@@ -88,7 +88,7 @@
    If cci_init() is invoked again with the same parameters after it
    has already returned successfully, it's a no-op.  If invoked again
    with different parameters, if the CCI implementation can change its
-   behavior to *also* accomodate the new behaviors indicated by the
+   behavior to *also* accommodate the new behaviors indicated by the
    new parameter values, it can return successfully.  Otherwise, it
    can return a failure and continue as if cci_init() had not been
    invoked again.
@@ -159,7 +159,7 @@ typedef enum cci_status {
   */
   CCI_ERR_RNR,
 
-  /*! the local device is gone, not coming back */
+  /*! The local device is gone, not coming back */
   CCI_ERR_DEVICE_DEAD,
   
   /*! Error returned from remote peer indicating that the address was
@@ -284,7 +284,7 @@ driver = psm
 device = ipath1
 sl = 3 # IB service level (if applicable)
 
-# storage is a device that uses the udp driver.  Note that this driver
+# storage is a device that uses the UDP driver.  Note that this driver
 # allows specifying which device to use by specifying its IP address
 # and MAC address -- assumedly it's an error if there is no single
 # device that matches both the specified IP address and MAC
@@ -321,7 +321,7 @@ typedef struct cci_device {
   /*! Maximum send size supported by the device */
   uint32_t max_send_size;
   
-  /*! Data rate per specitication: data bits per second (not the
+  /*! Data rate per specification: data bits per second (not the
     signaling rate). */
   uint64_t rate;
   
@@ -456,7 +456,7 @@ typedef int cci_os_handle_t;
 
   OUT fd: Operating system handle that can be used to block for
   progress on this endpoint.
-  
+
   This function creates a CCI endpoint.  A CCI endpoint represents 
   a collection of local resources (such as buffers).  An endpoint 
   is associated with a device that performs the actual communication 
@@ -527,8 +527,8 @@ CCI_DECLSPEC int cci_destroy_endpoint(cci_endpoint_t *endpoint);
 /*!
   Connection request attributes.
 
-  Reliable connections deliver messagees once. If the packet cannot
-  be delivered after a specific ammount of time, the connection is
+  Reliable connections deliver messages once. If the packet cannot
+  be delivered after a specific amount of time, the connection is
   broken; there is no guarantee regarding which messages have been
   received successfully before the connection was broken.
   
@@ -610,6 +610,7 @@ typedef struct cci_service {
     /* \todo When someone implements: We can't think of anything to
        put in here right now, but let's see what happens when someone
        does the first implementation. */
+    /*! unused */
     int bogus;
 } cci_service_t;
 
@@ -621,15 +622,15 @@ typedef struct cci_service {
   Windows' WaitOnMultipleObjects(), or other OS-specific methods).
 
   If a specific service port is not required, passing "0" will
-  allocate an unused one.  If the requested service poll is already
+  allocate an unused one.  If the requested service port is already
   used by another application, an error is returned.  The lowest 4096
-  (?) ports are reserved for priviledged processes.
+  (?) ports are reserved for privileged processes.
 
   \param[in] device	Device to bind to, can be NULL.
   \param[in] backlog	Incoming connection requests queue depth.
   \param[in,out] port	Port number used by client to identify the 
 			service accepting connection requests.
-  \param[out] service	Handle representing the service acception connection 
+  \param[out] service	Handle representing the service accepting connection 
 			requests through the connection manager.
   \param[out] fd	OS-specific file descriptor/handle to block on 
 			incoming connection requests.
@@ -745,7 +746,7 @@ CCI_DECLSPEC int cci_reject(cci_conn_req_t *conn_req);
   
   The connection request can carry limited 
   amount of data to be passed to the server for application-specific usage 
-  (identification, authentification, etc).
+  (identification, authentication, etc).
   
   The connect call is always non-blocking, reliable and requires a decision 
   by the server (accept or reject), even for unreliable connection, except 
@@ -768,7 +769,7 @@ CCI_DECLSPEC int cci_reject(cci_conn_req_t *conn_req);
   \param[in] port	The CCI port number use to identify the service on 
 			the server.
   \param[in] data_ptr	Pointer to connection data to be sent in the 
-			connection request (for authentification, etc).
+			connection request (for authentication, etc).
   \param[in] data_len	Length of connection data.  Implementations must 
                         support a data_len values <= 1,024 bytes.
   \param[in] attribute	Attributes of the requested connection (reliability, 
@@ -843,7 +844,7 @@ typedef enum cci_opt_name {
       RMA operations. */
   CCI_OPT_ENDPT_MAX_HEADER_SIZE, /* get */
 
-  /*! default send timeout for all new connections */
+  /*! Default send timeout for all new connections */
   CCI_OPT_ENDPT_SEND_TIMEOUT, /* set/get */
   
   /*! How many receiver buffers on the endpoint.  It is the max
@@ -869,7 +870,7 @@ typedef enum cci_opt_name {
       keepalive timeout, the CCI_EVENT_KEEPALIVE_TIMEOUT event is
       raised on that connection.
 
-      - The CCI implementation will automatially send control
+      - The CCI implementation will automatically send control
       hearbeats across an inactive (but still alive) connection to
       reset the peer's keepalive timer before it times out.
      
@@ -880,7 +881,7 @@ typedef enum cci_opt_name {
       connection, re-arm the keepalive timeout, etc. */
   CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT, /* set/get */
   
-  /*! reliable send timeout in microseconds */
+  /*! Reliable send timeout in microseconds */
   CCI_OPT_CONN_SEND_TIMEOUT /* set/get */
 } cci_opt_name_t;
 
@@ -913,7 +914,7 @@ CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t *handle, cci_opt_level_t level,
   requested a completion notification.
   
   On a reliable connection, a sender will generally complete a send
-  when the receiver replies for that message.  Additionaly, an error 
+  when the receiver replies for that message.  Additionally, an error 
   status may be returned (UNREACHABLE, DISCONNECTED, RNR).
   
   On an unreliable connection, a sender will return CCI_SUCCESS upon
@@ -997,6 +998,14 @@ typedef struct cci_event_recv {
 typedef struct cci_event_other {
   /*! Context value */
   void *context;
+
+  /*! union of possible other items */
+  union {
+    /*! new connection if peer accepted our connection request */
+    struct cci_event_connect {
+      cci_connection_t *connection;
+    } connect;
+  } u;
 } cci_event_other_t;
 
 
@@ -1049,6 +1058,7 @@ typedef struct cci_event {
   /*! Type of the event */
   cci_event_type_t type;
   
+  /*! union of event types */
   union {
     cci_event_send_t send;
     cci_event_recv_t recv;
@@ -1243,7 +1253,7 @@ CCI_DECLSPEC int cci_send(cci_connection_t *connection,
 CCI_DECLSPEC int cci_sendv(cci_connection_t *connection, 
                            void *header_ptr, uint32_t header_len, 
                            char **data_ptrs, int *data_lens,
-                           uint segment_cnt, void *context, int flags);
+                           uint8_t segment_cnt, void *context, int flags);
 
 
 /* RMA Area operations */
@@ -1310,7 +1320,7 @@ CCI_DECLSPEC int cci_rma_deregister(uint64_t rma_handle);
   \param[in] header_ptr	Pointer to local header segment.
   \param[in] header_len	Length of local header segment (limited to 32 bytes)
   \param[in] local_handle	Handle of the local RMA area.
-  \param[in] remote_offset	Offset in the local RMA area.
+  \param[in] local_offset	Offset in the local RMA area.
   \param[in] remote_handle	Handle of the remote RMA area.
   \param[in] remote_offset	Offset in the remote RMA area.
   \param[in] data_len	Length of local data segment (limited to max AM size).
