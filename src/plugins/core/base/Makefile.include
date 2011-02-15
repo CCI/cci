@@ -1,0 +1,19 @@
+#
+# Copyright (c) 2009-2010 Cisco Systems, Inc.  All rights reserved. 
+#
+# $COPYRIGHT$
+# 
+# Additional copyrights may follow
+# 
+# $HEADER$
+#
+
+# This file does not stand on its own; it is included in a
+# higher-level Makefile.am.
+
+sources += \
+        base/close.c \
+        base/open.c \
+        base/private.h \
+        base/public.h \
+        base/verify.c

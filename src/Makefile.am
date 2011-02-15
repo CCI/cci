@@ -1,0 +1,35 @@
+#
+# Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
+# $COPYRIGHT$
+#
+
+SUBDIRS = \
+        libltdl \
+        api \
+        plugins/base \
+        util \
+        $(PLUGINS_cci_FRAMEWORKS_SUBDIRS) \
+        $(PLUGINS_cci_FRAMEWORK_PLUGIN_STATIC_SUBDIRS) \
+        . \
+        $(PLUGINS_cci_FRAMEWORK_PLUGIN_DSO_SUBDIRS) \
+        tests
+
+DIST_SUBDIRS = \
+        libltdl \
+        api \
+        plugins/base \
+        util \
+        $(PLUGINS_cci_FRAMEWORKS_SUBDIRS) \
+        $(PLUGINS_cci_FRAMEWORK_PLUGIN_ALL_SUBDIRS) \
+        tests
+
+lib_LTLIBRARIES = libcci.la
+libcci_la_SOURCES =
+libcci_la_LIBADD = \
+        api/libcci_api.la \
+        plugins/base/libcci_plugins_base.la \
+        util/libcci_util.la \
+        libltdl/libltdlc.la \
+        $(PLUGINS_cci_FRAMEWORK_LIBS)
+libcci_la_DEPENDENCIES = $(libcci_la_LIBADD)
+libcci_la_LDFLAGS = -version-info $(libcci_so_version)
