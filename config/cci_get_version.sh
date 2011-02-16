@@ -160,9 +160,9 @@ $0 <srcfile> <option>
     --minor        - Minor version number
     --release      - Release version number
     --greek        - Greek (alpha, beta, etc) version number
-    --svn          - Subversion repository number
+    --repo-rev     - Repository version number
     --all          - Show all version numbers, separated by :
-    --base         - Show base version number (no svn number)
+    --base         - Show base version number (no repo version number)
     --release-date - Show the release date
     --help         - This message
 EOF
