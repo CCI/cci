@@ -14,7 +14,7 @@
 int cci_sendv(cci_connection_t *connection, 
               void *header_ptr, uint32_t header_len, 
               char **data_ptrs, int *data_lens,
-              uint segment_cnt, void *context, int flags)
+              uint8_t segment_cnt, void *context, int flags)
 {
     if (NULL == connection ||
         (NULL == header_ptr && header_len > 0) ||
