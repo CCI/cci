@@ -67,7 +67,11 @@ AC_DEFUN([CCI_SETUP_CORE],[
     fi
 
     # Add relevant -I's for our internal header files
-    CPPFLAGS="$CPPFLAGS -I$CCI_top_srcdir/include -I$CCI_top_srcdir/src -I$CCI_top_srcdir/src/libltdl"
+    CPPFLAGS="$CPPFLAGS -I$CCI_top_srcdir/include"
+    if test "$CCI_top_builddir" != "$CCI_top_srcdir"; then
+        CPPFLAGS="$CPPFLAGS -I$CCI_top_builddir/include"
+    fi
+    CPPFLAGS="$CPPFLAGS -I$CCI_top_srcdir/src -I$CCI_top_srcdir/src/libltdl"
 
     # Look for some header files
     AC_CHECK_HEADERS([errno.h stdint.h sys/types.h sys/time.h])
