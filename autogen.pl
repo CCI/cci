@@ -384,7 +384,7 @@ print "CCI autogen
 my $ret;
 
 # Sanity check
-if (! -d ".svn" && ! -d ".hg") {
+if (! -d ".svn" && ! -d ".hg" && ! -d ".git") {
     print("
 
 This doesn't look like a developer copy of CCI.  You probably do not
