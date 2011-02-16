@@ -1,6 +1,6 @@
 # -*- shell-script -*-
 #
-# Copyright © 2010 Cisco Systems, Inc.  All rights reserved.
+# Copyright © 2011 Cisco Systems, Inc.  All rights reserved.
 #
 # See COPYING in top-level directory.
 # 
@@ -40,10 +40,10 @@ CCI_VERSION="`$srcdir/config/cci_get_version.sh $srcdir/VERSION`"
 CCI_MAJOR_VERSION="`$srcdir/config/cci_get_version.sh $srcdir/VERSION --major`"
 CCI_MINOR_VERSION="`$srcdir/config/cci_get_version.sh $srcdir/VERSION --minor`"
 CCI_RELEASE_VERSION="`$srcdir/config/cci_get_version.sh $srcdir/VERSION --release`"
-CCI_SVN_R="`$srcdir/config/cci_get_version.sh $srcdir/VERSION --svn`"
+CCI_REPO_REV="`$srcdir/config/cci_get_version.sh $srcdir/VERSION --repo-rev`"
 CCI_RELEASE_DATE="`$srcdir/config/cci_get_version.sh $srcdir/VERSION --release-date`"
 AC_SUBST(CCI_VERSION)
-AC_SUBST(CCI_SVN_R)
+AC_SUBST(CCI_REPO_REV)
 AC_SUBST(CCI_RELEASE_DATE)
 AC_DEFINE_UNQUOTED([CCI_MAJOR_VERSION], [$CCI_MAJOR_VERSION],
     [Major version of cci])
