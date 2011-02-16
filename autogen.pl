@@ -407,6 +407,12 @@ push(@{$projects}, { name => "cci", dir => "src", need_base => 1 });
 
 # If we got here, all was good.  Run the auto tools.
 print "2. Running GNU Autotools...\n";
+
+# Delete the old libltdl copy if it's there (autoreconf will
+# re-generate it)
+system("rm -rf src/libltdl")
+    if (-d "src/libltdl");
+
 $ret = system("autoreconf -ivf");
 $ret >>= 8;
 
