@@ -148,7 +148,7 @@ typedef struct cci__evt {
 
 /*! CCI private listening endpoint (created when device is bound to service) */
 typedef struct cci__lep {
-    /*! Owning (bound) device */
+    /*! Owning device */
     struct cci__dev *dev;
 
     /*! Service we are bound to */

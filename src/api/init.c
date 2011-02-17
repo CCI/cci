@@ -201,8 +201,9 @@ int cci__parse_config(const char *path)
     }
 
     g->devices = devices;
+    globals = g;
 
-    return ret;
+    return 0;
 }
 
 int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
