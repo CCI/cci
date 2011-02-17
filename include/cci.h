@@ -1,5 +1,10 @@
 /*
- * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2010-2011 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2010-2011 Myricom, Inc.  All rights reserved.
+ * Copyright (c) 2010-2011 Qlogic Corporation.  All rights reserved.
+ * Copyright (c) 2010-2011 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ *
  * $COPYRIGHT$
  *
  * Main header file for the Common Communications Interface (CCI).
