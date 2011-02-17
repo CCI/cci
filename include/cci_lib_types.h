@@ -35,7 +35,7 @@ typedef struct cci__dev {
     TAILQ_ENTRY(cci__dev) entry;
 
     /*! Listening endpoints */
-    TAILQ_HEAD(s_leps, cci__lep) leps;
+    TAILQ_HEAD(s_dleps, cci__lep) leps;
 
     /*! Pointer to device specific struct */
     void *priv;
@@ -119,10 +119,10 @@ typedef struct cci__svc {
     uint32_t port;
 
     /*! Bound listening endpoints */
-    TAILQ_HEAD(s_leps, cci__lep) leps;
+    TAILQ_HEAD(s_sleps, cci__lep) leps;
 
     /*! Pending connection requests */
-    TAILQ_HEAD(s_crqs, cci__crq) crqs;
+    TAILQ_HEAD(s_scrqs, cci__crq) crqs;
 
     /*! Lock to protect leps and crqs */
     pthread_mutex_t lock;
@@ -161,7 +161,7 @@ typedef struct cci__lep {
     TAILQ_ENTRY(cci__lep) dentry;
 
     /*! List of idle connection requests */
-    TAILQ_HEAD(s_crqs, cci__crq) crqs;
+    TAILQ_HEAD(s_lcrqs, cci__crq) crqs;
 
     /*! Lock to protect crqs */
     pthread_mutex_t lock;
@@ -179,13 +179,13 @@ typedef struct cci__globals {
     cci_device_t **devices;
 
     /*! Lock to protect svcs */
-    pthread_mutex_lock lock;
+    pthread_mutex_t lock;
 
     /*! List of connection manager services sorted by port number */
     TAILQ_HEAD(s_svcs, cci__svc) svcs;
 } cci__globals_t;
 
-extern cci__globals_t globals;
+extern cci__globals_t *globals;
 
 /*! Obtain the private struct from the public struct
  *  Example 1:

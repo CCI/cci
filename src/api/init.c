@@ -8,6 +8,7 @@
 #include <stdio.h>
 
 #include "cci.h"
+#include "cci_lib_types.h"
 #include "plugins/base/public.h"
 #include "plugins/core/core.h"
 #include "plugins/core/base/public.h"
