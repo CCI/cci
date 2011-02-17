@@ -10,7 +10,7 @@
 #                         University of Stuttgart.  All rights reserved.
 # Copyright (c) 2004-2005 The Regents of the University of California.
 #                         All rights reserved.
-# Copyright © 2009 Cisco Systems, Inc.  All rights reserved.
+# Copyright © 2009-2011 Cisco Systems, Inc.  All rights reserved.
 # $COPYRIGHT$
 # 
 # Additional copyrights may follow
@@ -26,13 +26,13 @@ set srcdir=`pwd`
 cd "$builddir"
 
 set distdir="$builddir/$2"
-set HWLOC_VERSION="$3"
-set HWLOC_SVN_VERSION="$4"
+set CCI_VERSION="$3"
+set CCI_REPO_REV="$4"
 
 if ("$distdir" == "") then
     echo "Must supply relative distdir as argv[2] -- aborting"
     exit 1
-elif ("$HWLOC_VERSION" == "") then
+elif ("$CCI_VERSION" == "") then
     echo "Must supply version as argv[1] -- aborting"
     exit 1
 endif
@@ -51,20 +51,24 @@ endif
 # our tree's revision number, but only if we are in the source tree.
 # Otherwise, use what configure told us, at the cost of allowing one
 # or two corner cases in (but otherwise VPATH builds won't work).
-set svn_r=$HWLOC_SVN_VERSION
+set repo_rev=$CCI_REPO_REV
 if (-d .svn) then
-    set svn_r="r`svnversion .`"
+    set repo_rev="r`svnversion .`"
+else if (-d .hg) then
+    set repo_rev=hg`hg -v -R "$srcdir" tip | grep changeset | cut -d: -f3`
+else if (-d .git) then
+    set repo_rev=git`git log -1 "$srcdir" | grep commit | awk '{ print $2 }'`
 endif
 
 set start=`date`
 cat <<EOF
  
-Creating hwloc distribution
+Creating cci distribution
 In directory: `pwd`
 Srcdir: $srcdir
 Builddir: $builddir
 VPATH: $vpath_msg
-Version: $HWLOC_VERSION
+Version: $CCI_VERSION
 Started: $start
  
 EOF
@@ -83,75 +87,17 @@ endif
 # solve a whole host of problems with VPATH (since srcdir may be
 # relative or absolute)
 #
-set cur_svn_r="`grep '^svn_r' ${distdir}/VERSION | cut -d= -f2`"
-if ("$cur_svn_r" == "-1") then
-    sed -e 's/^svn_r=.*/svn_r='$svn_r'/' "${distdir}/VERSION" > "${distdir}/version.new"
+set cur_repo_rev="`grep '^repo_rev' ${distdir}/VERSION | cut -d= -f2`"
+if ("$cur_repo_rev" == "-1") then
+    sed -e 's/^repo_rev=.*/repo_rev='$repo_rev'/' "${distdir}/VERSION" > "${distdir}/version.new"
     cp "${distdir}/version.new" "${distdir}/VERSION"
     rm -f "${distdir}/version.new"
     # need to reset the timestamp to not annoy AM dependencies
     touch -r "${srcdir}/VERSION" "${distdir}/VERSION"
-    echo "*** Updated VERSION file with SVN r number"
+    echo "*** Updated VERSION file with repo rev number"
 else
-    echo "*** Did NOT update VERSION file with SVN r number"
+    echo "*** Did NOT update VERSION file with repo rev number"
 endif
-
-#
-# VPATH builds only work if the srcdir has valid docs already built.
-# If we're VPATH and the srcdir doesn't have valid docs, then fail.
-#
-
-if ($vpath == 1 && ! -d $srcdir/doc/doxygen-doc) then
-    echo "*** This is a VPATH 'make dist', but the srcdir does not already"
-    echo "*** have a doxygen-doc tree built.  hwloc's config/distscript.csh"
-    echo "*** the docs to be built in the srcdir before executing 'make"
-    echo "*** dist' in a VPATH build."
-    exit 1
-endif
-
-#
-# If we're not VPATH, force the generation of new doxygen documentation
-#
-
-if ($vpath == 0) then
-    # Not VPATH
-    echo "*** Making new doxygen documentation (doxygen-doc tree)"
-    echo "*** Directory: srcdir: $srcdir, distdir: $distdir, pwd: `pwd`"
-    cd doc
-    # We're still in the src tree, so kill any previous doxygen-docs
-    # tree and make a new one.
-    chmod -R a=rwx doxygen-doc
-    rm -rf doxygen-doc
-    make
-    if ($status != 0) then
-        echo ERROR: generating doxygen docs failed
-        echo ERROR: cannot continue
-        exit 1
-    endif
-
-    # Make new README file
-    echo "*** Making new README"
-    make readme
-    if ($status != 0) then
-        echo ERROR: generating new README failed
-        echo ERROR: cannot continue
-        exit 1
-    endif
-else
-    echo "*** This is a VPATH build; assuming that the doxygen docs and REAME"
-    echo "*** are current in the srcdir (i.e., we'll just copy those)"
-endif
-
-echo "*** Copying doxygen-doc tree to dist..."
-echo "*** Directory: srcdir: $srcdir, distdir: $distdir, pwd: `pwd`"
-chmod -R a=rwx $distdir/doc/doxygen-doc
-echo rm -rf $distdir/doc/doxygen-doc
-rm -rf $distdir/doc/doxygen-doc
-echo cp -rpf $srcdir/doc/doxygen-doc $distdir/doc
-cp -rpf $srcdir/doc/doxygen-doc $distdir/doc
-
-echo "*** Copying new README"
-ls -lf $distdir/README
-cp -pf $srcdir/README $distdir
 
 #########################################################
 # VERY IMPORTANT: Now go into the new distribution tree #
@@ -230,7 +176,7 @@ cd ..
 #
 
 cat <<EOF
-*** hwloc version $HWLOC_VERSION distribution created
+*** cci version $CCI_VERSION distribution created
  
 Started: $start
 Ended:   `date`

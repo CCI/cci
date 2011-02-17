@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
+# Copyright © 2010-2011 Cisco Systems, Inc.  All rights reserved.
 # $COPYRIGHT$
 #
 
@@ -22,6 +22,8 @@ DIST_SUBDIRS = \
         $(PLUGINS_cci_FRAMEWORKS_SUBDIRS) \
         $(PLUGINS_cci_FRAMEWORK_PLUGIN_ALL_SUBDIRS) \
         tests
+
+noinst_HEADERS = plugins/plugins.h
 
 lib_LTLIBRARIES = libcci.la
 libcci_la_SOURCES =

@@ -16,7 +16,3 @@ sources =
 include base/Makefile.include
 
 libcci_plugins_framework_core_la_SOURCES = $(headers) $(sources)
-
-# Install the header files where they can be found
-ccidir = $(includedir)/cci/plugins/core
-nobase_cci_HEADERS = $(headers)
