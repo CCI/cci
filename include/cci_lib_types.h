@@ -13,6 +13,7 @@
 #define CCI_LIB_TYPES_H
 
 #include <pthread.h>
+#include <stddef.h>
 #include "bsd/queue.h"
 
 /* NOTE: struct naming scheme
@@ -51,6 +52,9 @@ typedef struct cci__dev {
 
     /*! Listening endpoints */
     TAILQ_HEAD(s_dleps, cci__lep) leps;
+
+    /*! Lock for eps, leps */
+    pthread_mutex_t lock;
 
     /*! Pointer to device specific struct */
     void *priv;
@@ -216,6 +220,6 @@ extern cci__globals_t *globals;
  *    If we always use the name of the field in the parent struct for
  *    the local variable name, then the name is repeated as in
  *    example 2 */
-#define container_of(p, stype, field) ((stype *)(((uint8_t *)(p)) - offsetof(stype, field)))
+#define container_of(p,stype,field) ((stype *)(((uint8_t *)(p)) - offsetof(stype, field)))
 
 #endif /* CCI_LIB_TYPES_H */
