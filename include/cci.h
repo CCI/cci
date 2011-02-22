@@ -201,6 +201,9 @@ typedef enum cci_status {
   /*! No more memory */
   CCI_ENOMEM = ENOMEM,
 
+  /*! No device available */
+  CCI_ENODEV,
+
   /*! Address not available, cannot assign address */
   CCI_EADDRNOTAVAIL,
 
