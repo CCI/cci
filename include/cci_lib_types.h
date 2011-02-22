@@ -46,6 +46,9 @@ typedef struct cci__dev {
     /*! entry to hang this dev on the globals->devs */
     TAILQ_ENTRY(cci__dev) entry;
 
+    /*! Endpoints */
+    TAILQ_HEAD(s_eps, cci__ep) eps;
+
     /*! Listening endpoints */
     TAILQ_HEAD(s_dleps, cci__lep) leps;
 
@@ -85,9 +88,6 @@ typedef struct cci__ep {
     /*! Entry to hang on dev->eps */
     TAILQ_ENTRY(cci__ep) entry;
 
-    /*! List to hold open connections */
-    TAILQ_HEAD(s_conns, cci__conn) conns;
-
     /*! Pointer to device specific struct */
     void *priv;
 } cci__ep_t;
@@ -114,9 +114,6 @@ typedef struct cci__conn {
 
     /*! Send timeout in microseconds (if 0 use ep->tx_timeout) */
     uint32_t tx_timeout;
-
-    /*! Entry to hang on ep->conns */
-    TAILQ_ENTRY(cci__conn) entry;
 
     /*! Pointer to device specific struct */
     void *priv;
