@@ -9,6 +9,15 @@
 #define CCI_CORE_CORE_H
 
 #include "cci/config.h"
+#include "cci.h"
+#include "cci_lib_types.h"
+
+#define CCI_SOCK_AM_SIZE    (8 * 1024)  /* 8 KB - assume jumbo frames */
+
+/* A sock device needs the following items in the config file:
+ * driver = sock    # must be lowercase
+ * ip = 0.0.0.0     # valid IPv4 address of the adapter to use
+ */
 
 BEGIN_C_DECLS
 

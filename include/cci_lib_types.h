@@ -9,6 +9,9 @@
  * Private data structures for the Common Communications Interface (CCI).
  */
 
+#ifndef CCI_LIB_TYPES_H
+#define CCI_LIB_TYPES_H
+
 #include <pthread.h>
 #include "bsd/queue.h"
 
@@ -30,6 +33,15 @@
 typedef struct cci__dev {
     /*! Public device (name, info, argv, max_send_size, rate, pci) */
     cci_device_t device;
+
+    /*! Driver name */
+    char *driver;
+
+    /*! Priority (0-100, default = 50) */
+    int priority;
+
+    /*! Default device? */
+    int is_default;
 
     /*! entry to hang this dev on the globals->devs */
     TAILQ_ENTRY(cci__dev) entry;
@@ -208,3 +220,5 @@ extern cci__globals_t *globals;
  *    the local variable name, then the name is repeated as in
  *    example 2 */
 #define container_of(p, stype, field) ((stype *)(((uint8_t *)(p)) - offsetof(stype, field)))
+
+#endif /* CCI_LIB_TYPES_H */

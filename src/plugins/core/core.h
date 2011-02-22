@@ -10,6 +10,7 @@
 
 #include "cci/config.h"
 #include "cci.h"
+#include "cci_lib_types.h"
 #include "plugins/plugins.h"
 
 #ifdef HAVE_STDINT_H

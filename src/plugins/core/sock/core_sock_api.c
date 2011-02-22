@@ -7,6 +7,7 @@
 #include "cci/config.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "cci.h"
 #include "plugins/core/core.h"
@@ -131,7 +132,37 @@ cci_plugin_core_t cci_core_sock_plugin = {
 
 static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 {
-    printf("In sock_init\n");
+    cci__dev_t *dev;
+
+    fprintf(stderr, "In sock_init\n");
+
+    /* find devices that we own */
+
+    TAILQ_FOREACH(dev, &globals->devs, entry) {
+        if (0 == strcmp("sock", dev->driver)) {
+            cci_device_t *device;
+
+            device = &dev->device;
+            device->max_send_size = CCI_SOCK_AM_SIZE;
+
+            /* TODO determine link rate
+             *
+             * linux->driver->get ethtool settings->speed
+             * bsd/darwin->ioctl(SIOCGIFMEDIA)->ifm_active
+             * windows ?
+             */
+            device->rate = 10000000000;
+
+            device->pci.domain = -1;    /* per CCI spec */
+            device->pci.bus = -1;       /* per CCI spec */
+            device->pci.dev = -1;       /* per CCI spec */
+            device->pci.func = -1;      /* per CCI spec */
+
+            /* TODO parse conf_argv */
+            /* TODO d->priv */
+        }
+    }
+
     return CCI_SUCCESS;
 }
 
