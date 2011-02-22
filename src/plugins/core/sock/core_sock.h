@@ -24,8 +24,15 @@
 #define SOCK_EP_HASH_SIZE       (256)   /* nice round number */
 
 /* A sock device needs the following items in the config file:
- * driver = sock    # must be lowercase
- * ip = 0.0.0.0     # valid IPv4 address of the adapter to use
+ *
+ * driver = sock        # must be lowercase
+ * ip = 0.0.0.0         # valid IPv4 address of the adapter to use
+ *
+ * A sock device may have these items:
+ *
+ * listen_port = 54321  # port to listen on
+ * min_port = 4444      # lowest port to use for endpoints
+ * max_port = 5555      # highest port to use for endpoints
  */
 
 /* Message types */
