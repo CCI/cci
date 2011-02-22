@@ -140,7 +140,10 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 
     TAILQ_FOREACH(dev, &globals->devs, entry) {
         if (0 == strcmp("sock", dev->driver)) {
+            int i;
+            const char *arg;
             cci_device_t *device;
+            sock_dev_t *sdev;
 
             device = &dev->device;
             device->max_send_size = SOCK_AM_SIZE;
@@ -158,8 +161,26 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
             device->pci.dev = -1;       /* per CCI spec */
             device->pci.func = -1;      /* per CCI spec */
 
-            /* TODO parse conf_argv */
-            /* TODO d->priv */
+            dev->priv = calloc(1, sizeof(*dev->priv));
+            if (!dev->priv)
+                return CCI_ENOMEM;
+
+            sdev = dev->priv;
+
+            /* parse conf_argv */
+            for (i = 0, arg = device->conf_argv[i];
+                 arg != NULL; 
+                 i++, arg = device->conf_argv[i]) {
+                if (0 == strncmp("ip=", arg, 3)) {
+                    const char *ip = &arg[3];
+
+                    sdev->ip = inet_addr(ip);
+                }
+            }
+            if (sdev->ip == 0)
+                return CCI_EADDRNOTAVAIL;
+
+            /* TODO determine if IP is available and up */
         }
     }
 

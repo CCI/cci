@@ -199,7 +199,10 @@ typedef enum cci_status {
   CCI_ETIMEDOUT = ETIMEDOUT,
 
   /*! No more memory */
-  CCI_ENOMEM = ENOMEM
+  CCI_ENOMEM = ENOMEM,
+
+  /*! Address not available, cannot assign address */
+  CCI_EADDRNOTAVAIL,
 
   /* ...more here, inspired from errno.h... */
   
