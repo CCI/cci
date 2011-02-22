@@ -143,7 +143,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
             cci_device_t *device;
 
             device = &dev->device;
-            device->max_send_size = CCI_SOCK_AM_SIZE;
+            device->max_send_size = SOCK_AM_SIZE;
 
             /* TODO determine link rate
              *
