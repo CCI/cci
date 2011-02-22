@@ -13,6 +13,7 @@
 #include "plugins/core/core.h"
 #include "core_sock.h"
 
+sock_globals_t *sglobals = NULL;
 
 /*
  * Local functions
@@ -132,9 +133,18 @@ cci_plugin_core_t cci_core_sock_plugin = {
 
 static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 {
+    int count;
     cci__dev_t *dev;
 
     fprintf(stderr, "In sock_init\n");
+
+    /* init sock globals */
+    sglobals = calloc(1, sizeof(*sglobals));
+    if (!sglobals)
+        return CCI_ENOMEM;
+
+    /* FIXME magic number */
+    sglobals->devices = calloc(32, sizeof(*sglobals->devices));
 
     /* find devices that we own */
 
@@ -177,12 +187,17 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
                     sdev->ip = inet_addr(ip);
                 }
             }
-            if (sdev->ip == 0)
-                return CCI_EADDRNOTAVAIL;
+            if (sdev->ip != 0) {
+                sglobals->devices[sglobals->count] = device;
+                sglobals->count++;
+            }
 
             /* TODO determine if IP is available and up */
         }
     }
+
+    sglobals->devices = realloc(sglobals->devices,
+                                (sglobals->count + 1) * sizeof(cci_device_t *));
 
     return CCI_SUCCESS;
 }
@@ -198,7 +213,10 @@ static const char *sock_strerror(enum cci_status status)
 static int sock_get_devices(cci_device_t const ***devices)
 {
     printf("In sock_get_devices\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+
+    *devices = sglobals->devices;
+
+    return CCI_SUCCESS;
 }
 
 

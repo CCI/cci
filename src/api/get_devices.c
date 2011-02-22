@@ -13,9 +13,8 @@
 
 int cci_get_devices(cci_device_t const ***devices)
 {
-    if (NULL == devices || NULL == *devices || NULL == **devices) {
+    if (NULL == devices)
         return CCI_EINVAL;
-    }
 
     return cci_core->get_devices(devices);
 }

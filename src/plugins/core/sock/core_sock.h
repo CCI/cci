@@ -179,6 +179,16 @@ typedef struct sock_dev {
     pthread_mutex_t lock;
 } sock_dev_t;
 
+typedef struct sock_globals {
+    /*! Number of sock devices */
+    int count;
+
+    /*! Array of sock devices */
+    cci_device_t const **devices;
+} sock_globals_t;
+
+extern sock_globals_t *sglobals;
+
 BEGIN_C_DECLS
 
 int cci_core_sock_post_load(cci_plugin_t *me);
