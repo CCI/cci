@@ -43,6 +43,8 @@ int cci_create_endpoint(cci_device_t *device,
         return CCI_ENODEV;
 
     dev = container_of(device, cci__dev_t, device);
+    if (dev->is_up == 0)
+        return CCI_ENODEV;
 
     ep = calloc(1, sizeof(*ep));
     if (!ep)

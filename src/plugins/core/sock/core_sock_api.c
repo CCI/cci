@@ -190,6 +190,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
             if (sdev->ip != 0) {
                 sglobals->devices[sglobals->count] = device;
                 sglobals->count++;
+                dev->is_up = 1;
             }
 
             /* TODO determine if IP is available and up */
@@ -232,8 +233,61 @@ static int sock_create_endpoint(cci_device_t *device,
                                     cci_endpoint_t **endpoint, 
                                     cci_os_handle_t *fd)
 {
+    int i, ret;
+    cci__dev_t *dev;
+    cci__ep_t *ep;
+    sock_ep_t *sep;
+
     printf("In sock_create_endpoint\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+
+    dev = container_of(device, cci__dev_t, device);
+    if (0 != strcmp("sock", dev->driver)) {
+        ret = CCI_EINVAL;
+        goto out;
+    }
+
+    ep = container_of(*endpoint, cci__ep_t, endpoint);
+    ep->priv = calloc(1, sizeof(*sep));
+    if (!ep->priv) {
+        ret = CCI_ENOMEM;
+        goto out;
+    }
+
+    (*endpoint)->max_recv_buffer_count = SOCK_EP_RX_CNT;
+    ep->max_hdr_size = SOCK_EP_MAX_HDR_SIZE;
+    ep->rx_buf_cnt = SOCK_EP_RX_CNT;
+    ep->tx_buf_cnt = SOCK_EP_TX_CNT;
+    ep->buffer_len = SOCK_EP_BUF_LEN;
+    ep->tx_timeout = SOCK_EP_TX_TIMEOUT;
+
+    sep = ep->priv;
+
+    sep->sock = socket(PF_INET, SOCK_DGRAM, 0);
+    if (sep->sock == -1) {
+        ret = errno;
+        goto out;
+    }
+
+    for (i = 0; i < SOCK_EP_HASH_SIZE; i++)
+        TAILQ_INIT(&sep->conn_hash[i]);
+
+    TAILQ_INIT(&sep->txs);
+    TAILQ_INIT(&sep->idle_txs);
+    TAILQ_INIT(&sep->rxs);
+    TAILQ_INIT(&sep->idle_rxs);
+    pthread_mutex_init(&sep->lock, NULL);
+
+    return CCI_SUCCESS;
+
+out:
+    pthread_mutex_lock(&dev->lock);
+    TAILQ_REMOVE(&dev->eps, ep, entry);
+    pthread_mutex_unlock(&dev->lock);
+    if (ep->priv)
+        free(ep->priv);
+    free(ep);
+    *endpoint = NULL;
+    return ret;
 }
 
 

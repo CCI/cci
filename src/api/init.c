@@ -196,7 +196,9 @@ int cci__parse_config(const char *path)
             }
             dev->priority = 50; /* default */
             /* dev->is_default = 0; */
+            TAILQ_INIT(&dev->eps);
             TAILQ_INIT(&dev->leps);
+            pthread_mutex_init(&dev->lock, NULL);
 
             d = &dev->device;
             d->conf_argv = calloc(CCI_MAX_ARGS + 1, sizeof(char *));

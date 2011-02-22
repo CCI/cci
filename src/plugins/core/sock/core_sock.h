@@ -14,8 +14,14 @@
 #include "cci.h"
 #include "cci_lib_types.h"
 
-#define SOCK_AM_SIZE        (8 * 1024)  /* 8 KB - assume jumbo frames */
-#define SOCK_EP_HASH_SIZE   (256)       /* nice round number */
+#define SOCK_EP_MAX_HDR_SIZE    (32)    /* bytes */
+#define SOCK_EP_TX_TIMEOUT      (60)    /* seconds for now */
+#define SOCK_EP_RX_CNT          (256)   /* number of rx active messages */
+#define SOCK_EP_TX_CNT          (256)   /* number of tx active messages */
+#define SOCK_EP_BUF_LEN         (8192)  /* bytes including wire header */
+
+#define SOCK_AM_SIZE            (8192)  /* 8 KB - assume jumbo frames */
+#define SOCK_EP_HASH_SIZE       (256)   /* nice round number */
 
 /* A sock device needs the following items in the config file:
  * driver = sock    # must be lowercase

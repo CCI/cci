@@ -44,6 +44,9 @@ typedef struct cci__dev {
     /*! Default device? */
     int is_default;
 
+    /*! Is the device up? */
+    int is_up;
+
     /*! entry to hang this dev on the globals->devs */
     TAILQ_ENTRY(cci__dev) entry;
 
