@@ -15,6 +15,7 @@
 int cci_bind(cci_device_t *device, int backlog, uint32_t *port, 
              cci_service_t **service, cci_os_handle_t *fd)
 {
+    int i, ret;
     cci__dev_t *dev;
     cci__svc_t *svc;
     cci__lep_t *lep;
@@ -69,32 +70,76 @@ int cci_bind(cci_device_t *device, int backlog, uint32_t *port,
         TAILQ_INIT(&svc->crqs);
         pthread_mutex_init(&svc->lock, NULL);
 
+        /* create a listening port */
+        lep = calloc(1, sizeof(*lep));
+        if (!lep) {
+            ret = CCI_ENOMEM;
+            goto out;
+        }
+        TAILQ_INIT(&lep->crqs);
+        pthread_mutex_init(&lep->lock, NULL);
+
+        /* alloc connection requests */
+        for (i = 0; i < backlog; i++) {
+            cci__crq_t *crq;
+
+            crq = calloc(1, sizeof(*crq));
+            if (!crq) {
+                ret = CCI_ENOMEM;
+                goto out;
+            }
+            /* the driver fills in the cci_conn_req_t */
+            TAILQ_INSERT_TAIL(&lep->crqs, crq, entry);
+        }
+
+        /* add endpoint to dev and svc */
+        lep->svc = svc;
+        pthread_mutex_lock(&svc->lock);
+        TAILQ_INSERT_TAIL(&svc->leps, lep, sentry);
+        pthread_mutex_unlock(&svc->lock);
+        lep->dev = dev;
+        pthread_mutex_lock(&dev->lock);
+        TAILQ_INSERT_TAIL(&dev->leps, lep, dentry);
+        pthread_mutex_unlock(&dev->lock);
+
+        /* find port & add to globals->svcs */
         pthread_mutex_lock(&globals->lock);
-        svc->port = cci__next_port();
+        ret = cci__next_port(&svc->port);
+        if (ret) {
+            pthread_mutex_unlock(&globals->lock);
+            goto out;
+        }
         TAILQ_INSERT_TAIL(&globals->svcs, svc, entry);
         pthread_mutex_unlock(&globals->lock);
         *port = svc->port;
     }
 
-    /* create a listening port */
-    lep = calloc(1, sizeof(*lep));
-    if (!lep) {
-        pthread_mutex_lock(&globals->lock);
-        TAILQ_REMOVE(&globals->svcs, svc, entry);
-        pthread_mutex_unlock(&globals->lock);
-        free(svc);
-        return CCI_ENOMEM;
-    }
-    lep->dev = dev;
-    lep->svc = svc;
-    pthread_mutex_lock(&svc->lock);
-    TAILQ_INSERT_TAIL(&svc->leps, lep, sentry);
-    pthread_mutex_unlock(&svc->lock);
-    pthread_mutex_lock(&dev->lock);
-    TAILQ_INSERT_TAIL(&dev->leps, lep, dentry);
-    pthread_mutex_unlock(&dev->lock);
-    TAILQ_INIT(&lep->crqs);
-    pthread_mutex_init(&lep->lock, NULL);
+    ret =  cci_core->bind(device, backlog, port, service, fd);
+    if (ret)
+        goto out_w_remove;
 
-    return cci_core->bind(device, backlog, port, service, fd);
+    return CCI_SUCCESS;
+
+out_w_remove:
+    pthread_mutex_lock(&globals->lock);
+    TAILQ_REMOVE(&globals->svcs, svc, entry);
+    pthread_mutex_unlock(&globals->lock);
+out:
+    if (lep) {
+        cci__crq_t *crq;
+
+        if (lep->dev)
+            TAILQ_REMOVE(&dev->leps, lep, dentry);
+
+        while (!TAILQ_EMPTY(&lep->crqs)) {
+            crq = TAILQ_FIRST(&lep->crqs);
+            TAILQ_REMOVE(&lep->crqs, crq, entry);
+            free(crq);
+        }
+        free(lep);
+    }
+    if (svc)
+        free(svc);
+
+    return ret;
 }

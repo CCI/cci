@@ -226,20 +226,30 @@ extern cci__globals_t *globals;
 #define container_of(p,stype,field) ((stype *)(((uint8_t *)(p)) - offsetof(stype, field)))
 
 static inline uint32_t
-cci__next_port(void)
+cci__get_svc_port(uint32_t *port)
 {
-    uint32_t port = 4096;
+    uint32_t p = 4096;
     cci__svc_t *svc;
 
+    if (*port)
+        p = *port;
+
     TAILQ_FOREACH(svc, &globals->svcs, entry) {
-        if (svc->port > port) {
-            break;
-        } else if (svc->port == port) {
-            port++;
+        if (svc->port > p) {
+            return CCI_SUCCESS;
+        } else if (svc->port == p) {
+            if (*port)
+                return CCI_EBUSY;
+            else
+                p++;
+        }
+        if (p == 0) {
+            /* we rolled over */
+            return CCI_EBUSY;
         }
     }
 
-    return port;
+    return CCI_SUCCESS;
 }
 
 #endif /* CCI_LIB_TYPES_H */

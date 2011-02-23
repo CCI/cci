@@ -204,8 +204,11 @@ typedef enum cci_status {
   /*! No device available */
   CCI_ENODEV = ENODEV,
 
-  /*! Resource busy (no port available) */
+  /*! Resource busy (e.g. port in use) */
   CCI_EBUSY = EBUSY,
+
+  /*! Value out of range (e.g. no port available) */
+  CCI_ERANGE = ERANGE,
 
   /* ...more here, inspired from errno.h... */
   
