@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include "cci.h"
 #include "plugins/core/core.h"
@@ -135,7 +136,6 @@ cci_plugin_core_t cci_core_sock_plugin = {
 
 static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 {
-    int count;
     cci__dev_t *dev;
 
     fprintf(stderr, "In sock_init\n");

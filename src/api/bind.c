@@ -104,13 +104,14 @@ int cci_bind(cci_device_t *device, int backlog, uint32_t *port,
 
         /* find port & add to globals->svcs */
         pthread_mutex_lock(&globals->lock);
-        ret = cci__next_port(&svc->port);
+        ret = cci__get_svc_port(&svc->port);
         if (ret) {
             pthread_mutex_unlock(&globals->lock);
             goto out;
         }
         TAILQ_INSERT_TAIL(&globals->svcs, svc, entry);
         pthread_mutex_unlock(&globals->lock);
+        *service = &svc->service;
         *port = svc->port;
     }
 
