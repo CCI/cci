@@ -180,7 +180,7 @@ typedef struct sock_conn {
 
 typedef struct sock_dev {
     /*! Our IP address */
-    in_addr_t   ip;
+    in_addr_t ip;
 
     /*! Queued sends */
     TAILQ_HEAD(s_queued, sock_tx) queued;

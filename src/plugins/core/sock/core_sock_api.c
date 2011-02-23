@@ -8,6 +8,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <netinet/in.h>
 
 #include "cci.h"
 #include "plugins/core/core.h"
@@ -184,10 +186,10 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
                 if (0 == strncmp("ip=", arg, 3)) {
                     const char *ip = &arg[3];
 
-                    sdev->ip = inet_addr(ip);
+                    sdev->ip= inet_addr(ip);
                 }
             }
-            if (sdev->ip != 0) {
+            if (sdev->ip!= 0) {
                 sglobals->devices[sglobals->count] = device;
                 sglobals->count++;
                 dev->is_up = 1;
@@ -309,8 +311,9 @@ static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
     cci__svc_t *svc;
     cci__lep_t *lep;
     sock_dev_t *sdev;
-    sock_svc_t *ssvc;
     sock_lep_t *slep;
+    struct sockaddr_in sin;
+    socklen_t len = sizeof(sin);
 
     printf("In sock_bind\n");
 
@@ -320,18 +323,50 @@ static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
         goto out;
     }
 
-    if (*port > (64 * 1024)) {
-        /* FIXME */
-        free(svc);
-        ret = CCI_EBUSY;
+    if (*port > (64 * 1024))
+        return CCI_ERANGE;
+
+    svc = container_of(*service, cci__svc_t, service);
+    TAILQ_FOREACH(lep, &svc->leps, sentry) {
+        if (lep->dev == dev) {
+            break;
+        }
+    }
+
+    /* allocate sock listening endpoint */
+    slep = calloc(1, sizeof(*slep));
+    if (!slep)
+        return CCI_ENOMEM;
+
+    /* open socket */
+    slep->sock = socket(PF_INET, SOCK_DGRAM, 0);
+    if (slep->sock == -1) {
+        ret = errno;
         goto out;
     }
 
-    /* TODO open socket */
+    /* bind socket to device and port */
+    memset(&sin, 0, sizeof(sin));
+    sin.sin_family = AF_INET;
+    sin.sin_port = htons((uint16_t) *port);
+    sin.sin_addr.s_addr = htonl(sdev->ip);
+
+    ret = bind(slep->sock, (const struct sockaddr *) &sin, len);
+    if (ret) {
+        ret = errno;
+        goto out;
+    }
+
+    /* create OS handle */
+    /* TODO */
+
+    lep->priv = slep;
 
     return CCI_SUCCESS;
 
 out:
+    if (slep)
+        free(slep);
     return ret;
 }
 
