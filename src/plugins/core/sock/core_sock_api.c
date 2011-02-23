@@ -297,12 +297,42 @@ static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
-
+/*! sock_bind()
+ *
+ * device, port, service are always set
+ */
 static int sock_bind(cci_device_t *device, int backlog, uint32_t *port, 
                          cci_service_t **service, cci_os_handle_t *fd)
 {
+    int ret;
+    cci__dev_t *dev;
+    cci__svc_t *svc;
+    cci__lep_t *lep;
+    sock_dev_t *sdev;
+    sock_svc_t *ssvc;
+    sock_lep_t *slep;
+
     printf("In sock_bind\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+
+    dev = container_of(device, cci__dev_t, device);
+    if (0 != strcmp("sock", dev->driver)) {
+        ret = CCI_EINVAL;
+        goto out;
+    }
+
+    if (*port > (64 * 1024)) {
+        /* FIXME */
+        free(svc);
+        ret = CCI_EBUSY;
+        goto out;
+    }
+
+    /* TODO open socket */
+
+    return CCI_SUCCESS;
+
+out:
+    return ret;
 }
 
 

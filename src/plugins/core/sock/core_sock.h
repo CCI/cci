@@ -192,6 +192,18 @@ typedef struct sock_dev {
     pthread_mutex_t lock;
 } sock_dev_t;
 
+typedef struct sock_lep {
+    /*! OS handle for poll/select */
+    cci_os_handle_t fd;
+
+    /*! Socket for receiving conn requests */
+    cci_os_handle_t sock;
+} sock_lep_t;
+
+typedef struct sock_svc {
+    int foo;
+} sock_svc_t;
+
 typedef struct sock_globals {
     /*! Number of sock devices */
     int count;
