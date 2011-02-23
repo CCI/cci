@@ -103,6 +103,8 @@ int cci_bind(cci_device_t *device, int backlog, uint32_t *port,
         pthread_mutex_unlock(&dev->lock);
 
         /* find port & add to globals->svcs */
+        if (*port)
+            svc->port = *port;
         pthread_mutex_lock(&globals->lock);
         ret = cci__get_svc_port(&svc->port);
         if (ret) {

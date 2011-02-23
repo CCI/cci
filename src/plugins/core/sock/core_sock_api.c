@@ -178,6 +178,9 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
                 return CCI_ENOMEM;
 
             sdev = dev->priv;
+            TAILQ_INIT(&sdev->queued);
+            TAILQ_INIT(&sdev->pending);
+            pthread_mutex_init(&sdev->lock, NULL);
 
             /* parse conf_argv */
             for (i = 0, arg = device->conf_argv[i];
@@ -186,7 +189,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
                 if (0 == strncmp("ip=", arg, 3)) {
                     const char *ip = &arg[3];
 
-                    sdev->ip= inet_addr(ip);
+                    sdev->ip= inet_addr(ip); /* network order */
                 }
             }
             if (sdev->ip!= 0) {
@@ -346,10 +349,11 @@ static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
     }
 
     /* bind socket to device and port */
+    sdev = dev->priv;
     memset(&sin, 0, sizeof(sin));
     sin.sin_family = AF_INET;
     sin.sin_port = htons((uint16_t) *port);
-    sin.sin_addr.s_addr = htonl(sdev->ip);
+    sin.sin_addr.s_addr = sdev->ip;
 
     ret = bind(slep->sock, (const struct sockaddr *) &sin, len);
     if (ret) {

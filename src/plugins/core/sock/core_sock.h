@@ -179,7 +179,7 @@ typedef struct sock_conn {
 } sock_conn_t;
 
 typedef struct sock_dev {
-    /*! Our IP address */
+    /*! Our IP address in network order */
     in_addr_t ip;
 
     /*! Queued sends */
