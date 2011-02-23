@@ -220,6 +220,9 @@ static int sock_get_devices(cci_device_t const ***devices)
 {
     printf("In sock_get_devices\n");
 
+    if (!sglobals)
+        return CCI_ENODEV;
+
     *devices = sglobals->devices;
 
     return CCI_SUCCESS;
@@ -228,6 +231,9 @@ static int sock_get_devices(cci_device_t const ***devices)
 
 static int sock_free_devices(cci_device_t const **devices)
 {
+    if (!sglobals)
+        return CCI_ENODEV;
+
     printf("In sock_free_devices\n");
     return CCI_ERR_NOT_IMPLEMENTED;
 }
@@ -244,6 +250,9 @@ static int sock_create_endpoint(cci_device_t *device,
     sock_ep_t *sep;
 
     printf("In sock_create_endpoint\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
 
     dev = container_of(device, cci__dev_t, device);
     if (0 != strcmp("sock", dev->driver)) {
@@ -299,6 +308,10 @@ out:
 static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
 {
     printf("In sock_destroy_endpoint\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -319,6 +332,9 @@ static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
     socklen_t len = sizeof(sin);
 
     printf("In sock_bind\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
 
     dev = container_of(device, cci__dev_t, device);
     if (0 != strcmp("sock", dev->driver)) {
@@ -378,6 +394,10 @@ out:
 static int sock_unbind(cci_service_t *service, cci_device_t *device)
 {
     printf("In sock_unbind\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -386,6 +406,10 @@ static int sock_get_conn_req(cci_service_t *service,
                                  cci_conn_req_t **conn_req)
 {
     printf("In sock_get_conn_req\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -395,6 +419,10 @@ static int sock_accept(cci_conn_req_t *conn_req,
                            cci_connection_t **connection)
 {
     printf("In sock_accept\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -402,6 +430,10 @@ static int sock_accept(cci_conn_req_t *conn_req,
 static int sock_reject(cci_conn_req_t *conn_req)
 {
     printf("In sock_reject\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -414,6 +446,10 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
                             struct timeval *timeout)
 {
     printf("In sock_connect\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -421,6 +457,10 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
 static int sock_disconnect(cci_connection_t *connection)
 {
     printf("In sock_disconnect\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -430,6 +470,10 @@ static int sock_set_opt(cci_opt_handle_t *handle,
                             cci_opt_name_t name, const void* val, int len)
 {
     printf("In sock_set_opt\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -439,6 +483,10 @@ static int sock_get_opt(cci_opt_handle_t *handle,
                             cci_opt_name_t name, void** val, int *len)
 {
     printf("In sock_get_opt\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -446,6 +494,10 @@ static int sock_get_opt(cci_opt_handle_t *handle,
 static int sock_arm_os_handle(cci_endpoint_t *endpoint, int flags)
 {
     printf("In sock_arm_os_handle\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -455,6 +507,10 @@ static int sock_get_event(cci_endpoint_t *endpoint,
                               uint32_t flags)
 {
     printf("In sock_get_event\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -463,6 +519,10 @@ static int sock_return_event(cci_endpoint_t *endpoint,
                                  cci_event_t *event)
 {
     printf("In sock_return_event\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -473,6 +533,10 @@ static int sock_send(cci_connection_t *connection,
                          void *context, int flags)
 {
     printf("In sock_send\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -483,6 +547,10 @@ static int sock_sendv(cci_connection_t *connection,
                           uint segment_cnt, void *context, int flags)
 {
     printf("In sock_sendv\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -491,6 +559,10 @@ static int sock_rma_register(cci_endpoint_t *endpoint, void *start,
                                  uint64_t length, uint64_t *rma_handle)
 {
     printf("In sock_rma_register\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -500,6 +572,10 @@ static int sock_rma_register_phys(cci_endpoint_t *endpoint,
                                       uint64_t *rma_handle)
 {
     printf("In sock_rma_register_phys\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -507,6 +583,10 @@ static int sock_rma_register_phys(cci_endpoint_t *endpoint,
 static int sock_rma_deregister(uint64_t rma_handle)
 {
     printf("In sock_rma_deregister\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -518,5 +598,9 @@ static int sock_rma(cci_connection_t *connection,
                         uint64_t data_len, void *context, int flags)
 {
     printf("In sock_rma\n");
+
+    if (!sglobals)
+        return CCI_ENODEV;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
