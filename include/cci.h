@@ -210,6 +210,9 @@ typedef enum cci_status {
   /*! Value out of range (e.g. no port available) */
   CCI_ERANGE = ERANGE,
 
+  /*! Resource temporarily unavailable */
+  CCI_EAGAIN = EAGAIN,
+
   /* ...more here, inspired from errno.h... */
   
 } cci_status_t;
