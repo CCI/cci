@@ -11,6 +11,7 @@
 #include <string.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/socket.h>
 
 #include "cci.h"
 #include "plugins/core/core.h"
@@ -231,10 +232,27 @@ static int sock_get_devices(cci_device_t const ***devices)
 
 static int sock_free_devices(cci_device_t const **devices)
 {
+    printf("In sock_free_devices\n");
+
     if (!sglobals)
         return CCI_ENODEV;
 
-    printf("In sock_free_devices\n");
+    /* tear everything down */
+
+    /* for each device
+     *     for each endpoint
+     *         for each connection
+     *             close conn
+     *         for each tx/rx
+     *             free it
+     *         close socket
+     *     for each listening endpoint
+     *         remove from service
+     *         for each conn_req
+     *             free it
+     *         close socket
+     */
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -527,15 +545,103 @@ static int sock_return_event(cci_endpoint_t *endpoint,
 }
 
 
+static int sock_sendto(cci_os_handle_t sock, void *buf, int len,
+                       const struct sockaddr_in *sin)
+{
+    int ret = 0;
+    int left = len;
+    const struct sockaddr *s = (const struct sockaddr *)sin;
+    socklen_t slen = sizeof(*sin);
+
+    while (left) {
+        int offset = len - left;
+        ret = sendto(sock, buf + offset, left, 0, s, slen);
+        if (ret == -1) {
+            if (errno == EINTR)
+                continue;
+            else {
+                ret = errno;
+            goto out;
+            }
+        }
+        offset += ret;
+        left -= ret;
+    }
+out:
+        return ret;
+}
+
 static int sock_send(cci_connection_t *connection, 
                          void *header_ptr, uint32_t header_len, 
                          void *data_ptr, uint32_t data_len, 
                          void *context, int flags)
 {
+    int ret;
+    cci_endpoint_t *endpoint = connection->endpoint;
+    cci__ep_t *ep;
+    cci__conn_t *conn;
+    sock_ep_t *sep;
+    sock_conn_t *sconn;
+    sock_tx_t *tx;
+    sock_header_t *hdr;
+    void *ptr;
+
     printf("In sock_send\n");
 
     if (!sglobals)
         return CCI_ENODEV;
+
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    sep = ep->priv;
+    conn = container_of(connection, cci__conn_t, connection);
+    sconn = conn->priv;
+
+    /* is conn unreliable? */
+    if (!(connection->attribute & CCI_CONN_ATTR_RO ||
+          connection->attribute & CCI_CONN_ATTR_RU)) {
+        int len;
+        char *buffer;
+
+        len = sizeof(sock_header_t) + header_len + data_len;
+        buffer = calloc(len, sizeof(char));
+        if (!buffer)
+            return CCI_ENOMEM;
+
+        /* pack buffer */
+
+        hdr = (sock_header_t *) tx->buffer;
+        sock_pack_send(hdr, header_len, data_len, sconn->peer_id);
+        ptr = hdr++;
+        tx->len = len;
+
+        if (header_len) {
+            memcpy(ptr, header_ptr, header_len);
+            ptr += header_len;
+        }
+        if (data_len)
+            memcpy(ptr, data_ptr, data_len);
+
+        /* try to send */
+        ret = sock_sendto(sep->sock, buffer, len, &sconn->sin);
+        free(buffer);
+        if (ret == 0)
+            return CCI_SUCCESS;
+
+        /* if error, fall through */
+    }
+
+    /* get a tx */
+    pthread_mutex_lock(&sep->lock);
+    if (!TAILQ_EMPTY(&sep->idle_txs)) {
+        tx = TAILQ_FIRST(&sep->idle_txs);
+        TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
+    }
+    pthread_mutex_unlock(&sep->lock);
+
+    if (!tx)
+        return CCI_EAGAIN;
+
+    /* pack buffer */
 
     return CCI_ERR_NOT_IMPLEMENTED;
 }

@@ -9,6 +9,7 @@
 #define CCI_CORE_SOCK_H
 
 #include <netinet/in.h>
+#include <assert.h>
 
 #include "cci/config.h"
 #include "cci.h"
@@ -58,9 +59,240 @@ typedef enum sock_msg_type {
     SOCK_MSG_TYPE_MAX
 } sock_msg_type_t;
 
+/* Wire format */
+
+/* Message headers */
+
+/* basic header shared by RO, RU and UU */
+
+/* all headers should be 32-bit aligned */
+/* all fields should be in network byte order on the wire */
+/* all bit mangling is done while in host order */
+
+/* generic header:
+
+    <---------- 32 bits ---------->
+    <- 8 -> <--8--> <---- 16 ----->
+   +-------+-------+---------------+
+   | type  |   A   |       B       |
+   +-------+-------+---------------+
+   |               C               |
+   +-------+-------+---------------+
+
+   where each message type decides how to use A, B, and C
+
+ */
+
+typedef struct sock_header {
+    uint32_t type;  /* upper 8b are type, next 8b are A and rest are B */
+    uint32_t c;
+} sock_header_t;
+
+/* type, a, and b bit mangling */
+
+#define SOCK_TYPE_BITS      (8)
+#define SOCK_TYPE_MASK      (0xFF)
+#define SOCK_TYPE_SHIFT     (24)
+
+#define SOCK_A_BITS         (8)
+#define SOCK_A_MASK         (0xFF)
+#define SOCK_A_MAX          (SOCK_A_MASK)
+#define SOCK_A_SHIFT        (16)
+
+#define SOCK_B_BITS         (16)
+#define SOCK_B_MASK         (0xFFFF)
+#define SOCK_B_MAX          (SOCK_B_MASK)
+
+#define SOCK_TYPE(x)        ((uint8_t)  ((x) >> SOCK_TYPE_SHIFT))
+#define SOCK_A(x)           ((uint8_t) (((x) >> SOCK_A_SHIFT) & \
+                                                    SOCK_A_MASK))
+#define SOCK_B(x)           ((uint16_t) ((x) & SOCK_B_MASK))
+
+#define SOCK_PACK_TYPE(type,a,b)                    \
+        ((((uint32_t) (type)) << SOCK_TYPE_SHIFT) | \
+         (((uint32_t) (a)) << SOCK_A_SHIFT) |       \
+          ((uint32_t) (b)))
+
+static inline void
+sock_pack_header(sock_header_t *header,
+                 sock_msg_type_t type,
+                 uint8_t a,
+                 uint16_t b,
+                 uint32_t c)
+{
+    assert(type < SOCK_MSG_TYPE_MAX && type > SOCK_MSG_INVALID);
+
+    header->type = htonl(SOCK_PACK_TYPE(type, a, b));
+    header->c = htonl(c);
+}
+
+static inline void
+sock_parse_header(sock_header_t *header,
+                  sock_msg_type_t *type,
+                  uint8_t *a,
+                  uint16_t *b,
+                  uint32_t *c)
+{
+    uint32_t hl = ntohl(header->type);
+
+    *type = SOCK_TYPE(hl);
+    *a = (uint32_t) SOCK_A(hl);
+    *b = (uint32_t) SOCK_B(hl);
+    *c = ntohl(header->c);
+}
+
+/* Common message headers (RO, RU, and UU) */
+
+/* connection request header:
+
+    <---------- 32 bits ---------->
+    <- 8 -> <- 8 -> <---- 16 ----->
+   +-------+-------+---------------+
+   | type  | attr  |   data len    |
+   +-------+-------+---------------+
+   |              id               |
+   +-------------------------------+
+
+   The peer uses the id when sending to us.
+   The user data follows the header.
+
+ */
+
+static inline void
+sock_pack_conn_request(sock_header_t *header, cci_conn_attribute_t attr,
+                       uint16_t data_len, uint32_t id)
+{
+    sock_pack_header(header, SOCK_MSG_CONN_REQUEST, attr, data_len, id);
+}
+
+/* connection reply header:
+
+    <---------- 32 bits ---------->
+    <- 8 -> <- 8 -> <---- 16 ----->
+   +-------+-------+---------------+
+   | type  | reply |   reserved    |
+   +-------+-------+---------------+
+   |              id               |
+   +-------------------------------+
+
+   The reply is 0 for success else errno.
+   I use this ID when sending to this peer.
+
+ */
+
+static inline void
+sock_pack_conn_reply(sock_header_t *header, uint8_t reply, uint32_t id)
+{
+    sock_pack_header(header, SOCK_MSG_CONN_REPLY, reply, 0, id);
+}
+
+/* send header:
+
+    <---------- 32 bits ---------->
+    <- 8 -> <- 8 -> <---- 16 ----->
+   +-------+-------+---------------+
+   | type  | hlen  |   data len    |
+   +-------+-------+---------------+
+   |              id               |
+   +-------------------------------+
+
+   The user header and the data follow the send header.
+   The ID is the value assigned to me by the peer.
+
+ */
+
+static inline void
+sock_pack_send(sock_header_t *header, uint8_t header_len,
+               uint16_t data_len, uint32_t id)
+{
+    sock_pack_header(header, SOCK_MSG_SEND, header_len, data_len, id);
+}
+
+/* keepalive header:
+
+    <---------- 32 bits ---------->
+    <- 8 -> <-------- 24 --------->
+   +-------+-----------------------+
+   | type  |       reserved        |
+   +-------+-----------------------+
+   |              id               |
+   +-------------------------------+
+
+ */
+
+static inline void
+sock_pack_keepalive(sock_header_t *header, uint32_t id)
+{
+    sock_pack_header(header, SOCK_MSG_KEEPALIVE, 0, 0, id);
+}
+
+/* Reliable message headers (RO and RU) */
+
+#define SOCK_SEQ_BITS       (48)
+#define SOCK_SEQ_MASK       ((1ULL << SOCK_SEQ_BITS) - 1)
+#define SOCK_SEQ_MAX        (SOCK_SEQ_MASK)
+
+#define SOCK_ACK_MASK       (SOCK_SEQ_MASK)
+#define SOCK_ACK_MAX        (SOCK_SEQ_MAX)
+
+/* sequence and ack
+
+    <---------- 32 bits ---------->
+    <----- 16 ----> <----- 16 ---->
+   +-------------------------------+
+   |     seq (bits 16 - 47)        |
+   +---------------+---------------+
+   |  seq (0-15)   |  ack (32-47)  |
+   +---------------+---------------+
+   |      ack (bits 0 - 31)        |
+   +-------------------------------+
+
+*/
+
+typedef struct sock_seq_ack {
+    uint32_t seq;
+    uint32_t seq_ack;
+    uint32_t ack;
+} sock_seq_ack_t;
+
+static inline void
+sock_pack_seq_ack(sock_seq_ack_t *sa, uint64_t seq, uint64_t ack)
+{
+    uint32_t tmp;
+
+    assert(seq <= SOCK_SEQ_MAX);
+    assert(ack <= SOCK_ACK_MAX);
+
+    sa->seq = htonl((uint32_t) (seq >> 16));
+    tmp = (uint32_t) ((seq & 0xFFFFULL) << 16);
+    tmp |= (uint32_t) (ack >> 32);
+    sa->seq_ack = htonl(tmp);
+    sa->ack = htonl((uint32_t) ack);
+}
+
+static inline void
+sock_parse_seq_ack(sock_seq_ack_t *sa, uint64_t *seq, uint64_t *ack)
+{
+    *seq = ((uint64_t) ntohl(sa->seq)) << 16;
+    *seq |= (uint64_t) (ntohl(sa->seq_ack) >> 16);
+    *ack = (uint64_t) ntohl(sa->ack);
+    *ack |= ((uint64_t) (ntohl(sa->seq_ack) & 0xFFFF)) << 32;
+}
+
+/* reliable header */
+
+typedef struct sock_header_r {
+    sock_header_t header;
+    sock_seq_ack_t seq_ack;
+} sock_header_r_t;
+
+/* RMA headers */
+
+
+
 /*! Send active message context.
- *
- * \ingroup messages */
+*
+* \ingroup messages */
 typedef struct sock_tx {
     /*! Associated event (includes public cci_event_t) */
     cci__evt_t evt;

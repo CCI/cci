@@ -17,5 +17,16 @@ int cci_free_devices(cci_device_t const **devices)
         return CCI_EINVAL;
     }
 
-    return cci_core->free_devices(devices);
+    cci_core->free_devices(devices);
+
+    /* TODO */
+    /* for each device
+     *     for each endpoint
+     *         free it
+     *     for each listening endpoint
+     *         free it
+     *     free it
+     */             
+
+    return CCI_SUCCESS;
 }
