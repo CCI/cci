@@ -208,21 +208,38 @@ extern cci__globals_t *globals;
  *    cci_endpoint_t *endpt;
  *    cci__ep_t *ep;
  *
- *    ep = container_of(endpt, cci__ep, endpoint);
+ *    ep = container_of(endpt, cci__ep_t, endpoint);
  *
  *  Example 2:
  *    cci_device_t *device;
  *    cci__dev_t *dev;
  *
- *    dev = container_of(device, cci__dev, device);
+ *    dev = container_of(device, cci__dev_t, device);
  *
  *    where the first use of "device" is the variable
- *    the "cci__dev" is the parent struct
+ *    the "cci__dev_t" is the parent struct
  *    and the second device is the name of the field in the parent struct
  *
  *    If we always use the name of the field in the parent struct for
  *    the local variable name, then the name is repeated as in
  *    example 2 */
 #define container_of(p,stype,field) ((stype *)(((uint8_t *)(p)) - offsetof(stype, field)))
+
+static inline uint32_t
+cci__next_port(void)
+{
+    uint32_t port = 4096;
+    cci__svc_t *svc;
+
+    TAILQ_FOREACH(svc, &globals->svcs, entry) {
+        if (svc->port > port) {
+            break;
+        } else if (svc->port == port) {
+            port++;
+        }
+    }
+
+    return port;
+}
 
 #endif /* CCI_LIB_TYPES_H */

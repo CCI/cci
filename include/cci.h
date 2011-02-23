@@ -202,10 +202,10 @@ typedef enum cci_status {
   CCI_ENOMEM = ENOMEM,
 
   /*! No device available */
-  CCI_ENODEV,
+  CCI_ENODEV = ENODEV,
 
-  /*! Address not available, cannot assign address */
-  CCI_EADDRNOTAVAIL,
+  /*! Resource busy (no port available) */
+  CCI_EBUSY = EBUSY,
 
   /* ...more here, inspired from errno.h... */
   
