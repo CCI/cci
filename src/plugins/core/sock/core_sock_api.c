@@ -67,7 +67,7 @@ static int sock_send(cci_connection_t *connection,
 static int sock_sendv(cci_connection_t *connection, 
                           void *header_ptr, uint32_t header_len, 
                           char **data_ptrs, int *data_lens,
-                          uint segment_cnt, void *context, int flags);
+                          uint8_t segment_cnt, void *context, int flags);
 static int sock_rma_register(cci_endpoint_t *endpoint, void *start, 
                                  uint64_t length, uint64_t *rma_handle);
 static int sock_rma_register_phys(cci_endpoint_t *endpoint, 
@@ -598,7 +598,23 @@ static int sock_send(cci_connection_t *connection,
                          void *data_ptr, uint32_t data_len, 
                          void *context, int flags)
 {
-    int ret, is_reliable = 0;
+    uint8_t segment_cnt = 0;
+
+    if (data_ptr && data_len)
+        segment_cnt = 1;
+
+    return sock_sendv(connection, header_ptr, header_len,
+                      (char **) &data_ptr, (int *) &data_len,
+                      segment_cnt, context, flags);
+}
+
+
+static int sock_sendv(cci_connection_t *connection, 
+                          void *header_ptr, uint32_t header_len, 
+                          char **data_ptrs, int *data_lens,
+                          uint8_t segment_cnt, void *context, int flags)
+{
+    int i, ret, is_reliable = 0, data_len = 0;
     cci_endpoint_t *endpoint = connection->endpoint;
     cci__ep_t *ep;
     cci__dev_t *dev;
@@ -613,11 +629,19 @@ static int sock_send(cci_connection_t *connection,
     cci_event_t *event;     /* generic CCI event */
     cci_event_send_t *send; /* generic CCI send event */
 
-
-    printf("In sock_send\n");
+    if (segment_cnt < 2)
+        printf("In sock_send\n");
+    else
+        printf("In sock_sendv\n");
 
     if (!sglobals)
         return CCI_ENODEV;
+
+    for (i = 0; i < segment_cnt; i++) {
+        if (!data_ptrs[i] && data_lens[i])
+            return CCI_EINVAL;
+        data_len += data_lens[i];
+    }
 
     if (header_len + data_len > connection->max_send_size)
         return CCI_EMSGSIZE;
@@ -652,8 +676,12 @@ static int sock_send(cci_connection_t *connection,
             memcpy(ptr, header_ptr, header_len);
             ptr += header_len;
         }
-        if (data_len)
-            memcpy(ptr, data_ptr, data_len);
+        for (i = 0; i < segment_cnt; i++) {
+            if (data_lens[i]) {
+                memcpy(ptr, data_ptrs[i], data_lens[i]);
+                ptr += data_lens[i];
+            }
+        }
 
         /* try to send */
         ret = sock_sendto(sep->sock, buffer, len, &sconn->sin);
@@ -699,18 +727,18 @@ static int sock_send(cci_connection_t *connection,
     /* if reliable, add seq and ack */
 
     if (is_reliable) {
-            sock_seq_ack_t *sa;
-            uint64_t ack;
+        sock_seq_ack_t *sa;
+        uint64_t ack;
 
-            pthread_mutex_lock(&sconn->lock);
-            tx->seq = sconn->seq++;
-            ack = sconn->ack;
-            pthread_mutex_unlock(&sconn->lock);
+        pthread_mutex_lock(&sconn->lock);
+        tx->seq = sconn->seq++;
+        ack = sconn->ack;
+        pthread_mutex_unlock(&sconn->lock);
 
-            sa = (sock_seq_ack_t *) ptr;
-            sock_pack_seq_ack(sa, tx->seq, ack);
-            ptr = sa++;
-            tx->len += sizeof(*sa);
+        sa = (sock_seq_ack_t *) ptr;
+        sock_pack_seq_ack(sa, tx->seq, ack);
+        ptr = sa++;
+        tx->len += sizeof(*sa);
     }
 
     /* zero even if unreliable */
@@ -724,11 +752,15 @@ static int sock_send(cci_connection_t *connection,
              use sendmsg() with an iovec. */
 
     if (header_len) {
-            memcpy(ptr, header_ptr, header_len);
-            ptr += header_len;
+        memcpy(ptr, header_ptr, header_len);
+        ptr += header_len;
     }
-    if (data_len)
-            memcpy(ptr, data_ptr, data_len);
+    for (i = 0; i < segment_cnt; i++) {
+        if (data_lens[i]) {
+            memcpy(ptr, data_ptrs[i], data_lens[i]);
+            ptr += data_lens[i];
+        }
+    }
 
     tx->len += header_len + data_len;
     assert(tx->len <= ep->buffer_len);
@@ -743,6 +775,10 @@ static int sock_send(cci_connection_t *connection,
     /* try to progress txs */
 
     sock_progress_sends(sdev);
+
+    /* if unreliable, we are done */
+    if (!is_reliable)
+        return CCI_SUCCESS;
 
     /* if blocking, wait for completion */
 
@@ -781,20 +817,6 @@ static int sock_send(cci_connection_t *connection,
     }
 
     return CCI_SUCCESS;
-}
-
-
-static int sock_sendv(cci_connection_t *connection, 
-                          void *header_ptr, uint32_t header_len, 
-                          char **data_ptrs, int *data_lens,
-                          uint segment_cnt, void *context, int flags)
-{
-    printf("In sock_sendv\n");
-
-    if (!sglobals)
-        return CCI_ENODEV;
-
-    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
