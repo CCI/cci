@@ -213,6 +213,12 @@ typedef enum cci_status {
   /*! Resource temporarily unavailable */
   CCI_EAGAIN = EAGAIN,
 
+  /*! The output queue for a network interface is full */
+  CCI_ENOBUFS = ENOBUFS,
+
+  /*! Message too long */
+  CCI_EMSGSIZE = EMSGSIZE,
+
   /* ...more here, inspired from errno.h... */
   
 } cci_status_t;
