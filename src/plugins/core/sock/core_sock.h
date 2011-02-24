@@ -289,6 +289,13 @@ typedef struct sock_header_r {
 /* RMA headers */
 
 
+typedef enum sock_tx_state_t {
+    SOCK_TX_IDLE = 0,       /* available, held by endpoint */
+    SOCK_TX_QUEUED,         /* queued for sending */
+    SOCK_TX_PENDING,        /* sent, waiting ack */
+    SOCK_TX_COMPLETED       /* completed with status set */
+} sock_tx_state_t;
+
 
 /*! Send active message context.
 *
@@ -302,6 +309,9 @@ typedef struct sock_tx {
 
     /*! Flags (CCI_FLAG_[BLOCKING|SILENT|NO_COPY]) */
     int flags;
+
+    /*! State of send - not to be confused with completion status */
+    sock_tx_state_t state;
 
     /*! Buffer (wire header, user header, data) */
     void *buffer;

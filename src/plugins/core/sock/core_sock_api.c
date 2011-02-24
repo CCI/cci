@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
@@ -571,34 +572,68 @@ out:
         return ret;
 }
 
+static void
+sock_progress_pending(sock_dev_t *sdev)
+{
+    return;
+}
+
+static void
+sock_progress_queued(sock_dev_t *sdev)
+{
+    return;
+}
+
+static void
+sock_progress_sends(sock_dev_t *sdev)
+{
+    sock_progress_pending(sdev);
+    sock_progress_queued(sdev);
+
+    return;
+}
+
 static int sock_send(cci_connection_t *connection, 
                          void *header_ptr, uint32_t header_len, 
                          void *data_ptr, uint32_t data_len, 
                          void *context, int flags)
 {
-    int ret;
+    int ret, is_reliable = 0;
     cci_endpoint_t *endpoint = connection->endpoint;
     cci__ep_t *ep;
+    cci__dev_t *dev;
     cci__conn_t *conn;
     sock_ep_t *sep;
     sock_conn_t *sconn;
+    sock_dev_t *sdev;
     sock_tx_t *tx;
     sock_header_t *hdr;
     void *ptr;
+    cci__evt_t *evt;
+    cci_event_t *event;     /* generic CCI event */
+    cci_event_send_t *send; /* generic CCI send event */
+
 
     printf("In sock_send\n");
 
     if (!sglobals)
         return CCI_ENODEV;
 
+    if (header_len + data_len > connection->max_send_size)
+        return CCI_EMSGSIZE;
+
     ep = container_of(endpoint, cci__ep_t, endpoint);
     sep = ep->priv;
     conn = container_of(connection, cci__conn_t, connection);
     sconn = conn->priv;
+    dev = ep->dev;
+    sdev = dev->priv;
 
-    /* is conn unreliable? */
-    if (!(connection->attribute & CCI_CONN_ATTR_RO ||
-          connection->attribute & CCI_CONN_ATTR_RU)) {
+    is_reliable = connection->attribute & CCI_CONN_ATTR_RO ||
+                  connection->attribute & CCI_CONN_ATTR_RU;
+
+    /* if unreliable, try to send */
+    if (!is_reliable) {
         int len;
         char *buffer;
 
@@ -608,7 +643,6 @@ static int sock_send(cci_connection_t *connection,
             return CCI_ENOMEM;
 
         /* pack buffer */
-
         hdr = (sock_header_t *) tx->buffer;
         sock_pack_send(hdr, header_len, data_len, sconn->peer_id);
         ptr = hdr++;
@@ -639,11 +673,114 @@ static int sock_send(cci_connection_t *connection,
     pthread_mutex_unlock(&sep->lock);
 
     if (!tx)
-        return CCI_EAGAIN;
+        return CCI_ENOBUFS;
 
-    /* pack buffer */
+    /* tx bookkeeping */
+    tx->msg_type = SOCK_MSG_SEND;
+    tx->flags = flags;
 
-    return CCI_ERR_NOT_IMPLEMENTED;
+    /* setup generic CCI event */
+    evt = &tx->evt;
+    event = &evt->event;
+    event->type = CCI_EVENT_SEND;
+
+    send = &(event->info.send);
+    send->connection = connection;
+    send->context = context;
+    send->status = CCI_SUCCESS; /* for now */
+
+    /* pack send header */
+
+    hdr = (sock_header_t *) tx->buffer;
+    sock_pack_send(hdr, header_len, data_len, sconn->peer_id);
+    ptr = hdr++;
+    tx->len = sizeof(*hdr);
+
+    /* if reliable, add seq and ack */
+
+    if (is_reliable) {
+            sock_seq_ack_t *sa;
+            uint64_t ack;
+
+            pthread_mutex_lock(&sconn->lock);
+            tx->seq = sconn->seq++;
+            ack = sconn->ack;
+            pthread_mutex_unlock(&sconn->lock);
+
+            sa = (sock_seq_ack_t *) ptr;
+            sock_pack_seq_ack(sa, tx->seq, ack);
+            ptr = sa++;
+            tx->len += sizeof(*sa);
+    }
+
+    /* zero even if unreliable */
+
+    tx->cycles = 0;
+    tx->resends = 0;
+
+    /* copy user header and data to buffer
+     * NOTE: ignore CCI_FLAG_NO_COPY because we need to
+             send the entire packet in one shot. We could
+             use sendmsg() with an iovec. */
+
+    if (header_len) {
+            memcpy(ptr, header_ptr, header_len);
+            ptr += header_len;
+    }
+    if (data_len)
+            memcpy(ptr, data_ptr, data_len);
+
+    tx->len += header_len + data_len;
+    assert(tx->len <= ep->buffer_len);
+
+    /* insert at tail of sock device's queued list */
+
+    tx->state = SOCK_TX_QUEUED;
+    pthread_mutex_lock(&sdev->lock);
+    TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
+    pthread_mutex_unlock(&sdev->lock);
+
+    /* try to progress txs */
+
+    sock_progress_sends(sdev);
+
+    /* if blocking, wait for completion */
+
+    if (tx->flags & CCI_FLAG_BLOCKING) {
+        int ret;
+
+        while (tx->state != SOCK_TX_COMPLETED) {
+            /* TODO call progress function
+             *      or do we sleep a little and let the progress
+             *      thread do the retransmission and handle
+             *      recvs to get the ack? */
+            sock_progress_sends(sdev);
+
+            /* FIXME magic number 
+             * should be same as the progress thread interval 
+             * (or 1/2 its value?) */
+            usleep(10000);
+        }
+
+        /* get status and cleanup */
+        ret = send->status;
+
+        /* FIXME race with get_event()
+         *       get_event() must ignore sends with 
+         *       flags & CCI_FLAG_BLOCKING */
+
+        pthread_mutex_lock(&ep->lock);
+        TAILQ_REMOVE(&ep->evts, evt, entry);
+        pthread_mutex_unlock(&ep->lock);
+
+        pthread_mutex_lock(&sep->lock);
+        TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
+        pthread_mutex_unlock(&sep->lock);
+
+        return ret;
+    }
+
+    return CCI_SUCCESS;
 }
 
 
