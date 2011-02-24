@@ -647,6 +647,8 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
 
     hdr = (sock_header_t *) tx->buffer;
     sock_get_id(sep, &sconn->id);
+    /* FIXME silence -Wall -Werror until it is used */
+    if (0) sock_put_id(sep, 0);
     sock_pack_conn_request(hdr, attribute, (uint16_t) data_len, sconn->id);
     ptr = hdr++;
     tx->len = sizeof(*hdr);
@@ -655,7 +657,7 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
 
     tx->seq = 0;
     tx->seq = random() << 16; /* fill bits 16-47 */
-    tx->seq ^= random(); /* fill bits 0-15 and xor bits 16-31 */
+    tx->seq |= random() & 0xFFFFULL; /* fill bits 0-15 */
     ack = sconn->ack;
 
     sa = (sock_seq_ack_t *) ptr;
@@ -776,12 +778,12 @@ static int sock_return_event(cci_endpoint_t *endpoint,
 
 
 static int sock_sendto(cci_os_handle_t sock, void *buf, int len,
-                       const struct sockaddr_in *sin)
+                       const struct sockaddr_in sin)
 {
     int ret = 0;
     int left = len;
-    const struct sockaddr *s = (const struct sockaddr *)sin;
-    socklen_t slen = sizeof(*sin);
+    const struct sockaddr *s = (const struct sockaddr *)&sin;
+    socklen_t slen = sizeof(sin);
 
     while (left) {
         int offset = len - left;
@@ -804,12 +806,219 @@ out:
 static void
 sock_progress_pending(sock_dev_t *sdev)
 {
+    int ret, left;
+    void *ptr;
+    sock_tx_t           *tx, *tmp;
+    cci__evt_t          *evt;
+    cci_event_t         *event;         /* generic CCI event */
+    cci_event_send_t    *send;          /* generic CCI send event */
+    cci_connection_t    *connection;    /* generic CCI connection */
+    cci__conn_t         *conn;
+    sock_conn_t         *sconn;
+    cci__ep_t           *ep;
+    sock_ep_t           *sep;
+
+    /* This is only for reliable messages.
+     * Do not dequeue txs, just walk the list.
+     */
+
+    pthread_mutex_lock(&sdev->lock);
+    TAILQ_FOREACH_SAFE(tx, &sdev->pending, dentry, tmp) {
+
+        evt = &(tx->evt);
+        event = &evt->event;
+        connection = event->info.send.connection;
+        conn = container_of(connection, cci__conn_t, connection);
+        sconn = conn->priv;
+
+        ep = container_of(connection->endpoint, cci__ep_t, endpoint);
+        sep = ep->priv;
+
+        /* try to send it */
+
+        tx->cycles++;
+
+        /* TODO cycles % cycles_per_resend == 0 */
+        tx->resends++;
+
+        if (tx->resends >= ep->tx_timeout ||
+            tx->resends >= conn->tx_timeout) {
+
+            /* dequeue */
+
+            TAILQ_REMOVE(&sdev->pending, tx, dentry);
+
+            /* set status and add to completed events */
+
+            send = &(event->info.send);
+
+            send->status = CCI_ETIMEDOUT;
+            pthread_mutex_lock(&ep->lock);
+            TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+            pthread_mutex_unlock(&ep->lock);
+
+            continue;
+        }
+
+
+        left = tx->len;
+        ptr = tx->buffer;
+
+        ret = sock_sendto(sep->sock, ptr, left, sconn->sin);
+        if (ret == -1) {
+            switch (errno) {
+            case EINTR:
+                break;
+            default:
+                fprintf(stderr, "sendto() failed with %s\n", strerror(errno));
+                /* fall through */
+            case EAGAIN:
+            case ENOMEM:
+            case ENOBUFS:
+                /* give up for now */
+                pthread_mutex_unlock(&sdev->lock);
+                return;
+            }
+            assert(ret == left);
+        }
+        /* msg sent */
+    }
+    pthread_mutex_unlock(&sdev->lock);
+
     return;
 }
 
 static void
 sock_progress_queued(sock_dev_t *sdev)
 {
+    int                 ret, left, timeout;
+    void                *ptr;
+    sock_tx_t           *tx, *tmp;
+    cci__ep_t           *ep;
+    cci__evt_t          *evt;
+    cci__conn_t         *conn;
+    sock_ep_t           *sep;
+    sock_conn_t         *sconn;
+    cci_event_t         *event;         /* generic CCI event */
+    cci_connection_t    *connection;    /* generic CCI connection */
+    cci_endpoint_t      *endpoint;      /* generic CCI endpoint */
+
+    pthread_mutex_lock(&sdev->lock);
+    TAILQ_FOREACH_SAFE(tx, &sdev->queued, dentry, tmp) {
+
+        /* FIXME */
+        //TAILQ_REMOVE(&sdev->queued, tx, dentry);
+        //pthread_mutex_unlock(&sdev->lock);
+
+        evt = &(tx->evt);
+        event = &(evt->event);
+        if (event->type == CCI_EVENT_SEND)
+            connection = event->info.send.connection;
+        else
+            /* FIXME is this true of CONN_REPLY and CONN_ACK? */
+            connection = event->info.other.u.connect.connection;
+        conn = container_of(connection, cci__conn_t, connection);
+        sconn = conn->priv;
+
+        endpoint = connection->endpoint;
+        ep = container_of(endpoint, cci__ep_t, endpoint);
+        sep = ep->priv;
+
+        /* try to send it */
+
+        tx->cycles++;
+
+        /* cycles % cycles_per_resend == 0 */
+        if (tx->cycles % SOCK_PROG_FREQ != 0)
+            continue;
+
+        tx->resends++;
+
+        timeout = conn->tx_timeout ? conn->tx_timeout : ep->tx_timeout;
+
+        /* FIXME still holding sdev->lock */
+        if (tx->resends * SOCK_RESEND_TIME >= timeout) {
+
+            /* set status and add to completed events */
+
+            switch (tx->msg_type) {
+            case SOCK_MSG_SEND:
+                event->info.send.status = CCI_ETIMEDOUT;
+                break;
+            case SOCK_MSG_CONN_REQUEST:
+            case SOCK_MSG_CONN_REPLY:
+            case SOCK_MSG_CONN_ACK:
+                event->type = CCI_EVENT_CONNECT_TIMEOUT;
+                break;
+            default:
+                /* TODO */
+                return;
+            }
+            /* if SILENT, put idle tx */
+            if (tx->msg_type == SOCK_MSG_SEND &&
+                tx->flags & CCI_FLAG_SILENT) {
+
+                tx->state = SOCK_TX_IDLE;
+                pthread_mutex_lock(&sep->lock);
+                TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
+                pthread_mutex_unlock(&sep->lock);
+            } else {
+                tx->state = SOCK_TX_COMPLETED;
+                pthread_mutex_lock(&ep->lock);
+                TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+                pthread_mutex_unlock(&ep->lock);
+            }
+        }
+
+        left = tx->len;
+        ptr = tx->buffer;
+again:
+        ret = sock_sendto(sep->sock, ptr, left, sconn->sin);
+        if (ret == -1) {
+            switch (errno) {
+            case EINTR:
+                break;
+            default:
+                fprintf(stderr, "sendto() failed with %s\n", strerror(errno));
+                /* fall through */
+            case EAGAIN:
+            case ENOMEM:
+            case ENOBUFS:
+                /* requeue */
+                pthread_mutex_lock(&sdev->lock);
+                TAILQ_INSERT_HEAD(&sdev->queued, tx, dentry);
+                pthread_mutex_unlock(&sdev->lock);
+                return;
+            }
+        } else {
+            /* (partial?) success */
+
+            left -= ret;
+            ptr += ret;
+            if (left) {
+                    goto again;
+            }
+        }
+        /* msg sent */
+
+        /* if reliable, add to pending
+         * else add to completed events */
+
+        if (connection->attribute & CCI_CONN_ATTR_RO ||
+            connection->attribute & CCI_CONN_ATTR_RU) {
+            tx->state = SOCK_TX_PENDING;
+            pthread_mutex_lock(&sdev->lock);
+            TAILQ_INSERT_TAIL(&sdev->pending, tx, dentry);
+            pthread_mutex_unlock(&sdev->lock);
+        } else {
+            /* TODO handle SILENT flag */
+            tx->state = SOCK_TX_COMPLETED;
+            pthread_mutex_lock(&ep->lock);
+            TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+            pthread_mutex_unlock(&ep->lock);
+        }
+    } while (!TAILQ_EMPTY(&sdev->queued));
+
     return;
 }
 
@@ -913,7 +1122,7 @@ static int sock_sendv(cci_connection_t *connection,
         }
 
         /* try to send */
-        ret = sock_sendto(sep->sock, buffer, len, &sconn->sin);
+        ret = sock_sendto(sep->sock, buffer, len, sconn->sin);
         free(buffer);
         if (ret == 0)
             return CCI_SUCCESS;
@@ -1014,18 +1223,8 @@ static int sock_sendv(cci_connection_t *connection,
     if (tx->flags & CCI_FLAG_BLOCKING) {
         int ret;
 
-        while (tx->state != SOCK_TX_COMPLETED) {
-            /* TODO call progress function
-             *      or do we sleep a little and let the progress
-             *      thread do the retransmission and handle
-             *      recvs to get the ack? */
-            sock_progress_sends(sdev);
-
-            /* FIXME magic number 
-             * should be same as the progress thread interval 
-             * (or 1/2 its value?) */
-            usleep(10000);
-        }
+        while (tx->state != SOCK_TX_COMPLETED)
+            usleep(SOCK_PROG_TIME / 2);
 
         /* get status and cleanup */
         ret = send->status;

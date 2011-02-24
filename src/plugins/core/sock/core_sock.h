@@ -28,6 +28,11 @@
 #define SOCK_NUM_BLOCKS         (16384) /* number of blocks */
 #define SOCK_MAX_ID             (SOCK_BLOCK_SIZE * SOCK_NUM_BLOCKS)
                                         /* 1048576 conns per endpoint */
+#define SOCK_PROG_TIME          (10000) /* try to progress every N microseconds */
+#define SOCK_PROG_FREQ          (1000000 / SOCK_PROG_TIME)
+                                        /* progress attempts per second */
+#define SOCK_RESEND_TIME        (1000000)
+                                        /* time between resends in microseconds */
 
 /* Valid URI include:
  *
