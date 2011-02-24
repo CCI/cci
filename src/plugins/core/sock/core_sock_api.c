@@ -13,6 +13,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
 
 #include "cci.h"
 #include "plugins/core/core.h"
@@ -80,6 +83,8 @@ static int sock_rma(cci_connection_t *connection,
                         uint64_t remote_handle, uint64_t remote_offset,
                         uint64_t data_len, void *context, int flags);
 
+
+static void sock_progress_sends(sock_dev_t *sdev);
 
 /*
  * Public plugin structure.
@@ -456,6 +461,39 @@ static int sock_reject(cci_conn_req_t *conn_req)
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
+static int sock_getaddrinfo(const char *uri, in_addr_t *in)
+{
+    int ret;
+    char *hostname, *colon;
+    struct addrinfo *ai, hints;
+
+    if (0 == strncmp("ip://", uri, 5))
+        hostname = strdup(&uri[5]);
+    else
+        return CCI_EINVAL;
+
+    colon = strchr(hostname, ':');
+    if (colon)
+        colon = '\0';
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_protocol = IPPROTO_UDP;
+
+    ret = getaddrinfo(hostname, NULL, &hints, &ai);
+    free(hostname);
+
+    if (ret) {
+        freeaddrinfo(ai);
+        return ret;
+    }
+
+    *in = ((struct sockaddr_in *)ai->ai_addr)->sin_addr.s_addr;
+    freeaddrinfo(ai);
+
+    return CCI_SUCCESS;
+}
 
 static int sock_connect(cci_endpoint_t *endpoint, char *server_uri, 
                             uint32_t port,
@@ -464,12 +502,155 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
                             void *context, int flags, 
                             struct timeval *timeout)
 {
+    int ret;
+    cci__ep_t *ep;
+    cci__dev_t *dev;
+    cci__conn_t *conn;
+    sock_ep_t *sep;
+    sock_dev_t *sdev;
+    sock_conn_t *sconn;
+    sock_tx_t *tx;
+    sock_header_t *hdr;
+    cci__evt_t *evt;
+    cci_event_t *event;
+    cci_event_other_t *other;
+    cci_connection_t *connection;
+    struct sockaddr_in *sin;
+    void *ptr;
+    in_addr_t in;
+    sock_seq_ack_t *sa;
+    uint64_t ack;
+
+
     printf("In sock_connect\n");
 
     if (!sglobals)
         return CCI_ENODEV;
 
-    return CCI_ERR_NOT_IMPLEMENTED;
+    /* allocate a new connection */
+    conn = calloc(1, sizeof(*conn));
+    if (!conn)
+            return CCI_ENOMEM;
+
+    conn->priv = calloc(1, sizeof(*sconn));
+    if (!conn->priv) {
+        ret = CCI_ENOMEM;
+        goto out;
+    }
+
+    /* set up the connection */
+    conn->uri = strdup(server_uri);
+    if (!conn->uri) {
+        ret = CCI_ENOMEM;
+        goto out;
+    }
+
+    /* conn->tx_timeout = 0  by default */
+
+    connection = &conn->connection;
+    connection->attribute = attribute;
+    connection->endpoint = endpoint;
+    connection->max_send_size = SOCK_AM_SIZE;
+
+    /* set up sock specific info */
+
+    sconn->status = SOCK_CONN_ACTIVE;
+    sin = (struct sockaddr_in *) &sconn->sin;
+    memset(sin, 0, sizeof(*sin));
+    sin->sin_family = AF_INET;
+    sin->sin_port = htons(port);
+
+    ret = sock_getaddrinfo(server_uri, &in);
+    if (ret)
+        goto out;
+    sin->sin_addr.s_addr = in;  /* already in network order */
+
+    /* peer will assign id */
+
+    pthread_mutex_init(&sconn->lock, NULL);
+
+    /* get our endpoint and device */
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    sep = ep->priv;
+    dev = ep->dev;
+    sdev = dev->priv;
+
+    /* get a tx */
+    pthread_mutex_lock(&sep->lock);
+    if (!TAILQ_EMPTY(&sep->idle_txs)) {
+        tx = TAILQ_FIRST(&sep->idle_txs);
+        TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
+    }
+    pthread_mutex_unlock(&sep->lock);
+
+    if (!tx)
+        return CCI_ENOBUFS;
+
+    /* prep the tx */
+    tx->msg_type = SOCK_MSG_CONN_REQUEST;
+
+    evt = &tx->evt;
+    event = &evt->event;
+    event->type = CCI_EVENT_CONNECT_SUCCESS; /* for now */
+
+    other = &event->info.other;
+    other->context = context;
+    other->u.connect.connection = connection;
+
+    /* pack the msg */
+
+    hdr = (sock_header_t *) tx->buffer;
+    /* FIXME we need to assign an id and send it */
+    sock_pack_conn_request(hdr, attribute, (uint16_t) data_len, sconn->peer_id);
+    ptr = hdr++;
+    tx->len = sizeof(*hdr);
+
+    /* add seq and ack */
+
+    tx->seq = sconn->seq++;
+    ack = sconn->ack;
+
+    sa = (sock_seq_ack_t *) ptr;
+    sock_pack_seq_ack(sa, tx->seq, ack);
+    ptr = sa++;
+    tx->len += sizeof(*sa);
+
+    /* zero even if unreliable */
+
+    tx->cycles = 0;
+    tx->resends = 0;
+
+    if (data_len)
+            memcpy(ptr, data_ptr, data_len);
+
+    tx->len += data_len;
+    assert(tx->len <= ep->buffer_len);
+
+    /* insert at tail of device's queued list */
+
+    dev = ep->dev;
+    sdev = dev->priv;
+
+    tx->state = SOCK_TX_QUEUED;
+    pthread_mutex_lock(&sdev->lock);
+    TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
+    pthread_mutex_unlock(&sdev->lock);
+
+    /* try to progress txs */
+
+    sock_progress_sends(sdev);
+
+    return CCI_SUCCESS;
+
+out:
+    if (conn) {
+        if (conn->uri)
+            free((char *) conn->uri);
+        if (conn->priv)
+            free(conn->priv);
+        free(conn);
+    }
+    return ret;
 }
 
 

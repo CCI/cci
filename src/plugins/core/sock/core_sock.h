@@ -24,6 +24,17 @@
 #define SOCK_AM_SIZE            (8192)  /* 8 KB - assume jumbo frames */
 #define SOCK_EP_HASH_SIZE       (256)   /* nice round number */
 
+/* Valid URI include:
+ *
+ * ip://1.2.3.4         # IPv4 address
+ * ip://foo.bar.com     # Resolvable name
+ */
+
+/* Valid URI arguments:
+ *
+ * :eth0                # Interface name
+ */
+
 /* A sock device needs the following items in the config file:
  *
  * driver = sock        # must be lowercase
@@ -397,9 +408,6 @@ typedef struct sock_conn {
 
     /*! Peer's sockaddr_in (IP, port) */
     const struct sockaddr_in sin;
-
-    /*! Send timeout (if 0, use endpoint send timeout) */
-    uint32_t tx_timeout;
 
     /*! ID we assigned to peer */
     uint32_t peer_id;
