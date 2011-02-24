@@ -24,6 +24,11 @@
 #define SOCK_AM_SIZE            (8192)  /* 8 KB - assume jumbo frames */
 #define SOCK_EP_HASH_SIZE       (256)   /* nice round number */
 
+#define SOCK_BLOCK_SIZE         (64)    /* use 64b blocks for id storage */
+#define SOCK_NUM_BLOCKS         (16384) /* number of blocks */
+#define SOCK_MAX_ID             (SOCK_BLOCK_SIZE * SOCK_NUM_BLOCKS)
+                                        /* 1048576 conns per endpoint */
+
 /* Valid URI include:
  *
  * ip://1.2.3.4         # IPv4 address
@@ -389,6 +394,9 @@ typedef struct sock_ep {
 
     /*! Lock for lists */
     pthread_mutex_t lock;
+
+    /*! Connection id blocks */
+    uint64_t *ids;
 } sock_ep_t;
 
 /* Connection info */
@@ -409,11 +417,11 @@ typedef struct sock_conn {
     /*! Peer's sockaddr_in (IP, port) */
     const struct sockaddr_in sin;
 
-    /*! ID we assigned to peer */
+    /*! ID we assigned to us by peer - use when sending to peer */
     uint32_t peer_id;
 
-    /*! ID assigned to us by peer */
-    uint32_t our_id;
+    /*! ID we assigned to peer - peer uses to send to us and we use to look up conn */
+    uint32_t id;
 
     /*! Entry to hang on sock_ep->conns[hash] */
     TAILQ_ENTRY(sock_conn) entry;

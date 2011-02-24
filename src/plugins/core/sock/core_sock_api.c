@@ -269,9 +269,9 @@ static int sock_create_endpoint(cci_device_t *device,
                                     cci_os_handle_t *fd)
 {
     int i, ret;
-    cci__dev_t *dev;
-    cci__ep_t *ep;
-    sock_ep_t *sep;
+    cci__dev_t *dev = NULL;
+    cci__ep_t *ep = NULL;
+    sock_ep_t *sep = NULL;
 
     printf("In sock_create_endpoint\n");
 
@@ -299,6 +299,11 @@ static int sock_create_endpoint(cci_device_t *device,
     ep->tx_timeout = SOCK_EP_TX_TIMEOUT;
 
     sep = ep->priv;
+    sep->ids = calloc(SOCK_NUM_BLOCKS, sizeof(*sep->ids));
+    if (!sep->ids) {
+        ret = CCI_ENOMEM;
+        goto out;
+    }
 
     sep->sock = socket(PF_INET, SOCK_DGRAM, 0);
     if (sep->sock == -1) {
@@ -321,9 +326,13 @@ out:
     pthread_mutex_lock(&dev->lock);
     TAILQ_REMOVE(&dev->eps, ep, entry);
     pthread_mutex_unlock(&dev->lock);
-    if (ep->priv)
-        free(ep->priv);
-    free(ep);
+    if (sep) {
+        if (sep->ids)
+            free(sep->ids);
+        free(sep);
+    }
+    if (ep)
+        free(ep);
     *endpoint = NULL;
     return ret;
 }
@@ -495,6 +504,43 @@ static int sock_getaddrinfo(const char *uri, in_addr_t *in)
     return CCI_SUCCESS;
 }
 
+static void
+sock_get_id(sock_ep_t *ep, uint32_t *id)
+{
+    uint32_t n, block, offset;
+    uint64_t *b;
+
+    while (1) {
+        n = random();
+        block = n / SOCK_BLOCK_SIZE;
+        offset = n % SOCK_BLOCK_SIZE;
+        b = &ep->ids[block];
+
+        if ((*b & (1 << offset)) == 0) {
+            *b |= (1 << offset);
+            *id = (block * SOCK_BLOCK_SIZE) + offset;
+            break;
+        }
+    }
+    return;
+}
+
+static void
+sock_put_id(sock_ep_t *ep, uint32_t id)
+{
+    uint32_t block, offset;
+    uint64_t *b;
+
+    block = id / SOCK_BLOCK_SIZE;
+    offset = id % SOCK_BLOCK_SIZE;
+    b = &ep->ids[block];
+
+    assert((*b & (1 << offset)) == 1);
+    *b &= ~(1 << offset);
+
+    return;
+}
+
 static int sock_connect(cci_endpoint_t *endpoint, char *server_uri, 
                             uint32_t port,
                             void *data_ptr, uint32_t data_len, 
@@ -600,14 +646,16 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     /* pack the msg */
 
     hdr = (sock_header_t *) tx->buffer;
-    /* FIXME we need to assign an id and send it */
-    sock_pack_conn_request(hdr, attribute, (uint16_t) data_len, sconn->peer_id);
+    sock_get_id(sep, &sconn->id);
+    sock_pack_conn_request(hdr, attribute, (uint16_t) data_len, sconn->id);
     ptr = hdr++;
     tx->len = sizeof(*hdr);
 
     /* add seq and ack */
 
-    tx->seq = sconn->seq++;
+    tx->seq = 0;
+    tx->seq = random() << 16; /* fill bits 16-47 */
+    tx->seq ^= random(); /* fill bits 0-15 and xor bits 16-31 */
     ack = sconn->ack;
 
     sa = (sock_seq_ack_t *) ptr;
