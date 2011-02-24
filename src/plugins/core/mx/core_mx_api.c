@@ -59,7 +59,7 @@ static int mx_send(cci_connection_t *connection,
 static int mx_sendv(cci_connection_t *connection, 
                           void *header_ptr, uint32_t header_len, 
                           char **data_ptrs, int *data_lens,
-                          uint segment_cnt, void *context, int flags);
+                          uint8_t segment_cnt, void *context, int flags);
 static int mx_rma_register(cci_endpoint_t *endpoint, void *start, 
                                  uint64_t length, uint64_t *rma_handle);
 static int mx_rma_register_phys(cci_endpoint_t *endpoint, 
@@ -286,7 +286,7 @@ static int mx_send(cci_connection_t *connection,
 static int mx_sendv(cci_connection_t *connection, 
                           void *header_ptr, uint32_t header_len, 
                           char **data_ptrs, int *data_lens,
-                          uint segment_cnt, void *context, int flags)
+                          uint8_t segment_cnt, void *context, int flags)
 {
     printf("In mx_sendv\n");
     return CCI_ERR_NOT_IMPLEMENTED;

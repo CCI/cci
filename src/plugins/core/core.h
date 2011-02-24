@@ -74,7 +74,7 @@ typedef int (*cci_send_fn_t)(cci_connection_t *connection,
 typedef int (*cci_sendv_fn_t)(cci_connection_t *connection, 
                               void *header_ptr, uint32_t header_len, 
                               char **data_ptrs, int *data_lens,
-                              uint segment_cnt, void *context, int flags);
+                              uint8_t segment_cnt, void *context, int flags);
 typedef int (*cci_rma_register_fn_t)(cci_endpoint_t *endpoint, void *start, 
                                      uint64_t length, uint64_t *rma_handle);
 typedef int (*cci_rma_register_phys_fn_t)(cci_endpoint_t *endpoint, 
