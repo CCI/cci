@@ -85,6 +85,7 @@ static int sock_rma(cci_connection_t *connection,
 
 
 static void sock_progress_sends(sock_dev_t *sdev);
+static void *sock_progress_thread(void *arg);
 
 /*
  * Public plugin structure.
@@ -143,7 +144,9 @@ cci_plugin_core_t cci_core_sock_plugin = {
 
 static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 {
+    int ret;
     cci__dev_t *dev;
+    pthread_t pid;
 
     fprintf(stderr, "In sock_init\n");
 
@@ -152,15 +155,17 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
     if (!sglobals)
         return CCI_ENOMEM;
 
-    /* FIXME magic number */
-    sglobals->devices = calloc(32, sizeof(*sglobals->devices));
+    sglobals->devices = calloc(CCI_MAX_DEVICES, sizeof(*sglobals->devices));
+    if (!sglobals->devices) {
+        ret = CCI_ENOMEM;
+        goto out;
+    }
 
     /* find devices that we own */
 
     TAILQ_FOREACH(dev, &globals->devs, entry) {
         if (0 == strcmp("sock", dev->driver)) {
-            int i;
-            const char *arg;
+            const char **arg;
             cci_device_t *device;
             sock_dev_t *sdev;
 
@@ -181,8 +186,10 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
             device->pci.func = -1;      /* per CCI spec */
 
             dev->priv = calloc(1, sizeof(*dev->priv));
-            if (!dev->priv)
-                return CCI_ENOMEM;
+            if (!dev->priv) {
+                ret = CCI_ENOMEM;
+                goto out;
+            }
 
             sdev = dev->priv;
             TAILQ_INIT(&sdev->queued);
@@ -190,16 +197,16 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
             pthread_mutex_init(&sdev->lock, NULL);
 
             /* parse conf_argv */
-            for (i = 0, arg = device->conf_argv[i];
-                 arg != NULL; 
-                 i++, arg = device->conf_argv[i]) {
-                if (0 == strncmp("ip=", arg, 3)) {
-                    const char *ip = &arg[3];
+            for (arg = device->conf_argv;
+                 *arg != NULL; 
+                 arg++) {
+                if (0 == strncmp("ip=", *arg, 3)) {
+                    const char *ip = *arg + 3;
 
                     sdev->ip= inet_addr(ip); /* network order */
                 }
             }
-            if (sdev->ip!= 0) {
+            if (sdev->ip != 0) {
                 sglobals->devices[sglobals->count] = device;
                 sglobals->count++;
                 dev->is_up = 1;
@@ -211,8 +218,33 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 
     sglobals->devices = realloc(sglobals->devices,
                                 (sglobals->count + 1) * sizeof(cci_device_t *));
+    sglobals->devices[sglobals->count] = NULL;
+
+    ret = pthread_create(&pid, NULL, sock_progress_thread, NULL);
+    if (ret)
+        goto out;
 
     return CCI_SUCCESS;
+
+out:
+    if (sglobals) {
+        if (sglobals->devices) {
+            cci_device_t const *device;
+            cci__dev_t *dev;
+
+            for (device = sglobals->devices[0];
+                 device != NULL;
+                 device++) {
+                dev = container_of(device, cci__dev_t, device);
+                if (dev->priv)
+                    free(dev->priv);
+            }
+            free(sglobals->devices);
+        }
+        free(sglobals);
+        sglobals = NULL;
+    }
+    return ret;
 }
 
 
@@ -988,14 +1020,44 @@ sock_progress_pending(sock_dev_t *sdev)
     pthread_mutex_unlock(&sdev->lock);
 
     /* transfer txs to sock ep's list */
-    pthread_mutex_lock(&sep->lock);
-    TAILQ_CONCAT(&sep->idle_txs, &idle_txs, dentry);
-    pthread_mutex_unlock(&sep->lock);
+    while (!TAILQ_EMPTY(&idle_txs)) {
+        tx = TAILQ_FIRST(&idle_txs);
+        TAILQ_REMOVE(&idle_txs, tx, dentry);
+        evt = &(tx->evt);
+        event = &(evt->event);
+        if (event->type == CCI_EVENT_SEND)
+            connection = event->info.send.connection;
+        else
+            /* FIXME is this true of CONN_REPLY and CONN_ACK? */
+            connection = event->info.other.u.connect.connection;
+        conn = container_of(connection, cci__conn_t, connection);
+        sconn = conn->priv;
+
+        ep = container_of(connection->endpoint, cci__ep_t, endpoint);
+        sep = ep->priv;
+        pthread_mutex_lock(&sep->lock);
+        TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
+        pthread_mutex_unlock(&sep->lock);
+    }
 
     /* transfer evts to the ep's list */
-    pthread_mutex_lock(&ep->lock);
-    TAILQ_CONCAT(&ep->evts, &evts, entry);
-    pthread_mutex_unlock(&ep->lock);
+    while (!TAILQ_EMPTY(&evts)) {
+        evt = TAILQ_FIRST(&evts);
+        event = &(evt->event);
+        if (event->type == CCI_EVENT_SEND)
+            connection = event->info.send.connection;
+        else
+            /* FIXME is this true of CONN_REPLY and CONN_ACK? */
+            connection = event->info.other.u.connect.connection;
+        conn = container_of(connection, cci__conn_t, connection);
+        sconn = conn->priv;
+
+        ep = container_of(connection->endpoint, cci__ep_t, endpoint);
+        TAILQ_REMOVE(&evts, evt, entry);
+        pthread_mutex_lock(&ep->lock);
+        TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+        pthread_mutex_unlock(&ep->lock);
+    }
 
     return;
 }
@@ -1116,14 +1178,46 @@ sock_progress_queued(sock_dev_t *sdev)
     pthread_mutex_unlock(&sdev->lock);
 
     /* transfer txs to sock ep's list */
-    pthread_mutex_lock(&sep->lock);
-    TAILQ_CONCAT(&sep->idle_txs, &idle_txs, dentry);
-    pthread_mutex_unlock(&sep->lock);
+    while (!TAILQ_EMPTY(&idle_txs)) {
+        tx = TAILQ_FIRST(&idle_txs);
+        TAILQ_REMOVE(&idle_txs, tx, dentry);
+        evt = &(tx->evt);
+        event = &(evt->event);
+        if (event->type == CCI_EVENT_SEND)
+            connection = event->info.send.connection;
+        else
+            /* FIXME is this true of CONN_REPLY and CONN_ACK? */
+            connection = event->info.other.u.connect.connection;
+        conn = container_of(connection, cci__conn_t, connection);
+        sconn = conn->priv;
+
+        endpoint = connection->endpoint;
+        ep = container_of(endpoint, cci__ep_t, endpoint);
+        sep = ep->priv;
+        pthread_mutex_lock(&sep->lock);
+        TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
+        pthread_mutex_unlock(&sep->lock);
+    }
 
     /* transfer evts to the ep's list */
-    pthread_mutex_lock(&ep->lock);
-    TAILQ_CONCAT(&ep->evts, &evts, entry);
-    pthread_mutex_unlock(&ep->lock);
+    while (!TAILQ_EMPTY(&evts)) {
+        evt = TAILQ_FIRST(&evts);
+        event = &(evt->event);
+        if (event->type == CCI_EVENT_SEND)
+            connection = event->info.send.connection;
+        else
+            /* FIXME is this true of CONN_REPLY and CONN_ACK? */
+            connection = event->info.other.u.connect.connection;
+        conn = container_of(connection, cci__conn_t, connection);
+        sconn = conn->priv;
+
+        endpoint = connection->endpoint;
+        ep = container_of(endpoint, cci__ep_t, endpoint);
+        TAILQ_REMOVE(&evts, evt, entry);
+        pthread_mutex_lock(&ep->lock);
+        TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+        pthread_mutex_unlock(&ep->lock);
+    }
 
     return;
 }
@@ -1402,4 +1496,26 @@ static int sock_rma(cci_connection_t *connection,
         return CCI_ENODEV;
 
     return CCI_ERR_NOT_IMPLEMENTED;
+}
+
+static void *sock_progress_thread(void *arg)
+{
+    while (!sglobals->shutdown) {
+        //int i;
+        cci__dev_t *dev;
+        sock_dev_t *sdev;
+        cci_device_t const **device;
+
+        /* for each device, try progressing */
+        for (device = sglobals->devices;
+             *device != NULL;
+             device++) {
+            dev = container_of(*device, cci__dev_t, device);
+            sdev = dev->priv;
+            sock_progress_sends(sdev);
+        }
+        sleep(1);
+    }
+
+    pthread_exit(NULL);
 }

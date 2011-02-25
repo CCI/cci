@@ -491,6 +491,9 @@ typedef struct sock_globals {
 
     /*! Array of sock devices */
     cci_device_t const **devices;
+
+    /*! In shutdown? */
+    int shutdown;
 } sock_globals_t;
 
 extern sock_globals_t *sglobals;
