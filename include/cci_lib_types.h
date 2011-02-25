@@ -16,6 +16,12 @@
 #include <stddef.h>
 #include "bsd/queue.h"
 
+#define CCI_MAX_DEVICES     32
+#define CCI_MAX_ARGS        32
+#define CCI_MAX_KEY_LEN     256
+#define CCI_MAX_VALUE_LEN   512
+
+
 /* NOTE: struct naming scheme
  *       - Private structs start with cci__
  *       - Names should not be be the same as the public counterpart

@@ -17,10 +17,6 @@
 cci__globals_t *globals = NULL;
 
 #define CCI_BUF_LEN             1024
-#define CCI_MAX_DEVICES         32
-#define CCI_MAX_ARGS            32
-#define CCI_MAX_KEY_LEN         256
-#define CCI_MAX_VALUE_LEN       512
 
 void cci__free_args(char **args)
 {
