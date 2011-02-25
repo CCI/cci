@@ -1112,6 +1112,11 @@ typedef struct cci_event {
 */
 CCI_DECLSPEC int cci_arm_os_handle(cci_endpoint_t *endpoint, int flags);
 
+typedef enum cci_pe_event {
+    CCI_PE_SEND_EVENT,
+    CCI_PE_RECV_EVENT,
+    CCI_PE_OTHER_EVENT
+} cci_pe_event_t;
 /*!
   Get the next available CCI event.
 
@@ -1256,6 +1261,10 @@ CCI_DECLSPEC int cci_send(cci_connection_t *connection,
                           void *header_ptr, uint32_t header_len, 
                           void *data_ptr, uint32_t data_len, 
                           void *context, int flags);
+
+#define CCI_FLAG_BLOCKING   (1 << 0)
+#define CCI_FLAG_NO_COPY    (1 << 1)
+#define CCI_FLAG_SILENT     (1 << 3)
 
 /*! JMS Fill me in
 

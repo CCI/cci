@@ -16,10 +16,6 @@
 #include <stddef.h>
 #include "bsd/queue.h"
 
-#define CCI_FLAG_BLOCKING   (1 << 0)
-#define CCI_FLAG_NO_COPY    (1 << 1)
-#define CCI_FLAG_SILENT     (1 << 3)
-
 /* NOTE: struct naming scheme
  *       - Private structs start with cci__
  *       - Names should not be be the same as the public counterpart

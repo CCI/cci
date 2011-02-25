@@ -16,7 +16,7 @@ int cci_get_event(cci_endpoint_t *endpoint,
                   uint32_t flags)
 {
     if (NULL == endpoint ||
-        NULL == event || NULL == *event) {
+        NULL == event) {
         return CCI_EINVAL;
     }
 
