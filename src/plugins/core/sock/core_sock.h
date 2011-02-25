@@ -311,10 +311,17 @@ typedef struct sock_header_r {
 
 
 typedef enum sock_tx_state_t {
-    SOCK_TX_IDLE = 0,       /* available, held by endpoint */
-    SOCK_TX_QUEUED,         /* queued for sending */
-    SOCK_TX_PENDING,        /* sent, waiting ack */
-    SOCK_TX_COMPLETED       /* completed with status set */
+    /*! available, held by endpoint */
+    SOCK_TX_IDLE = 0,
+
+    /*! queued for sending */
+    SOCK_TX_QUEUED,
+
+    /*! sent, waiting ack */
+    SOCK_TX_PENDING,
+
+    /*! completed with status set */
+    SOCK_TX_COMPLETED
 } sock_tx_state_t;
 
 
@@ -340,10 +347,10 @@ typedef struct sock_tx {
     /*! Buffer length */
     uint16_t len;
 
-    /* Entry for hanging on ep->idle_txs, dev->queued, dev->pending */
+    /*! Entry for hanging on ep->idle_txs, dev->queued, dev->pending */
     TAILQ_ENTRY(sock_tx) dentry;
 
-    /* Entry for hanging on ep->txs */
+    /*! Entry for hanging on ep->txs */
     TAILQ_ENTRY(sock_tx) tentry;
 
     /*! If reliable, use the following: */
@@ -371,11 +378,11 @@ typedef struct sock_rx {
     /*! Buffer length */
     uint16_t len;
 
-    /* Entry for hanging on ep->idle_rxs, ep->loaned */
-    TAILQ_ENTRY(sock_tx) entry;
+    /*! Entry for hanging on ep->idle_rxs, ep->loaned */
+    TAILQ_ENTRY(sock_rx) entry;
 
-    /* Entry for hanging on ep->rxs */
-    TAILQ_ENTRY(sock_tx) gentry;
+    /*! Entry for hanging on ep->rxs */
+    TAILQ_ENTRY(sock_rx) gentry;
 } sock_rx_t;
 
 typedef struct sock_ep {
@@ -407,12 +414,23 @@ typedef struct sock_ep {
 /* Connection info */
 
 typedef enum sock_conn_status {
-    SOCK_CONN_CLOSED    = -2,   /* shutdown */
-    SOCK_CONN_CLOSING   = -1,   /* disconnect called */
+    /*! Shutdown */
+    SOCK_CONN_CLOSED    = -2,
+
+    /*! Disconnect called */
+    SOCK_CONN_CLOSING   = -1,
+
+    /*! NULL (intial) state */
     SOCK_CONN_INIT      =  0,
-    SOCK_CONN_ACTIVE,           /* waiting on client ACK */
-    SOCK_CONN_PASSIVE,          /* waiting on server ACK */
-    SOCK_CONN_READY             /* received peer's ACK */
+
+    /*! Waiting on server ACK */
+    SOCK_CONN_ACTIVE,
+
+    /*! Waiting on client ACK */
+    SOCK_CONN_PASSIVE,
+
+    /*! Connection open and useable */
+    SOCK_CONN_READY
 } sock_conn_status_t;
 
 typedef struct sock_conn {
