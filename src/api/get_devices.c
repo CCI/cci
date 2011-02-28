@@ -11,7 +11,7 @@
 #include "plugins/core/core.h"
 
 
-int cci_get_devices(cci_device_t const ***devices)
+int cci_get_devices(cci_device_t const *** const devices)
 {
     if (NULL == devices)
         return CCI_EINVAL;

@@ -12,9 +12,12 @@
 #ifndef CCI_LIB_TYPES_H
 #define CCI_LIB_TYPES_H
 
+#include <stdio.h>
 #include <pthread.h>
 #include <stddef.h>
 #include "bsd/queue.h"
+
+BEGIN_C_DECLS
 
 #define CCI_MAX_DEVICES     32
 #define CCI_MAX_ARGS        32
@@ -161,6 +164,9 @@ typedef struct cci__evt {
     /*! Owning endpoint */
     cci__ep_t *ep;
 
+    /*! Owning connection */
+    cci__conn_t *conn;
+
     /*! Entry to hang on ep->evts */
     TAILQ_ENTRY(cci__evt) entry;
 
@@ -257,5 +263,44 @@ cci__get_svc_port(uint32_t *port)
 
     return CCI_SUCCESS;
 }
+
+static inline cci__conn_t *
+cci__evt_to_conn(cci__evt_t *evt)
+{
+    cci_connection_t *connection = NULL;
+
+    switch (evt->event.type) {
+    case CCI_EVENT_SEND:
+        connection = evt->event.info.send.connection;
+        break;
+    case CCI_EVENT_RECV:
+        connection = evt->event.info.recv.connection;
+        break;
+    case CCI_EVENT_CONNECT_SUCCESS:
+        connection = evt->event.info.other.u.connect.connection;
+        break;
+    default:
+        fprintf(stderr, "%s: unexpected type %d\n", __func__, evt->event.type);
+        break;
+    }
+    if (connection)
+        return container_of(connection, cci__conn_t, connection);
+    else
+        return NULL;
+}
+
+static inline cci__ep_t *
+cci__evt_to_ep(cci__evt_t *evt)
+{
+    cci__conn_t *conn;
+
+    conn = cci__evt_to_conn(evt);
+    if (conn)
+        return container_of((&conn->connection)->endpoint, cci__ep_t, endpoint);
+    else
+        return NULL;
+}
+
+END_C_DECLS
 
 #endif /* CCI_LIB_TYPES_H */

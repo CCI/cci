@@ -17,6 +17,7 @@ int cci_create_endpoint(cci_device_t *device,
                         cci_endpoint_t **endpoint, 
                         cci_os_handle_t *fd)
 {
+    int ret;
     cci__ep_t *ep;
     cci__dev_t *dev;
 
@@ -53,11 +54,14 @@ int cci_create_endpoint(cci_device_t *device,
     TAILQ_INIT(&ep->evts);
     pthread_mutex_init(&ep->lock, NULL);
     ep->dev = dev;
+    *endpoint = &ep->endpoint;
+
+    ret = cci_core->create_endpoint(device, flags, endpoint, fd);
+
     pthread_mutex_lock(&dev->lock);
     /* TODO check dev's state */
     TAILQ_INSERT_TAIL(&dev->eps, ep, entry);
     pthread_mutex_unlock(&dev->lock);
-    *endpoint = &ep->endpoint;
 
-    return cci_core->create_endpoint(device, flags, endpoint, fd);
+    return ret;
 }
