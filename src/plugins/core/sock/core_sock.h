@@ -15,6 +15,8 @@
 #include "cci.h"
 #include "cci_lib_types.h"
 
+BEGIN_C_DECLS
+
 #define SOCK_EP_MAX_HDR_SIZE    (32)    /* bytes */
 #define SOCK_EP_TX_TIMEOUT      (60)    /* seconds for now */
 #define SOCK_EP_RX_CNT          (256)   /* number of rx active messages */
@@ -33,6 +35,7 @@
                                         /* progress attempts per second */
 #define SOCK_RESEND_TIME        (1000000)
                                         /* time between resends in microseconds */
+#define SOCK_PEEK_LEN           (32)    /* large enough for RMA header */
 
 /* Valid URI include:
  *
@@ -434,6 +437,9 @@ typedef enum sock_conn_status {
 } sock_conn_status_t;
 
 typedef struct sock_conn {
+    /*! Owning conn */
+    cci__conn_t *conn;
+
     /*! Status */
     sock_conn_status_t status;
 
@@ -497,8 +503,6 @@ typedef struct sock_globals {
 } sock_globals_t;
 
 extern sock_globals_t *sglobals;
-
-BEGIN_C_DECLS
 
 int cci_core_sock_post_load(cci_plugin_t *me);
 int cci_core_sock_pre_unload(cci_plugin_t *me);

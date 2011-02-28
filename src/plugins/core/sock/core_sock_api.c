@@ -343,6 +343,8 @@ static int sock_create_endpoint(cci_device_t *device,
         goto out;
     }
 
+    /* TODO need to bind? */
+
     for (i = 0; i < SOCK_EP_HASH_SIZE; i++)
         TAILQ_INIT(&sep->conn_hash[i]);
 
@@ -351,6 +353,42 @@ static int sock_create_endpoint(cci_device_t *device,
     TAILQ_INIT(&sep->rxs);
     TAILQ_INIT(&sep->idle_rxs);
     pthread_mutex_init(&sep->lock, NULL);
+
+    /* alloc txs */
+    for (i = 0; i < ep->tx_buf_cnt; i++) {
+        sock_tx_t *tx;
+
+        tx = calloc(1, sizeof(*tx));
+        if (!tx) {
+            /* TODO */
+        }
+        tx->evt.event.type = CCI_EVENT_SEND;
+        tx->buffer = malloc(ep->buffer_len);
+        if (tx->buffer) {
+            /* TODO */
+        }
+        tx->len = 0;
+        TAILQ_INSERT_TAIL(&sep->txs, tx, tentry);
+        TAILQ_INSERT_TAIL(&sep->idle_txs, tx, dentry);
+    }
+
+    /* alloc rxs */
+    for (i = 0; i < ep->rx_buf_cnt; i++) {
+        sock_rx_t *rx;
+
+        rx = calloc(1, sizeof(*rx));
+        if (!rx) {
+            /* TODO */
+        }
+        rx->evt.event.type = CCI_EVENT_RECV;
+        rx->buffer = malloc(ep->buffer_len);
+        if (rx->buffer) {
+            /* TODO */
+        }
+        rx->len = 0;
+        TAILQ_INSERT_TAIL(&sep->rxs, rx, gentry);
+        TAILQ_INSERT_TAIL(&sep->idle_rxs, rx, entry);
+    }
 
     return CCI_SUCCESS;
 
@@ -543,13 +581,13 @@ sock_get_id(sock_ep_t *ep, uint32_t *id)
     uint64_t *b;
 
     while (1) {
-        n = random();
+        n = random() % SOCK_NUM_BLOCKS;
         block = n / SOCK_BLOCK_SIZE;
         offset = n % SOCK_BLOCK_SIZE;
         b = &ep->ids[block];
 
-        if ((*b & (1 << offset)) == 0) {
-            *b |= (1 << offset);
+        if ((*b & (1ULL << offset)) == 0) {
+            *b |= (1ULL << offset);
             *id = (block * SOCK_BLOCK_SIZE) + offset;
             break;
         }
@@ -580,24 +618,24 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
                             void *context, int flags, 
                             struct timeval *timeout)
 {
-    int ret;
-    cci__ep_t *ep;
-    cci__dev_t *dev;
-    cci__conn_t *conn;
-    sock_ep_t *sep;
-    sock_dev_t *sdev;
-    sock_conn_t *sconn;
-    sock_tx_t *tx;
-    sock_header_t *hdr;
-    cci__evt_t *evt;
-    cci_event_t *event;
-    cci_event_other_t *other;
-    cci_connection_t *connection;
-    struct sockaddr_in *sin;
-    void *ptr;
-    in_addr_t in;
-    sock_seq_ack_t *sa;
-    uint64_t ack;
+    int                 ret;
+    cci__ep_t           *ep         = NULL;
+    cci__dev_t          *dev        = NULL;
+    cci__conn_t         *conn       = NULL;
+    sock_ep_t           *sep        = NULL;
+    sock_dev_t          *sdev       = NULL;
+    sock_conn_t         *sconn      = NULL;
+    sock_tx_t           *tx         = NULL;
+    sock_header_t       *hdr        = NULL;
+    cci__evt_t          *evt        = NULL;
+    cci_event_t         *event      = NULL;
+    cci_event_other_t   *other      = NULL;
+    cci_connection_t    *connection = NULL;
+    struct sockaddr_in  *sin        = NULL;
+    void                *ptr        = NULL;
+    in_addr_t           in;
+    sock_seq_ack_t      *sa         = NULL;
+    uint64_t            ack;
 
 
     printf("In sock_connect\n");
@@ -615,6 +653,8 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
         ret = CCI_ENOMEM;
         goto out;
     }
+    sconn = conn->priv;
+    sconn->conn = conn;
 
     /* set up the connection */
     conn->uri = strdup(server_uri);
@@ -668,6 +708,7 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     tx->msg_type = SOCK_MSG_CONN_REQUEST;
 
     evt = &tx->evt;
+    evt->ep = ep;
     event = &evt->event;
     event->type = CCI_EVENT_CONNECT_SUCCESS; /* for now */
 
@@ -682,8 +723,8 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     /* FIXME silence -Wall -Werror until it is used */
     if (0) sock_put_id(sep, 0);
     sock_pack_conn_request(hdr, attribute, (uint16_t) data_len, sconn->id);
-    ptr = hdr++;
     tx->len = sizeof(*hdr);
+    ptr = tx->buffer + tx->len;
 
     /* add seq and ack */
 
@@ -694,8 +735,8 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
 
     sa = (sock_seq_ack_t *) ptr;
     sock_pack_seq_ack(sa, tx->seq, ack);
-    ptr = sa++;
     tx->len += sizeof(*sa);
+    ptr = tx->buffer + tx->len;
 
     /* zero even if unreliable */
 
@@ -899,33 +940,21 @@ static int sock_return_event(cci_endpoint_t *endpoint,
 static int sock_sendto(cci_os_handle_t sock, void *buf, int len,
                        const struct sockaddr_in sin)
 {
-    int ret = 0;
-    int left = len;
+    int ret;
     const struct sockaddr *s = (const struct sockaddr *)&sin;
     socklen_t slen = sizeof(sin);
 
-    while (left) {
-        int offset = len - left;
-        ret = sendto(sock, buf + offset, left, 0, s, slen);
-        if (ret == -1) {
-            if (errno == EINTR)
-                continue;
-            else {
-                ret = errno;
-            goto out;
-            }
-        }
-        offset += ret;
-        left -= ret;
-    }
-out:
-        return ret;
+    ret = sendto(sock, buf, len, 0, s, slen);
+    if (ret != -1)
+        assert(ret == len);
+
+    return ret;
 }
 
 static void
 sock_progress_pending(sock_dev_t *sdev)
 {
-    int ret;
+    int ret, timeout;
     sock_tx_t           *tx, *tmp;
     cci__evt_t          *evt;
     cci_event_t         *event;         /* generic CCI event */
@@ -948,10 +977,10 @@ sock_progress_pending(sock_dev_t *sdev)
     TAILQ_FOREACH_SAFE(tx, &sdev->pending, dentry, tmp) {
 
         evt = &(tx->evt);
-        event = &evt->event;
-        connection = event->info.send.connection;
-        conn = container_of(connection, cci__conn_t, connection);
+        conn = cci__evt_to_conn(evt);
+        connection = &conn->connection;
         sconn = conn->priv;
+        event = &evt->event;
 
         ep = container_of(connection->endpoint, cci__ep_t, endpoint);
         sep = ep->priv;
@@ -963,8 +992,9 @@ sock_progress_pending(sock_dev_t *sdev)
         /* TODO cycles % cycles_per_resend == 0 */
         tx->resends++;
 
-        if (tx->resends >= ep->tx_timeout ||
-            tx->resends >= conn->tx_timeout) {
+        timeout = conn->tx_timeout ? conn->tx_timeout : ep->tx_timeout;
+
+        if (tx->resends * SOCK_RESEND_TIME >= timeout * 1000000) {
 
             /* dequeue */
 
@@ -1014,7 +1044,6 @@ sock_progress_pending(sock_dev_t *sdev)
                 continue;
             }
         }
-        assert(ret == tx->len);
         /* msg sent */
     }
     pthread_mutex_unlock(&sdev->lock);
@@ -1023,17 +1052,7 @@ sock_progress_pending(sock_dev_t *sdev)
     while (!TAILQ_EMPTY(&idle_txs)) {
         tx = TAILQ_FIRST(&idle_txs);
         TAILQ_REMOVE(&idle_txs, tx, dentry);
-        evt = &(tx->evt);
-        event = &(evt->event);
-        if (event->type == CCI_EVENT_SEND)
-            connection = event->info.send.connection;
-        else
-            /* FIXME is this true of CONN_REPLY and CONN_ACK? */
-            connection = event->info.other.u.connect.connection;
-        conn = container_of(connection, cci__conn_t, connection);
-        sconn = conn->priv;
-
-        ep = container_of(connection->endpoint, cci__ep_t, endpoint);
+        ep = cci__evt_to_ep(&tx->evt);
         sep = ep->priv;
         pthread_mutex_lock(&sep->lock);
         TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
@@ -1043,17 +1062,8 @@ sock_progress_pending(sock_dev_t *sdev)
     /* transfer evts to the ep's list */
     while (!TAILQ_EMPTY(&evts)) {
         evt = TAILQ_FIRST(&evts);
-        event = &(evt->event);
-        if (event->type == CCI_EVENT_SEND)
-            connection = event->info.send.connection;
-        else
-            /* FIXME is this true of CONN_REPLY and CONN_ACK? */
-            connection = event->info.other.u.connect.connection;
-        conn = container_of(connection, cci__conn_t, connection);
-        sconn = conn->priv;
-
-        ep = container_of(connection->endpoint, cci__ep_t, endpoint);
         TAILQ_REMOVE(&evts, evt, entry);
+        ep = cci__evt_to_ep(evt);
         pthread_mutex_lock(&ep->lock);
         TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
         pthread_mutex_unlock(&ep->lock);
@@ -1099,7 +1109,7 @@ sock_progress_queued(sock_dev_t *sdev)
 
         /* try to send it */
 
-        tx->cycles++;
+        //tx->cycles++;
 
         /* cycles % cycles_per_resend == 0 */
         if (tx->cycles % SOCK_PROG_FREQ != 0)
@@ -1109,7 +1119,7 @@ sock_progress_queued(sock_dev_t *sdev)
 
         timeout = conn->tx_timeout ? conn->tx_timeout : ep->tx_timeout;
 
-        if (tx->resends * SOCK_RESEND_TIME >= timeout) {
+        if (tx->resends * SOCK_RESEND_TIME >= timeout * 1000000) {
 
             /* set status and add to completed events */
 
@@ -1156,7 +1166,6 @@ sock_progress_queued(sock_dev_t *sdev)
                 continue;
             }
         }
-        assert(ret == tx->len);
         /* msg sent */
 
         /* if reliable or connection, add to pending
@@ -1181,18 +1190,7 @@ sock_progress_queued(sock_dev_t *sdev)
     while (!TAILQ_EMPTY(&idle_txs)) {
         tx = TAILQ_FIRST(&idle_txs);
         TAILQ_REMOVE(&idle_txs, tx, dentry);
-        evt = &(tx->evt);
-        event = &(evt->event);
-        if (event->type == CCI_EVENT_SEND)
-            connection = event->info.send.connection;
-        else
-            /* FIXME is this true of CONN_REPLY and CONN_ACK? */
-            connection = event->info.other.u.connect.connection;
-        conn = container_of(connection, cci__conn_t, connection);
-        sconn = conn->priv;
-
-        endpoint = connection->endpoint;
-        ep = container_of(endpoint, cci__ep_t, endpoint);
+        ep = cci__evt_to_ep(&tx->evt);
         sep = ep->priv;
         pthread_mutex_lock(&sep->lock);
         TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
@@ -1202,18 +1200,8 @@ sock_progress_queued(sock_dev_t *sdev)
     /* transfer evts to the ep's list */
     while (!TAILQ_EMPTY(&evts)) {
         evt = TAILQ_FIRST(&evts);
-        event = &(evt->event);
-        if (event->type == CCI_EVENT_SEND)
-            connection = event->info.send.connection;
-        else
-            /* FIXME is this true of CONN_REPLY and CONN_ACK? */
-            connection = event->info.other.u.connect.connection;
-        conn = container_of(connection, cci__conn_t, connection);
-        sconn = conn->priv;
-
-        endpoint = connection->endpoint;
-        ep = container_of(endpoint, cci__ep_t, endpoint);
         TAILQ_REMOVE(&evts, evt, entry);
+        ep = cci__evt_to_ep(evt);
         pthread_mutex_lock(&ep->lock);
         TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
         pthread_mutex_unlock(&ep->lock);
@@ -1260,7 +1248,7 @@ static int sock_sendv(cci_connection_t *connection,
     sock_ep_t *sep;
     sock_conn_t *sconn;
     sock_dev_t *sdev;
-    sock_tx_t *tx;
+    sock_tx_t *tx = NULL;
     sock_header_t *hdr;
     void *ptr;
     cci__evt_t *evt;
@@ -1307,8 +1295,8 @@ static int sock_sendv(cci_connection_t *connection,
         /* pack buffer */
         hdr = (sock_header_t *) tx->buffer;
         sock_pack_send(hdr, header_len, data_len, sconn->peer_id);
-        ptr = hdr++;
         tx->len = len;
+        ptr = tx->buffer + tx->len;
 
         if (header_len) {
             memcpy(ptr, header_ptr, header_len);
@@ -1347,6 +1335,8 @@ static int sock_sendv(cci_connection_t *connection,
 
     /* setup generic CCI event */
     evt = &tx->evt;
+    evt->ep = ep;
+    evt->conn = conn;
     event = &evt->event;
     event->type = CCI_EVENT_SEND;
 
@@ -1359,8 +1349,8 @@ static int sock_sendv(cci_connection_t *connection,
 
     hdr = (sock_header_t *) tx->buffer;
     sock_pack_send(hdr, header_len, data_len, sconn->peer_id);
-    ptr = hdr++;
     tx->len = sizeof(*hdr);
+    ptr = tx->buffer + tx->len;
 
     /* if reliable, add seq and ack */
 
@@ -1375,8 +1365,8 @@ static int sock_sendv(cci_connection_t *connection,
 
         sa = (sock_seq_ack_t *) ptr;
         sock_pack_seq_ack(sa, tx->seq, ack);
-        ptr = sa++;
         tx->len += sizeof(*sa);
+        ptr = tx->buffer + tx->len;
     }
 
     /* zero even if unreliable */
@@ -1498,13 +1488,276 @@ static int sock_rma(cci_connection_t *connection,
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
+/* The endpoint maintains 256 lists. Hash the ip and port and return the index
+ * of the list. We use all six bytes and this is endian agnostic. It evenly
+ * disperses large blocks of addresses as well as large ranges of ports on the
+ * same address.
+ */
+uint8_t sock_ip_hash(in_addr_t ip, uint16_t port)
+{
+    port ^= (ip & 0x0000FFFF);
+    port ^= (ip & 0xFFFF0000) >> 16;
+    return (port & 0x00FF) ^ ((port & 0xFF00) >> 8);
+}
+
+static sock_conn_t *
+sock_find_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id)
+{
+    uint8_t i;
+    struct s_conns *conn_list;
+    sock_conn_t *sconn = NULL, *sc;
+
+    i = sock_ip_hash(ip, port);
+    conn_list = &sep->conn_hash[i];
+    TAILQ_FOREACH(sc, conn_list, entry) {
+            if (sc->sin.sin_addr.s_addr == ip &&
+                sc->sin.sin_port == port &&
+                sc->peer_id == id) {
+                    sconn = sc;
+                    break;
+            }
+    }
+    return sconn;
+}
+
+static void
+sock_handle_active_message(sock_conn_t *sconn,
+                           sock_rx_t *rx,
+                           uint8_t header_len,
+                           uint16_t data_len,
+                           uint32_t id)
+{
+    cci__evt_t *evt;
+    cci__conn_t *conn = sconn->conn;
+    sock_header_t *hdr;         /* wire header */
+    cci_event_t *event;             /* generic CCI event */
+    cci_event_recv_t *recv;         /* generic CCI recv event */
+    cci_endpoint_t *endpoint;        /* generic CCI endpoint */
+    cci__ep_t *ep;
+
+    endpoint = (&conn->connection)->endpoint;
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+
+    /* get cci__evt_t to hang on ep->events */
+
+    evt = &rx->evt;
+
+    /* set wire header so we can find user header */
+
+    hdr = (sock_header_t *) rx->buffer;
+
+    /* setup the generic event for the application */
+
+    event = (cci_event_t *) &evt->event;
+    event->type = CCI_EVENT_RECV;
+
+#if 0
+    recv = &(event->info.recv);
+#endif
+    recv = calloc(1, sizeof(*recv));
+    recv->header_len = header_len;
+    recv->data_len = data_len;
+    recv->header_ptr = rx->buffer + sizeof(*hdr);
+    recv->connection = &conn->connection;
+
+    /* if a reliable connection, handle the ack */
+
+    if (conn->connection.attribute & CCI_CONN_ATTR_RO ||
+        conn->connection.attribute & CCI_CONN_ATTR_RU) {
+
+        sock_header_r_t *hdr_r = (sock_header_r_t *) rx->buffer;
+        sock_seq_ack_t *sa = &hdr_r->seq_ack;
+
+        /* TODO handle_ack(conn, sa->ack, up_to) */
+        if (0)
+            sa->ack++;
+
+        recv->header_ptr = hdr_r + sizeof(*sa);
+    }
+
+    recv->data_ptr = recv->header_ptr + header_len;
+
+    /* queue event on endpoint's completed event queue */
+
+    pthread_mutex_lock(&ep->lock);
+    TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+    pthread_mutex_unlock(&ep->lock);
+
+    /* TODO notify via ep->fd */
+
+    return;
+}
+
+
+
+static void
+sock_recvfrom(cci__ep_t *ep)
+{
+    int ret = 0;
+    uint8_t a;
+    uint16_t b;
+    uint32_t id;
+    sock_rx_t *rx = NULL;
+    struct sockaddr_in sin;
+    socklen_t sin_len = sizeof(sin);
+    sock_conn_t *sconn;
+    sock_ep_t *sep;
+    sock_msg_type_t type;
+
+    /* get idle rx */
+
+    sep = ep->priv;
+    pthread_mutex_lock(&sep->lock);
+    if (!TAILQ_EMPTY(&sep->idle_rxs)) {
+        rx = TAILQ_FIRST(&sep->idle_rxs);
+        TAILQ_REMOVE(&sep->idle_rxs, rx, entry);
+    }
+    pthread_mutex_unlock(&sep->lock);
+
+    if (!rx)
+        return;
+
+    /* recv msg */
+
+    ret = recvfrom(sep->sock, rx->buffer, SOCK_PEEK_LEN,
+                   MSG_PEEK, (struct sockaddr *)&sin, &sin_len);
+    if (ret < sizeof(sock_header_t)) {
+        /* queue rx on idle list */
+        pthread_mutex_lock(&sep->lock);
+        TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
+        pthread_mutex_unlock(&sep->lock);
+        if (ret == -1)
+            fprintf(stderr, "recvfrom() failed with %s\n", strerror(errno));
+        return;
+    }
+
+    /* lookup connection from sin and id */
+
+    sock_parse_header(rx->buffer, &type, &a, &b, &id);
+    sconn = sock_find_conn(sep, sin.sin_addr.s_addr, sin.sin_port, id);
+
+    /* if no conn & !conn_req, drop msg, requeue rx */
+    if (!sconn && type != SOCK_MSG_CONN_REQUEST) {
+        char buf[8];
+
+        pthread_mutex_lock(&sep->lock);
+        TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
+        pthread_mutex_unlock(&sep->lock);
+        recvfrom(sep->sock, buf, 8, 0, (struct sockaddr *)&sin, &sin_len);
+        return;
+    }
+
+    /* TODO handle types */
+
+    switch (type) {
+    case SOCK_MSG_CONN_REQUEST:
+            break;
+    case SOCK_MSG_CONN_REPLY:
+            break;
+    case SOCK_MSG_DISCONNECT:
+            break;
+    case SOCK_MSG_SEND:
+            sock_handle_active_message(sconn, rx, a, b, id);
+            break;
+    case SOCK_MSG_KEEPALIVE:
+            break;
+    case SOCK_MSG_ACK_ONLY:
+            break;
+    case SOCK_MSG_ACK_UP_TO:
+            break;
+    case SOCK_MSG_RMA_WRITE:
+            break;
+    case SOCK_MSG_RMA_WRITE_DONE:
+            break;
+    case SOCK_MSG_RMA_READ_REQUEST:
+            break;
+    case SOCK_MSG_RMA_READ_REPLY:
+            break;
+    default:
+            fprintf(stderr, "unknown active message with type %d\n", type);
+    }
+
+    return;
+}
+
+static void
+sock_recvfrom_lep(cci__lep_t *lep)
+{
+    int ret = 0;
+    uint8_t a;
+    uint16_t b;
+    uint32_t id;
+    char buffer[1024];  /* FIXME magic number */
+    cci__crq_t *crq;
+    struct sockaddr_in sin;
+    socklen_t sin_len = sizeof(sin);
+    sock_lep_t *slep;
+    sock_msg_type_t type;
+
+    /* get idle crq */
+
+    slep = lep->priv;
+    pthread_mutex_lock(&lep->lock);
+    if (!TAILQ_EMPTY(&lep->crqs)) {
+        crq = TAILQ_FIRST(&lep->crqs);
+        TAILQ_REMOVE(&lep->crqs, crq, entry);
+    }
+    pthread_mutex_unlock(&lep->lock);
+
+    /* FIXME use local buffer */
+    if (!crq)
+        return;
+
+    /* recv msg */
+
+    ret = recvfrom(slep->sock, buffer, 20, /* FIXME magic number */
+                   /* MSG_PEEK */ 0, (struct sockaddr *)&sin, &sin_len);
+    if (ret < 20) {
+        /* queue crq on idle list */
+        pthread_mutex_lock(&lep->lock);
+        TAILQ_INSERT_HEAD(&lep->crqs, crq, entry);
+        pthread_mutex_unlock(&lep->lock);
+        if (ret == -1)
+            fprintf(stderr, "recvfrom_lep() failed with %s\n", strerror(errno));
+        return;
+    }
+
+    /* lookup connection from sin and id */
+
+    sock_parse_header((sock_header_t *)buffer, &type, &a, &b, &id);
+
+    /* if no conn & !conn_req, drop msg, requeue rx */
+    if (type != SOCK_MSG_CONN_REQUEST) {
+        char buf[8];
+
+        pthread_mutex_lock(&lep->lock);
+        TAILQ_INSERT_HEAD(&lep->crqs, crq, entry);
+        pthread_mutex_unlock(&lep->lock);
+        recvfrom(slep->sock, buf, 8, 0, (struct sockaddr *)&sin, &sin_len);
+        return;
+    }
+
+    /* TODO handle types */
+
+    switch (type) {
+    case SOCK_MSG_CONN_REQUEST:
+        fprintf(stdout, "conn req recvd\n");
+        break;
+    default:
+            fprintf(stderr, "unknown active message with type %d\n", type);
+    }
+
+    return;
+}
+
 static void *sock_progress_thread(void *arg)
 {
     while (!sglobals->shutdown) {
-        //int i;
         cci__dev_t *dev;
         sock_dev_t *sdev;
         cci_device_t const **device;
+        cci__ep_t *ep;
+        cci__lep_t *lep;
 
         /* for each device, try progressing */
         for (device = sglobals->devices;
@@ -1513,8 +1766,17 @@ static void *sock_progress_thread(void *arg)
             dev = container_of(*device, cci__dev_t, device);
             sdev = dev->priv;
             sock_progress_sends(sdev);
+            /* to quiet the compiler for now */
+            if (0) {
+            TAILQ_FOREACH(ep, &dev->eps, entry)
+                sock_recvfrom(ep);
+            }
+#if 1
+            TAILQ_FOREACH(lep, &dev->leps, dentry)
+                sock_recvfrom_lep(lep);
+#endif
         }
-        sleep(1);
+        usleep(SOCK_PROG_TIME);
     }
 
     pthread_exit(NULL);
