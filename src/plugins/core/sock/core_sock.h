@@ -36,6 +36,8 @@ BEGIN_C_DECLS
 #define SOCK_RESEND_TIME        (10000000)
                                         /* time between resends in microseconds */
 #define SOCK_PEEK_LEN           (32)    /* large enough for RMA header */
+#define SOCK_CONN_REQ_HDR_LEN   (sizeof(struct sock_header_r))
+                                        /* header + seqack */
 
 /* Valid URI include:
  *
@@ -485,6 +487,9 @@ typedef struct sock_lep {
 
     /*! Socket for receiving conn requests */
     cci_os_handle_t sock;
+
+    /*! Buffer for incoming lep->backlog messages */
+    void *buffer;
 } sock_lep_t;
 
 typedef struct sock_svc {

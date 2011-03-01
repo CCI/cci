@@ -304,7 +304,7 @@ sock_set_nonblocking(cci_os_handle_t sock)
     if (-1 == flags)
         flags = 0;
     ret = fcntl(sock, F_SETFL, flags | O_NONBLOCK);
-    if (ret == -1)
+    if (-1 == ret)
         return errno;
     return 0;
 }
@@ -479,6 +479,12 @@ static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
     if (!slep)
         return CCI_ENOMEM;
 
+    slep->buffer = calloc(backlog, CCI_CONN_REQ_LEN + SOCK_CONN_REQ_HDR_LEN);
+    if (!slep->buffer) {
+        ret = CCI_ENOMEM;
+        goto out;
+    }
+
     /* open socket */
     slep->sock = socket(PF_INET, SOCK_DGRAM, 0);
     if (slep->sock == -1) {
@@ -511,10 +517,13 @@ static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
     return CCI_SUCCESS;
 
 out:
-    if (slep)
+    if (slep) {
+        if (slep->buffer)
+            free(slep->buffer);
         if (slep->sock)
             close(slep->sock);
         free(slep);
+    }
     return ret;
 }
 
@@ -1710,7 +1719,7 @@ sock_recvfrom_lep(cci__lep_t *lep)
     uint8_t a;
     uint16_t b;
     uint32_t id;
-    char buffer[1024];  /* FIXME magic number */
+    char buffer[1024];  /* per CCI spec */ /* FIXME magic number */
     cci__crq_t *crq;
     struct sockaddr_in sin;
     socklen_t sin_len = sizeof(sin);
@@ -1733,9 +1742,9 @@ sock_recvfrom_lep(cci__lep_t *lep)
 
     /* recv msg */
 
-    ret = recvfrom(slep->sock, buffer, 20, /* FIXME magic number */
+    ret = recvfrom(slep->sock, buffer, SOCK_CONN_REQ_HDR_LEN,
                    0, (struct sockaddr *)&sin, &sin_len);
-    if (ret < 20) {
+    if (ret < SOCK_CONN_REQ_HDR_LEN) {
         recvfrom(slep->sock, buffer, 8, /* FIXME magic number */
                  0, (struct sockaddr *)&sin, &sin_len);
 
@@ -1752,7 +1761,7 @@ sock_recvfrom_lep(cci__lep_t *lep)
 
     sock_parse_header((sock_header_t *)buffer, &type, &a, &b, &id);
 
-    /* if no conn & !conn_req, drop msg, requeue rx */
+    /* if !conn_req, drop msg, requeue crq */
     if (type != SOCK_MSG_CONN_REQUEST) {
         char buf[8];
 
@@ -1763,15 +1772,7 @@ sock_recvfrom_lep(cci__lep_t *lep)
         return;
     }
 
-    /* TODO handle types */
-
-    switch (type) {
-    case SOCK_MSG_CONN_REQUEST:
-        fprintf(stdout, "conn req recvd\n");
-        break;
-    default:
-            fprintf(stderr, "unknown active message with type %d\n", type);
-    }
+    /* TODO create conn_req */
 
     return;
 }
