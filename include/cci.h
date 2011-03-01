@@ -759,6 +759,7 @@ CCI_DECLSPEC int cci_reject(cci_conn_req_t *conn_req);
 /*                  */
 /********************/
 
+#define CCI_CONN_REQ_LEN    (1024)  /* see below */
 /*! 
   Initiate a connection request (client side).
   

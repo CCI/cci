@@ -182,6 +182,9 @@ typedef struct cci__lep {
     /*! Service we are bound to */
     struct cci__svc *svc;
 
+    /*! Number of crqs when bound */
+    int backlog;
+
     /*! Entry to hang on svc->leps */
     TAILQ_ENTRY(cci__lep) sentry;
 
