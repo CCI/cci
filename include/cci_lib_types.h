@@ -277,6 +277,7 @@ cci__evt_to_conn(cci__evt_t *evt)
         connection = evt->event.info.recv.connection;
         break;
     case CCI_EVENT_CONNECT_SUCCESS:
+    case CCI_EVENT_CONNECT_TIMEOUT:
         connection = evt->event.info.other.u.connect.connection;
         break;
     default:

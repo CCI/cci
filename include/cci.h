@@ -384,7 +384,7 @@ typedef struct cci_device {
 
   \ingroup devices
 */
-CCI_DECLSPEC int cci_get_devices(cci_device_t const ***devices);
+CCI_DECLSPEC int cci_get_devices(cci_device_t const *** const devices);
 
 /*! 
   Frees a NULL-terminated array of (cci_device_t*)'s that were
@@ -992,11 +992,11 @@ typedef struct cci_event_send {
 typedef struct cci_event_recv {
   /*! The length of the header part of the message (in bytes). 
     This value may be 0. */
-  uint32_t header_len;
+  const uint32_t header_len;
   
   /*! The length of the data part of the message (in bytes). 
     This value may be 0. */
-  uint32_t data_len;
+  const uint32_t data_len;
   
   /*! Pointer to the header part of the received message.  The pointer
     always points to an address that is 8-byte aligned, unless
