@@ -16,6 +16,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <fcntl.h>
 
 #include "cci.h"
 #include "plugins/core/core.h"
@@ -294,6 +295,19 @@ static int sock_free_devices(cci_device_t const **devices)
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
+static inline int
+sock_set_nonblocking(cci_os_handle_t sock)
+{
+    int ret, flags;
+
+    flags = fcntl(sock, F_GETFL, 0);
+    if (-1 == flags)
+        flags = 0;
+    ret = fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+    if (ret == -1)
+        return errno;
+    return 0;
+}
 
 static int sock_create_endpoint(cci_device_t *device, 
                                     int flags, 
@@ -342,6 +356,9 @@ static int sock_create_endpoint(cci_device_t *device,
         ret = errno;
         goto out;
     }
+    ret = sock_set_nonblocking(sep->sock);
+    if (ret)
+        goto out;
 
     /* TODO need to bind? */
 
@@ -399,6 +416,8 @@ out:
     if (sep) {
         if (sep->ids)
             free(sep->ids);
+        if (sep->sock)
+            close(sep->sock);
         free(sep);
     }
     if (ep)
@@ -467,6 +486,10 @@ static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
         goto out;
     }
 
+    ret = sock_set_nonblocking(slep->sock);
+    if (ret)
+        goto out;
+
     /* bind socket to device and port */
     sdev = dev->priv;
     memset(&sin, 0, sizeof(sin));
@@ -489,6 +512,8 @@ static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
 
 out:
     if (slep)
+        if (slep->sock)
+            close(slep->sock);
         free(slep);
     return ret;
 }
@@ -985,16 +1010,15 @@ sock_progress_pending(sock_dev_t *sdev)
         ep = container_of(connection->endpoint, cci__ep_t, endpoint);
         sep = ep->priv;
 
+        /* cycles % cycles_per_resend == 0 */
+        if (tx->cycles++ % SOCK_PROG_FREQ != 0)
+            continue;
+
         /* try to send it */
-
-        tx->cycles++;
-
-        /* TODO cycles % cycles_per_resend == 0 */
-        tx->resends++;
 
         timeout = conn->tx_timeout ? conn->tx_timeout : ep->tx_timeout;
 
-        if (tx->resends * SOCK_RESEND_TIME >= timeout * 1000000) {
+        if (tx->resends++ * SOCK_RESEND_TIME >= timeout * 1000000) {
 
             /* dequeue */
 
@@ -1107,19 +1131,15 @@ sock_progress_queued(sock_dev_t *sdev)
         ep = container_of(endpoint, cci__ep_t, endpoint);
         sep = ep->priv;
 
-        /* try to send it */
-
-        //tx->cycles++;
-
         /* cycles % cycles_per_resend == 0 */
-        if (tx->cycles % SOCK_PROG_FREQ != 0)
+        if (tx->cycles++ % SOCK_PROG_FREQ != 0)
             continue;
 
-        tx->resends++;
+        /* try to send it */
 
         timeout = conn->tx_timeout ? conn->tx_timeout : ep->tx_timeout;
 
-        if (tx->resends * SOCK_RESEND_TIME >= timeout * 1000000) {
+        if (tx->resends++ * SOCK_RESEND_TIME >= timeout * 1000000) {
 
             /* set status and add to completed events */
 
@@ -1551,13 +1571,10 @@ sock_handle_active_message(sock_conn_t *sconn,
     event = (cci_event_t *) &evt->event;
     event->type = CCI_EVENT_RECV;
 
-#if 0
     recv = &(event->info.recv);
-#endif
-    recv = calloc(1, sizeof(*recv));
-    recv->header_len = header_len;
-    recv->data_len = data_len;
-    recv->header_ptr = rx->buffer + sizeof(*hdr);
+    *((uint32_t *) &recv->header_len) = header_len;
+    *((uint32_t *) &recv->data_len) = data_len;
+    *((void **) &recv->header_ptr) = rx->buffer + sizeof(*hdr);
     recv->connection = &conn->connection;
 
     /* if a reliable connection, handle the ack */
@@ -1572,10 +1589,10 @@ sock_handle_active_message(sock_conn_t *sconn,
         if (0)
             sa->ack++;
 
-        recv->header_ptr = hdr_r + sizeof(*sa);
+        *((void **) &recv->header_ptr) = hdr_r + sizeof(*sa);
     }
 
-    recv->data_ptr = recv->header_ptr + header_len;
+    *((void **) &recv->data_ptr) = recv->header_ptr + header_len;
 
     /* queue event on endpoint's completed event queue */
 
@@ -1593,7 +1610,7 @@ sock_handle_active_message(sock_conn_t *sconn,
 static void
 sock_recvfrom(cci__ep_t *ep)
 {
-    int ret = 0;
+    int ret = 0, drop_msg = 0;
     uint8_t a;
     uint16_t b;
     uint32_t id;
@@ -1603,6 +1620,7 @@ sock_recvfrom(cci__ep_t *ep)
     sock_conn_t *sconn;
     sock_ep_t *sep;
     sock_msg_type_t type;
+    char buf[8];
 
     /* get idle rx */
 
@@ -1617,18 +1635,14 @@ sock_recvfrom(cci__ep_t *ep)
     if (!rx)
         return;
 
-    /* recv msg */
+    /* peek at msg header.
+     * handler must call recvfrom for the full msg. */
 
     ret = recvfrom(sep->sock, rx->buffer, SOCK_PEEK_LEN,
                    MSG_PEEK, (struct sockaddr *)&sin, &sin_len);
     if (ret < sizeof(sock_header_t)) {
-        /* queue rx on idle list */
-        pthread_mutex_lock(&sep->lock);
-        TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
-        pthread_mutex_unlock(&sep->lock);
-        if (ret == -1)
-            fprintf(stderr, "recvfrom() failed with %s\n", strerror(errno));
-        return;
+        drop_msg = 1;
+        goto out;
     }
 
     /* lookup connection from sin and id */
@@ -1636,45 +1650,54 @@ sock_recvfrom(cci__ep_t *ep)
     sock_parse_header(rx->buffer, &type, &a, &b, &id);
     sconn = sock_find_conn(sep, sin.sin_addr.s_addr, sin.sin_port, id);
 
-    /* if no conn & !conn_req, drop msg, requeue rx */
-    if (!sconn && type != SOCK_MSG_CONN_REQUEST) {
-        char buf[8];
-
-        pthread_mutex_lock(&sep->lock);
-        TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
-        pthread_mutex_unlock(&sep->lock);
-        recvfrom(sep->sock, buf, 8, 0, (struct sockaddr *)&sin, &sin_len);
-        return;
+    /* if no conn, drop msg, requeue rx */
+    if (!sconn) {
+        drop_msg = 1;
+        goto out;
     }
 
     /* TODO handle types */
 
     switch (type) {
     case SOCK_MSG_CONN_REQUEST:
-            break;
+        fprintf(stderr, "conn request on non-listening endpoint\n");
+        drop_msg = 1;
+        break;
     case SOCK_MSG_CONN_REPLY:
-            break;
+        break;
+    case SOCK_MSG_CONN_ACK:
+        break;
     case SOCK_MSG_DISCONNECT:
-            break;
+        break;
     case SOCK_MSG_SEND:
-            sock_handle_active_message(sconn, rx, a, b, id);
-            break;
+        sock_handle_active_message(sconn, rx, a, b, id);
+        break;
     case SOCK_MSG_KEEPALIVE:
-            break;
+        break;
     case SOCK_MSG_ACK_ONLY:
-            break;
+        break;
     case SOCK_MSG_ACK_UP_TO:
-            break;
+        break;
+    case SOCK_MSG_SACK:
+        break;
     case SOCK_MSG_RMA_WRITE:
-            break;
+        break;
     case SOCK_MSG_RMA_WRITE_DONE:
-            break;
+        break;
     case SOCK_MSG_RMA_READ_REQUEST:
-            break;
+        break;
     case SOCK_MSG_RMA_READ_REPLY:
-            break;
+        break;
     default:
-            fprintf(stderr, "unknown active message with type %d\n", type);
+        fprintf(stderr, "unknown active message with type %d\n", type);
+    }
+
+out:
+    if (drop_msg) {
+        pthread_mutex_lock(&sep->lock);
+        TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
+        pthread_mutex_unlock(&sep->lock);
+        recvfrom(sep->sock, buf, 8, 0, (struct sockaddr *)&sin, &sin_len);
     }
 
     return;
@@ -1711,13 +1734,16 @@ sock_recvfrom_lep(cci__lep_t *lep)
     /* recv msg */
 
     ret = recvfrom(slep->sock, buffer, 20, /* FIXME magic number */
-                   /* MSG_PEEK */ 0, (struct sockaddr *)&sin, &sin_len);
+                   0, (struct sockaddr *)&sin, &sin_len);
     if (ret < 20) {
+        recvfrom(slep->sock, buffer, 8, /* FIXME magic number */
+                 0, (struct sockaddr *)&sin, &sin_len);
+
         /* queue crq on idle list */
         pthread_mutex_lock(&lep->lock);
         TAILQ_INSERT_HEAD(&lep->crqs, crq, entry);
         pthread_mutex_unlock(&lep->lock);
-        if (ret == -1)
+        if (ret == -1 && errno != EAGAIN)
             fprintf(stderr, "recvfrom_lep() failed with %s\n", strerror(errno));
         return;
     }
@@ -1766,15 +1792,11 @@ static void *sock_progress_thread(void *arg)
             dev = container_of(*device, cci__dev_t, device);
             sdev = dev->priv;
             sock_progress_sends(sdev);
-            /* to quiet the compiler for now */
-            if (0) {
+            /* TODO switch to select to determine which need recvfrom */
             TAILQ_FOREACH(ep, &dev->eps, entry)
                 sock_recvfrom(ep);
-            }
-#if 1
             TAILQ_FOREACH(lep, &dev->leps, dentry)
                 sock_recvfrom_lep(lep);
-#endif
         }
         usleep(SOCK_PROG_TIME);
     }
