@@ -89,6 +89,7 @@ int cci_bind(cci_device_t *device, int backlog, uint32_t *port,
                 ret = CCI_ENOMEM;
                 goto out;
             }
+            crq->lep = lep;
             /* the driver fills in the cci_conn_req_t */
             TAILQ_INSERT_TAIL(&lep->crqs, crq, entry);
         }

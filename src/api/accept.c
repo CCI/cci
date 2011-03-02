@@ -14,8 +14,9 @@
 int cci_accept(cci_conn_req_t *conn_req, cci_endpoint_t *endpoint, 
                cci_connection_t **connection)
 {
+    int ret;
     cci__crq_t *crq;
-    cci__ep_t *ep;
+    cci__lep_t *lep;
 
     if (NULL == conn_req ||
         NULL == endpoint ||
@@ -23,8 +24,14 @@ int cci_accept(cci_conn_req_t *conn_req, cci_endpoint_t *endpoint,
         return CCI_EINVAL;
     }
 
-    crq = container_of(conn_req, cci__crq_t, conn_req);
-    ep = container_of(endpoint, cci__ep_t, endpoint);
+    ret = cci_core->accept(conn_req, endpoint, connection);
 
-    return cci_core->accept(conn_req, endpoint, connection);
+    /* queue crq */
+    crq = container_of(conn_req, cci__crq_t, conn_req);
+    lep = crq->lep;
+    pthread_mutex_lock(&lep->lock);
+    TAILQ_INSERT_HEAD(&lep->crqs, crq, entry);
+    pthread_mutex_unlock(&lep->lock);
+
+    return ret;
 }

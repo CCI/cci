@@ -597,7 +597,7 @@ typedef enum cci_conn_attribute {
 */
 typedef struct cci_conn_req {
     /*! Array of compatible devices */
-    cci_device_t **devices;
+    cci_device_t const ** const devices;
     /*! Number of compatible devices */
     uint32_t devices_cnt;
 

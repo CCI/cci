@@ -14,8 +14,8 @@
  int cci_get_conn_req(cci_service_t *service, 
                       cci_conn_req_t **conn_req)
 {
-    cci__svc_t *svc;
-    cci__crq_t *crq;
+    cci__svc_t *svc     = NULL;
+    cci__crq_t *crq     = NULL;
 
     if (NULL == service ||
         NULL == conn_req) {
@@ -29,7 +29,7 @@
         crq = TAILQ_FIRST(&svc->crqs);
         TAILQ_REMOVE(&svc->crqs, crq, entry);
     }
-    pthread_mutex_lock(&svc->lock);
+    pthread_mutex_unlock(&svc->lock);
 
     if (crq) {
         *conn_req = &crq->conn_req;

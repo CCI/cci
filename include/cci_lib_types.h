@@ -111,7 +111,10 @@ typedef struct cci__ep {
 /*! CCI private connection request */
 typedef struct cci__crq {
     /*! Public connection request (devices, cnt, ptr, len, attribute) */
-    cci_conn_req_t    conn_req;
+    cci_conn_req_t conn_req;
+
+    /*! Owning listening endpoint */
+    struct cci__lep *lep;
 
     /*! Entry to hang on lep->crqs and svc->crqs */
     TAILQ_ENTRY(cci__crq) entry;
