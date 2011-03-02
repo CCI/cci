@@ -36,7 +36,7 @@ BEGIN_C_DECLS
 #define SOCK_RESEND_TIME        (10000000)
                                         /* time between resends in microseconds */
 #define SOCK_PEEK_LEN           (32)    /* large enough for RMA header */
-#define SOCK_CONN_REQ_HDR_LEN   (sizeof(struct sock_header_r))
+#define SOCK_CONN_REQ_HDR_LEN   ((int) (sizeof(struct sock_header_r)))
                                         /* header + seqack */
 
 /* Valid URI include:
@@ -487,10 +487,12 @@ typedef struct sock_lep {
 
     /*! Socket for receiving conn requests */
     cci_os_handle_t sock;
-
-    /*! Buffer for incoming lep->backlog messages */
-    void *buffer;
 } sock_lep_t;
+
+typedef struct sock_crq {
+    /*! Buffer for conn request */
+    void *buffer;
+} sock_crq_t;
 
 typedef struct sock_svc {
     int foo;
@@ -501,7 +503,7 @@ typedef struct sock_globals {
     int count;
 
     /*! Array of sock devices */
-    cci_device_t const **devices;
+    cci_device_t const ** const devices;
 
     /*! In shutdown? */
     int shutdown;

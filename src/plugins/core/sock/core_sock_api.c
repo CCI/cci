@@ -148,6 +148,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
     int ret;
     cci__dev_t *dev;
     pthread_t pid;
+    cci_device_t **devices;
 
     fprintf(stderr, "In sock_init\n");
 
@@ -156,8 +157,8 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
     if (!sglobals)
         return CCI_ENOMEM;
 
-    sglobals->devices = calloc(CCI_MAX_DEVICES, sizeof(*sglobals->devices));
-    if (!sglobals->devices) {
+    devices = calloc(CCI_MAX_DEVICES, sizeof(*sglobals->devices));
+    if (!devices) {
         ret = CCI_ENOMEM;
         goto out;
     }
@@ -208,7 +209,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
                 }
             }
             if (sdev->ip != 0) {
-                sglobals->devices[sglobals->count] = device;
+                devices[sglobals->count] = device;
                 sglobals->count++;
                 dev->is_up = 1;
             }
@@ -217,9 +218,10 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
         }
     }
 
-    sglobals->devices = realloc(sglobals->devices,
-                                (sglobals->count + 1) * sizeof(cci_device_t *));
-    sglobals->devices[sglobals->count] = NULL;
+    devices = realloc(devices, (sglobals->count + 1) * sizeof(cci_device_t *));
+    devices[sglobals->count] = NULL;
+
+    *((cci_device_t ***) &sglobals->devices) = devices;
 
     ret = pthread_create(&pid, NULL, sock_progress_thread, NULL);
     if (ret)
@@ -228,20 +230,20 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
     return CCI_SUCCESS;
 
 out:
-    if (sglobals) {
-        if (sglobals->devices) {
-            cci_device_t const *device;
-            cci__dev_t *dev;
+    if (devices) {
+        cci_device_t const *device;
+        cci__dev_t *dev;
 
-            for (device = sglobals->devices[0];
-                 device != NULL;
-                 device++) {
-                dev = container_of(device, cci__dev_t, device);
-                if (dev->priv)
-                    free(dev->priv);
-            }
-            free(sglobals->devices);
+        for (device = devices[0];
+             device != NULL;
+             device++) {
+            dev = container_of(device, cci__dev_t, device);
+            if (dev->priv)
+                free(dev->priv);
         }
+        free(devices);
+    }
+    if (sglobals) {
         free(sglobals);
         sglobals = NULL;
     }
@@ -448,8 +450,10 @@ static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
     cci__dev_t *dev;
     cci__svc_t *svc;
     cci__lep_t *lep;
+    cci__crq_t *crq;
     sock_dev_t *sdev;
     sock_lep_t *slep;
+    sock_crq_t *scrq;
     struct sockaddr_in sin;
     socklen_t len = sizeof(sin);
 
@@ -479,10 +483,19 @@ static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
     if (!slep)
         return CCI_ENOMEM;
 
-    slep->buffer = calloc(backlog, CCI_CONN_REQ_LEN + SOCK_CONN_REQ_HDR_LEN);
-    if (!slep->buffer) {
-        ret = CCI_ENOMEM;
-        goto out;
+    /* alloc sock_crq_t for each cci__crq_t */
+    TAILQ_FOREACH(crq, &lep->crqs, entry) {
+        crq->priv = calloc(1, sizeof(*scrq));
+        if (!crq->priv) {
+            ret = CCI_ENOMEM;
+            goto out;
+        }
+        scrq = crq->priv;
+        scrq->buffer = calloc(1, CCI_CONN_REQ_LEN + SOCK_CONN_REQ_HDR_LEN);
+        if (!scrq->buffer) {
+            ret = CCI_ENOMEM;
+            goto out;
+        }
     }
 
     /* open socket */
@@ -518,11 +531,19 @@ static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
 
 out:
     if (slep) {
-        if (slep->buffer)
-            free(slep->buffer);
-        if (slep->sock)
+        TAILQ_FOREACH(crq, &lep->crqs, entry) {
+            scrq = crq->priv;
+            if (scrq) {
+                if (scrq->buffer)
+                    free(scrq->buffer);
+                free(scrq);
+                crq->priv = NULL;
+            }
+        }
+        if (slep->sock > 0)
             close(slep->sock);
         free(slep);
+        lep->priv = NULL;
     }
     return ret;
 }
@@ -1614,10 +1635,19 @@ sock_handle_active_message(sock_conn_t *sconn,
     return;
 }
 
+static inline void
+sock_drop_msg(cci_os_handle_t sock)
+{
+    char buf[4];
+    struct sockaddr sa;
+    socklen_t slen;
 
+    recvfrom(sock, buf, 4, 0, &sa, &slen);
+    return;
+}
 
 static void
-sock_recvfrom(cci__ep_t *ep)
+sock_recvfrom_ep(cci__ep_t *ep)
 {
     int ret = 0, drop_msg = 0;
     uint8_t a;
@@ -1629,7 +1659,6 @@ sock_recvfrom(cci__ep_t *ep)
     sock_conn_t *sconn;
     sock_ep_t *sep;
     sock_msg_type_t type;
-    char buf[8];
 
     /* get idle rx */
 
@@ -1706,7 +1735,7 @@ out:
         pthread_mutex_lock(&sep->lock);
         TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
         pthread_mutex_unlock(&sep->lock);
-        recvfrom(sep->sock, buf, 8, 0, (struct sockaddr *)&sin, &sin_len);
+        sock_drop_msg(sep->sock);
     }
 
     return;
@@ -1715,15 +1744,19 @@ out:
 static void
 sock_recvfrom_lep(cci__lep_t *lep)
 {
-    int ret = 0;
-    uint8_t a;
-    uint16_t b;
-    uint32_t id;
-    char buffer[1024];  /* per CCI spec */ /* FIXME magic number */
-    cci__crq_t *crq;
+    int             ret     = 0;
+    uint8_t         a;
+    uint16_t        b;
+    uint32_t        id;
+    uint32_t        len     = SOCK_CONN_REQ_HDR_LEN + CCI_CONN_REQ_LEN;
+    char            buffer[len];  /* per CCI spec */
+    char            *ptr    = buffer;
+    cci__crq_t      *crq    = NULL;
+    cci__svc_t      *svc    = NULL;
+    sock_crq_t      *scrq;
     struct sockaddr_in sin;
-    socklen_t sin_len = sizeof(sin);
-    sock_lep_t *slep;
+    socklen_t       sin_len = sizeof(sin);
+    sock_lep_t      *slep   = NULL;
     sock_msg_type_t type;
 
     /* get idle crq */
@@ -1736,24 +1769,22 @@ sock_recvfrom_lep(cci__lep_t *lep)
     }
     pthread_mutex_unlock(&lep->lock);
 
-    /* FIXME use local buffer */
-    if (!crq)
-        return;
-
     /* recv msg */
 
-    ret = recvfrom(slep->sock, buffer, SOCK_CONN_REQ_HDR_LEN,
-                   0, (struct sockaddr *)&sin, &sin_len);
-    if (ret < SOCK_CONN_REQ_HDR_LEN) {
-        recvfrom(slep->sock, buffer, 8, /* FIXME magic number */
-                 0, (struct sockaddr *)&sin, &sin_len);
-
-        /* queue crq on idle list */
-        pthread_mutex_lock(&lep->lock);
-        TAILQ_INSERT_HEAD(&lep->crqs, crq, entry);
-        pthread_mutex_unlock(&lep->lock);
-        if (ret == -1 && errno != EAGAIN)
-            fprintf(stderr, "recvfrom_lep() failed with %s\n", strerror(errno));
+    if (crq) {
+        scrq = crq->priv;
+        ptr = scrq->buffer;
+    }
+        
+    ret = recvfrom(slep->sock, buffer, len, 0, (struct sockaddr *)&sin, &sin_len);
+    if (ret < SOCK_CONN_REQ_HDR_LEN || !crq) {
+        /* nothing available or partial header, return.
+         * let the client retry */
+        if (crq) {
+            pthread_mutex_lock(&lep->lock);
+            TAILQ_INSERT_HEAD(&lep->crqs, crq, entry);
+            pthread_mutex_unlock(&lep->lock);
+        }
         return;
     }
 
@@ -1763,16 +1794,23 @@ sock_recvfrom_lep(cci__lep_t *lep)
 
     /* if !conn_req, drop msg, requeue crq */
     if (type != SOCK_MSG_CONN_REQUEST) {
-        char buf[8];
-
         pthread_mutex_lock(&lep->lock);
         TAILQ_INSERT_HEAD(&lep->crqs, crq, entry);
         pthread_mutex_unlock(&lep->lock);
-        recvfrom(slep->sock, buf, 8, 0, (struct sockaddr *)&sin, &sin_len);
         return;
     }
 
-    /* TODO create conn_req */
+    /* FIXME we need to determine on which devices this peer is reachable */
+    *((cci_device_t ***) &(crq->conn_req.devices)) = (cci_device_t **) sglobals->devices;
+    crq->conn_req.devices_cnt = sglobals->count;
+    crq->conn_req.data_ptr = scrq->buffer + SOCK_CONN_REQ_HDR_LEN;
+    crq->conn_req.data_len = ret - SOCK_CONN_REQ_HDR_LEN;
+    crq->conn_req.attribute = b;
+
+    svc = lep->svc;
+    pthread_mutex_lock(&svc->lock);
+    TAILQ_INSERT_TAIL(&svc->crqs, crq, entry);
+    pthread_mutex_unlock(&svc->lock);
 
     return;
 }
@@ -1795,7 +1833,7 @@ static void *sock_progress_thread(void *arg)
             sock_progress_sends(sdev);
             /* TODO switch to select to determine which need recvfrom */
             TAILQ_FOREACH(ep, &dev->eps, entry)
-                sock_recvfrom(ep);
+                sock_recvfrom_ep(ep);
             TAILQ_FOREACH(lep, &dev->leps, dentry)
                 sock_recvfrom_lep(lep);
         }
