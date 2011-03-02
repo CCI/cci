@@ -571,17 +571,100 @@ static int sock_get_conn_req(cci_service_t *service,
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
+static void
+sock_get_id(sock_ep_t *ep, uint32_t *id)
+{
+    uint32_t n, block, offset;
+    uint64_t *b;
+
+    while (1) {
+        n = random() % SOCK_NUM_BLOCKS;
+        block = n / SOCK_BLOCK_SIZE;
+        offset = n % SOCK_BLOCK_SIZE;
+        b = &ep->ids[block];
+
+        if ((*b & (1ULL << offset)) == 0) {
+            *b |= (1ULL << offset);
+            *id = (block * SOCK_BLOCK_SIZE) + offset;
+            break;
+        }
+    }
+    return;
+}
+
+static void
+sock_put_id(sock_ep_t *ep, uint32_t id)
+{
+    uint32_t block, offset;
+    uint64_t *b;
+
+    block = id / SOCK_BLOCK_SIZE;
+    offset = id % SOCK_BLOCK_SIZE;
+    b = &ep->ids[block];
+
+    assert((*b & (1 << offset)) == 1);
+    *b &= ~(1 << offset);
+
+    return;
+}
 
 static int sock_accept(cci_conn_req_t *conn_req, 
                            cci_endpoint_t *endpoint, 
                            cci_connection_t **connection)
 {
+    uint8_t         a;
+    uint16_t        b;
+    uint32_t        id;
+    uint64_t        seq;
+    uint64_t        ack;
+    cci__ep_t       *ep     = NULL;
+    cci__crq_t      *crq    = NULL;
+    cci__conn_t     *conn   = NULL;
+    sock_ep_t       *sep    = NULL;
+    sock_crq_t      *scrq   = NULL;
+    sock_conn_t     *sconn  = NULL;
+    sock_header_r_t *hdr_r  = NULL;
+    sock_msg_type_t type;
+
     printf("In sock_accept\n");
 
     if (!sglobals)
         return CCI_ENODEV;
 
-    return CCI_ERR_NOT_IMPLEMENTED;
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    sep = ep->priv;
+    crq = container_of(conn_req, cci__crq_t, conn_req);
+
+    conn = calloc(1, sizeof(*conn));
+    if (!conn)
+        return CCI_ENOMEM;
+
+    conn->tx_timeout = ep->tx_timeout;
+    conn->priv = calloc(1, sizeof(*sconn));
+    if (!conn->priv) {
+        free(conn);
+        return CCI_ENOMEM;
+    }
+
+    hdr_r = scrq->buffer;
+    sock_parse_header(&hdr_r->header, &type, &a, &b, &id);
+    sock_parse_seq_ack(&hdr_r->seq_ack, &seq, &ack);
+
+    sconn = conn->priv;
+    sconn->conn = conn;
+    sconn->status = SOCK_CONN_PASSIVE;
+    *((struct sockaddr_in *) &sconn->sin) = scrq->sin;
+    sconn->peer_id = id;
+    sock_get_id(sep, &sconn->id);
+    /* TODO get seq before sending */
+    sconn->seq = 0;
+    sconn->ack = seq;
+
+    pthread_mutex_init(&sconn->lock, NULL);
+
+    /* prepare conn_reply */
+
+    return CCI_SUCCESS;
 }
 
 
@@ -629,43 +712,6 @@ static int sock_getaddrinfo(const char *uri, in_addr_t *in)
     return CCI_SUCCESS;
 }
 
-static void
-sock_get_id(sock_ep_t *ep, uint32_t *id)
-{
-    uint32_t n, block, offset;
-    uint64_t *b;
-
-    while (1) {
-        n = random() % SOCK_NUM_BLOCKS;
-        block = n / SOCK_BLOCK_SIZE;
-        offset = n % SOCK_BLOCK_SIZE;
-        b = &ep->ids[block];
-
-        if ((*b & (1ULL << offset)) == 0) {
-            *b |= (1ULL << offset);
-            *id = (block * SOCK_BLOCK_SIZE) + offset;
-            break;
-        }
-    }
-    return;
-}
-
-static void
-sock_put_id(sock_ep_t *ep, uint32_t id)
-{
-    uint32_t block, offset;
-    uint64_t *b;
-
-    block = id / SOCK_BLOCK_SIZE;
-    offset = id % SOCK_BLOCK_SIZE;
-    b = &ep->ids[block];
-
-    assert((*b & (1 << offset)) == 1);
-    *b &= ~(1 << offset);
-
-    return;
-}
-
 static int sock_connect(cci_endpoint_t *endpoint, char *server_uri, 
                             uint32_t port,
                             void *data_ptr, uint32_t data_len, 
@@ -681,7 +727,7 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     sock_dev_t          *sdev       = NULL;
     sock_conn_t         *sconn      = NULL;
     sock_tx_t           *tx         = NULL;
-    sock_header_t       *hdr        = NULL;
+    sock_header_r_t     *hdr_r      = NULL;
     cci__evt_t          *evt        = NULL;
     cci_event_t         *event      = NULL;
     cci_event_other_t   *other      = NULL;
@@ -689,7 +735,6 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     struct sockaddr_in  *sin        = NULL;
     void                *ptr        = NULL;
     in_addr_t           in;
-    sock_seq_ack_t      *sa         = NULL;
     uint64_t            ack;
 
 
@@ -773,12 +818,12 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
 
     /* pack the msg */
 
-    hdr = (sock_header_t *) tx->buffer;
+    hdr_r = (sock_header_r_t *) tx->buffer;
     sock_get_id(sep, &sconn->id);
     /* FIXME silence -Wall -Werror until it is used */
     if (0) sock_put_id(sep, 0);
-    sock_pack_conn_request(hdr, attribute, (uint16_t) data_len, sconn->id);
-    tx->len = sizeof(*hdr);
+    sock_pack_conn_request(&hdr_r->header, attribute, (uint16_t) data_len, sconn->id);
+    tx->len = sizeof(*hdr_r);
     ptr = tx->buffer + tx->len;
 
     /* add seq and ack */
@@ -787,11 +832,7 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     tx->seq = random() << 16; /* fill bits 16-47 */
     tx->seq |= random() & 0xFFFFULL; /* fill bits 0-15 */
     ack = sconn->ack;
-
-    sa = (sock_seq_ack_t *) ptr;
-    sock_pack_seq_ack(sa, tx->seq, ack);
-    tx->len += sizeof(*sa);
-    ptr = tx->buffer + tx->len;
+    sock_pack_seq_ack(&hdr_r->seq_ack, tx->seq, ack);
 
     /* zero even if unreliable */
 
@@ -1806,6 +1847,7 @@ sock_recvfrom_lep(cci__lep_t *lep)
     crq->conn_req.data_ptr = scrq->buffer + SOCK_CONN_REQ_HDR_LEN;
     crq->conn_req.data_len = ret - SOCK_CONN_REQ_HDR_LEN;
     crq->conn_req.attribute = b;
+    *((struct sockaddr_in *) &scrq->sin) = sin;
 
     svc = lep->svc;
     pthread_mutex_lock(&svc->lock);

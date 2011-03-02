@@ -492,6 +492,9 @@ typedef struct sock_lep {
 typedef struct sock_crq {
     /*! Buffer for conn request */
     void *buffer;
+
+    /*! Client's sockaddr_in */
+    const struct sockaddr_in sin;
 } sock_crq_t;
 
 typedef struct sock_svc {
