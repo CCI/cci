@@ -219,6 +219,9 @@ typedef enum cci_status {
   /*! Message too long */
   CCI_EMSGSIZE = EMSGSIZE,
 
+  /*! No message of desired type */
+  CCI_ENOMSG = ENOMSG,
+
   /* ...more here, inspired from errno.h... */
   
 } cci_status_t;

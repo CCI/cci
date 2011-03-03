@@ -13,6 +13,8 @@
 #define CCI_LIB_TYPES_H
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <pthread.h>
 #include <stddef.h>
 #include "bsd/queue.h"
@@ -202,6 +204,9 @@ typedef struct cci__lep {
 
     /*! Pointer to device specific struct */
     void *priv;
+
+    /*! Debug mask */
+    uint32_t debug;
 } cci__lep_t;
 
 /*! CCI private global state */
@@ -307,6 +312,46 @@ cci__evt_to_ep(cci__evt_t *evt)
     else
         return NULL;
 }
+
+extern int cci__debug;
+
+/*
+ * Debugging macros.
+ */
+#define CCI_DB_MEM    (1 << 0) /* memory alloc/free and accounting */
+#define CCI_DB_MSG    (1 << 1) /* handling tx/rx structures, sending/receiving */
+#define CCI_DB_PEER   (1 << 2) /* modifying peers */
+#define CCI_DB_CONN   (1 << 3) /* connection handling */
+#define CCI_DB_ERR    (1 << 4) /* fatal errors, should always be followed by exit() */
+#define CCI_DB_FUNC   (1 << 5) /* enterling/leaving functions */
+#define CCI_DB_INFO   (1 << 6) /* just informational */
+#define CCI_DB_WARN   (1 << 7) /* non-fatal error */
+#define CCI_DB_DRVR   (1 << 8) /* driver function returned error */
+
+#define CCI_DB_ALL    (~0)     /* print everything */
+#define CCI_DB_DFLT   (CCI_DB_ERR|CCI_DB_WARN)
+
+#define CCI_DEBUG     1        /* Turn on for developing */
+
+#if CCI_DEBUG
+#define debug(lvl,fmt,args...)                          \
+  do {                                                  \
+      if (lvl & cci__debug)                         \
+          fprintf(stderr, "cci: " fmt "\n", ##args);    \
+  } while (0)
+#else  /* ! CCI_DEBUG */
+#define debug(lvl,fmt,...) do { } while (0)
+#endif /* CCI_DEBUG */
+
+#define CCI_ENTER                                                               \
+  do {                                                                          \
+        debug(CCI_DB_FUNC, "entering %s", __func__);                            \
+  } while (0);
+
+#define CCI_EXIT                                                                \
+  do {                                                                          \
+        debug(CCI_DB_FUNC, "exiting  %s", __func__);                            \
+  } while (0);
 
 END_C_DECLS
 
