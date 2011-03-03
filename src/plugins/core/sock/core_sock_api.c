@@ -150,7 +150,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
     pthread_t pid;
     cci_device_t **devices;
 
-    fprintf(stderr, "In sock_init\n");
+    CCI_ENTER;
 
     /* init sock globals */
     sglobals = calloc(1, sizeof(*sglobals));
@@ -253,14 +253,14 @@ out:
 
 static const char *sock_strerror(enum cci_status status)
 {
-    printf("In sock_sterrror\n");
+    CCI_ENTER;
     return NULL;
 }
 
 
 static int sock_get_devices(cci_device_t const ***devices)
 {
-    printf("In sock_get_devices\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -273,7 +273,7 @@ static int sock_get_devices(cci_device_t const ***devices)
 
 static int sock_free_devices(cci_device_t const **devices)
 {
-    printf("In sock_free_devices\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -321,7 +321,7 @@ static int sock_create_endpoint(cci_device_t *device,
     cci__ep_t *ep = NULL;
     sock_ep_t *sep = NULL;
 
-    printf("In sock_create_endpoint\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -362,10 +362,12 @@ static int sock_create_endpoint(cci_device_t *device,
     if (ret)
         goto out;
 
-    /* TODO need to bind? */
+    /* TODO need to bind to device */
 
-    for (i = 0; i < SOCK_EP_HASH_SIZE; i++)
+    for (i = 0; i < SOCK_EP_HASH_SIZE; i++) {
         TAILQ_INIT(&sep->conn_hash[i]);
+        TAILQ_INIT(&sep->active_hash[i]);
+    }
 
     TAILQ_INIT(&sep->txs);
     TAILQ_INIT(&sep->idle_txs);
@@ -431,7 +433,7 @@ out:
 
 static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
 {
-    printf("In sock_destroy_endpoint\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -444,20 +446,20 @@ static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
  * device, port, service are always set
  */
 static int sock_bind(cci_device_t *device, int backlog, uint32_t *port, 
-                         cci_service_t **service, cci_os_handle_t *fd)
+                     cci_service_t **service, cci_os_handle_t *fd)
 {
     int ret;
-    cci__dev_t *dev;
-    cci__svc_t *svc;
-    cci__lep_t *lep;
-    cci__crq_t *crq;
-    sock_dev_t *sdev;
-    sock_lep_t *slep;
-    sock_crq_t *scrq;
+    cci__dev_t  *dev    = NULL;
+    cci__svc_t  *svc    = NULL;
+    cci__lep_t  *lep    = NULL;
+    cci__crq_t  *crq    = NULL;
+    sock_dev_t  *sdev   = NULL;
+    sock_lep_t  *slep   = NULL;
+    sock_crq_t  *scrq   = NULL;
     struct sockaddr_in sin;
     socklen_t len = sizeof(sin);
 
-    printf("In sock_bind\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -551,7 +553,7 @@ out:
 
 static int sock_unbind(cci_service_t *service, cci_device_t *device)
 {
-    printf("In sock_unbind\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -563,7 +565,7 @@ static int sock_unbind(cci_service_t *service, cci_device_t *device)
 static int sock_get_conn_req(cci_service_t *service, 
                                  cci_conn_req_t **conn_req)
 {
-    printf("In sock_get_conn_req\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -642,7 +644,7 @@ static int sock_accept(cci_conn_req_t *conn_req,
     sock_tx_t       *tx     = NULL;
     void            *ptr    = NULL;
 
-    printf("In sock_accept\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -738,7 +740,7 @@ static int sock_accept(cci_conn_req_t *conn_req,
 
 static int sock_reject(cci_conn_req_t *conn_req)
 {
-    printf("In sock_reject\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -793,7 +795,7 @@ uint8_t sock_ip_hash(in_addr_t ip, uint16_t port)
 }
 
 static sock_conn_t *
-sock_find_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id)
+sock_find_open_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id)
 {
     uint8_t i;
     struct s_conns *conn_list;
@@ -802,14 +804,42 @@ sock_find_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id)
     i = sock_ip_hash(ip, port);
     conn_list = &sep->conn_hash[i];
     TAILQ_FOREACH(sc, conn_list, entry) {
-            if (sc->sin.sin_addr.s_addr == ip &&
-                sc->sin.sin_port == port &&
-                sc->peer_id == id) {
-                    sconn = sc;
-                    break;
-            }
+        if (sc->sin.sin_addr.s_addr == ip &&
+            sc->sin.sin_port == port &&
+            sc->peer_id == id) {
+                sconn = sc;
+                break;
+        }
     }
     return sconn;
+}
+
+static sock_conn_t *
+sock_find_active_conn(sock_ep_t *sep, in_addr_t ip, uint32_t id)
+{
+    uint8_t i;
+    struct s_active *active_list;
+    sock_conn_t *sconn = NULL, *sc;
+
+    i = sock_ip_hash(ip, 0);
+    active_list = &sep->active_hash[i];
+    TAILQ_FOREACH(sc, active_list, entry) {
+        if (sc->sin.sin_addr.s_addr == ip &&
+            sc->id == id) {
+                sconn = sc;
+                break;
+        }
+    }
+    return sconn;
+}
+
+static sock_conn_t *
+sock_find_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id, int new)
+{
+    if (new)
+        return sock_find_active_conn(sep, ip, id);
+    else
+        return sock_find_open_conn(sep, ip, port, id);
 }
 
 static int sock_connect(cci_endpoint_t *endpoint, char *server_uri, 
@@ -837,9 +867,9 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     void                *ptr        = NULL;
     in_addr_t           ip;
     uint64_t            ack;
-    struct s_conns      *conn_list;
+    struct s_active     *active_list;
 
-    printf("In sock_connect\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -894,10 +924,10 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     dev = ep->dev;
     sdev = dev->priv;
 
-    i = sock_ip_hash(ip, port);
-    conn_list = &sep->conn_hash[i];
+    i = sock_ip_hash(ip, 0);
+    active_list = &sep->active_hash[i];
     pthread_mutex_lock(&sep->lock);
-    TAILQ_INSERT_TAIL(conn_list, sconn, entry);
+    TAILQ_INSERT_TAIL(active_list, sconn, entry);
     pthread_mutex_unlock(&sep->lock);
 
     /* get a tx */
@@ -981,7 +1011,7 @@ out:
 
 static int sock_disconnect(cci_connection_t *connection)
 {
-    printf("In sock_disconnect\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -994,7 +1024,7 @@ static int sock_set_opt(cci_opt_handle_t *handle,
                             cci_opt_level_t level, 
                             cci_opt_name_t name, const void* val, int len)
 {
-    printf("In sock_set_opt\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -1007,7 +1037,7 @@ static int sock_get_opt(cci_opt_handle_t *handle,
                             cci_opt_level_t level, 
                             cci_opt_name_t name, void** val, int *len)
 {
-    printf("In sock_get_opt\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -1018,7 +1048,7 @@ static int sock_get_opt(cci_opt_handle_t *handle,
 
 static int sock_arm_os_handle(cci_endpoint_t *endpoint, int flags)
 {
-    printf("In sock_arm_os_handle\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -1037,7 +1067,7 @@ static int sock_get_event(cci_endpoint_t *endpoint,
     sock_ep_t       *sep;
     cci_event_t     *tmp;
 
-    printf("In sock_get_event\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -1100,7 +1130,7 @@ static int sock_return_event(cci_endpoint_t *endpoint,
     sock_tx_t   *tx;
     sock_rx_t   *rx;
 
-    printf("In sock_return_event\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -1453,9 +1483,9 @@ static int sock_sendv(cci_connection_t *connection,
     cci_event_send_t *send; /* generic CCI send event */
 
     if (segment_cnt < 2)
-        printf("In sock_send\n");
+        debug(CCI_DB_FUNC, "entering sock_send()");
     else
-        printf("In sock_sendv\n");
+        debug(CCI_DB_FUNC, "entering sock_sendv()");
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -1638,7 +1668,7 @@ static int sock_sendv(cci_connection_t *connection,
 static int sock_rma_register(cci_endpoint_t *endpoint, void *start, 
                                  uint64_t length, uint64_t *rma_handle)
 {
-    printf("In sock_rma_register\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -1651,7 +1681,7 @@ static int sock_rma_register_phys(cci_endpoint_t *endpoint,
                                       cci_sg_t *sg_list, uint32_t sg_cnt, 
                                       uint64_t *rma_handle)
 {
-    printf("In sock_rma_register_phys\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -1662,7 +1692,7 @@ static int sock_rma_register_phys(cci_endpoint_t *endpoint,
 
 static int sock_rma_deregister(uint64_t rma_handle)
 {
-    printf("In sock_rma_deregister\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -1677,7 +1707,7 @@ static int sock_rma(cci_connection_t *connection,
                         uint64_t remote_handle, uint64_t remote_offset,
                         uint64_t data_len, void *context, int flags)
 {
-    printf("In sock_rma\n");
+    CCI_ENTER;
 
     if (!sglobals)
         return CCI_ENODEV;
@@ -1750,6 +1780,85 @@ sock_handle_active_message(sock_conn_t *sconn,
     return;
 }
 
+static int
+sock_handle_ack(cci__ep_t *ep, uint64_t ack)
+{
+    int             ret     = 0;
+
+    return ret;
+}
+
+static void
+sock_handle_conn_reply(sock_conn_t *sconn,
+                           sock_rx_t *rx,
+                           uint8_t reply, /* SUCCESS or REJECTED */
+                           uint16_t unused,
+                           uint32_t id)
+{
+    uint32_t        peer_id     = 0;
+    cci__evt_t      *evt;
+    cci__dev_t      *dev;
+    cci__conn_t     *conn = sconn->conn;
+    sock_dev_t      *sdev;
+    sock_tx_t       *tx = NULL, *tmp = NULL;
+    sock_header_r_t *hdr_r;     /* wire header */
+    cci_event_t     *event;     /* generic CCI event */
+    cci_endpoint_t  *endpoint;  /* generic CCI endpoint */
+    cci__ep_t       *ep;
+    void            *ptr;
+    uint64_t        seq;
+    uint64_t        ack;
+
+    endpoint = (&conn->connection)->endpoint;
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    dev = ep->dev;
+    sdev = dev->priv;
+
+    /* get cci__evt_t to hang on ep->events */
+
+    evt = &rx->evt;
+
+    /* set wire header so we can find user header */
+
+    hdr_r = (sock_header_r_t *) rx->buffer;
+    ptr = rx->buffer + sizeof(*hdr_r);
+
+    /* setup the generic event for the application */
+
+    event = (cci_event_t *) &evt->event;
+    /* FIXME handle reject */
+    event->type = CCI_EVENT_CONNECT_SUCCESS;
+    event->info.other.u.connect.connection = &conn->connection;
+
+    memcpy(&peer_id, ptr, sizeof(peer_id));
+
+    /* TODO handle ack */
+
+    sock_parse_seq_ack(&hdr_r->seq_ack, &seq, &ack);
+
+    /* silence compiler for now */
+    if (0) sock_handle_ack(ep, ack);
+
+    pthread_mutex_lock(&sdev->lock);
+    TAILQ_FOREACH_SAFE(tx, &sdev->pending, dentry, tmp) {
+        if (tx->seq == ack) {
+            TAILQ_REMOVE(&sdev->pending, tx,dentry);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&sdev->lock);
+
+    if (!tx) {
+        /* FIXME do what here? */
+    }
+
+    /* use the rx to complete the connect and
+     * reuse the tx to ack their reply
+     */
+
+    return;
+}
+
 static inline void
 sock_drop_msg(cci_os_handle_t sock)
 {
@@ -1764,7 +1873,7 @@ sock_drop_msg(cci_os_handle_t sock)
 static void
 sock_recvfrom_ep(cci__ep_t *ep)
 {
-    int ret = 0, drop_msg = 0;
+    int ret = 0, drop_msg = 0, reply = 0;
     uint8_t a;
     uint16_t b;
     uint32_t id;
@@ -1801,7 +1910,9 @@ sock_recvfrom_ep(cci__ep_t *ep)
     /* lookup connection from sin and id */
 
     sock_parse_header(rx->buffer, &type, &a, &b, &id);
-    sconn = sock_find_conn(sep, sin.sin_addr.s_addr, sin.sin_port, id);
+    if (SOCK_MSG_CONN_REPLY == type)
+        reply = 1;
+    sconn = sock_find_conn(sep, sin.sin_addr.s_addr, sin.sin_port, id, reply);
 
     /* if no conn, drop msg, requeue rx */
     if (!sconn) {
@@ -1817,6 +1928,7 @@ sock_recvfrom_ep(cci__ep_t *ep)
         drop_msg = 1;
         break;
     case SOCK_MSG_CONN_REPLY:
+        sock_handle_conn_reply(sconn, rx, a, b, id);
         break;
     case SOCK_MSG_CONN_ACK:
         break;

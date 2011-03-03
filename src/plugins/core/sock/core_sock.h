@@ -415,6 +415,9 @@ typedef struct sock_ep {
 
     /*! Connection id blocks */
     uint64_t *ids;
+
+    /*! List of active connections awaiting replies */
+    TAILQ_HEAD(s_active, sock_conn) active_hash[SOCK_EP_HASH_SIZE];
 } sock_ep_t;
 
 /* Connection info */
