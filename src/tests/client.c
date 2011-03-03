@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2011 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2011 Oak Ridge National Labs.  All rights reserved.
+ *
+ * See COPYING in top-level directory
+ *
+ * $COPYRIGHT$
+ *
+ */
+
 #include "cci.h"
 #include <unistd.h>
 
