@@ -608,23 +608,39 @@ sock_put_id(sock_ep_t *ep, uint32_t id)
     return;
 }
 
+static inline uint64_t
+sock_get_new_seq(void)
+{
+    uint64_t seq = 0ULL;
+
+    seq = random() << 16; /* fill bits 16-47 */
+    seq |= random() & 0xFFFFULL; /* fill bits 0-15 */
+
+    return seq;
+}
+
 static int sock_accept(cci_conn_req_t *conn_req, 
                            cci_endpoint_t *endpoint, 
                            cci_connection_t **connection)
 {
     uint8_t         a;
     uint16_t        b;
-    uint32_t        id;
-    uint64_t        seq;
-    uint64_t        ack;
+    uint32_t        peer_id;
+    uint64_t        peer_seq;
+    uint64_t        peer_ack;
     cci__ep_t       *ep     = NULL;
     cci__crq_t      *crq    = NULL;
     cci__conn_t     *conn   = NULL;
+    cci__evt_t      *evt    = NULL;
+    cci__dev_t      *dev    = NULL;
     sock_ep_t       *sep    = NULL;
     sock_crq_t      *scrq   = NULL;
     sock_conn_t     *sconn  = NULL;
+    sock_dev_t      *sdev   = NULL;
     sock_header_r_t *hdr_r  = NULL;
     sock_msg_type_t type;
+    sock_tx_t       *tx     = NULL;
+    void            *ptr    = NULL;
 
     printf("In sock_accept\n");
 
@@ -634,6 +650,7 @@ static int sock_accept(cci_conn_req_t *conn_req,
     ep = container_of(endpoint, cci__ep_t, endpoint);
     sep = ep->priv;
     crq = container_of(conn_req, cci__crq_t, conn_req);
+    scrq = crq->priv;
 
     conn = calloc(1, sizeof(*conn));
     if (!conn)
@@ -647,22 +664,73 @@ static int sock_accept(cci_conn_req_t *conn_req,
     }
 
     hdr_r = scrq->buffer;
-    sock_parse_header(&hdr_r->header, &type, &a, &b, &id);
-    sock_parse_seq_ack(&hdr_r->seq_ack, &seq, &ack);
+    sock_parse_header(&hdr_r->header, &type, &a, &b, &peer_id);
+    sock_parse_seq_ack(&hdr_r->seq_ack, &peer_seq, &peer_ack);
+
+    conn->connection.attribute = a;
+    conn->connection.endpoint = endpoint;
+    conn->connection.max_send_size = SOCK_AM_SIZE;
 
     sconn = conn->priv;
     sconn->conn = conn;
     sconn->status = SOCK_CONN_PASSIVE;
     *((struct sockaddr_in *) &sconn->sin) = scrq->sin;
-    sconn->peer_id = id;
+    sconn->peer_id = peer_id;
     sock_get_id(sep, &sconn->id);
-    /* TODO get seq before sending */
-    sconn->seq = 0;
-    sconn->ack = seq;
+    sconn->seq = sock_get_new_seq(); /* even for UU since this reply is reliable */
+    sconn->ack = peer_seq;
 
     pthread_mutex_init(&sconn->lock, NULL);
 
     /* prepare conn_reply */
+
+    /* get a tx */
+    pthread_mutex_lock(&sep->lock);
+    if (!TAILQ_EMPTY(&sep->idle_txs)) {
+        tx = TAILQ_FIRST(&sep->idle_txs);
+        TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
+    }
+    pthread_mutex_unlock(&sep->lock);
+
+    /* FIXME what should we do here? */
+    if (!tx)
+        return CCI_ENOBUFS;
+
+    /* prep the tx */
+    tx->msg_type = SOCK_MSG_CONN_REPLY;
+    tx->cycles = 0;
+    tx->resends = 0;
+
+    evt = &tx->evt;
+    evt->ep = ep;
+    evt->event.type = CCI_EVENT_CONNECT_SUCCESS; /* for now */
+    evt->event.info.other.context = NULL; /* FIXME or crq? */
+    evt->event.info.other.u.connect.connection = &conn->connection;
+
+    /* pack the msg */
+
+    hdr_r = (sock_header_r_t *) tx->buffer;
+    sock_pack_conn_reply(&hdr_r->header, CCI_EVENT_CONNECT_SUCCESS, sconn->peer_id);
+    sock_pack_seq_ack(&hdr_r->seq_ack, sconn->seq, sconn->ack);
+    ptr = tx->buffer + sizeof(*hdr_r);
+    memcpy(ptr, &sconn->id, sizeof(sconn->id));
+    tx->len = sizeof(*hdr_r) + sizeof(sconn->id);
+
+    /* insert at tail of device's queued list */
+
+    dev = ep->dev;
+    sdev = dev->priv;
+
+    tx->state = SOCK_TX_QUEUED;
+    pthread_mutex_lock(&sdev->lock);
+    TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
+    pthread_mutex_unlock(&sdev->lock);
+
+    /* try to progress txs */
+
+    sock_progress_sends(sdev);
+
+    *connection = &conn->connection;
 
     return CCI_SUCCESS;
 }
@@ -712,6 +780,38 @@ static int sock_getaddrinfo(const char *uri, in_addr_t *in)
     return CCI_SUCCESS;
 }
 
+/* The endpoint maintains 256 lists. Hash the ip and port and return the index
+ * of the list. We use all six bytes and this is endian agnostic. It evenly
+ * disperses large blocks of addresses as well as large ranges of ports on the
+ * same address.
+ */
+uint8_t sock_ip_hash(in_addr_t ip, uint16_t port)
+{
+    port ^= (ip & 0x0000FFFF);
+    port ^= (ip & 0xFFFF0000) >> 16;
+    return (port & 0x00FF) ^ ((port & 0xFF00) >> 8);
+}
+
+static sock_conn_t *
+sock_find_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id)
+{
+    uint8_t i;
+    struct s_conns *conn_list;
+    sock_conn_t *sconn = NULL, *sc;
+
+    i = sock_ip_hash(ip, port);
+    conn_list = &sep->conn_hash[i];
+    TAILQ_FOREACH(sc, conn_list, entry) {
+            if (sc->sin.sin_addr.s_addr == ip &&
+                sc->sin.sin_port == port &&
+                sc->peer_id == id) {
+                    sconn = sc;
+                    break;
+            }
+    }
+    return sconn;
+}
+
 static int sock_connect(cci_endpoint_t *endpoint, char *server_uri, 
                             uint32_t port,
                             void *data_ptr, uint32_t data_len, 
@@ -720,6 +820,7 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
                             struct timeval *timeout)
 {
     int                 ret;
+    int                 i;
     cci__ep_t           *ep         = NULL;
     cci__dev_t          *dev        = NULL;
     cci__conn_t         *conn       = NULL;
@@ -734,9 +835,9 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     cci_connection_t    *connection = NULL;
     struct sockaddr_in  *sin        = NULL;
     void                *ptr        = NULL;
-    in_addr_t           in;
+    in_addr_t           ip;
     uint64_t            ack;
-
+    struct s_conns      *conn_list;
 
     printf("In sock_connect\n");
 
@@ -778,10 +879,10 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     sin->sin_family = AF_INET;
     sin->sin_port = htons(port);
 
-    ret = sock_getaddrinfo(server_uri, &in);
+    ret = sock_getaddrinfo(server_uri, &ip);
     if (ret)
         goto out;
-    sin->sin_addr.s_addr = in;  /* already in network order */
+    sin->sin_addr.s_addr = ip;  /* already in network order */
 
     /* peer will assign id */
 
@@ -792,6 +893,12 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     sep = ep->priv;
     dev = ep->dev;
     sdev = dev->priv;
+
+    i = sock_ip_hash(ip, port);
+    conn_list = &sep->conn_hash[i];
+    pthread_mutex_lock(&sep->lock);
+    TAILQ_INSERT_TAIL(conn_list, sconn, entry);
+    pthread_mutex_unlock(&sep->lock);
 
     /* get a tx */
     pthread_mutex_lock(&sep->lock);
@@ -828,10 +935,9 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
 
     /* add seq and ack */
 
-    tx->seq = 0;
-    tx->seq = random() << 16; /* fill bits 16-47 */
-    tx->seq |= random() & 0xFFFFULL; /* fill bits 0-15 */
-    ack = sconn->ack;
+    sconn->seq = sock_get_new_seq();
+    tx->seq = sconn->seq;
+    ack = 0; /* unneeded */
     sock_pack_seq_ack(&hdr_r->seq_ack, tx->seq, ack);
 
     /* zero even if unreliable */
@@ -1579,38 +1685,6 @@ static int sock_rma(cci_connection_t *connection,
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
-/* The endpoint maintains 256 lists. Hash the ip and port and return the index
- * of the list. We use all six bytes and this is endian agnostic. It evenly
- * disperses large blocks of addresses as well as large ranges of ports on the
- * same address.
- */
-uint8_t sock_ip_hash(in_addr_t ip, uint16_t port)
-{
-    port ^= (ip & 0x0000FFFF);
-    port ^= (ip & 0xFFFF0000) >> 16;
-    return (port & 0x00FF) ^ ((port & 0xFF00) >> 8);
-}
-
-static sock_conn_t *
-sock_find_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id)
-{
-    uint8_t i;
-    struct s_conns *conn_list;
-    sock_conn_t *sconn = NULL, *sc;
-
-    i = sock_ip_hash(ip, port);
-    conn_list = &sep->conn_hash[i];
-    TAILQ_FOREACH(sc, conn_list, entry) {
-            if (sc->sin.sin_addr.s_addr == ip &&
-                sc->sin.sin_port == port &&
-                sc->peer_id == id) {
-                    sconn = sc;
-                    break;
-            }
-    }
-    return sconn;
-}
-
 static void
 sock_handle_active_message(sock_conn_t *sconn,
                            sock_rx_t *rx,
@@ -1719,7 +1793,7 @@ sock_recvfrom_ep(cci__ep_t *ep)
 
     ret = recvfrom(sep->sock, rx->buffer, SOCK_PEEK_LEN,
                    MSG_PEEK, (struct sockaddr *)&sin, &sin_len);
-    if (ret < sizeof(sock_header_t)) {
+    if (ret < (int) sizeof(sock_header_t)) {
         drop_msg = 1;
         goto out;
     }
@@ -1817,7 +1891,7 @@ sock_recvfrom_lep(cci__lep_t *lep)
         ptr = scrq->buffer;
     }
         
-    ret = recvfrom(slep->sock, buffer, len, 0, (struct sockaddr *)&sin, &sin_len);
+    ret = recvfrom(slep->sock, ptr, len, 0, (struct sockaddr *)&sin, &sin_len);
     if (ret < SOCK_CONN_REQ_HDR_LEN || !crq) {
         /* nothing available or partial header, return.
          * let the client retry */
@@ -1831,7 +1905,7 @@ sock_recvfrom_lep(cci__lep_t *lep)
 
     /* lookup connection from sin and id */
 
-    sock_parse_header((sock_header_t *)buffer, &type, &a, &b, &id);
+    sock_parse_header((sock_header_t *)scrq->buffer, &type, &a, &b, &id);
 
     /* if !conn_req, drop msg, requeue crq */
     if (type != SOCK_MSG_CONN_REQUEST) {
@@ -1848,6 +1922,8 @@ sock_recvfrom_lep(cci__lep_t *lep)
     crq->conn_req.data_len = ret - SOCK_CONN_REQ_HDR_LEN;
     crq->conn_req.attribute = b;
     *((struct sockaddr_in *) &scrq->sin) = sin;
+
+    fprintf(stderr, "recv'd conn_req from %s:%d\n", inet_ntoa(sin.sin_addr), ntohs(sin.sin_port));
 
     svc = lep->svc;
     pthread_mutex_lock(&svc->lock);

@@ -203,13 +203,14 @@ sock_pack_conn_request(sock_header_t *header, cci_conn_attribute_t attr,
 
    The reply is 0 for success else errno.
    I use this ID when sending to this peer.
+   The accepting peer will send his id back in the payload (length 4)
 
  */
 
 static inline void
 sock_pack_conn_reply(sock_header_t *header, uint8_t reply, uint32_t id)
 {
-    sock_pack_header(header, SOCK_MSG_CONN_REPLY, reply, 0, id);
+    sock_pack_header(header, SOCK_MSG_CONN_REPLY, reply, sizeof(id), id);
 }
 
 /* send header:

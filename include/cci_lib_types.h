@@ -180,7 +180,7 @@ typedef struct cci__evt {
 /*! CCI private listening endpoint (created when device is bound to service) */
 typedef struct cci__lep {
     /*! Owning device */
-    struct cci__dev *dev;
+    cci__dev_t *dev;
 
     /*! Service we are bound to */
     struct cci__svc *svc;
@@ -206,7 +206,7 @@ typedef struct cci__lep {
 
 /*! CCI private global state */
 typedef struct cci__globals {
-    /*! List of all know devices */
+    /*! List of all known devices */
     TAILQ_HEAD(s_devs, cci__dev) devs;
 
     /*! Array of user devices */
