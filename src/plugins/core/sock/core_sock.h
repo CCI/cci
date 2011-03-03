@@ -217,6 +217,26 @@ sock_pack_conn_reply(sock_header_t *header, uint8_t reply, uint32_t id)
     sock_pack_header(header, SOCK_MSG_CONN_REPLY, reply, sizeof(id), id);
 }
 
+/* connection ack header:
+
+    <---------- 32 bits ---------->
+    <- 8 -> <- 8 -> <---- 16 ----->
+   +-------+-----------------------+
+   | type  |       reserved        |
+   +-------+-----------------------+
+   |           peer_id             |
+   +-------------------------------+
+
+   I use this ID when sending to this peer.
+
+ */
+
+static inline void
+sock_pack_conn_ack(sock_header_t *header, uint32_t id)
+{
+    sock_pack_header(header, SOCK_MSG_CONN_REPLY, 0, 0, id);
+}
+
 /* send header:
 
     <---------- 32 bits ---------->

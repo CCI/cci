@@ -632,7 +632,7 @@ static int sock_accept(cci_conn_req_t *conn_req,
 {
     uint8_t         a;
     uint16_t        b;
-    uint32_t        peer_id;
+    uint32_t        peer_id, id;
     uint64_t        peer_seq;
     uint64_t        peer_ack;
     cci__ep_t       *ep     = NULL;
@@ -719,8 +719,10 @@ static int sock_accept(cci_conn_req_t *conn_req,
     hdr_r = (sock_header_r_t *) tx->buffer;
     sock_pack_conn_reply(&hdr_r->header, CCI_EVENT_CONNECT_SUCCESS, sconn->peer_id);
     sock_pack_seq_ack(&hdr_r->seq_ack, sconn->seq, sconn->ack);
+    id = htonl(sconn->id);
     ptr = tx->buffer + sizeof(*hdr_r);
-    memcpy(ptr, &sconn->id, sizeof(sconn->id));
+    memcpy(ptr, &id, sizeof(sconn->id));
+
     tx->len = sizeof(*hdr_r) + sizeof(sconn->id);
 
     /* insert at tail of device's queued list */
@@ -1798,24 +1800,28 @@ sock_handle_conn_reply(sock_conn_t *sconn,
                            sock_rx_t *rx,
                            uint8_t reply, /* SUCCESS or REJECTED */
                            uint16_t unused,
-                           uint32_t id)
+                           uint32_t id,
+                           struct sockaddr_in sin)
 {
+    int             i;
     uint32_t        peer_id     = 0;
+    cci__ep_t       *ep;
     cci__evt_t      *evt;
     cci__dev_t      *dev;
     cci__conn_t     *conn = sconn->conn;
+    sock_ep_t       *sep;
     sock_dev_t      *sdev;
     sock_tx_t       *tx = NULL, *tmp = NULL;
     sock_header_r_t *hdr_r;     /* wire header */
     cci_event_t     *event;     /* generic CCI event */
     cci_endpoint_t  *endpoint;  /* generic CCI endpoint */
-    cci__ep_t       *ep;
     void            *ptr;
     uint64_t        seq;
     uint64_t        ack;
 
     endpoint = (&conn->connection)->endpoint;
     ep = container_of(endpoint, cci__ep_t, endpoint);
+    sep = ep->priv;
     dev = ep->dev;
     sdev = dev->priv;
 
@@ -1832,8 +1838,10 @@ sock_handle_conn_reply(sock_conn_t *sconn,
 
     event = (cci_event_t *) &evt->event;
     /* FIXME handle reject */
-    event->type = CCI_EVENT_CONNECT_SUCCESS;
-    event->info.other.u.connect.connection = &conn->connection;
+    event->type = reply; /* CCI_EVENT_CONNECT_[SUCCESS|REJECTED] */
+
+    if (CCI_EVENT_CONNECT_SUCCESS == reply)
+        event->info.other.u.connect.connection = &conn->connection;
 
     memcpy(&peer_id, ptr, sizeof(peer_id));
 
@@ -1855,11 +1863,49 @@ sock_handle_conn_reply(sock_conn_t *sconn,
 
     if (!tx) {
         /* FIXME do what here? */
+        /* if no tx, then it timed out,
+         * but we have a sconn */
     }
 
     /* use the rx to complete the connect and
      * reuse the tx to ack their reply
      */
+    rx->evt.event.info.other.context = tx->evt.event.info.send.context;
+
+    sconn->peer_id = ntohl(peer_id);
+    sconn->status = SOCK_CONN_READY;
+    *((struct sockaddr_in *) &sconn->sin) = sin;
+    sconn->ack = ack;
+
+    i = sock_ip_hash(ntohl(sin.sin_addr.s_addr), ntohs(sin.sin_port));
+    pthread_mutex_lock(&sep->lock);
+    TAILQ_INSERT_TAIL(&sep->conn_hash[i], sconn, entry);
+    pthread_mutex_unlock(&sep->lock);
+
+    tx->msg_type = SOCK_MSG_CONN_REPLY;
+    tx->evt.event.type = CCI_EVENT_CONNECT_SUCCESS;
+    tx->evt.event.info.other.u.connect.connection = &conn->connection;
+    tx->evt.ep = ep;
+    tx->evt.conn = conn;
+
+    tx->cycles = 0;
+    tx->resends = 0;
+
+    hdr_r = tx->buffer;
+    sock_pack_conn_ack(&hdr_r->header, sconn->peer_id);
+    pthread_mutex_lock(&sconn->lock);
+    tx->seq = sconn->seq++;
+    pthread_mutex_unlock(&sconn->lock);
+    sock_pack_seq_ack(&hdr_r->seq_ack, tx->seq, sconn->ack);
+
+    tx->state = SOCK_TX_QUEUED;
+    pthread_mutex_lock(&sdev->lock);
+    TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
+    pthread_mutex_unlock(&sdev->lock);
+
+    /* try to progress txs */
+
+    sock_progress_sends(sdev);
 
     return;
 }
@@ -1933,7 +1979,7 @@ sock_recvfrom_ep(cci__ep_t *ep)
         drop_msg = 1;
         break;
     case SOCK_MSG_CONN_REPLY:
-        sock_handle_conn_reply(sconn, rx, a, b, id);
+        sock_handle_conn_reply(sconn, rx, a, b, id, sin);
         break;
     case SOCK_MSG_CONN_ACK:
         break;
