@@ -14,7 +14,63 @@
 #include "plugins/core/core.h"
 #include "plugins/core/base/public.h"
 
+int cci__debug = CCI_DB_DFLT;
 cci__globals_t *globals = NULL;
+
+static inline void
+cci__get_debug_env(void)
+{
+    int     mask    = 0;
+    char    *debug  = NULL;
+
+    debug = getenv("CCI_DEBUG");
+    if (!(debug && debug[0] != '\0'))
+        return;
+
+    do {
+        char    *comma  = NULL;
+        char    *next   = NULL;
+
+        comma = strchr(debug, ',');
+        if (comma) {
+            /* find the comma */
+            *comma = '\0'; 
+            next = comma + 1;
+        } else {
+            /* last item */
+            next = NULL;
+        }
+        if (0 == strncmp(debug, "mem", 3)) {
+            mask |= CCI_DB_MEM;
+        } else if (0 == strncmp(debug, "msg", 3)) {
+            mask |= CCI_DB_MSG;
+        } else if (0 == strncmp(debug, "peer", 4)) {
+            mask |= CCI_DB_PEER;
+        } else if (0 == strncmp(debug, "conn", 4)) {
+            mask |= CCI_DB_CONN;
+        } else if (0 == strncmp(debug, "err", 3)) {
+            mask |= CCI_DB_ERR;
+        } else if (0 == strncmp(debug, "func", 4)) {
+            mask |= CCI_DB_FUNC;
+        } else if (0 == strncmp(debug, "info", 4)) {
+            mask |= CCI_DB_INFO;
+        } else if (0 == strncmp(debug, "warn", 4)) {
+            mask |= CCI_DB_WARN;
+        } else if (0 == strncmp(debug, "drvr", 4)) {
+            mask |= CCI_DB_DRVR;
+        } else if (0 == strncmp(debug, "all", 4)) {
+            mask |= CCI_DB_ALL;
+        } else {
+            fprintf(stderr, "unknown debug level \"%s\"\n", debug);
+        }
+        debug = next;
+    } while (debug);
+
+    cci__debug = mask;
+
+    return;
+}
+
 
 #define CCI_BUF_LEN             1024
 
@@ -109,7 +165,7 @@ void cci__add_dev(cci__dev_t *dev)
 int cci__parse_config(const char *path)
 {
     int ret = 0, i = 0, arg_cnt = 0, driver = 0, is_default = 0;
-    char buffer[CCI_BUF_LEN], *str, *default_name;
+    char buffer[CCI_BUF_LEN], *str, *default_name = NULL;
     FILE *file;
     cci_device_t *d = NULL;
     cci__dev_t  *dev = NULL;
@@ -348,9 +404,11 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
     int ret;
     static int once = 0;
 
+    cci__get_debug_env();
+
     if (abi_ver != CCI_ABI_VERSION) {
-        fprintf(stderr, "cci_init: got ABI version %d, but expected %d\n",
-                abi_ver, CCI_ABI_VERSION);
+        debug(CCI_DB_INFO, "got ABI version %d, but expected %d\n",
+              abi_ver, CCI_ABI_VERSION);
         return CCI_EINVAL;
     }
 
@@ -386,14 +444,14 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 
         str = getenv("CCI_CONFIG");
         if (!str || str[0] == '\0') {
-            fprintf(stderr, "unable to find CCI_CONFIG environment "
+            debug(CCI_DB_WARN, "unable to find CCI_CONFIG environment "
                             "variable.\n");
             return CCI_ERR_NOT_FOUND;
         }
 
         ret = cci__parse_config(str);
         if (ret) {
-            fprintf(stderr, "unable to parse CCI_CONFIG file %s\n", str);
+            debug(CCI_DB_ERR, "unable to parse CCI_CONFIG file %s\n", str);
             return CCI_ERROR;
         }
 
