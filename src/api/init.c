@@ -66,7 +66,7 @@ cci__get_debug_env(void)
         debug = next;
     } while (debug);
 
-    cci__debug = mask;
+    cci__debug |= mask;
 
     return;
 }
