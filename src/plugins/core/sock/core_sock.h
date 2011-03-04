@@ -22,7 +22,7 @@
 BEGIN_C_DECLS
 
 #define SOCK_EP_MAX_HDR_SIZE    (32)    /* bytes */
-#define SOCK_EP_TX_TIMEOUT      (60)    /* seconds for now */
+#define SOCK_EP_TX_TIMEOUT_SEC  (60)    /* seconds for now */
 #define SOCK_EP_RX_CNT          (256)   /* number of rx active messages */
 #define SOCK_EP_TX_CNT          (256)   /* number of tx active messages */
 #define SOCK_EP_BUF_LEN         (8192)  /* bytes including wire header */
@@ -34,11 +34,10 @@ BEGIN_C_DECLS
 #define SOCK_NUM_BLOCKS         (16384) /* number of blocks */
 #define SOCK_MAX_ID             (SOCK_BLOCK_SIZE * SOCK_NUM_BLOCKS)
                                         /* 1048576 conns per endpoint */
-#define SOCK_PROG_TIME          (100000) /* try to progress every N microseconds */
-#define SOCK_PROG_FREQ          (1000000 / SOCK_PROG_TIME)
-                                        /* progress attempts per second */
-#define SOCK_RESEND_TIME        (10000000)
-                                        /* time between resends in microseconds */
+#define SOCK_PROG_TIME_US       (100000) /* try to progress every N microseconds */
+#define SOCK_RESEND_TIME_SEC    (10)     /* time between resends in seconds */
+#define SOCK_RESEND_CYCLES      (SOCK_RESEND_TIME_SEC * 1000000 / SOCK_PROG_TIME_US)
+                                        /* progress attempts every N cycles */
 #define SOCK_PEEK_LEN           (32)    /* large enough for RMA header */
 #define SOCK_CONN_REQ_HDR_LEN   ((int) (sizeof(struct sock_header_r)))
                                         /* header + seqack */
