@@ -94,6 +94,9 @@ typedef struct cci__ep {
     /*! Send timeout in microseconds */
     uint32_t tx_timeout;
 
+    /*! Keepalive timeout in microseconds */
+    uint32_t keepalive_timeout;
+
     /*! Events ready for process */
     TAILQ_HEAD(s_evts, cci__evt) evts;
 

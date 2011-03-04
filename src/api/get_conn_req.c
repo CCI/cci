@@ -20,8 +20,11 @@
  int cci_get_conn_req(cci_service_t *service, 
                       cci_conn_req_t **conn_req)
 {
+    int ret;
     cci__svc_t *svc     = NULL;
     cci__crq_t *crq     = NULL;
+
+    CCI_ENTER;
 
     if (NULL == service ||
         NULL == conn_req) {
@@ -39,9 +42,13 @@
 
     if (crq) {
         *conn_req = &crq->conn_req;
-        return CCI_SUCCESS;
+        ret = CCI_SUCCESS;
     } else
-        return CCI_EAGAIN;
+        ret = CCI_EAGAIN;
+
+    CCI_EXIT;
+
+    return ret;
 
 #if 0
     return cci_core->get_conn_req(service, conn_req);

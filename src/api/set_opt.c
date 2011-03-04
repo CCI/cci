@@ -20,10 +20,27 @@
 int cci_set_opt(cci_opt_handle_t *handle, cci_opt_level_t level, 
                 cci_opt_name_t name, const void* val, int len)
 {
+    int ret;
+
+    CCI_ENTER;
+
     if (NULL == handle ||
-        (NULL == val && len > 0)) {
+        NULL == val ||
+        len == 0) {
         return CCI_EINVAL;
     }
 
-    return cci_core->set_opt(handle, level, name, val, len);
+    if (CCI_OPT_LEVEL_ENDPOINT == level) {
+        if (handle->endpoint == NULL || name == CCI_OPT_CONN_SEND_TIMEOUT)
+            return CCI_EINVAL;
+    } else {
+        if (handle->connection == NULL || name != CCI_OPT_CONN_SEND_TIMEOUT)
+            return CCI_EINVAL;
+    }
+
+    ret = cci_core->set_opt(handle, level, name, val, len);
+
+    CCI_EXIT;
+
+    return ret;
 }
