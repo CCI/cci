@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include "cci.h"
 
@@ -22,6 +23,7 @@ int main(int argc, char *argv[])
     cci_endpoint_t *endpoint = NULL;
     cci_os_handle_t ep_fd, bind_fd;
     cci_service_t *service = NULL;
+    cci_connection_t *connection = NULL;
 
     ret = cci_init(CCI_ABI_VERSION, 0, &caps);
     if (ret) {
@@ -43,7 +45,7 @@ int main(int argc, char *argv[])
     }
 
     /* we don't associate the endpoint with the service? */
-    ret = cci_bind(devices[0], 10, &port, &service, &bind_fd);
+    ret = cci_bind(devices[0], 10, &port,&service, &bind_fd);
     if (ret) {
         fprintf(stderr, "cci_bind() failed with %s\n", strerror(ret));
         exit(EXIT_FAILURE);
@@ -52,25 +54,60 @@ int main(int argc, char *argv[])
     while (1) {
         int accept = 1;
         cci_conn_req_t *conn_req;
-        cci_connection_t *connection = NULL;
+        cci_event_t *event;
 
         ret = cci_get_conn_req(service, &conn_req);
-        if (ret)
-            continue;
+        if (ret == 0 && conn_req) {
 
-        /* inspect conn_req_t and decide to accept or reject */
+            /* inspect conn_req_t and decide to accept or reject */
 
-        if (accept) {
-            /* associate this connect request with this endpoint */
-            cci_accept(conn_req, endpoint, &connection);
+            if (accept) {
+                /* associate this connect request with this endpoint */
+                cci_accept(conn_req, endpoint, &connection);
 
-            /* add new connection to connection list, etc. */
-        } else {
-            cci_reject(conn_req);
+                /* add new connection to connection list, etc. */
+            } else {
+                cci_reject(conn_req);
+            }
         }
 
         /* check for next event...
          * handle communication over existing connections */
+
+again:
+        ret = cci_get_event(endpoint, &event, 0);
+        if (ret == 0) {
+            if (event->type == CCI_EVENT_RECV) {
+                char buf[8192];
+                char *hdr = "header:";
+                char *data = "data:";
+                int len = 0;
+                int offset = 0;
+                int hlen = event->info.recv.header_len;
+                int dlen = event->info.recv.data_len;
+
+                memset(buf, 0, 8192);
+                len = strlen(hdr);
+                memcpy(buf, hdr, len);
+                offset += len;
+                memcpy(buf + offset, event->info.recv.header_ptr, hlen);
+                offset += hlen;
+                len = strlen(data);
+                memcpy(buf + offset, data, len);
+                offset += len;
+                memcpy(buf + offset, event->info.recv.data_ptr, dlen);
+                offset += dlen;
+                fprintf(stdout, "recv'd \"%s\"\n", buf);
+                cci_send(connection, NULL, 0, buf, offset, NULL, 0);
+            } else if (event->type == CCI_EVENT_SEND) {
+                fprintf(stdout, "completed send\n");
+            } else {
+                printf("event type %d\n", event->type);
+            }
+            cci_return_event(endpoint, event);
+            goto again;
+        }
+        usleep(500000);
     }
 
     /* clean up */
