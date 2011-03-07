@@ -34,8 +34,8 @@ BEGIN_C_DECLS
 #define SOCK_NUM_BLOCKS         (16384) /* number of blocks */
 #define SOCK_MAX_ID             (SOCK_BLOCK_SIZE * SOCK_NUM_BLOCKS)
                                         /* 1048576 conns per endpoint */
-#define SOCK_PROG_TIME_US       (100000) /* try to progress every N microseconds */
-#define SOCK_RESEND_TIME_SEC    (10)     /* time between resends in seconds */
+#define SOCK_PROG_TIME_US       (10000) /* try to progress every N microseconds */
+#define SOCK_RESEND_TIME_SEC    (1)     /* time between resends in seconds */
 #define SOCK_RESEND_CYCLES      (SOCK_RESEND_TIME_SEC * 1000000 / SOCK_PROG_TIME_US)
                                         /* progress attempts every N cycles */
 #define SOCK_PEEK_LEN           (32)    /* large enough for RMA header */

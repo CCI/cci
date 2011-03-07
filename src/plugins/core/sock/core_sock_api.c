@@ -742,7 +742,6 @@ static int sock_accept(cci_conn_req_t *conn_req,
     /* insert in sock ep's list of conns */
 
     i = sock_ip_hash(ntohl(sconn->sin.sin_addr.s_addr), ntohs(sconn->sin.sin_port));
-    debug(CCI_DB_WARN, "%s: hash %d", __func__, i);
     pthread_mutex_lock(&sep->lock);
     TAILQ_INSERT_TAIL(&sep->conn_hash[i], sconn, entry);
     pthread_mutex_unlock(&sep->lock);
@@ -868,7 +867,6 @@ sock_find_open_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id)
     CCI_ENTER;
 
     i = sock_ip_hash(ip, port);
-    debug(CCI_DB_WARN, "%s: hash %d", __func__, i);
     conn_list = &sep->conn_hash[i];
     TAILQ_FOREACH(sc, conn_list, entry) {
         if (sc->sin.sin_addr.s_addr == ip &&
@@ -1762,8 +1760,6 @@ static int sock_sendv(cci_connection_t *connection,
                 tx->len += data_lens[i];
             }
         }
-
-        debug(CCI_DB_WARN, "sending \"%s\"", (char *) tx->buffer + 8);
 
         /* try to send */
         ret = sock_sendto(sep->sock, tx->buffer, tx->len, sconn->sin);
