@@ -159,8 +159,10 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 
     /* init sock globals */
     sglobals = calloc(1, sizeof(*sglobals));
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENOMEM;
+    }
 
     devices = calloc(CCI_MAX_DEVICES, sizeof(*sglobals->devices));
     if (!devices) {
@@ -232,6 +234,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
     if (ret)
         goto out;
 
+    CCI_EXIT;
     return CCI_SUCCESS;
 
 out:
@@ -252,6 +255,7 @@ out:
         free(sglobals);
         sglobals = NULL;
     }
+    CCI_EXIT;
     return ret;
 }
 
@@ -267,10 +271,14 @@ static int sock_get_devices(cci_device_t const ***devices)
 {
     CCI_ENTER;
 
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENODEV;
+    }
 
     *devices = sglobals->devices;
+
+    CCI_EXIT;
 
     return CCI_SUCCESS;
 }
@@ -280,8 +288,10 @@ static int sock_free_devices(cci_device_t const **devices)
 {
     CCI_ENTER;
 
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENODEV;
+    }
 
     /* tear everything down */
 
@@ -299,6 +309,7 @@ static int sock_free_devices(cci_device_t const **devices)
      *         close socket
      */
 
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -328,8 +339,10 @@ static int sock_create_endpoint(cci_device_t *device,
 
     CCI_ENTER;
 
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENODEV;
+    }
 
     dev = container_of(device, cci__dev_t, device);
     if (0 != strcmp("sock", dev->driver)) {
@@ -416,6 +429,7 @@ static int sock_create_endpoint(cci_device_t *device,
         TAILQ_INSERT_TAIL(&sep->idle_rxs, rx, entry);
     }
 
+    CCI_EXIT;
     return CCI_SUCCESS;
 
 out:
@@ -432,6 +446,7 @@ out:
     if (ep)
         free(ep);
     *endpoint = NULL;
+    CCI_EXIT;
     return ret;
 }
 
@@ -440,9 +455,12 @@ static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
 {
     CCI_ENTER;
 
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENODEV;
+    }
 
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -466,8 +484,10 @@ static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
 
     CCI_ENTER;
 
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENODEV;
+    }
 
     dev = container_of(device, cci__dev_t, device);
     if (0 != strcmp("sock", dev->driver)) {
@@ -475,8 +495,10 @@ static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
         goto out;
     }
 
-    if (*port > (64 * 1024))
+    if (*port > (64 * 1024)) {
+        CCI_EXIT;
         return CCI_ERANGE;
+    }
 
     svc = container_of(*service, cci__svc_t, service);
     TAILQ_FOREACH(lep, &svc->leps, sentry) {
@@ -487,8 +509,10 @@ static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
 
     /* allocate sock listening endpoint */
     slep = calloc(1, sizeof(*slep));
-    if (!slep)
+    if (!slep) {
+        CCI_EXIT;
         return CCI_ENOMEM;
+    }
 
     /* alloc sock_crq_t for each cci__crq_t */
     TAILQ_FOREACH(crq, &lep->crqs, entry) {
@@ -534,6 +558,7 @@ static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
 
     lep->priv = slep;
 
+    CCI_EXIT;
     return CCI_SUCCESS;
 
 out:
@@ -552,6 +577,7 @@ out:
         free(slep);
         lep->priv = NULL;
     }
+    CCI_EXIT;
     return ret;
 }
 
@@ -560,9 +586,12 @@ static int sock_unbind(cci_service_t *service, cci_device_t *device)
 {
     CCI_ENTER;
 
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENODEV;
+    }
 
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -572,9 +601,12 @@ static int sock_get_conn_req(cci_service_t *service,
 {
     CCI_ENTER;
 
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENODEV;
+    }
 
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -779,9 +811,12 @@ static int sock_reject(cci_conn_req_t *conn_req)
 {
     CCI_ENTER;
 
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENODEV;
+    }
 
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -793,8 +828,10 @@ static int sock_getaddrinfo(const char *uri, in_addr_t *in)
 
     if (0 == strncmp("ip://", uri, 5))
         hostname = strdup(&uri[5]);
-    else
+    else {
+        CCI_EXIT;
         return CCI_EINVAL;
+    }
 
     colon = strchr(hostname, ':');
     if (colon)
@@ -810,12 +847,14 @@ static int sock_getaddrinfo(const char *uri, in_addr_t *in)
 
     if (ret) {
         freeaddrinfo(ai);
+        CCI_EXIT;
         return ret;
     }
 
     *in = ((struct sockaddr_in *)ai->ai_addr)->sin_addr.s_addr;
     freeaddrinfo(ai);
 
+    CCI_EXIT;
     return CCI_SUCCESS;
 }
 
@@ -902,13 +941,17 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
 
     CCI_ENTER;
 
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENODEV;
+    }
 
     /* allocate a new connection */
     conn = calloc(1, sizeof(*conn));
-    if (!conn)
-            return CCI_ENOMEM;
+    if (!conn) {
+        CCI_EXIT;
+        return CCI_ENOMEM;
+    }
 
     conn->priv = calloc(1, sizeof(*sconn));
     if (!conn->priv) {
@@ -969,8 +1012,10 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     }
     pthread_mutex_unlock(&sep->lock);
 
-    if (!tx)
+    if (!tx) {
+        CCI_EXIT;
         return CCI_ENOBUFS;
+    }
 
     /* prep the tx */
     tx->msg_type = SOCK_MSG_CONN_REQUEST;
@@ -1026,6 +1071,7 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
 
     sock_progress_sends(sdev);
 
+    CCI_EXIT;
     return CCI_SUCCESS;
 
 out:
@@ -1036,6 +1082,7 @@ out:
             free(conn->priv);
         free(conn);
     }
+    CCI_EXIT;
     return ret;
 }
 
@@ -1044,8 +1091,10 @@ static int sock_disconnect(cci_connection_t *connection)
 {
     CCI_ENTER;
 
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENODEV;
+    }
 
     /* need to clean up */
 
@@ -1055,6 +1104,7 @@ static int sock_disconnect(cci_connection_t *connection)
      * free conn
      */
 
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1071,8 +1121,10 @@ static int sock_set_opt(cci_opt_handle_t *handle,
 
     CCI_ENTER;
 
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENODEV;
+    }
 
     if (CCI_OPT_LEVEL_ENDPOINT == level) {
         ep = container_of(handle->endpoint, cci__ep_t, endpoint);
@@ -1123,8 +1175,10 @@ static int sock_get_opt(cci_opt_handle_t *handle,
 
     CCI_ENTER;
 
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENODEV;
+    }
 
     CCI_EXIT;
 
@@ -1136,9 +1190,12 @@ static int sock_arm_os_handle(cci_endpoint_t *endpoint, int flags)
 {
     CCI_ENTER;
 
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENODEV;
+    }
 
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1155,8 +1212,10 @@ static int sock_get_event(cci_endpoint_t *endpoint,
 
     CCI_ENTER;
 
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENODEV;
+    }
 
     ep = container_of(endpoint, cci__ep_t, endpoint);
     sep = ep->priv;
@@ -1165,6 +1224,7 @@ static int sock_get_event(cci_endpoint_t *endpoint,
     if (TAILQ_EMPTY(&ep->evts)) {
         pthread_mutex_unlock(&ep->lock);
         *event = NULL;
+        CCI_EXIT;
         return CCI_EAGAIN;
     }
 
@@ -1203,6 +1263,7 @@ static int sock_get_event(cci_endpoint_t *endpoint,
 
     *event = &ev->event;
 
+    CCI_EXIT;
     return ret;
 }
 
@@ -1218,16 +1279,20 @@ static int sock_return_event(cci_endpoint_t *endpoint,
 
     CCI_ENTER;
 
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENODEV;
+    }
 
     ep = container_of(endpoint, cci__ep_t, endpoint);
     sep = ep->priv;
 
     evt = container_of(event, cci__evt_t, event);
 
-    if (evt->ep != ep)
+    if (evt->ep != ep) {
+        CCI_EXIT;
         return CCI_EINVAL;
+    }
 
     /* enqueue the event */
 
@@ -1250,6 +1315,8 @@ static int sock_return_event(cci_endpoint_t *endpoint,
         /* TODO */
         break;
     }
+
+    CCI_EXIT;
 
     return CCI_SUCCESS;
 }
@@ -1281,6 +1348,8 @@ sock_progress_pending(sock_dev_t *sdev)
     sock_conn_t         *sconn;
     cci__ep_t           *ep;
     sock_ep_t           *sep;
+
+    CCI_ENTER;
 
     TAILQ_HEAD(s_idle_txs, sock_tx) idle_txs = TAILQ_HEAD_INITIALIZER(idle_txs);
     TAILQ_HEAD(s_evts, cci__evt) evts = TAILQ_HEAD_INITIALIZER(evts);
@@ -1330,6 +1399,7 @@ sock_progress_pending(sock_dev_t *sdev)
                 break;
             default:
                 /* TODO */
+                CCI_EXIT;
                 return;
             }
             /* if SILENT, put idle tx */
@@ -1378,6 +1448,7 @@ sock_progress_pending(sock_dev_t *sdev)
             break;
         default:
             /* TODO */
+            CCI_EXIT;
             return;
         }
         /* if SILENT, put idle tx */
@@ -1416,6 +1487,8 @@ sock_progress_pending(sock_dev_t *sdev)
         pthread_mutex_unlock(&ep->lock);
     }
 
+    CCI_EXIT;
+
     return;
 }
 
@@ -1432,6 +1505,8 @@ sock_progress_queued(sock_dev_t *sdev)
     cci_event_t         *event;         /* generic CCI event */
     cci_connection_t    *connection;    /* generic CCI connection */
     cci_endpoint_t      *endpoint;      /* generic CCI endpoint */
+
+    CCI_ENTER;
 
     TAILQ_HEAD(s_idle_txs, sock_tx) idle_txs = TAILQ_HEAD_INITIALIZER(idle_txs);
     TAILQ_HEAD(s_evts, cci__evt) evts = TAILQ_HEAD_INITIALIZER(evts);
@@ -1477,6 +1552,7 @@ sock_progress_queued(sock_dev_t *sdev)
                 break;
             default:
                 /* TODO */
+                CCI_EXIT;
                 return;
             }
             TAILQ_REMOVE(&sdev->queued, tx, dentry);
@@ -1550,6 +1626,8 @@ sock_progress_queued(sock_dev_t *sdev)
         TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
         pthread_mutex_unlock(&ep->lock);
     }
+
+    CCI_EXIT;
 
     return;
 }
@@ -1822,9 +1900,12 @@ static int sock_rma_register_phys(cci_endpoint_t *endpoint,
 {
     CCI_ENTER;
 
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENODEV;
+    }
 
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1833,9 +1914,12 @@ static int sock_rma_deregister(uint64_t rma_handle)
 {
     CCI_ENTER;
 
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENODEV;
+    }
 
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1848,9 +1932,12 @@ static int sock_rma(cci_connection_t *connection,
 {
     CCI_ENTER;
 
-    if (!sglobals)
+    if (!sglobals) {
+        CCI_EXIT;
         return CCI_ENODEV;
+    }
 
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1868,6 +1955,8 @@ sock_handle_active_message(sock_conn_t *sconn,
     cci_event_recv_t *recv;         /* generic CCI recv event */
     cci_endpoint_t *endpoint;        /* generic CCI endpoint */
     cci__ep_t *ep;
+
+    CCI_ENTER;
 
     endpoint = (&conn->connection)->endpoint;
     ep = container_of(endpoint, cci__ep_t, endpoint);
@@ -1915,6 +2004,8 @@ sock_handle_active_message(sock_conn_t *sconn,
     pthread_mutex_unlock(&ep->lock);
 
     /* TODO notify via ep->fd */
+
+    CCI_EXIT;
 
     return;
 }
@@ -2004,6 +2095,8 @@ sock_handle_conn_reply(sock_conn_t *sconn,
         pthread_mutex_lock(&sep->lock);
         TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
         pthread_mutex_unlock(&sep->lock);
+
+        CCI_EXIT;
         return;
     }
 
