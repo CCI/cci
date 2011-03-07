@@ -233,7 +233,7 @@ sock_pack_conn_reply(sock_header_t *header, uint8_t reply, uint32_t id)
 static inline void
 sock_pack_conn_ack(sock_header_t *header, uint32_t id)
 {
-    sock_pack_header(header, SOCK_MSG_CONN_REPLY, 0, 0, id);
+    sock_pack_header(header, SOCK_MSG_CONN_ACK, 0, 0, id);
 }
 
 /* send header:
