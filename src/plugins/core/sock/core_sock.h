@@ -403,12 +403,6 @@ typedef struct sock_tx {
     /*! Sequence number */
     uint64_t seq;
 
-    /*! Passes through the progress thread */
-    uint64_t cycles;
-
-    /*! Number of resend attempts */
-    uint64_t resends;
-
     /*! Last send in microseconds */
     uint64_t last_attempt_us;
 

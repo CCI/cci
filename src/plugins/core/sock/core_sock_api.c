@@ -766,8 +766,6 @@ static int sock_accept(cci_conn_req_t *conn_req,
 
     /* prep the tx */
     tx->msg_type = SOCK_MSG_CONN_REPLY;
-    tx->cycles = 0;
-    tx->resends = 0;
     tx->last_attempt_us = 0ULL;
     tx->timeout_us = 0ULL;
 
@@ -1050,8 +1048,6 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
 
     /* zero even if unreliable */
 
-    tx->cycles = 0;
-    tx->resends = 0;
     tx->last_attempt_us = 0ULL;
     tx->timeout_us = 0ULL;
 
@@ -1369,7 +1365,6 @@ static void
 sock_progress_pending(sock_dev_t *sdev)
 {
     int ret;
-    uint32_t            timeout;
     uint64_t            now;
     sock_tx_t           *tx, *tmp;
     cci__evt_t          *evt;
@@ -1405,17 +1400,9 @@ sock_progress_pending(sock_dev_t *sdev)
         ep = container_of(connection->endpoint, cci__ep_t, endpoint);
         sep = ep->priv;
 
-#if 0
-        /* cycles % cycles_per_resend == 0 */
-        if (tx->cycles++ % SOCK_RESEND_CYCLES != 0)
-            continue;
-#endif
-
         assert(tx->last_attempt_us != 0ULL);
 
-        /* try to send it */
-
-        timeout = conn->tx_timeout ? conn->tx_timeout : ep->tx_timeout;
+        /* has it timed out? */
 
         if (tx->timeout_us < now) { /* FIXME nned to handle rollover */
 
@@ -1454,12 +1441,14 @@ sock_progress_pending(sock_dev_t *sdev)
             continue;
         }
 
+        /* is it time to resend? */
+
         if ((tx->last_attempt_us + (SOCK_RESEND_TIME_SEC * 1000000)) > now)
             continue;
 
-        tx->last_attempt_us = now;
-
         /* need to resend it */
+
+        tx->last_attempt_us = now;
 
         debug(CCI_DB_MSG, "sending msg %d\n", tx->msg_type);
         ret = sock_sendto(sep->sock, tx->buffer, tx->len, sconn->sin);
@@ -1577,12 +1566,6 @@ sock_progress_queued(sock_dev_t *sdev)
         endpoint = connection->endpoint;
         ep = container_of(endpoint, cci__ep_t, endpoint);
         sep = ep->priv;
-
-#if 0
-        /* cycles % cycles_per_resend == 0 */
-        if (tx->cycles++ % SOCK_RESEND_CYCLES != 0)
-            continue;
-#endif
 
         /* try to send it */
 
@@ -1791,8 +1774,6 @@ static int sock_sendv(cci_connection_t *connection,
 
     /* zero even if unreliable */
 
-    tx->cycles = 0;
-    tx->resends = 0;
     tx->last_attempt_us = 0ULL;
     tx->timeout_us = 0ULL;
 
@@ -2163,8 +2144,8 @@ sock_handle_conn_reply(sock_conn_t *sconn,
     tx->evt.ep = ep;
     tx->evt.conn = conn;
 
-    tx->cycles = 0;
-    tx->resends = 0;
+    tx->last_attempt_us = 0ULL;
+    tx->timeout_us = 0ULL;
 
     hdr_r = tx->buffer;
     sock_pack_conn_ack(&hdr_r->header, sconn->peer_id);
