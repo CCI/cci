@@ -42,6 +42,22 @@ BEGIN_C_DECLS
 #define SOCK_CONN_REQ_HDR_LEN   ((int) (sizeof(struct sock_header_r)))
                                         /* header + seqack */
 
+static inline uint64_t
+sock_tv_to_usecs(struct timeval tv)
+{
+    return (tv.tv_sec * 1000000) + tv.tv_usec;
+}
+
+#define SOCK_TV_TO_USECS(tv)    (((tv).tv_sec * 1000000) + (tv).tv_usec)
+
+static inline uint64_t
+sock_get_usecs(void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return sock_tv_to_usecs(tv);
+}
+
 /* Valid URI include:
  *
  * ip://1.2.3.4         # IPv4 address
@@ -392,6 +408,12 @@ typedef struct sock_tx {
 
     /*! Number of resend attempts */
     uint64_t resends;
+
+    /*! Last send in microseconds */
+    uint64_t last_attempt_us;
+
+    /*! Timeout in microseconds */
+    uint64_t timeout_us;
 } sock_tx_t;
 
 /*! Receive active message context.
@@ -506,6 +528,9 @@ typedef struct sock_dev {
 
     /*! Lock to protect queued and pending */
     pthread_mutex_t lock;
+
+    /*! Being progressed? */
+    int is_progressing;
 } sock_dev_t;
 
 typedef struct sock_lep {
