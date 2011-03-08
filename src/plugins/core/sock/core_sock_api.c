@@ -414,12 +414,14 @@ static int sock_create_endpoint(cci_device_t *device,
 
         tx = calloc(1, sizeof(*tx));
         if (!tx) {
-            /* TODO */
+            ret = CCI_ENOMEM;
+            goto out;
         }
         tx->evt.event.type = CCI_EVENT_SEND;
         tx->buffer = malloc(ep->buffer_len);
         if (tx->buffer) {
-            /* TODO */
+            ret = CCI_ENOMEM;
+            goto out;
         }
         tx->len = 0;
         TAILQ_INSERT_TAIL(&sep->txs, tx, tentry);
@@ -432,12 +434,14 @@ static int sock_create_endpoint(cci_device_t *device,
 
         rx = calloc(1, sizeof(*rx));
         if (!rx) {
-            /* TODO */
+            ret = CCI_ENOMEM;
+            goto out;
         }
         rx->evt.event.type = CCI_EVENT_RECV;
         rx->buffer = malloc(ep->buffer_len);
         if (rx->buffer) {
-            /* TODO */
+            ret = CCI_ENOMEM;
+            goto out;
         }
         rx->len = 0;
         TAILQ_INSERT_TAIL(&sep->rxs, rx, gentry);
@@ -452,6 +456,24 @@ out:
     TAILQ_REMOVE(&dev->eps, ep, entry);
     pthread_mutex_unlock(&dev->lock);
     if (sep) {
+        while (!TAILQ_EMPTY(&sep->txs)) {
+            sock_tx_t *tx;
+
+            tx = TAILQ_FIRST(&sep->txs);
+            TAILQ_REMOVE(&sep->txs, tx, tentry);
+            if (tx->buffer)
+                free(tx->buffer);
+            free(tx);
+        }
+        while (!TAILQ_EMPTY(&sep->rxs)) {
+            sock_rx_t *rx;
+
+            rx = TAILQ_FIRST(&sep->rxs);
+            TAILQ_REMOVE(&sep->rxs, rx, gentry);
+            if (rx->buffer)
+                free(rx->buffer);
+            free(rx);
+        }
         if (sep->ids)
             free(sep->ids);
         if (sep->sock)
@@ -735,6 +757,21 @@ static int sock_accept(cci_conn_req_t *conn_req,
         return CCI_ENOMEM;
     }
 
+    /* get a tx */
+    pthread_mutex_lock(&sep->lock);
+    if (!TAILQ_EMPTY(&sep->idle_txs)) {
+        tx = TAILQ_FIRST(&sep->idle_txs);
+        TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
+    }
+    pthread_mutex_unlock(&sep->lock);
+
+    if (!tx) {
+        free(conn->priv);
+        free(conn);
+        CCI_EXIT;
+        return CCI_ENOBUFS;
+    }
+
     hdr_r = scrq->buffer;
     sock_parse_header(&hdr_r->header, &type, &a, &b, &peer_id);
     sock_parse_seq_ack(&hdr_r->seq_ack, &peer_seq, &peer_ack);
@@ -763,21 +800,6 @@ static int sock_accept(cci_conn_req_t *conn_req,
 
     /* prepare conn_reply */
 
-    /* get a tx */
-    pthread_mutex_lock(&sep->lock);
-    if (!TAILQ_EMPTY(&sep->idle_txs)) {
-        tx = TAILQ_FIRST(&sep->idle_txs);
-        TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
-    }
-    pthread_mutex_unlock(&sep->lock);
-
-    /* FIXME what should we do here? */
-    if (!tx) {
-        CCI_EXIT;
-        return CCI_ENOBUFS;
-    }
-
-    /* prep the tx */
     tx->msg_type = SOCK_MSG_CONN_REPLY;
     tx->last_attempt_us = 0ULL;
     tx->timeout_us = 0ULL;
