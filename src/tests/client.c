@@ -14,6 +14,45 @@
 #include <unistd.h>
 #include <stdlib.h>
 
+static void
+poll_events(cci_endpoint_t *endpoint, cci_connection_t **connection, int *done)
+{
+    int ret;
+    char buffer[8192];
+    cci_event_t *event;
+
+again:
+    ret = cci_get_event(endpoint, &event, 0);
+    if (ret == CCI_SUCCESS && event) {
+        switch (event->type) {
+        case CCI_EVENT_SEND:
+            fprintf(stderr, "send %d completed with %d\n",
+                    (int)((uintptr_t) event->info.send.context),
+                    event->info.send.status);
+            break;
+        case CCI_EVENT_RECV:
+        {
+            int len = event->info.recv.header_len + event->info.recv.data_len;
+
+            memcpy(buffer, event->info.recv.header_ptr, len);
+            buffer[len] = '\0';
+            fprintf(stderr, "received \"%s\"\n", buffer);
+            break;
+        }
+        case CCI_EVENT_CONNECT_SUCCESS:
+            *done = 1;
+            *connection = event->info.other.u.connect.connection;
+            break;
+        case CCI_EVENT_CONNECT_REJECTED:
+            *done = 1;
+        default:
+            fprintf(stderr, "ignoring event type %d\n", event->type);
+        }
+        cci_return_event(endpoint, event);
+        goto again;
+    }
+}
+
 int main(int argc, char *argv[])
 {
 	int done = 0, ret, i = 0;
@@ -26,8 +65,6 @@ int main(int argc, char *argv[])
 	cci_connection_t *connection = NULL;
     cci_opt_handle_t handle;
     uint32_t timeout = 30 * 1000000;
-	cci_event_t *event;
-    char buffer[8192];
 
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
     if (ret) {
@@ -66,28 +103,12 @@ int main(int argc, char *argv[])
 
 	/* poll for connect completion */
 	while (!done) {
-        int ret;
-
-		/* what does this return:
-		 *   if there is an event? 0 or 1 or other?
-		 *   if there is not an event? is event NULL? */
-		ret = cci_get_event(endpoint, &event, 0);
-
-        if (ret == 0) {
-		    if (event->type == CCI_EVENT_CONNECT_SUCCESS) {
-			    /* shouldn't the event contain the connection? */
-			    /* store new connection */
-			    done = 1;
-                connection = event->info.other.u.connect.connection;
-		    } else if (event->type == CCI_EVENT_CONNECT_REJECTED) {
-			    done = 1;
-		    } else {
-                fprintf(stderr, "unknown event type %d\n", event->type);
-            }
-		    cci_return_event(endpoint, event);
-        }
-        usleep(1000);
+        poll_events(endpoint, &connection, &done);
+        usleep(100000);
 	}
+
+    if (!connection)
+        exit(0);
 
 	/* begin communication with server */
     for (i = 0; i < 10; i++) {
@@ -98,40 +119,15 @@ int main(int argc, char *argv[])
         memset(data, 0, sizeof(data));
         sprintf(hdr, "%4d", i);
         sprintf(data, "Hello World!");
-        ret = cci_send(connection, hdr, (uint32_t) strlen(hdr), data, (uint32_t) strlen(data), (void *)(uintptr_t) i, 0);
+        ret = cci_send(connection, hdr, (uint32_t) strlen(hdr),
+                       data, (uint32_t) strlen(data), (void *)(uintptr_t) i, 0);
         if (ret)
-            fprintf(stderr, "send returned %d\n", ret);
+            fprintf(stderr, "send %d returned %d\n", i, ret);
 
-again:
-        ret = cci_get_event(endpoint, &event, 0);
-        if (ret == CCI_SUCCESS && event) {
-            if (event->type == CCI_EVENT_SEND) {
-                fprintf(stderr, "send completed with %d\n", event->info.send.status);
-            } else if (event->type == CCI_EVENT_RECV) {
-                int len = event->info.recv.header_len + event->info.recv.data_len;
-
-                memcpy(buffer, event->info.recv.header_ptr, len);
-                buffer[len] = '\0';
-                fprintf(stderr, "received \"%s\"\n", buffer);
-            }
-            cci_return_event(endpoint, event);
-            goto again;
-        }
-        sleep(1);
+        poll_events(endpoint, &connection, &done);
+        usleep(10000);
     }
-    ret = cci_get_event(endpoint, &event, 0);
-    if (ret == CCI_SUCCESS && event) {
-        if (event->type == CCI_EVENT_SEND) {
-            fprintf(stderr, "send completed with %d\n", event->info.send.status);
-        } else if (event->type == CCI_EVENT_RECV) {
-            int len = event->info.recv.header_len + event->info.recv.data_len;
-
-            memcpy(buffer, event->info.recv.header_ptr, len);
-            buffer[len] = '\0';
-            fprintf(stderr, "received \"%s\"\n", buffer);
-        }
-        cci_return_event(endpoint, event);
-    }
+    poll_events(endpoint, &connection, &done);
 
 	/* clean up */
 	ret = cci_disconnect(connection);

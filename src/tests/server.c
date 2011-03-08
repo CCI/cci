@@ -97,17 +97,19 @@ again:
                 offset += len;
                 memcpy(buf + offset, event->info.recv.data_ptr, dlen);
                 offset += dlen;
-                fprintf(stdout, "recv'd \"%s\"\n", buf);
-                cci_send(connection, NULL, 0, buf, offset, NULL, 0);
+                fprintf(stderr, "recv'd \"%s\"\n", buf);
+                ret = cci_send(connection, NULL, 0, buf, offset, NULL, 0);
+                if (ret)
+                    fprintf(stderr, "send returned %d\n", ret);
             } else if (event->type == CCI_EVENT_SEND) {
-                fprintf(stdout, "completed send\n");
+                fprintf(stderr, "completed send\n");
             } else {
                 printf("event type %d\n", event->type);
             }
             cci_return_event(endpoint, event);
             goto again;
         }
-        usleep(500000);
+        usleep(1000);
     }
 
     /* clean up */
