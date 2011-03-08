@@ -338,6 +338,9 @@ static int sock_create_endpoint(cci_device_t *device,
     cci__dev_t *dev = NULL;
     cci__ep_t *ep = NULL;
     sock_ep_t *sep = NULL;
+    sock_dev_t *sdev;
+    struct sockaddr_in sin;
+    socklen_t len = sizeof(sin);
 
     CCI_ENTER;
 
@@ -382,7 +385,17 @@ static int sock_create_endpoint(cci_device_t *device,
     if (ret)
         goto out;
 
-    /* TODO need to bind to device */
+    /* bind socket to device */
+    sdev = dev->priv;
+    memset(&sin, 0, sizeof(sin));
+    sin.sin_family = AF_INET;
+    sin.sin_addr.s_addr = sdev->ip;
+
+    ret = bind(sep->sock, (const struct sockaddr *) &sin, len);
+    if (ret) {
+        ret = errno;
+        goto out;
+    }
 
     for (i = 0; i < SOCK_EP_HASH_SIZE; i++) {
         TAILQ_INIT(&sep->conn_hash[i]);
