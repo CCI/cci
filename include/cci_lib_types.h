@@ -202,6 +202,9 @@ typedef struct cci__lep {
     /*! List of idle connection requests */
     TAILQ_HEAD(s_lcrqs, cci__crq) crqs;
 
+    /*! List of passive connections pending REJECT replies */
+    TAILQ_HEAD(s_passive, cci__crq) passive;
+
     /*! Lock to protect crqs */
     pthread_mutex_t lock;
 
@@ -276,44 +279,6 @@ cci__get_svc_port(uint32_t *port)
     }
 
     return CCI_SUCCESS;
-}
-
-static inline cci__conn_t *
-cci__evt_to_conn(cci__evt_t *evt)
-{
-    cci_connection_t *connection = NULL;
-
-    switch (evt->event.type) {
-    case CCI_EVENT_SEND:
-        connection = evt->event.info.send.connection;
-        break;
-    case CCI_EVENT_RECV:
-        connection = evt->event.info.recv.connection;
-        break;
-    case CCI_EVENT_CONNECT_SUCCESS:
-    case CCI_EVENT_CONNECT_TIMEOUT:
-        connection = evt->event.info.other.u.connect.connection;
-        break;
-    default:
-        fprintf(stderr, "%s: unexpected type %d\n", __func__, evt->event.type);
-        break;
-    }
-    if (connection)
-        return container_of(connection, cci__conn_t, connection);
-    else
-        return NULL;
-}
-
-static inline cci__ep_t *
-cci__evt_to_ep(cci__evt_t *evt)
-{
-    cci__conn_t *conn;
-
-    conn = cci__evt_to_conn(evt);
-    if (conn)
-        return container_of((&conn->connection)->endpoint, cci__ep_t, endpoint);
-    else
-        return NULL;
 }
 
 extern int cci__debug;

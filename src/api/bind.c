@@ -83,6 +83,7 @@ int cci_bind(cci_device_t *device, int backlog, uint32_t *port,
             goto out;
         }
         TAILQ_INIT(&lep->crqs);
+        TAILQ_INIT(&lep->passive);
         pthread_mutex_init(&lep->lock, NULL);
         lep->backlog = backlog;
 
