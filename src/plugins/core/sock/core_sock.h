@@ -14,6 +14,8 @@
 
 #include <netinet/in.h>
 #include <assert.h>
+#include <arpa/inet.h>
+
 
 #include "cci/config.h"
 #include "cci.h"
