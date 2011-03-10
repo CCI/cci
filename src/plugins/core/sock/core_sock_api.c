@@ -2738,6 +2738,8 @@ sock_recvfrom_lep(cci__lep_t *lep)
     case SOCK_MSG_CONN_ACK:
     {
         char name[32];
+        cci__crq_t *c, *ctmp;
+        sock_crq_t *sc;
 
         memset(name, 0, sizeof(name));
         sock_sin_to_name(sin, name, sizeof(name));
@@ -2745,7 +2747,19 @@ sock_recvfrom_lep(cci__lep_t *lep)
         debug((CCI_DB_MSG|CCI_DB_CONN), "listening ep %d recv'd conn_ack "
               "from %s", slep->sock, name);
 
-        /* TODO remove crq from lep and return it to avail list */
+        /* remove crq from lep and return it to avail list */
+        pthread_mutex_lock(&lep->lock);
+        TAILQ_INSERT_HEAD(&lep->crqs, crq, entry);
+        TAILQ_FOREACH_SAFE(c, &lep->passive, entry, ctmp) {
+            sc = c->priv;
+            if (sc->peer_id == id) {
+                TAILQ_REMOVE(&lep->passive, c, entry);
+                /* hang on svc after droppping lep->lock */
+                TAILQ_INSERT_HEAD(&lep->crqs, c, entry);
+                break;
+            }
+        }
+        pthread_mutex_unlock(&lep->lock);
         break;
     }
     default:
