@@ -231,7 +231,10 @@ sock_pack_conn_request(sock_header_t *header, cci_conn_attribute_t attr,
 static inline void
 sock_pack_conn_reply(sock_header_t *header, uint8_t reply, uint32_t id)
 {
-    sock_pack_header(header, SOCK_MSG_CONN_REPLY, reply, sizeof(id), id);
+    if (reply == CCI_EVENT_CONNECT_SUCCESS)
+        sock_pack_header(header, SOCK_MSG_CONN_REPLY, reply, sizeof(id), id);
+    else
+        sock_pack_header(header, SOCK_MSG_CONN_REPLY, reply, 0, id);
 }
 
 /* connection ack header:
@@ -543,6 +546,15 @@ typedef struct sock_crq {
 
     /*! Client's sockaddr_in */
     const struct sockaddr_in sin;
+
+    /*! Peer's id if we reject */
+    uint32_t peer_id;
+
+    /*! Last send in microseconds if reject */
+    uint64_t last_attempt_us;
+
+    /*! Timeout in microseconds if reject */
+    uint64_t timeout_us;
 } sock_crq_t;
 
 typedef struct sock_svc {
