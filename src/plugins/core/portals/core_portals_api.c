@@ -5,13 +5,12 @@
  */
 
 #include "cci/config.h"
-
 #include <stdio.h>
-#include <portals/portals3.h>
-
 #include "cci.h"
 #include "plugins/core/core.h"
 #include "core_portals.h"
+
+portals_globals_t *pglobals = NULL;
 
 
 /*
@@ -164,12 +163,71 @@ static int portals_init(uint32_t abi_ver,
                         uint32_t *caps)
 {
     int                 iRC, iMax_devices;
+    int                 iReject;
+    cci__dev_t          *dev;
+    cci_device_t        **ds;
     ptl_interface_t     ifID;       /* portals interface */
     ptl_ni_limits_t     niLimit;    /* portals interface limits */
     ptl_handle_ni_t     niHandle;   /* portals interface handle */
-    printf("In portals_init\n");
+
+    CCI_ENTER;
+
 /*
- * Step 1.  Initialize the portals library.
+ * Step 1.  Extract portals devices from global configuration.
+ */
+    if( !(pglobals=calloc( 1, sizeof(*pglobals) )) )
+        return CCI_ENOMEM;          /* cannot save global device list */
+
+    if( !(ds=calloc( CCI_MAX_DEVICES, sizeof(*pglobals->devices) )) ) {
+
+        free(pglobals);
+        pglobals=NULL;
+        return CCI_ENOMEM;          /* cannot save list of devices */
+    }
+
+/*
+ * Start searching global configuration for portals devices.
+ */
+    iReject=1;
+    TAILQ_FOREACH( dev, &globals->devs, entry ) {
+
+        if(!strcmp( "portals", dev->driver )) { /* Found one */
+
+            const char    **arg;
+            cci_device_t  *device;
+            portals_dev_t *pdev;
+
+            iReject=0;
+            device = &dev->device;
+            device->max_send_size=268435456;  /* Wired @256MB for now */
+            device->rate = 46000000000; /* SeaStar2+, 6 ports, bps */
+            device->pci.domain = -1;    /* per CCI spec */
+            device->pci.bus = -1;       /* per CCI spec */
+            device->pci.dev = -1;       /* per CCI spec */
+            device->pci.func = -1;      /* per CCI spec */
+
+            dev->priv = calloc(1, sizeof(*dev->priv));
+            if (!dev->priv) {
+                free(pglobals->devices);
+                free(pglobals);
+                pglobals=NULL;
+                return CCI_ENOMEM;
+            }
+
+            pdev = dev->priv;
+        }
+    }
+
+    if(iReject) {                   /* No portals devices configured */
+        
+        free(pglobals->devices);
+        free(pglobals);
+        pglobals=NULL;
+        return CCI_ENODEV;
+    }
+
+/*
+ * Step 3.  Initialize the portals library.
  */
     if( (iRC=PtlInit( &iMax_devices ))!=PTL_OK ) {
 
@@ -187,7 +245,7 @@ static int portals_init(uint32_t abi_ver,
  */
     ifID=IFACE_FROM_BRIDGE_AND_NALID( PTL_BRIDGE_UK, PTL_IFACE_SS );
 /*
- * Step 2.  Initialize the network interface.
+ * Step 4.  Initialize the network interface.
  */
     iRC=PtlNIInit( ifID, PTL_PID_ANY, NULL, &niLimit, &niHandle );
     if( iRC!=PTL_OK ) {
@@ -227,7 +285,11 @@ static const char *portals_strerror(enum cci_status status)
 
 static int portals_get_devices(cci_device_t const ***devices)
 {
-    printf("In portals_get_devices\n");
+    CCI_ENTER;
+    int                 i, iTot, iRC;
+
+    iTot=sizeof(globals->devices);
+    fprintf( stdout, "There are %d devices.\n", iTot );
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
