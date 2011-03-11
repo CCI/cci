@@ -247,7 +247,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
             device->pci.dev = -1;       /* per CCI spec */
             device->pci.func = -1;      /* per CCI spec */
 
-            dev->priv = calloc(1, sizeof(*dev->priv));
+            dev->priv = calloc(1, sizeof(*sdev));
             if (!dev->priv) {
                 ret = CCI_ENOMEM;
                 goto out;
