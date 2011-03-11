@@ -2272,8 +2272,6 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
 
     sep = ep->priv;
 
-    debug(CCI_DB_WARN, "%s: sconn=%p", __func__, sconn);
-
     if (!sconn) {
         /* either this is a dup and the conn is now ready or
          * the conn is closed and we simply ack the msg
