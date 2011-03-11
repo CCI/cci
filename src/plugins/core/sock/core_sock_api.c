@@ -2030,7 +2030,7 @@ static int sock_sendv(cci_connection_t *connection,
             pthread_mutex_lock(&ep->lock);
             TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
             pthread_mutex_unlock(&ep->lock);
-            debug(CCI_DB_MSG, "sent UU msg");
+            debug(CCI_DB_MSG, "sent UU msg with %d bytes", tx->len - (int) sizeof(sock_header_t));
 
             sock_progress_dev(dev);
 
@@ -2565,7 +2565,7 @@ sock_drop_msg(cci_os_handle_t sock)
 static void
 sock_recvfrom_ep(cci__ep_t *ep)
 {
-    int ret = 0, drop_msg = 0, reply = 0;
+    int ret = 0, drop_msg = 0, q_rx = 0, reply = 0;
     uint8_t a;
     uint16_t b;
     uint32_t id;
@@ -2601,7 +2601,7 @@ sock_recvfrom_ep(cci__ep_t *ep)
     ret = recvfrom(sep->sock, rx->buffer, SOCK_PEEK_LEN,
                    MSG_PEEK, (struct sockaddr *)&sin, &sin_len);
     if (ret < (int) sizeof(sock_header_t)) {
-        drop_msg = 1;
+        q_rx = 1;
         goto out;
     }
 
@@ -2616,8 +2616,8 @@ sock_recvfrom_ep(cci__ep_t *ep)
         char name[32];
         memset(name, 0, sizeof(name));
         sock_sin_to_name(sin, name, sizeof(name));
-        debug((CCI_DB_MSG), "ep %d recv'd %s msg from %s",
-              sep->sock, sock_msg_type(type), name);
+        debug((CCI_DB_MSG), "ep %d recv'd %s msg from %s with %d bytes",
+              sep->sock, sock_msg_type(type), name, a + b);
     }
 
     /* if no conn, drop msg, requeue rx */
@@ -2676,12 +2676,13 @@ sock_recvfrom_ep(cci__ep_t *ep)
     }
 
 out:
-    if (drop_msg) {
+    if (drop_msg || q_rx) {
         pthread_mutex_lock(&sep->lock);
         TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
         pthread_mutex_unlock(&sep->lock);
-        sock_drop_msg(sep->sock);
     }
+    if (drop_msg)
+        sock_drop_msg(sep->sock);
 
     CCI_EXIT;
 
