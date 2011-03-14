@@ -158,7 +158,7 @@ do_client()
     while (!ready)
         sleep(1);
 
-    printf("Bytes\tLatency (one-way)\n");
+    printf("Bytes\tLatency (one-way)\tThroughput\n");
 
 	/* begin communication with server */
     for (current_size = 0;
@@ -180,7 +180,9 @@ do_client()
 
         gettimeofday(&end, NULL);
 
-        printf("%4d\t%6.2lf us\n", current_size, usecs(start, end) / (double) ITERS / 2.0);
+        printf("%4d\t%6.2lf us\t\t%6.2lf Mb/s\n",
+               current_size, usecs(start, end) / (double) ITERS / 2.0,
+               (double) ITERS * (double) current_size * 8.0 / usecs(start, end) / 2.0);
 
         count = 0;
         warmup = 0;
