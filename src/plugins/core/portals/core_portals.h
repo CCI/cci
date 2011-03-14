@@ -12,9 +12,18 @@
 
 BEGIN_C_DECLS
 
+#define PORTALS_PROG_TIME_US       (10000) /* try to progress every N microseconds */
+#define PORTALS_RESEND_TIME_SEC    (1)     /* time between resends in seconds */
+#define PORTALS_RESEND_CYCLES      (PORTALS_RESEND_TIME_SEC * 1000000 / PORTALS_PROG_TIME_US)
+
 typedef struct portals_dev {
 
-    ptl_process_id_t idp;
+    ptl_process_id_t                  idp;
+    TAILQ_HEAD(p_queued, portals_tx)  queued;  /*! Queued sends */
+    TAILQ_HEAD(p_pending, portals_tx) pending; /*! Pending sends */
+    pthread_mutex_t                   lock;    /*! For queued/pending */
+    int                        is_progressing; /*! Being progressed? */
+
 } portals_dev_t;
 
 typedef struct portals_globals {
