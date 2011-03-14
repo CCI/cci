@@ -546,6 +546,9 @@ out:
 
 static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
 {
+    cci__ep_t   *ep     = NULL;
+    sock_ep_t   *sep    = NULL;
+
     CCI_ENTER;
 
     if (!sglobals) {
@@ -553,8 +556,59 @@ static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
         return CCI_ENODEV;
     }
 
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    sep = ep->priv;
+
+    if (sep) {
+        int i;
+        cci__conn_t *conn;
+        sock_conn_t *sconn;
+
+        for (i = 0; i < SOCK_EP_HASH_SIZE; i++) {
+            while (!TAILQ_EMPTY(&sep->conn_hash[i])) {
+                sconn = TAILQ_FIRST(&sep->conn_hash[i]);
+                TAILQ_REMOVE(&sep->conn_hash[i], sconn, entry);
+                conn = sconn->conn;
+
+                free(conn);
+                free(sconn);
+            }
+            while (!TAILQ_EMPTY(&sep->active_hash[i])) {
+                sconn = TAILQ_FIRST(&sep->active_hash[i]);
+                TAILQ_REMOVE(&sep->active_hash[i], sconn, entry);
+                conn = sconn->conn;
+
+                free(conn);
+                free(sconn);
+            }
+        }
+        while (!TAILQ_EMPTY(&sep->txs)) {
+            sock_tx_t *tx;
+
+            tx = TAILQ_FIRST(&sep->txs);
+            TAILQ_REMOVE(&sep->txs, tx, tentry);
+            if (tx->buffer)
+                free(tx->buffer);
+            free(tx);
+        }
+        while (!TAILQ_EMPTY(&sep->rxs)) {
+            sock_rx_t *rx;
+
+            rx = TAILQ_FIRST(&sep->rxs);
+            TAILQ_REMOVE(&sep->rxs, rx, gentry);
+            if (rx->buffer)
+                free(rx->buffer);
+            free(rx);
+        }
+        if (sep->ids)
+            free(sep->ids);
+        if (sep->sock)
+            close(sep->sock);
+        free(sep);
+    }
+
     CCI_EXIT;
-    return CCI_ERR_NOT_IMPLEMENTED;
+    return CCI_SUCCESS;
 }
 
 /*! sock_bind()
@@ -691,6 +745,7 @@ static int sock_unbind(cci_service_t *service, cci_device_t *device)
 }
 
 
+/* NOTE: currently never called */
 static int sock_get_conn_req(cci_service_t *service, 
                                  cci_conn_req_t **conn_req)
 {
@@ -1141,13 +1196,6 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     sconn = conn->priv;
     sconn->conn = conn;
 
-    /* set up the connection */
-    conn->uri = strdup(server_uri);
-    if (!conn->uri) {
-        ret = CCI_ENOMEM;
-        goto out;
-    }
-
     /* conn->tx_timeout = 0  by default */
 
     connection = &conn->connection;
@@ -1273,6 +1321,13 @@ out:
 
 static int sock_disconnect(cci_connection_t *connection)
 {
+    int             i       = 0;
+    cci__conn_t     *conn   = NULL;
+    cci__ep_t       *ep     = NULL;
+    sock_conn_t     *sconn  = NULL;
+    sock_ep_t       *sep    = NULL;
+    cci_endpoint_t  *endpoint   = NULL;
+
     CCI_ENTER;
 
     if (!sglobals) {
@@ -1288,8 +1343,24 @@ static int sock_disconnect(cci_connection_t *connection)
      * free conn
      */
 
+    conn = container_of(connection, cci__conn_t, connection);
+    sconn = conn->priv;
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    sep = ep->priv;
+
+    if (conn->uri)
+        free((char *) conn->uri);
+
+    i = sock_ip_hash(sconn->sin.sin_addr.s_addr, sconn->sin.sin_port);
+    pthread_mutex_lock(&sep->lock);
+    TAILQ_REMOVE(&sep->conn_hash[i], sconn, entry);
+    pthread_mutex_unlock(&sep->lock);
+
+    free(sconn);
+    free(conn);
+
     CCI_EXIT;
-    return CCI_ERR_NOT_IMPLEMENTED;
+    return CCI_SUCCESS;
 }
 
 
@@ -1783,6 +1854,7 @@ sock_progress_queued(sock_dev_t *sdev)
             case SOCK_MSG_CONN_ACK:
             default:
                 /* TODO */
+                debug(CCI_DB_WARN, "%s: timeout of %s msg", __func__, sock_msg_type(tx->msg_type));
                 CCI_EXIT;
                 return;
             }
