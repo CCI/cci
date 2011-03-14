@@ -174,8 +174,6 @@ do_client()
             poll_events();
 
         gettimeofday(&start, NULL);
-        ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
-        if (ret) fprintf(stderr, "send returned %d\n", ret);
 
         while (count < ITERS)
             poll_events();
