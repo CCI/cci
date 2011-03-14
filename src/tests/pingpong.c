@@ -26,6 +26,7 @@ int connect_done = 0, done = 0;
 int ready = 0;
 int is_server = 0;
 int send = 0, recv = 0;
+int warmup = 0;
 int count = 0;
 char *name;
 char *server_uri;
@@ -71,8 +72,12 @@ again:
             } else {
                 recv--;
                 if (!is_server) {
-                    if (event->info.recv.data_len == current_size)
-                        count++;
+                    if (event->info.recv.data_len == current_size) {
+                        if (warmup < WARMUP)
+                            warmup++;
+                        else
+                            count++;
+                    }
                 } else {
                     if (event->info.recv.data_len > current_size)
                         current_size = event->info.recv.data_len;
@@ -162,6 +167,12 @@ do_client()
 
         send++;
         recv++;
+        ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
+        if (ret) fprintf(stderr, "send returned %d\n", ret);
+
+        while (count < WARMUP)
+            poll_events();
+
         gettimeofday(&start, NULL);
         ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
         if (ret) fprintf(stderr, "send returned %d\n", ret);
@@ -174,6 +185,8 @@ do_client()
         printf("%4d\t%6.2lf us\n", current_size, usecs(start, end) / (double) ITERS / 2.0);
 
         count = 0;
+        warmup = 0;
+
         if (current_size == 0)
             current_size++;
         else
