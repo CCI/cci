@@ -23,5 +23,6 @@ int cci_disconnect(cci_connection_t *connection)
         return CCI_EINVAL;
     }
 
+    /* NOTE the driver does all connection cleanup */
     return cci_core->disconnect(connection);
 }

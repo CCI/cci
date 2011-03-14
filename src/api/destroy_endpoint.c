@@ -19,9 +19,26 @@
 
 int cci_destroy_endpoint(cci_endpoint_t *endpoint)
 {
-    if (NULL == endpoint) {
-        return CCI_EINVAL;
-    }
+    int         ret     = CCI_SUCCESS;
+    cci__ep_t   *ep     = NULL;
+    cci__dev_t  *dev    = NULL;
 
+    if (NULL == endpoint)
+        return CCI_EINVAL;
+
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    dev = ep->dev;
+
+    pthread_mutex_lock(&dev->lock);
+    TAILQ_REMOVE(&dev->eps, ep, entry);
+    pthread_mutex_unlock(&dev->lock);
+
+    /* the driver is responsible for cleaning up ep->priv,
+     * the evts list, and any cci__conn_t that it is maintaining.
+     */
     return cci_core->destroy_endpoint(endpoint);
+
+    free(ep);
+
+    return ret;
 }
