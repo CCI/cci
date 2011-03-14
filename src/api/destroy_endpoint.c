@@ -36,7 +36,7 @@ int cci_destroy_endpoint(cci_endpoint_t *endpoint)
     /* the driver is responsible for cleaning up ep->priv,
      * the evts list, and any cci__conn_t that it is maintaining.
      */
-    return cci_core->destroy_endpoint(endpoint);
+    ret = cci_core->destroy_endpoint(endpoint);
 
     free(ep);
 

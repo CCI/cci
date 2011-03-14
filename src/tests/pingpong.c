@@ -291,6 +291,8 @@ int main(int argc, char *argv[])
         fprintf(stderr, "cci_destroy_endpoint() failed with %s\n", cci_strerror(ret));
         exit(EXIT_FAILURE);
     }
+    if (buffer)
+        free(buffer);
     ret = cci_free_devices((cci_device_t const **) devices);
     if (ret) {
         fprintf(stderr, "cci_free_devices() failed with %s\n", cci_strerror(ret));
