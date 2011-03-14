@@ -18,7 +18,7 @@
 #include "cci.h"
 
 #define DFLT_PORT   54321
-#define ITERS       1000
+#define ITERS       100000
 #define WARMUP      1000
 
 /* Globals */
@@ -70,8 +70,13 @@ again:
                 ready = 1;
             } else {
                 recv--;
-                if (!is_server)
-                    count++;
+                if (!is_server) {
+                    if (event->info.recv.data_len == current_size)
+                        count++;
+                } else {
+                    if (event->info.recv.data_len > current_size)
+                        current_size = event->info.recv.data_len;
+                }
                 if (is_server ||
                     count < ITERS) {
                     send++;
@@ -80,7 +85,9 @@ again:
                         done = 1;
                         return;
                     }
-                    cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
+                    ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
+                    if (ret)
+                        fprintf(stderr, "%s: send returned %s\n", __func__, cci_strerror(ret));
                 }
             }
             break;
@@ -118,8 +125,6 @@ void
 do_client()
 {
     int ret;
-    static int last = 0;
-    char *buffer = NULL;
     struct timeval start, end;
     cci_conn_attribute_t type = CCI_CONN_ATTR_UU;
 
@@ -131,10 +136,8 @@ do_client()
     }
 
 	/* poll for connect completion */
-	while (!connect_done) {
+	while (!connect_done)
         poll_events();
-        usleep(10000);
-	}
 
     if (!connection) {
         fprintf(stderr, "no connection\n");
@@ -163,21 +166,8 @@ do_client()
         ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
         if (ret) fprintf(stderr, "send returned %d\n", ret);
 
-        while (count < ITERS) {
+        while (count < ITERS)
             poll_events();
-            if (type != CCI_CONN_ATTR_UU)
-                continue;
-            if (last == count) {
-                usleep(1);
-                if (last == count) {
-                    cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
-                } else {
-                    last = count;
-                }
-            } else {
-                last = count;
-            }
-        }
 
         gettimeofday(&end, NULL);
 
@@ -216,14 +206,18 @@ do_server()
             accept = 1;
             ready = 1;
             cci_accept(conn_req, endpoint, &connection);
+
+            buffer = calloc(1, connection->max_send_size);
+            if (!buffer) {
+                fprintf(stderr, "unable to alloc buffer\n");
+                return;
+            }
             cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
         }
     }
 
-    while (!done) {
+    while (!done)
         poll_events();
-        usleep(1);
-    }
 
     /* clean up */
     cci_unbind(service, NULL);
