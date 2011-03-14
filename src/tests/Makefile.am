@@ -7,6 +7,8 @@ AM_LDFLAGS = $(top_builddir)/src/libcci.la
 
 TESTS = \
         init	\
-	server
+	server	\
+	client	\
+	pingpong
 
 check_PROGRAMS = $(TESTS)

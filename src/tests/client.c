@@ -43,8 +43,11 @@ again:
             *done = 1;
             *connection = event->info.other.u.connect.connection;
             break;
+        case CCI_EVENT_CONNECT_TIMEOUT:
         case CCI_EVENT_CONNECT_REJECTED:
             *done = 1;
+            *connection = NULL;
+            break;
         default:
             fprintf(stderr, "ignoring event type %d\n", event->type);
         }
@@ -104,7 +107,7 @@ int main(int argc, char *argv[])
 	/* poll for connect completion */
 	while (!done) {
         poll_events(endpoint, &connection, &done);
-        usleep(100000);
+        usleep(1000);
 	}
 
     if (!connection)
@@ -125,7 +128,7 @@ int main(int argc, char *argv[])
             fprintf(stderr, "send %d returned %d\n", i, ret);
 
         poll_events(endpoint, &connection, &done);
-        usleep(10000);
+        usleep(1000);
     }
     poll_events(endpoint, &connection, &done);
 

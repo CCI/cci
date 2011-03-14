@@ -56,6 +56,27 @@ const char *cci_strerror(enum cci_status status)
     case CCI_ENOMEM:
         return "CCI_ENOMEM";
 
+    case CCI_ENODEV:
+        return "CCI_ENODEV";
+
+    case CCI_EBUSY:
+        return "CCI_EBUSY";
+
+    case CCI_ERANGE:
+        return "CCI_ERANGE";
+
+    case CCI_EAGAIN:
+        return "CCI_EAGAIN";
+
+    case CCI_ENOBUFS:
+        return "CCI_ENOBUFS";
+
+    case CCI_EMSGSIZE:
+        return "CCI_EMSGSIZE";
+
+    case CCI_ENOMSG:
+        return "CCI_ENOMSG";
+
     default:
         return cci_core->strerror(status);
     }

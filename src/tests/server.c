@@ -27,27 +27,27 @@ int main(int argc, char *argv[])
 
     ret = cci_init(CCI_ABI_VERSION, 0, &caps);
     if (ret) {
-        fprintf(stderr, "cci_init() failed with %s\n", strerror(ret));
+        fprintf(stderr, "cci_init() failed with %s\n", cci_strerror(ret));
         exit(EXIT_FAILURE);
     }
 
     ret = cci_get_devices((cci_device_t const *** const) &devices);
     if (ret) {
-        fprintf(stderr, "cci_get_devices() failed with %s\n", strerror(ret));
+        fprintf(stderr, "cci_get_devices() failed with %s\n", cci_strerror(ret));
         exit(EXIT_FAILURE);
     }
 
     /* create an endpoint? */
     ret = cci_create_endpoint(NULL, 0, &endpoint, &ep_fd);
     if (ret) {
-        fprintf(stderr, "cci_create_endpoint() failed with %s\n", strerror(ret));
+        fprintf(stderr, "cci_create_endpoint() failed with %s\n", cci_strerror(ret));
         exit(EXIT_FAILURE);
     }
 
     /* we don't associate the endpoint with the service? */
     ret = cci_bind(devices[0], 10, &port,&service, &bind_fd);
     if (ret) {
-        fprintf(stderr, "cci_bind() failed with %s\n", strerror(ret));
+        fprintf(stderr, "cci_bind() failed with %s\n", cci_strerror(ret));
         exit(EXIT_FAILURE);
     }
 
