@@ -216,7 +216,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
         return CCI_ENOMEM;
     }
 
-    srandomdev();
+    srandom((unsigned int) sock_get_usecs());
 
     devices = calloc(CCI_MAX_DEVICES, sizeof(*sglobals->devices));
     if (!devices) {
