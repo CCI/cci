@@ -23,13 +23,15 @@
 
 BEGIN_C_DECLS
 
+#define SOCK_AM_SIZE            (8192)  /* 8 KB - assume jumbo frames */
+
 #define SOCK_EP_MAX_HDR_SIZE    (32)    /* bytes */
 #define SOCK_EP_TX_TIMEOUT_SEC  (60)    /* seconds for now */
 #define SOCK_EP_RX_CNT          (256)   /* number of rx active messages */
 #define SOCK_EP_TX_CNT          (256)   /* number of tx active messages */
-#define SOCK_EP_BUF_LEN         (8192)  /* bytes including wire header */
+#define SOCK_EP_BUF_LEN         (SOCK_AM_SIZE + SOCK_EP_MAX_HDR_SIZE)
+                                /* bytes including wire header */
 
-#define SOCK_AM_SIZE            (8192)  /* 8 KB - assume jumbo frames */
 #define SOCK_EP_HASH_SIZE       (256)   /* nice round number */
 
 #define SOCK_BLOCK_SIZE         (64)    /* use 64b blocks for id storage */
