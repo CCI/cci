@@ -340,8 +340,14 @@ static int sock_get_devices(cci_device_t const ***devices)
 }
 
 
+/* NOTE the CCI layer has already unbound all devices 
+ *      and destroyed all endpoints.
+ *      All we need to do if free dev->priv
+ */
 static int sock_free_devices(cci_device_t const **devices)
 {
+    cci__dev_t *dev = NULL;
+
     CCI_ENTER;
 
     if (!sglobals) {
@@ -349,24 +355,17 @@ static int sock_free_devices(cci_device_t const **devices)
         return CCI_ENODEV;
     }
 
-    /* tear everything down */
+    /* let the progress thread know we are going away */
+    sglobals->shutdown = 1;
+    usleep(SOCK_PROG_TIME_US);
 
-    /* for each device
-     *     for each endpoint
-     *         for each connection
-     *             close conn
-     *         for each tx/rx
-     *             free it
-     *         close socket
-     *     for each listening endpoint
-     *         remove from service
-     *         for each conn_req
-     *             free it
-     *         close socket
-     */
+    pthread_mutex_lock(&globals->lock);
+    TAILQ_FOREACH(dev, &globals->devs, entry)
+        free(dev->priv);
+    pthread_mutex_unlock(&globals->lock);
 
     CCI_EXIT;
-    return CCI_ERR_NOT_IMPLEMENTED;
+    return CCI_SUCCESS;
 }
 
 static inline int
@@ -730,9 +729,16 @@ out:
     return ret;
 }
 
-
+/* We only cleanup the private lep and crqs */
 static int sock_unbind(cci_service_t *service, cci_device_t *device)
 {
+    cci__dev_t  *dev    = NULL;
+    cci__svc_t  *svc    = NULL;
+    cci__lep_t  *lep    = NULL;
+    cci__crq_t  *crq    = NULL;
+    sock_lep_t  *slep   = NULL;
+    sock_crq_t  *scrq   = NULL;
+
     CCI_ENTER;
 
     if (!sglobals) {
@@ -740,8 +746,33 @@ static int sock_unbind(cci_service_t *service, cci_device_t *device)
         return CCI_ENODEV;
     }
 
+    dev = container_of(device, cci__dev_t, device);
+    svc = container_of(service, cci__svc_t, service);
+
+    pthread_mutex_lock(&svc->lock);
+    TAILQ_FOREACH(lep, &svc->leps, sentry) {
+        if (lep->dev == dev) {
+            break;
+        }
+    }
+    pthread_mutex_unlock(&svc->lock);
+
+    slep = lep->priv;
+
+    pthread_mutex_lock(&lep->lock);
+    TAILQ_FOREACH(crq, &lep->all_crqs, lentry) {
+        scrq = crq->priv;
+        free(scrq->buffer);
+        free(scrq);
+    }
+    close(slep->sock);
+    /* TODO close(slep->fd); */
+    pthread_mutex_unlock(&lep->lock);
+
+    free(slep);
+
     CCI_EXIT;
-    return CCI_ERR_NOT_IMPLEMENTED;
+    return CCI_SUCCESS;
 }
 
 
@@ -2785,6 +2816,10 @@ sock_recvfrom_lep(cci__lep_t *lep)
 
     slep = lep->priv;
     pthread_mutex_lock(&lep->lock);
+    if (lep->state == CCI_LEP_CLOSING) {
+        pthread_mutex_unlock(&lep->lock);
+        return;
+    }
     if (!TAILQ_EMPTY(&lep->crqs)) {
         crq = TAILQ_FIRST(&lep->crqs);
         TAILQ_REMOVE(&lep->crqs, crq, entry);

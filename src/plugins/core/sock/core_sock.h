@@ -557,10 +557,6 @@ typedef struct sock_crq {
     uint64_t timeout_us;
 } sock_crq_t;
 
-typedef struct sock_svc {
-    int foo;
-} sock_svc_t;
-
 typedef struct sock_globals {
     /*! Number of sock devices */
     int count;
