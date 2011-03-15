@@ -71,9 +71,9 @@ int cci_unbind(cci_service_t *service, cci_device_t *device)
     pthread_mutex_lock(&svc->lock);
     if (TAILQ_EMPTY(&svc->leps)) {
         TAILQ_REMOVE(&globals->svcs, svc, entry);
+        pthread_mutex_unlock(&svc->lock);
         free(svc);
     }
-    pthread_mutex_unlock(&svc->lock);
     pthread_mutex_unlock(&globals->lock);
 
     return ret;

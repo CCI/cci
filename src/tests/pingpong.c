@@ -156,7 +156,7 @@ do_client()
     }
 
     while (!ready)
-        sleep(1);
+        poll_events();
 
     printf("Bytes\tLatency (one-way)\tThroughput\n");
 

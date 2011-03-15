@@ -76,6 +76,7 @@ int cci_free_devices(cci_device_t const **devices)
 
     /* free globals */
     free(globals->devices);
+    free(globals);
 
     return CCI_SUCCESS;
 }
