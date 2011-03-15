@@ -28,7 +28,9 @@
 #include "plugins/core/core.h"
 #include "core_sock.h"
 
+int shut_down = 0;
 sock_globals_t *sglobals = NULL;
+pthread_t tid;
 
 /*
  * Local functions
@@ -203,7 +205,6 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 {
     int ret;
     cci__dev_t *dev;
-    pthread_t pid;
     cci_device_t **devices;
 
     CCI_ENTER;
@@ -284,7 +285,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 
     *((cci_device_t ***) &sglobals->devices) = devices;
 
-    ret = pthread_create(&pid, NULL, sock_progress_thread, NULL);
+    ret = pthread_create(&tid, NULL, sock_progress_thread, NULL);
     if (ret)
         goto out;
 
@@ -356,13 +357,16 @@ static int sock_free_devices(cci_device_t const **devices)
     }
 
     /* let the progress thread know we are going away */
-    sglobals->shutdown = 1;
-    usleep(SOCK_PROG_TIME_US);
+    shut_down = 1;
+    pthread_join(tid, NULL);
 
     pthread_mutex_lock(&globals->lock);
     TAILQ_FOREACH(dev, &globals->devs, entry)
         free(dev->priv);
     pthread_mutex_unlock(&globals->lock);
+
+    free(sglobals->devices);
+    free(sglobals);
 
     CCI_EXIT;
     return CCI_SUCCESS;
@@ -472,7 +476,7 @@ static int sock_create_endpoint(cci_device_t *device,
         }
         tx->evt.event.type = CCI_EVENT_SEND;
         tx->evt.ep = ep;
-        tx->buffer = malloc(ep->buffer_len);
+        tx->buffer = calloc(1, ep->buffer_len);
         if (!tx->buffer) {
             ret = CCI_ENOMEM;
             goto out;
@@ -493,7 +497,7 @@ static int sock_create_endpoint(cci_device_t *device,
         }
         rx->evt.event.type = CCI_EVENT_RECV;
         rx->evt.ep = ep;
-        rx->buffer = malloc(ep->buffer_len);
+        rx->buffer = calloc(1, ep->buffer_len);
         if (!rx->buffer) {
             ret = CCI_ENOMEM;
             goto out;
@@ -2975,7 +2979,7 @@ sock_progress_dev(cci__dev_t *dev)
 
 static void *sock_progress_thread(void *arg)
 {
-    while (!sglobals->shutdown) {
+    while (!shut_down) {
         cci__dev_t *dev;
         cci_device_t const **device;
 
