@@ -83,6 +83,7 @@ int cci_bind(cci_device_t *device, int backlog, uint32_t *port,
             goto out;
         }
         TAILQ_INIT(&lep->crqs);
+        TAILQ_INIT(&lep->all_crqs);
         TAILQ_INIT(&lep->passive);
         pthread_mutex_init(&lep->lock, NULL);
         lep->backlog = backlog;
@@ -99,6 +100,7 @@ int cci_bind(cci_device_t *device, int backlog, uint32_t *port,
             crq->lep = lep;
             /* the driver fills in the cci_conn_req_t */
             TAILQ_INSERT_TAIL(&lep->crqs, crq, entry);
+            TAILQ_INSERT_TAIL(&lep->all_crqs, crq, lentry);
         }
 
         /* add endpoint to dev and svc */
@@ -129,6 +131,8 @@ int cci_bind(cci_device_t *device, int backlog, uint32_t *port,
     ret =  cci_core->bind(device, backlog, port, service, fd);
     if (ret)
         goto out_w_remove;
+
+    lep->state = CCI_LEP_READY;
 
     return CCI_SUCCESS;
 

@@ -124,6 +124,9 @@ typedef struct cci__crq {
     /*! Entry to hang on lep->crqs and svc->crqs */
     TAILQ_ENTRY(cci__crq) entry;
 
+    /*! Entry to hang on lep->all_crqs for clean up */
+    TAILQ_ENTRY(cci__crq) lentry;
+
     /*! Pointer to device specific struct */
     void *priv;
 } cci__crq_t;
@@ -182,8 +185,17 @@ typedef struct cci__evt {
     void *priv;
 } cci__evt_t;
 
+typedef enum cci__lep_state {
+    CCI_LEP_CLOSING = -1,
+    CCI_LEP_INIT,
+    CCI_LEP_READY,
+} cci__lep_state_t;
+
 /*! CCI private listening endpoint (created when device is bound to service) */
 typedef struct cci__lep {
+    /*! Is this listening endpoint usable? */
+    cci__lep_state_t state;
+
     /*! Owning device */
     cci__dev_t *dev;
 
@@ -201,6 +213,9 @@ typedef struct cci__lep {
 
     /*! List of idle connection requests */
     TAILQ_HEAD(s_lcrqs, cci__crq) crqs;
+
+    /*! List of all connection requests */
+    TAILQ_HEAD(s_acrqs, cci__crq) all_crqs;
 
     /*! List of passive connections pending REJECT replies */
     TAILQ_HEAD(s_passive, cci__crq) passive;

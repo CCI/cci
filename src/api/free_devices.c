@@ -16,23 +16,66 @@
 #include "cci.h"
 #include "plugins/core/core.h"
 
+extern void cci__free_dev(cci__dev_t *dev);
 
 int cci_free_devices(cci_device_t const **devices)
 {
+    cci__dev_t  *dev    = NULL;
+
     if (NULL == devices || NULL == *devices) {
         return CCI_EINVAL;
     }
 
-    cci_core->free_devices(devices);
+    /* unbind services */
+    pthread_mutex_lock(&globals->lock);
+    while (!TAILQ_EMPTY(&globals->svcs)) {
+        cci__svc_t *svc = TAILQ_FIRST(&globals->svcs);
+        cci__lep_t *lep = NULL;
 
-    /* TODO */
+        pthread_mutex_lock(&svc->lock);
+        if (!TAILQ_EMPTY(&svc->leps)) {
+            lep = TAILQ_FIRST(&svc->leps);
+        }   
+        pthread_mutex_unlock(&svc->lock);
+        pthread_mutex_unlock(&globals->lock);
+        if (lep)
+            cci_unbind(&lep->svc->service, &lep->dev->device);
+
+        pthread_mutex_lock(&globals->lock);
+    }
+    pthread_mutex_unlock(&globals->lock);
+
     /* for each device
      *     for each endpoint
-     *         free it
-     *     for each listening endpoint
-     *         free it
-     *     free it
-     */             
+     *         close_endpoint
+     */
+
+    pthread_mutex_lock(&globals->lock);
+    TAILQ_FOREACH(dev, &globals->devs, entry) {
+        pthread_mutex_lock(&dev->lock);
+        while (!TAILQ_EMPTY(&dev->eps)) {
+            cci__ep_t *ep = TAILQ_FIRST(&dev->eps);
+            pthread_mutex_unlock(&dev->lock);
+            cci_destroy_endpoint(&ep->endpoint);
+            pthread_mutex_lock(&dev->lock);
+        }
+        pthread_mutex_unlock(&dev->lock);
+    }
+    pthread_mutex_unlock(&globals->lock);
+
+    /* let the driver clean up the private device */
+    cci_core->free_devices(devices);
+
+    pthread_mutex_lock(&globals->lock);
+    while (!TAILQ_EMPTY(&globals->devs)) {
+        cci__dev_t *dev = TAILQ_FIRST(&globals->devs);
+        TAILQ_REMOVE(&globals->devs, dev, entry);
+        cci__free_dev(dev);
+    }
+    pthread_mutex_unlock(&globals->lock);
+
+    /* free globals */
+    free(globals->devices);
 
     return CCI_SUCCESS;
 }
