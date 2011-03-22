@@ -23,14 +23,15 @@
 
 BEGIN_C_DECLS
 
-#define SOCK_AM_SIZE            (8192)  /* 8 KB - assume jumbo frames */
+#define SOCK_UDP_MAX            (65507) /* 64 KB - 8 B UDP - 20 B IP */
+#define SOCK_MAX_HDR_SIZE       (64)    /* max sock header size */
+#define SOCK_MAX_HDRS           (SOCK_MAX_HDR_SIZE + 20 + 8) /* IP + UDP */
+#define SOCK_DEFAULT_MSS        (8192)  /* 8 KB - assume jumbo frames */
 
-#define SOCK_EP_MAX_HDR_SIZE    (32)    /* bytes */
+#define SOCK_EP_MAX_HDR_SIZE    (32)    /* max user header size */
 #define SOCK_EP_TX_TIMEOUT_SEC  (60)    /* seconds for now */
-#define SOCK_EP_RX_CNT          (256)   /* number of rx active messages */
-#define SOCK_EP_TX_CNT          (256)   /* number of tx active messages */
-#define SOCK_EP_BUF_LEN         (SOCK_AM_SIZE + SOCK_EP_MAX_HDR_SIZE)
-                                /* bytes including wire header */
+#define SOCK_EP_RX_CNT          (1024)  /* number of rx active messages */
+#define SOCK_EP_TX_CNT          (128)   /* number of tx active messages */
 
 #define SOCK_EP_HASH_SIZE       (256)   /* nice round number */
 
@@ -80,6 +81,7 @@ sock_get_usecs(void)
  *
  * A sock device may have these items:
  *
+ * mss = 9000           # max_send_size - default 8192
  * listen_port = 54321  # port to listen on
  * min_port = 4444      # lowest port to use for endpoints
  * max_port = 5555      # highest port to use for endpoints
@@ -190,7 +192,64 @@ sock_parse_header(sock_header_t *header,
     *c = ntohl(header->c);
 }
 
+/* Reliable message headers (RO and RU) */
+
+#define SOCK_SEQ_BITS       (31)
+#define SOCK_SEQ_MASK       ((1 << (SOCK_SEQ_BITS - 1)) - 1)
+#define SOCK_SEQ_MAX        (SOCK_SEQ_MASK)
+
+#define SOCK_ACK_MASK       (SOCK_SEQ_MASK)
+#define SOCK_ACK_MAX        (SOCK_SEQ_MAX)
+
+/* sequence and timestamp
+
+    <---------- 32 bits ---------->
+   +-------------------------------+
+   |              seq              |
+   +---------------+---------------+
+   |           timestamp           |
+   +-------------------------------+
+
+*/
+
+typedef struct sock_seq_ts {
+    uint32_t seq;
+    uint32_t ts;
+} sock_seq_ts_t;
+
+static inline void
+sock_pack_seq_ts(sock_seq_ts_t *sa, uint32_t seq, uint32_t ts)
+{
+    assert(seq <= SOCK_SEQ_MAX);
+
+    sa->seq = htonl(seq);
+    sa->ts = htonl(ts);
+}
+
+static inline void
+sock_parse_seq_ts(sock_seq_ts_t *sa, uint32_t *seq, uint32_t *ts)
+{
+    *seq = ntohl(sa->seq);
+    *ts = ntohl(sa->ts);
+}
+
+/* reliable header */
+
+typedef struct sock_header_r {
+    sock_header_t header;
+    sock_seq_ts_t seq_ts;
+} sock_header_r_t;
+
 /* Common message headers (RO, RU, and UU) */
+
+/* connection request/reply */
+typedef struct sock_handshake {
+    uint32_t id;                    /* id that peer uses when sending to me */
+    uint32_t ack;                   /* to ack the request and reply */
+    uint32_t max_recv_buffer_count; /* max recvs that I can handle */
+    uint16_t mss;                   /* lower of each endpoint */
+    uint16_t reserved;
+} sock_handshake_t;
 
 /* connection request header:
 
@@ -199,11 +258,28 @@ sock_parse_header(sock_header_t *header,
    +-------+-------+---------------+
    | type  | attr  |   data len    |
    +-------+-------+---------------+
-   |              id               |
+   |               0               |
    +-------------------------------+
+
+   +-------------------------------+
+   |           client id           |
+   +-------------------------------+
+   |              ack              |
+   +-------------------------------+
+   |      max_recv_buffer_count    |
+   +-------------------------------+
+   |      mss      |   reserved    |
+   +---------------+---------------+
 
    The peer uses the id when sending to us.
    The user data follows the header.
+
+   attr: CCI_CONN_ATTR_[UU|RU|RO]
+   data len: amount of user data following header
+   id: peer uses ID when sending to us
+   seq: starting sequence number for this connection
+   ts: timestamp in usecs
+   mss: max send size
 
  */
 
@@ -221,22 +297,31 @@ sock_pack_conn_request(sock_header_t *header, cci_conn_attribute_t attr,
    +-------+-------+---------------+
    | type  | reply |   reserved    |
    +-------+-------+---------------+
-   |              id               |
+   |           client id           |
    +-------------------------------+
+
+   +-------------------------------+
+   |           server id           |
+   +-------------------------------+
+   |              seq              |
+   +-------------------------------+
+   |           timestamp           |
+   +-------------------------------+
+   |      mss      |     cwnd      |
+   +---------------+---------------+
 
    The reply is 0 for success else errno.
    I use this ID when sending to this peer.
    The accepting peer will send his id back in the payload (length 4)
 
+   reply: CCI_EVENT_CONNECT_[SUCCESS|REJECTED]
+   mss: max app payload (user header and user data)
  */
 
 static inline void
 sock_pack_conn_reply(sock_header_t *header, uint8_t reply, uint32_t id)
 {
-    if (reply == CCI_EVENT_CONNECT_SUCCESS)
-        sock_pack_header(header, SOCK_MSG_CONN_REPLY, reply, sizeof(id), id);
-    else
-        sock_pack_header(header, SOCK_MSG_CONN_REPLY, reply, 0, id);
+    sock_pack_header(header, SOCK_MSG_CONN_REPLY, reply, 0, id);
 }
 
 /* connection ack header:
@@ -299,65 +384,20 @@ sock_pack_keepalive(sock_header_t *header, uint32_t id)
     sock_pack_header(header, SOCK_MSG_KEEPALIVE, 0, 0, id);
 }
 
-/* Reliable message headers (RO and RU) */
-
-#define SOCK_SEQ_BITS       (48)
-#define SOCK_SEQ_MASK       ((1ULL << SOCK_SEQ_BITS) - 1)
-#define SOCK_SEQ_MAX        (SOCK_SEQ_MASK)
-
-#define SOCK_ACK_MASK       (SOCK_SEQ_MASK)
-#define SOCK_ACK_MAX        (SOCK_SEQ_MAX)
-
-/* sequence and ack
-
-    <---------- 32 bits ---------->
-    <----- 16 ----> <----- 16 ---->
-   +-------------------------------+
-   |     seq (bits 16 - 47)        |
-   +---------------+---------------+
-   |  seq (0-15)   |  ack (32-47)  |
-   +---------------+---------------+
-   |      ack (bits 0 - 31)        |
-   +-------------------------------+
-
-*/
-
-typedef struct sock_seq_ack {
-    uint32_t seq;
-    uint32_t seq_ack;
-    uint32_t ack;
-} sock_seq_ack_t;
-
-static inline void
-sock_pack_seq_ack(sock_seq_ack_t *sa, uint64_t seq, uint64_t ack)
-{
-    uint32_t tmp;
-
-    assert(seq <= SOCK_SEQ_MAX);
-    assert(ack <= SOCK_ACK_MAX);
-
-    sa->seq = htonl((uint32_t) (seq >> 16));
-    tmp = (uint32_t) ((seq & 0xFFFFULL) << 16);
-    tmp |= (uint32_t) (ack >> 32);
-    sa->seq_ack = htonl(tmp);
-    sa->ack = htonl((uint32_t) ack);
-}
-
-static inline void
-sock_parse_seq_ack(sock_seq_ack_t *sa, uint64_t *seq, uint64_t *ack)
-{
-    *seq = ((uint64_t) ntohl(sa->seq)) << 16;
-    *seq |= (uint64_t) (ntohl(sa->seq_ack) >> 16);
-    *ack = (uint64_t) ntohl(sa->ack);
-    *ack |= ((uint64_t) (ntohl(sa->seq_ack) & 0xFFFF)) << 32;
-}
-
-/* reliable header */
-
-typedef struct sock_header_r {
-    sock_header_t header;
-    sock_seq_ack_t seq_ack;
-} sock_header_r_t;
+#if 0
+typedef struct sock_pkt {
+    union {
+        sock_header_t u;
+        sock_header_r_t r;
+    } hdr;
+    union {
+        sock_handshake_t hs;
+        sock_ack_t ack;
+        sock_rma_t rma;
+    } u;
+    char payload[0];
+} sock_pkt_t;
+#endif
 
 /* RMA headers */
 
@@ -408,7 +448,7 @@ typedef struct sock_tx {
     /*! If reliable, use the following: */
 
     /*! Sequence number */
-    uint64_t seq;
+    uint32_t seq;
 
     /*! Last send in microseconds */
     uint64_t last_attempt_us;
@@ -504,14 +544,20 @@ typedef struct sock_conn {
     /*! ID we assigned to peer - peer uses to send to us and we use to look up conn */
     uint32_t id;
 
+    /*! Max sends in flight to this peer */
+    uint32_t max_tx_cnt;
+
     /*! Entry to hang on sock_ep->conns[hash] */
     TAILQ_ENTRY(sock_conn) entry;
 
     /*! Last sequence number sent */
-    uint64_t seq;
+    uint32_t seq;
 
     /*! Peer's last seqno received */
-    uint64_t ack;
+    uint32_t ack;
+
+    /*! Peer's last timestamp received */
+    uint32_t ts;
 
     /*! Lock to protect seq, ack */
     pthread_mutex_t lock;

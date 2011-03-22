@@ -233,7 +233,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
             sock_dev_t *sdev;
 
             device = &dev->device;
-            device->max_send_size = SOCK_AM_SIZE;
+            device->max_send_size = SOCK_DEFAULT_MSS;
 
             /* TODO determine link rate
              *
@@ -241,7 +241,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
              * bsd/darwin->ioctl(SIOCGIFMEDIA)->ifm_active
              * windows ?
              */
-            device->rate = 10000000000;
+            device->rate = 10000000000ULL;
 
             device->pci.domain = -1;    /* per CCI spec */
             device->pci.bus = -1;       /* per CCI spec */
@@ -268,6 +268,14 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
                     const char *ip = *arg + 3;
 
                     sdev->ip= inet_addr(ip); /* network order */
+                } else if (0 == strncmp("mss=", *arg, 4)) {
+                    const char *mss_str = *arg + 4;
+                    uint32_t mss = strtol(mss_str, NULL, 0);
+                    if (mss + SOCK_MAX_HDR_SIZE > SOCK_UDP_MAX)
+                        mss = SOCK_UDP_MAX - SOCK_MAX_HDR_SIZE;
+
+                    assert(mss > SOCK_MAX_HDRS + SOCK_EP_MAX_HDR_SIZE);
+                    device->max_send_size = mss;
                 }
             }
             if (sdev->ip != 0) {
@@ -423,7 +431,7 @@ static int sock_create_endpoint(cci_device_t *device,
     ep->max_hdr_size = SOCK_EP_MAX_HDR_SIZE;
     ep->rx_buf_cnt = SOCK_EP_RX_CNT;
     ep->tx_buf_cnt = SOCK_EP_TX_CNT;
-    ep->buffer_len = SOCK_EP_BUF_LEN;
+    ep->buffer_len = dev->device.max_send_size + SOCK_MAX_HDRS;
     ep->tx_timeout = SOCK_EP_TX_TIMEOUT_SEC * 1000000;
 
     sep = ep->priv;
@@ -832,15 +840,10 @@ sock_put_id(sock_ep_t *ep, uint32_t id)
     return;
 }
 
-static inline uint64_t
+static inline uint32_t
 sock_get_new_seq(void)
 {
-    uint64_t seq = 0ULL;
-
-    seq = random() << 16; /* fill bits 16-47 */
-    seq |= random() & 0xFFFFULL; /* fill bits 0-15 */
-
-    return seq;
+    return (random() & SOCK_SEQ_MASK);
 }
 
 /* The endpoint maintains 256 lists. Hash the ip and port and return the index
@@ -861,9 +864,9 @@ static int sock_accept(cci_conn_req_t *conn_req,
 {
     uint8_t         a;
     uint16_t        b;
-    uint32_t        peer_id, id;
-    uint64_t        peer_seq;
-    uint64_t        peer_ack;
+    uint32_t        unused;
+    uint32_t        peer_seq;
+    uint32_t        peer_ts;
     int             i;
     cci__ep_t       *ep     = NULL;
     cci__crq_t      *crq    = NULL;
@@ -877,7 +880,8 @@ static int sock_accept(cci_conn_req_t *conn_req,
     sock_header_r_t *hdr_r  = NULL;
     sock_msg_type_t type;
     sock_tx_t       *tx     = NULL;
-    void            *ptr    = NULL;
+    sock_handshake_t    *hs = NULL;
+
 
     CCI_ENTER;
 
@@ -890,6 +894,8 @@ static int sock_accept(cci_conn_req_t *conn_req,
     sep = ep->priv;
     crq = container_of(conn_req, cci__crq_t, conn_req);
     scrq = crq->priv;
+    dev = ep->dev;
+    sdev = dev->priv;
 
     conn = calloc(1, sizeof(*conn));
     if (!conn) {
@@ -921,21 +927,26 @@ static int sock_accept(cci_conn_req_t *conn_req,
     }
 
     hdr_r = scrq->buffer;
-    sock_parse_header(&hdr_r->header, &type, &a, &b, &peer_id);
-    sock_parse_seq_ack(&hdr_r->seq_ack, &peer_seq, &peer_ack);
+    sock_parse_header(&hdr_r->header, &type, &a, &b, &unused);
+    sock_parse_seq_ts(&hdr_r->seq_ts, &peer_seq, &peer_ts);
 
     conn->connection.attribute = a;
     conn->connection.endpoint = endpoint;
-    conn->connection.max_send_size = SOCK_AM_SIZE;
+    conn->connection.max_send_size = dev->device.max_send_size;
+    hs = (sock_handshake_t *) (scrq->buffer + sizeof(*hdr_r));
+    if (((uint32_t) ntohs(hs->mss)) < conn->connection.max_send_size)
+        conn->connection.max_send_size = (uint32_t) ntohs(hs->mss);
 
     sconn = conn->priv;
     sconn->conn = conn;
     sconn->status = SOCK_CONN_READY; /* set ready since the app thinks it is */
     *((struct sockaddr_in *) &sconn->sin) = scrq->sin;
-    sconn->peer_id = peer_id;
+    sconn->peer_id = ntohl(hs->id);
     sock_get_id(sep, &sconn->id);
     sconn->seq = sock_get_new_seq(); /* even for UU since this reply is reliable */
     sconn->ack = peer_seq;
+    if (cci_conn_is_reliable(conn))
+        sconn->max_tx_cnt = ntohl(hs->max_recv_buffer_count);
 
     pthread_mutex_init(&sconn->lock, NULL);
 
@@ -964,22 +975,22 @@ static int sock_accept(cci_conn_req_t *conn_req,
     /* pack the msg */
 
     hdr_r = (sock_header_r_t *) tx->buffer;
-    sock_pack_conn_reply(&hdr_r->header, CCI_EVENT_CONNECT_SUCCESS, sconn->peer_id);
-    sock_pack_seq_ack(&hdr_r->seq_ack, sconn->seq, sconn->ack);
-    id = htonl(sconn->id);
-    ptr = tx->buffer + sizeof(*hdr_r);
-    memcpy(ptr, &id, sizeof(sconn->id));
+    sock_pack_conn_reply(&hdr_r->header, CCI_EVENT_CONNECT_SUCCESS,
+                         sconn->peer_id);
+    sock_pack_seq_ts(&hdr_r->seq_ts, sconn->seq, (uint32_t) sock_get_usecs());
+    hs = (sock_handshake_t *) (tx->buffer + sizeof(*hdr_r));
+    hs->id = htonl(sconn->id);
+    hs->ack = htonl(sconn->ack);
+    hs->mss = htons((uint16_t) conn->connection.max_send_size);
+    hs->max_recv_buffer_count = htonl(ep->endpoint.max_recv_buffer_count);
 
-    tx->len = sizeof(*hdr_r) + sizeof(sconn->id);
+    tx->len = sizeof(*hdr_r) + sizeof(*hs);
     tx->seq = sconn->seq;
 
-    debug(CCI_DB_CONN, "queuing conn_reply with seq %" PRIx64 " ack %" PRIx64"",
-          sconn->seq, sconn->ack);
+    debug(CCI_DB_CONN, "queuing conn_reply with seq %x ts %x",
+          sconn->seq, sconn->ts); // FIXME
 
     /* insert at tail of device's queued list */
-
-    dev = ep->dev;
-    sdev = dev->priv;
 
     tx->state = SOCK_TX_QUEUED;
     pthread_mutex_lock(&sdev->lock);
@@ -1004,8 +1015,8 @@ static int sock_reject(cci_conn_req_t *conn_req)
     uint8_t         a;
     uint16_t        b;
     uint32_t        peer_id;
-    uint64_t        peer_seq;
-    uint64_t        peer_ack;
+    uint32_t        peer_seq;
+    uint32_t        peer_ts;
     char            buffer[SOCK_CONN_REQ_HDR_LEN];
     cci__lep_t      *lep     = NULL;
     cci__crq_t      *crq    = NULL;
@@ -1029,13 +1040,13 @@ static int sock_reject(cci_conn_req_t *conn_req)
 
     hdr_r = scrq->buffer;
     sock_parse_header(&hdr_r->header, &type, &a, &b, &peer_id);
-    sock_parse_seq_ack(&hdr_r->seq_ack, &peer_seq, &peer_ack);
+    sock_parse_seq_ts(&hdr_r->seq_ts, &peer_seq, &peer_ts);
 
     /* prepare conn_reply */
 
     hdr_r = (sock_header_r_t *) buffer;
     sock_pack_conn_reply(&hdr_r->header, CCI_EVENT_CONNECT_REJECTED, peer_id);
-    sock_pack_seq_ack(&hdr_r->seq_ack, 0, peer_seq);
+    sock_pack_seq_ts(&hdr_r->seq_ts, peer_seq, 0);
 
     scrq->peer_id = peer_id;
     scrq->last_attempt_us = sock_get_usecs();
@@ -1206,8 +1217,9 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     struct sockaddr_in  *sin        = NULL;
     void                *ptr        = NULL;
     in_addr_t           ip;
-    uint64_t            ack;
+    uint32_t            ts          = 0;
     struct s_active     *active_list;
+    sock_handshake_t    *hs         = NULL;
 
     CCI_ENTER;
 
@@ -1236,7 +1248,6 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     connection = &conn->connection;
     connection->attribute = attribute;
     connection->endpoint = endpoint;
-    connection->max_send_size = SOCK_AM_SIZE;
 
     /* set up sock specific info */
 
@@ -1260,6 +1271,8 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     sep = ep->priv;
     dev = ep->dev;
     sdev = dev->priv;
+
+    connection->max_send_size = dev->device.max_send_size;
 
     i = sock_ip_hash(ip, 0);
     active_list = &sep->active_hash[i];
@@ -1299,7 +1312,8 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     sock_get_id(sep, &sconn->id);
     /* FIXME silence -Wall -Werror until it is used */
     if (0) sock_put_id(sep, 0);
-    sock_pack_conn_request(&hdr_r->header, attribute, (uint16_t) data_len, sconn->id);
+    sock_pack_conn_request(&hdr_r->header, attribute,
+                           (uint16_t) data_len, 0);
     tx->len = sizeof(*hdr_r);
     ptr = tx->buffer + tx->len;
 
@@ -1307,11 +1321,20 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
 
     sconn->seq = sock_get_new_seq();
     tx->seq = sconn->seq;
-    ack = 0; /* unneeded */
-    sock_pack_seq_ack(&hdr_r->seq_ack, tx->seq, ack);
+    sock_pack_seq_ts(&hdr_r->seq_ts, tx->seq, ts);
 
-    debug(CCI_DB_CONN, "queuing conn_request with seq %" PRIx64 " ack %" PRIx64"",
-          tx->seq, ack);
+    /* add handshake */
+    hs = (sock_handshake_t *) ptr;
+    hs->id = htonl(sconn->id);
+    hs->ack = 0;
+    hs->max_recv_buffer_count = htonl(endpoint->max_recv_buffer_count);
+    hs->mss = htons((uint16_t) connection->max_send_size);
+
+    tx->len += sizeof(*hs);
+    ptr = tx->buffer + tx->len;
+
+    debug(CCI_DB_CONN, "queuing conn_request with seq %x ts %x",
+          tx->seq, ts);
 
     /* zero even if unreliable */
 
@@ -2098,14 +2121,14 @@ static int sock_sendv(cci_connection_t *connection,
 
     if (is_reliable) {
         sock_header_r_t *hdr_r = tx->buffer;
-        uint64_t ack;
+        uint32_t ts;
 
         pthread_mutex_lock(&sconn->lock);
         tx->seq = sconn->seq++;
-        ack = sconn->ack;
+        //ack = sconn->ack; //FIXME
         pthread_mutex_unlock(&sconn->lock);
 
-        sock_pack_seq_ack(&hdr_r->seq_ack, tx->seq, ack);
+        sock_pack_seq_ts(&hdr_r->seq_ts, tx->seq, ts);
         tx->len = sizeof(*hdr_r);
     }
     ptr = tx->buffer + tx->len;
@@ -2303,11 +2326,11 @@ sock_handle_active_message(sock_conn_t *sconn,
         conn->connection.attribute & CCI_CONN_ATTR_RU) {
 
         sock_header_r_t *hdr_r = (sock_header_r_t *) rx->buffer;
-        sock_seq_ack_t *sa = &hdr_r->seq_ack;
+        sock_seq_ts_t *sa = &hdr_r->seq_ts;
 
         /* TODO handle_ack(conn, sa->ack, up_to) */
         if (0)
-            sa->ack++;
+            sa->ts++;
 
         *((void **) &recv->header_ptr) = hdr_r + sizeof(*hdr_r);
     }
@@ -2338,14 +2361,14 @@ sock_handle_ack(cci__ep_t *ep, uint64_t ack)
 /* Possible states and what to do:
  *
  * Recv         send        send        with        complete    switch
- * Success      conn_ack    reliably    seq_ack     event       lists
+ * Success      conn_ack    reliably    seq_ts      event       lists
  * -------------------------------------------------------------------
  * No conn      Error
  * Active conn  Yes         Yes         Yes         Yes         Yes
  * Ready conn   Yes         Yes         Yes         No          No
  * ===================================================================
  * Recv         send        send        with        complete    free
- * Rejected     conn_ack    reliably    seq_ack     event       conn
+ * Rejected     conn_ack    reliably    seq_ts      event       conn
  * -------------------------------------------------------------------
  * No conn      Yes         No          No          No          No
  * Active conn  Yes         No          No          Yes         Yes
@@ -2361,7 +2384,6 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
                            cci__ep_t *ep)
 {
     int             i, ret;
-    uint32_t        peer_id = 0;
     cci__evt_t      *evt    = NULL;
     cci__dev_t      *dev    = NULL;
     cci__conn_t     *conn   = NULL;
@@ -2371,9 +2393,10 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
     sock_header_r_t *hdr_r;     /* wire header */
     cci_event_t     *event;     /* generic CCI event */
     cci_endpoint_t  *endpoint;  /* generic CCI endpoint */
-    void            *ptr;
-    uint64_t        seq;        /* peer's seq */
-    uint64_t        ack;        /* our original seq */
+    uint32_t        seq;        /* peer's seq */
+    uint32_t        ack;        /* my conn_req seq */
+    uint32_t        ts;         /* FIXME our original seq */
+    sock_handshake_t    *hs = NULL;
 
     CCI_ENTER;
 
@@ -2421,19 +2444,21 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
     /* set wire header so we can find user header */
 
     hdr_r = (sock_header_r_t *) rx->buffer;
-    ptr = rx->buffer + sizeof(*hdr_r);
 
     /* TODO handle ack */
 
-    sock_parse_seq_ack(&hdr_r->seq_ack, &seq, &ack);
+    sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts); //FIXME do something with ts
 
     /* silence compiler for now */
-    if (0) sock_handle_ack(ep, ack);
+    if (0) sock_handle_ack(ep, ts); //FIXME
 
     if (sconn->status == SOCK_CONN_ACTIVE) {
         struct s_active *active_list;
 
         debug(CCI_DB_CONN, "transition active connection to ready");
+
+        hs = (sock_handshake_t *) (rx->buffer + sizeof(*hdr_r));
+        ack = ntohl(hs->ack);
 
         /* get pending conn_req tx, create event, move conn to conn_hash */
         pthread_mutex_lock(&sdev->lock);
@@ -2462,6 +2487,13 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
             assert(0);
         }
 
+        /* check mss and rx count */
+        if (((uint32_t) ntohs(hs->mss)) < conn->connection.max_send_size)
+            conn->connection.max_send_size = (uint32_t) ntohs(hs->mss);
+
+        if (cci_conn_is_reliable(conn))
+            sconn->max_tx_cnt = ntohl(hs->max_recv_buffer_count);
+
         /* get cci__evt_t to hang on ep->events */
 
         evt = &rx->evt;
@@ -2480,8 +2512,7 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
 
         if (CCI_EVENT_CONNECT_SUCCESS == reply) {
             event->info.other.u.connect.connection = &conn->connection;
-            memcpy(&peer_id, ptr, sizeof(peer_id));
-            sconn->peer_id = ntohl(peer_id);
+            sconn->peer_id = ntohl(hs->id);
             sconn->status = SOCK_CONN_READY;
             *((struct sockaddr_in *) &sconn->sin) = sin;
             sconn->ack = seq;
@@ -2568,10 +2599,9 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
 
     hdr_r = tx->buffer;
     sock_pack_conn_ack(&hdr_r->header, sconn->id);
-    sock_pack_seq_ack(&hdr_r->seq_ack, tx->seq, seq);
+    sock_pack_seq_ts(&hdr_r->seq_ts, tx->seq, sconn->ack);
 
-    debug(CCI_DB_CONN, "queuing conn_ack with seq %" PRIx64 " ack %" PRIx64"",
-          tx->seq, seq);
+    debug(CCI_DB_CONN, "queuing conn_ack with seq %x", tx->seq);
 
     tx->state = SOCK_TX_QUEUED;
     pthread_mutex_lock(&sdev->lock);
@@ -2603,8 +2633,8 @@ sock_handle_conn_ack(sock_conn_t *sconn,
     sock_tx_t       *tx = NULL, *tmp = NULL, *t = NULL;
     sock_header_r_t *hdr_r;     /* wire header */
     cci_endpoint_t  *endpoint;  /* generic CCI endpoint */
-    uint64_t        seq;
-    uint64_t        ack;
+    uint32_t        seq;
+    uint32_t        ts;
 
     CCI_ENTER;
 
@@ -2619,16 +2649,16 @@ sock_handle_conn_ack(sock_conn_t *sconn,
     /* TODO handle ack */
 
     hdr_r = rx->buffer;
-    sock_parse_seq_ack(&hdr_r->seq_ack, &seq, &ack);
+    sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
 
-    debug(CCI_DB_CONN, "%s: seq %"PRIx64" ack %"PRIx64"", __func__, seq, ack);
+    debug(CCI_DB_CONN, "%s: seq %x ack %x", __func__, seq, ts);
 
     /* silence compiler for now */
-    if (0) sock_handle_ack(ep, ack);
+    if (0) sock_handle_ack(ep, ts);
 
     pthread_mutex_lock(&sdev->lock);
     TAILQ_FOREACH_SAFE(t, &sdev->pending, dentry, tmp) {
-        if (t->seq == ack) {
+        if (t->seq == ts) { // FIXME
             TAILQ_REMOVE(&sdev->pending, t, dentry);
             tx = t;
             debug(CCI_DB_CONN, "%s: found conn_reply", __func__);
@@ -2642,7 +2672,7 @@ sock_handle_conn_ack(sock_conn_t *sconn,
         /* if no tx, then it timed out or this is a duplicate,
          * but we have a sconn */
         debug((CCI_DB_MSG|CCI_DB_CONN), "received conn_ack and no matching tx "
-              "(seq %"PRIx64" ack %"PRIx64")", seq, ack);
+              "(seq %x ack %x)", seq, ts); //FIXME
     } else {
         pthread_mutex_lock(&sep->lock);
         TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
@@ -2746,19 +2776,19 @@ sock_recvfrom_ep(cci__ep_t *ep)
         drop_msg = 1;
         break;
     case SOCK_MSG_CONN_REPLY:
-        recvfrom(sep->sock, rx->buffer, SOCK_AM_SIZE,
+        recvfrom(sep->sock, rx->buffer, ep->buffer_len,
                  0, (struct sockaddr *)&sin, &sin_len);
         sock_handle_conn_reply(sconn, rx, a, b, id, sin, ep);
         break;
     case SOCK_MSG_CONN_ACK:
-        recvfrom(sep->sock, rx->buffer, SOCK_AM_SIZE,
+        recvfrom(sep->sock, rx->buffer, ep->buffer_len,
                  0, (struct sockaddr *)&sin, &sin_len);
         sock_handle_conn_ack(sconn, rx, a, b, id, sin);
         break;
     case SOCK_MSG_DISCONNECT:
         break;
     case SOCK_MSG_SEND:
-        recvfrom(sep->sock, rx->buffer, SOCK_AM_SIZE,
+        recvfrom(sep->sock, rx->buffer, ep->buffer_len,
                  0, (struct sockaddr *)&sin, &sin_len);
         sock_handle_active_message(sconn, rx, a, b, id);
         break;
