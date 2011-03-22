@@ -146,6 +146,13 @@ typedef struct cci__conn {
     void *priv;
 } cci__conn_t;
 
+static inline int
+cci_conn_is_reliable(cci__conn_t *conn)
+{
+    return (conn->connection.attribute & CCI_CONN_ATTR_RO ||
+            conn->connection.attribute & CCI_CONN_ATTR_RU);
+}
+
 /*! CCI private connection manager service */
 typedef struct cci__svc {
     /*! Public service (bogus) */
