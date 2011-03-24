@@ -176,6 +176,8 @@ sock_msg_type(sock_msg_type_t type)
         return "send";
     case SOCK_MSG_KEEPALIVE:
         return "keepalive";
+    case SOCK_MSG_PING:
+        return "ping for RTTM";
     case SOCK_MSG_ACK_ONLY:
         return "ack_only";
     case SOCK_MSG_ACK_UP_TO:
@@ -268,13 +270,15 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
                     const char *ip = *arg + 3;
 
                     sdev->ip= inet_addr(ip); /* network order */
-                } else if (0 == strncmp("mss=", *arg, 4)) {
+                } else if (0 == strncmp("mtu=", *arg, 4)) {
                     const char *mss_str = *arg + 4;
                     uint32_t mss = strtol(mss_str, NULL, 0);
-                    if (mss + SOCK_MAX_HDR_SIZE > SOCK_UDP_MAX)
-                        mss = SOCK_UDP_MAX - SOCK_MAX_HDR_SIZE;
+                    if (mss > SOCK_UDP_MAX)
+                        mss = SOCK_UDP_MAX;
 
-                    assert(mss > SOCK_MAX_HDRS + SOCK_EP_MAX_HDR_SIZE);
+                    mss -= SOCK_MAX_HDR_SIZE;
+
+                    assert(mss >= SOCK_MIN_MSS);
                     device->max_send_size = mss;
                 }
             }
@@ -520,7 +524,9 @@ static int sock_create_endpoint(cci_device_t *device,
 
 out:
     pthread_mutex_lock(&dev->lock);
-    TAILQ_REMOVE(&dev->eps, ep, entry);
+    if (!TAILQ_EMPTY(&dev->eps)) {
+        TAILQ_REMOVE(&dev->eps, ep, entry);
+    }
     pthread_mutex_unlock(&dev->lock);
     if (sep) {
         while (!TAILQ_EMPTY(&sep->txs)) {
@@ -843,7 +849,7 @@ sock_put_id(sock_ep_t *ep, uint32_t id)
 static inline uint32_t
 sock_get_new_seq(void)
 {
-    return (random() & SOCK_SEQ_MASK);
+    return ((uint32_t) random() & SOCK_SEQ_MASK);
 }
 
 /* The endpoint maintains 256 lists. Hash the ip and port and return the index
@@ -881,6 +887,7 @@ static int sock_accept(cci_conn_req_t *conn_req,
     sock_msg_type_t type;
     sock_tx_t       *tx     = NULL;
     sock_handshake_t    *hs = NULL;
+    uint32_t        id, ack, max_recv_buffer_count, mss;
 
 
     CCI_ENTER;
@@ -933,20 +940,25 @@ static int sock_accept(cci_conn_req_t *conn_req,
     conn->connection.attribute = a;
     conn->connection.endpoint = endpoint;
     conn->connection.max_send_size = dev->device.max_send_size;
+
     hs = (sock_handshake_t *) (scrq->buffer + sizeof(*hdr_r));
-    if (((uint32_t) ntohs(hs->mss)) < conn->connection.max_send_size)
-        conn->connection.max_send_size = (uint32_t) ntohs(hs->mss);
+    sock_parse_handshake(hs, &id, &ack, &max_recv_buffer_count, &mss);
+    if (mss < SOCK_MIN_MSS) {
+        /* FIXME do what? */
+    }
+    if (mss < conn->connection.max_send_size)
+        conn->connection.max_send_size = mss;
 
     sconn = conn->priv;
     sconn->conn = conn;
     sconn->status = SOCK_CONN_READY; /* set ready since the app thinks it is */
     *((struct sockaddr_in *) &sconn->sin) = scrq->sin;
-    sconn->peer_id = ntohl(hs->id);
+    sconn->peer_id = id;
     sock_get_id(sep, &sconn->id);
     sconn->seq = sock_get_new_seq(); /* even for UU since this reply is reliable */
     sconn->ack = peer_seq;
     if (cci_conn_is_reliable(conn))
-        sconn->max_tx_cnt = ntohl(hs->max_recv_buffer_count);
+        sconn->max_tx_cnt = max_recv_buffer_count;
 
     pthread_mutex_init(&sconn->lock, NULL);
 
@@ -979,10 +991,9 @@ static int sock_accept(cci_conn_req_t *conn_req,
                          sconn->peer_id);
     sock_pack_seq_ts(&hdr_r->seq_ts, sconn->seq, (uint32_t) sock_get_usecs());
     hs = (sock_handshake_t *) (tx->buffer + sizeof(*hdr_r));
-    hs->id = htonl(sconn->id);
-    hs->ack = htonl(sconn->ack);
-    hs->mss = htons((uint16_t) conn->connection.max_send_size);
-    hs->max_recv_buffer_count = htonl(ep->endpoint.max_recv_buffer_count);
+    sock_pack_handshake(hs, sconn->id, sconn->ack,
+                        ep->endpoint.max_recv_buffer_count,
+                        conn->connection.max_send_size);
 
     tx->len = sizeof(*hdr_r) + sizeof(*hs);
     tx->seq = sconn->seq;
@@ -1325,10 +1336,9 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
 
     /* add handshake */
     hs = (sock_handshake_t *) ptr;
-    hs->id = htonl(sconn->id);
-    hs->ack = 0;
-    hs->max_recv_buffer_count = htonl(endpoint->max_recv_buffer_count);
-    hs->mss = htons((uint16_t) connection->max_send_size);
+    sock_pack_handshake(hs, sconn->id, 0,
+                        endpoint->max_recv_buffer_count,
+                        connection->max_send_size);
 
     tx->len += sizeof(*hs);
     ptr = tx->buffer + tx->len;
@@ -2394,7 +2404,6 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
     cci_event_t     *event;     /* generic CCI event */
     cci_endpoint_t  *endpoint;  /* generic CCI endpoint */
     uint32_t        seq;        /* peer's seq */
-    uint32_t        ack;        /* my conn_req seq */
     uint32_t        ts;         /* FIXME our original seq */
     sock_handshake_t    *hs = NULL;
 
@@ -2453,12 +2462,13 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
     if (0) sock_handle_ack(ep, ts); //FIXME
 
     if (sconn->status == SOCK_CONN_ACTIVE) {
+        uint32_t peer_id, ack, max_recv_buffer_count, mss;
         struct s_active *active_list;
 
         debug(CCI_DB_CONN, "transition active connection to ready");
 
         hs = (sock_handshake_t *) (rx->buffer + sizeof(*hdr_r));
-        ack = ntohl(hs->ack);
+        sock_parse_handshake(hs, &peer_id, &ack, &max_recv_buffer_count, &mss);
 
         /* get pending conn_req tx, create event, move conn to conn_hash */
         pthread_mutex_lock(&sdev->lock);
@@ -2488,11 +2498,11 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
         }
 
         /* check mss and rx count */
-        if (((uint32_t) ntohs(hs->mss)) < conn->connection.max_send_size)
-            conn->connection.max_send_size = (uint32_t) ntohs(hs->mss);
+        if (mss < conn->connection.max_send_size)
+            conn->connection.max_send_size = mss;
 
         if (cci_conn_is_reliable(conn))
-            sconn->max_tx_cnt = ntohl(hs->max_recv_buffer_count);
+            sconn->max_tx_cnt = max_recv_buffer_count;
 
         /* get cci__evt_t to hang on ep->events */
 
@@ -2512,7 +2522,7 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
 
         if (CCI_EVENT_CONNECT_SUCCESS == reply) {
             event->info.other.u.connect.connection = &conn->connection;
-            sconn->peer_id = ntohl(hs->id);
+            sconn->peer_id = peer_id;
             sconn->status = SOCK_CONN_READY;
             *((struct sockaddr_in *) &sconn->sin) = sin;
             sconn->ack = seq;

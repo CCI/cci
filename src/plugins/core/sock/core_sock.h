@@ -27,6 +27,8 @@ BEGIN_C_DECLS
 #define SOCK_MAX_HDR_SIZE       (64)    /* max sock header size */
 #define SOCK_MAX_HDRS           (SOCK_MAX_HDR_SIZE + 20 + 8) /* IP + UDP */
 #define SOCK_DEFAULT_MSS        (8192)  /* 8 KB - assume jumbo frames */
+#define SOCK_MIN_MSS            (1500 - SOCK_MAX_HDR_SIZE)
+#define SOCK_MAX_SACK           (4)     /* pairs of start/end acks */
 
 #define SOCK_EP_MAX_HDR_SIZE    (32)    /* max user header size */
 #define SOCK_EP_TX_TIMEOUT_SEC  (60)    /* seconds for now */
@@ -81,7 +83,7 @@ sock_get_usecs(void)
  *
  * A sock device may have these items:
  *
- * mss = 9000           # max_send_size - default 8192
+ * mtu = 9000           # MTU less headers will become max_send_size
  * listen_port = 54321  # port to listen on
  * min_port = 4444      # lowest port to use for endpoints
  * max_port = 5555      # highest port to use for endpoints
@@ -100,6 +102,7 @@ typedef enum sock_msg_type {
 
     /* the rest apply to reliable connections only */
 
+    SOCK_MSG_PING,          /* no data, just echo timestamp for RTTM */
     SOCK_MSG_ACK_ONLY,      /* ack only this seqno */
     SOCK_MSG_ACK_UP_TO,     /* ack up to and including this seqno */
     SOCK_MSG_SACK,          /* ack these blocks of sequences */
@@ -137,6 +140,7 @@ typedef enum sock_msg_type {
 typedef struct sock_header {
     uint32_t type;  /* upper 8b are type, next 8b are A and rest are B */
     uint32_t c;
+    char data[0];   /* start unreliable payload here */
 } sock_header_t;
 
 /* type, a, and b bit mangling */
@@ -192,21 +196,25 @@ sock_parse_header(sock_header_t *header,
     *c = ntohl(header->c);
 }
 
-/* Reliable message headers (RO and RU) */
+/* Reliable message headers (RO and RU) add a seq and timestamp */
 
-#define SOCK_SEQ_BITS       (31)
-#define SOCK_SEQ_MASK       ((1 << (SOCK_SEQ_BITS - 1)) - 1)
-#define SOCK_SEQ_MAX        (SOCK_SEQ_MASK)
-
+#define SOCK_SEQ_BITS       (32)
+#define SOCK_SEQ_MASK       (~0)
 #define SOCK_ACK_MASK       (SOCK_SEQ_MASK)
-#define SOCK_ACK_MAX        (SOCK_SEQ_MAX)
+
+#define SOCK_SEQ_LT(a,b)    ((int)((a)-(b)) < 0)
+#define SOCK_SEQ_LTE(a,b)   ((int)((a)-(b)) <= 0)
+#define SOCK_SEQ_GT(a,b)    ((int)((a)-(b)) > 0)
+#define SOCK_SEQ_GTE(a,b)   ((int)((a)-(b)) >= 0)
+#define SOCK_SEQ_MIN(a,b)   ((SOCK_SEQ_LT(a, b)) ? (a) : (b))
+#define SOCK_SEQ_MAX(a,b)   ((SOCK_SEQ_GT(a, b)) ? (a) : (b))
 
 /* sequence and timestamp
 
     <---------- 32 bits ---------->
    +-------------------------------+
    |              seq              |
-   +---------------+---------------+
+   +-------------------------------+
    |           timestamp           |
    +-------------------------------+
 
@@ -220,8 +228,6 @@ typedef struct sock_seq_ts {
 static inline void
 sock_pack_seq_ts(sock_seq_ts_t *sa, uint32_t seq, uint32_t ts)
 {
-    assert(seq <= SOCK_SEQ_MAX);
-
     sa->seq = htonl(seq);
     sa->ts = htonl(ts);
 }
@@ -238,6 +244,7 @@ sock_parse_seq_ts(sock_seq_ts_t *sa, uint32_t *seq, uint32_t *ts)
 typedef struct sock_header_r {
     sock_header_t header;
     sock_seq_ts_t seq_ts;
+    char data[0];           /* start reliable payload here */
 } sock_header_r_t;
 
 /* Common message headers (RO, RU, and UU) */
@@ -247,9 +254,32 @@ typedef struct sock_handshake {
     uint32_t id;                    /* id that peer uses when sending to me */
     uint32_t ack;                   /* to ack the request and reply */
     uint32_t max_recv_buffer_count; /* max recvs that I can handle */
-    uint16_t mss;                   /* lower of each endpoint */
-    uint16_t reserved;
+    uint32_t mss;                   /* lower of each endpoint */
 } sock_handshake_t;
+
+static inline void
+sock_pack_handshake(sock_handshake_t *hs, uint32_t id, uint32_t ack,
+                    uint32_t max_recv_buffer_count, uint32_t mss)
+{
+    assert(mss < (SOCK_UDP_MAX - SOCK_MAX_HDR_SIZE));
+    assert(mss > SOCK_MIN_MSS);
+
+    hs->id = htonl(id);
+    hs->ack = htonl(ack);
+    hs->max_recv_buffer_count = htonl(max_recv_buffer_count);
+    hs->mss = htonl(mss);
+}
+
+static inline void
+sock_parse_handshake(sock_handshake_t *hs, uint32_t *id, uint32_t *ack,
+                     uint32_t *max_recv_buffer_count, uint32_t *mss)
+{
+    *id = ntohl(hs->id);
+    *ack = ntohl(hs->ack);
+    *max_recv_buffer_count = ntohl(hs->max_recv_buffer_count);
+    *mss = ntohl(hs->mss);
+}
+
 
 /* connection request header:
 
@@ -262,14 +292,20 @@ typedef struct sock_handshake {
    +-------------------------------+
 
    +-------------------------------+
+   |              seq              |
+   +-------------------------------+
+   |           timestamp           |
+   +-------------------------------+
+
+   +-------------------------------+
    |           client id           |
    +-------------------------------+
-   |              ack              |
+   |               0               |
    +-------------------------------+
    |      max_recv_buffer_count    |
    +-------------------------------+
-   |      mss      |   reserved    |
-   +---------------+---------------+
+   |              mss              |
+   +-------------------------------+
 
    The peer uses the id when sending to us.
    The user data follows the header.
@@ -279,6 +315,7 @@ typedef struct sock_handshake {
    id: peer uses ID when sending to us
    seq: starting sequence number for this connection
    ts: timestamp in usecs
+   max_recv_buffer_count: number of msgs we can receive
    mss: max send size
 
  */
@@ -301,14 +338,20 @@ sock_pack_conn_request(sock_header_t *header, cci_conn_attribute_t attr,
    +-------------------------------+
 
    +-------------------------------+
-   |           server id           |
-   +-------------------------------+
    |              seq              |
    +-------------------------------+
    |           timestamp           |
    +-------------------------------+
-   |      mss      |     cwnd      |
-   +---------------+---------------+
+
+   +-------------------------------+
+   |           server id           |
+   +-------------------------------+
+   |          client's seq         |
+   +-------------------------------+
+   |      max_recv_buffer_count    |
+   +-------------------------------+
+   |              mss              |
+   +-------------------------------+
 
    The reply is 0 for success else errno.
    I use this ID when sending to this peer.
@@ -384,23 +427,173 @@ sock_pack_keepalive(sock_header_t *header, uint32_t id)
     sock_pack_header(header, SOCK_MSG_KEEPALIVE, 0, 0, id);
 }
 
-#if 0
-typedef struct sock_pkt {
-    union {
-        sock_header_t u;
-        sock_header_r_t r;
-    } hdr;
-    union {
-        sock_handshake_t hs;
-        sock_ack_t ack;
-        sock_rma_t rma;
-    } u;
-    char payload[0];
-} sock_pkt_t;
-#endif
+/* ack header and ack(s):
+
+    <---------- 32 bits ---------->
+    <- 8 -> <- 8 -> <---- 16 ----->
+   +-------+-------+---------------+
+   | type  |  cnt  |   reserved    |
+   +-------+-----------------------+
+   |              id               |
+   +-------------------------------+
+   |              seq              |
+   +-------------------------------+
+   |           timestamp           |
+   +-------------------------------+
+   |              ack              |
+   +-------------------------------+
+
+   type: SOCK_MSG_[ACK_ONLY|ACK_UP_TO|SACK]
+   cnt: number of acks (1 or 2, 4, 6, 8 if SACK)
+   id: ID of the receiver assigned to the sender
+   ack: ack payload starting at header_r->data
+
+ */
+
+static inline void
+sock_pack_ack(sock_header_r_t *header_r, sock_msg_type_t type, uint32_t peer_id,
+              uint32_t seq, uint32_t ts, uint32_t *ack, int count)
+{
+    int         i;
+    uint32_t    *p  = (uint32_t *)&header_r->data;
+
+    assert(count > 0);
+    if (count == 1)
+        assert(type == SOCK_MSG_ACK_ONLY || type == SOCK_MSG_ACK_UP_TO);
+    else {
+        assert(type == SOCK_MSG_SACK);
+        assert(count % 2 == 0);
+        assert(count / 2 <= SOCK_MAX_SACK);
+    }
+
+    sock_pack_header(&header_r->header, type, count, 0, peer_id);
+    sock_pack_seq_ts(&header_r->seq_ts, seq, ts);
+    for (i = 0; i < count; i++)
+        p[i] = htonl(ack[i]);
+}
+
+/* Caller must provide storage for (SOCK_MAX_SACK * 2) acks */
+/* Count = number of acks. If sack, count each start and end */
+static inline void
+sock_parse_ack(sock_header_r_t *header_r, sock_msg_type_t *type, uint32_t *id,
+              uint32_t *seq, uint32_t *ts, uint32_t *ack, int *count)
+{
+    int i;
+    uint8_t     a;
+    uint16_t    b;
+    uint32_t    *p  = (uint32_t *)&header_r->data;
+
+    assert(ack != NULL);
+    sock_parse_header(&header_r->header, type, &a, &b, id);
+    *count = (int) a;
+    sock_parse_seq_ts(&header_r->seq_ts, seq, ts);
+    for (i = 0; i < *count; i++)
+        ack[i] = (uint32_t) ntohl(p[i]);
+}
 
 /* RMA headers */
 
+/* RMA handle offset
+
+    <---------- 32 bits ---------->
+   +-------------------------------+
+   |         handle (0 - 31)       |
+   +-------------------------------+
+   |         handle (32 - 63)      |
+   +-------------------------------+
+   |         offset (0 - 31)       |
+   +-------------------------------+
+   |         offset (32 - 63)      |
+   +-------------------------------+
+
+ */
+
+typedef struct sock_rma_handle_offset {
+    uint32_t handle_high;
+    uint32_t handle_low;
+    uint32_t offset_high;
+    uint32_t offset_low;
+} sock_rma_handle_offset_t;
+
+static inline void
+sock_pack_rma_handle_offset(sock_rma_handle_offset_t *ho,
+                            uint64_t handle, uint64_t offset)
+{
+    ho->handle_high = htonl((uint32_t) (handle >> 32));
+    ho->handle_low  = htonl((uint32_t) (handle & 0xFFFFFFFF));
+    ho->offset_high = htonl((uint32_t) (offset >> 32));
+    ho->offset_low  = htonl((uint32_t) (offset & 0xFFFFFFFF));
+}
+
+static inline void
+sock_parse_rma_handle_offset(sock_rma_handle_offset_t *ho,
+                             uint64_t *handle, uint64_t *offset)
+{
+    *handle = ((uint64_t) ntohl(ho->handle_high)) << 32;
+    *handle |= (uint64_t) ho->handle_low;
+    *offset = ((uint64_t) ntohl(ho->offset_high)) << 32;
+    *offset |= (uint64_t) ho->offset_low;
+}
+
+typedef struct sock_rma_header {
+    sock_header_r_t header_r;
+    sock_rma_handle_offset_t local;
+    sock_rma_handle_offset_t remote;
+    uint32_t segment;
+    uint32_t total;
+} sock_rma_header_t;
+
+/* RMA write
+
+    <---------- 32 bits ---------->
+    <- 8 -> <- 8 -> <---- 16 ----->
+   +-------+-------+---------------+
+   | type  |   a   |    data_len   |
+   +-------+-------+---------------+
+   |            peer id            |
+   +-------------------------------+
+
+   +-------------------------------+
+   |              seq              |
+   +-------------------------------+
+   |           timestamp           |
+   +-------------------------------+
+
+   +-------------------------------+
+   |     local handle (0 - 31)     |
+   +-------------------------------+
+   |     local handle (32 - 63)    |
+   +-------------------------------+
+   |     local offset (0 - 31)     |
+   +-------------------------------+
+   |     local offset (32 - 63)    |
+   +-------------------------------+
+   |     remote handle (0 - 31)    |
+   +-------------------------------+
+   |     remote handle (32 - 63)   |
+   +-------------------------------+
+   |     remote offset (0 - 31)    |
+   +-------------------------------+
+   |     remote offset (32 - 63)   |
+   +-------------------------------+
+   |            segment            |
+   +-------------------------------+
+   |             total             |
+   +-------------------------------+
+
+   +-------------------------------+
+   |             data              |
+
+   handle: remote handle
+   offset: offset of this packet into handle (i.e. offset + packet offset)
+   segment: Nth segment of RMA
+   total: total segments for RMA
+ */
+
+/************* Windowing and Acking *******************/
+
+
+/************* SOCK private structures ****************/
 
 typedef enum sock_tx_state_t {
     /*! available, held by endpoint */
@@ -617,6 +810,7 @@ typedef struct sock_globals {
 } sock_globals_t;
 
 extern sock_globals_t *sglobals;
+
 
 int cci_core_sock_post_load(cci_plugin_t *me);
 int cci_core_sock_pre_unload(cci_plugin_t *me);
