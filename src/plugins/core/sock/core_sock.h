@@ -593,6 +593,7 @@ typedef struct sock_rma_header {
 /************* Windowing and Acking *******************/
 
 
+
 /************* SOCK private structures ****************/
 
 typedef enum sock_tx_state_t {
@@ -721,6 +722,21 @@ typedef enum sock_conn_status {
     SOCK_CONN_READY
 } sock_conn_status_t;
 
+/* ACK_ONLY:    start == end, one item in list
+ * ACK_UP_TO:   end > start, one item in list
+ * SACK:        multiple items in list
+ */
+typedef struct sock_ack {
+    /*! Starting seq inclusive */
+    uint32_t start;
+
+    /*! Ending seq inclusive */
+    uint32_t end;
+
+    /*! Hang on sconn->to_ack */
+    TAILQ_ENTRY(sock_ack) entry;
+} sock_ack_t;
+
 typedef struct sock_conn {
     /*! Owning conn */
     cci__conn_t *conn;
@@ -746,15 +762,29 @@ typedef struct sock_conn {
     /*! Last sequence number sent */
     uint32_t seq;
 
-    /*! Peer's last seqno received */
-    uint32_t ack;
+    /*! Peer's last contiguous seqno acked (ACK_UP_TO) */
+    uint32_t acked;
 
     /*! Peer's last timestamp received */
     uint32_t ts;
 
+    /*! List of sequence numbers to ack */
+    TAILQ_HEAD(s_acks, sock_ack) acks;
+
     /*! Lock to protect seq, ack */
     pthread_mutex_t lock;
 } sock_conn_t;
+
+/* Only call if holding the sconn->lock and sconn->acks is not empty
+ *
+ * If only one item, return 0
+ * If more than one item, return 1
+ */
+static inline int
+sock_need_sack(sock_conn_t *sconn)
+{
+    return TAILQ_FIRST(&sconn->acks) != TAILQ_LAST(&sconn->acks, s_acks);
+}
 
 typedef struct sock_dev {
     /*! Our IP address in network order */

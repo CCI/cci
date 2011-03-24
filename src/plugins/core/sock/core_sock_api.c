@@ -950,13 +950,13 @@ static int sock_accept(cci_conn_req_t *conn_req,
         conn->connection.max_send_size = mss;
 
     sconn = conn->priv;
+    TAILQ_INIT(&sconn->acks);
     sconn->conn = conn;
     sconn->status = SOCK_CONN_READY; /* set ready since the app thinks it is */
     *((struct sockaddr_in *) &sconn->sin) = scrq->sin;
     sconn->peer_id = id;
     sock_get_id(sep, &sconn->id);
     sconn->seq = sock_get_new_seq(); /* even for UU since this reply is reliable */
-    sconn->ack = peer_seq;
     if (cci_conn_is_reliable(conn))
         sconn->max_tx_cnt = max_recv_buffer_count;
 
@@ -991,7 +991,7 @@ static int sock_accept(cci_conn_req_t *conn_req,
                          sconn->peer_id);
     sock_pack_seq_ts(&hdr_r->seq_ts, sconn->seq, (uint32_t) sock_get_usecs());
     hs = (sock_handshake_t *) (tx->buffer + sizeof(*hdr_r));
-    sock_pack_handshake(hs, sconn->id, sconn->ack,
+    sock_pack_handshake(hs, sconn->id, peer_seq,
                         ep->endpoint.max_recv_buffer_count,
                         conn->connection.max_send_size);
 
@@ -1253,6 +1253,7 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     }
     sconn = conn->priv;
     sconn->conn = conn;
+    TAILQ_INIT(&sconn->acks);
 
     /* conn->tx_timeout = 0  by default */
 
@@ -2291,6 +2292,89 @@ static int sock_rma(cci_connection_t *connection,
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
+/*!
+  Handle incoming sequence number
+
+  If we have acked it
+    ignore it
+  Walk sconn->acks:
+    if it exists in a current entry
+      do nothing
+    if it borders a current entry
+      add it to the entry
+    if it falls between two entries with boardering them
+      add a new entry between them
+    else
+      add a new entry at the tail
+
+ */
+static inline void
+sock_handle_seq(sock_conn_t *sconn, uint32_t seq)
+{
+    int done            = 0;
+    sock_ack_t  *ack    = NULL;
+    sock_ack_t  *last   = NULL;
+    sock_ack_t  *tmp    = NULL;
+
+    if (SOCK_SEQ_LTE(seq, sconn->acked))
+        return;
+
+    pthread_mutex_lock(&sconn->lock);
+    TAILQ_FOREACH_SAFE(ack, &sconn->acks, entry, tmp) {
+        if (SOCK_SEQ_GTE(seq, ack->start) &&
+            SOCK_SEQ_LTE(seq, ack->end)) {
+            /* seq exists in this entry,
+               do nothing */
+            done = 1;
+            break;
+        } else if (seq == ack->start - 1) {
+            /* add it to start of this entry */
+            ack->start = seq;
+            done = 1;
+            break;
+        } else if (seq == ack->end + 1) {
+            sock_ack_t *next = TAILQ_NEXT(ack, entry);
+
+            /* add it to the end of this entry */
+            ack->end = seq;
+
+            /* did we plug a hole between entries? */
+            if (next) {
+                /* add this range to next and delete this entry */
+                next->start = ack->start;
+                TAILQ_REMOVE(&sconn->acks, ack, entry);
+                free(ack);
+            }
+            done = 1;
+            break;
+        } else if (last && SOCK_SEQ_GT(seq, last->end) &&
+                   SOCK_SEQ_LT(seq, ack->start)) {
+            sock_ack_t *new;
+
+            /* add a new entry before this entry */
+            new = calloc(1, sizeof(*new));
+            if (new) {
+                new->start = new->end = seq;
+                TAILQ_INSERT_BEFORE(ack, new, entry);
+            }
+            done = 1;
+            break;
+        }
+        last = ack;
+    }
+    if (!done) {
+        /* add new entry to tail */
+        ack = calloc(1, sizeof(*ack));
+        if (ack) {
+            ack->start = ack->end = seq;
+            TAILQ_INSERT_TAIL(&sconn->acks, ack, entry);
+        }
+    }
+    pthread_mutex_unlock(&sconn->lock);
+
+    return;
+}
+
 static void
 sock_handle_active_message(sock_conn_t *sconn,
                            sock_rx_t *rx,
@@ -2327,22 +2411,22 @@ sock_handle_active_message(sock_conn_t *sconn,
     recv = &(event->info.recv);
     *((uint32_t *) &recv->header_len) = header_len;
     *((uint32_t *) &recv->data_len) = data_len;
-    *((void **) &recv->header_ptr) = rx->buffer + sizeof(*hdr);
+    *((void **) &recv->header_ptr) = (void *) &hdr->data;
     recv->connection = &conn->connection;
 
     /* if a reliable connection, handle the ack */
 
     if (conn->connection.attribute & CCI_CONN_ATTR_RO ||
         conn->connection.attribute & CCI_CONN_ATTR_RU) {
+        uint32_t seq, ts;
 
         sock_header_r_t *hdr_r = (sock_header_r_t *) rx->buffer;
-        sock_seq_ts_t *sa = &hdr_r->seq_ts;
 
-        /* TODO handle_ack(conn, sa->ack, up_to) */
-        if (0)
-            sa->ts++;
+        sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
+        sock_handle_seq(sconn, seq);
+        /* TODO handle ts */
 
-        *((void **) &recv->header_ptr) = hdr_r + sizeof(*hdr_r);
+        *((void **) &recv->header_ptr) = (void *) &hdr_r->data;
     }
 
     *((void **) &recv->data_ptr) = recv->header_ptr + header_len;
@@ -2360,10 +2444,17 @@ sock_handle_active_message(sock_conn_t *sconn,
     return;
 }
 
-static int
-sock_handle_ack(cci__ep_t *ep, uint64_t ack)
+/*!
+  Handle incoming ack
+
+  Check the device pending list for the matching tx
+    if found, remove it and hang it on the completion list
+    if not found, ignore (it is a duplicate)
+ */
+static inline int
+sock_handle_ack(cci__ep_t *ep, uint32_t ack)
 {
-    int             ret     = 0;
+    int     ret = CCI_SUCCESS;
 
     return ret;
 }
@@ -2459,7 +2550,7 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
     sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts); //FIXME do something with ts
 
     /* silence compiler for now */
-    if (0) sock_handle_ack(ep, ts); //FIXME
+    if (0) sock_handle_ack(ep, seq); //FIXME
 
     if (sconn->status == SOCK_CONN_ACTIVE) {
         uint32_t peer_id, ack, max_recv_buffer_count, mss;
@@ -2525,7 +2616,7 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
             sconn->peer_id = peer_id;
             sconn->status = SOCK_CONN_READY;
             *((struct sockaddr_in *) &sconn->sin) = sin;
-            sconn->ack = seq;
+            sconn->acked = seq;
 
             i = sock_ip_hash(sin.sin_addr.s_addr, sin.sin_port);
             pthread_mutex_lock(&sep->lock);
@@ -2609,7 +2700,7 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
 
     hdr_r = tx->buffer;
     sock_pack_conn_ack(&hdr_r->header, sconn->id);
-    sock_pack_seq_ts(&hdr_r->seq_ts, tx->seq, sconn->ack);
+    sock_pack_seq_ts(&hdr_r->seq_ts, tx->seq, sconn->acked);
 
     debug(CCI_DB_CONN, "queuing conn_ack with seq %x", tx->seq);
 
