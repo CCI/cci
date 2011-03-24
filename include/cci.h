@@ -224,6 +224,9 @@ typedef enum cci_status {
   /*! No message of desired type */
   CCI_ENOMSG = ENOMSG,
 
+  /*! Address not available */
+  CCI_EADDRNOTAVAIL = EADDRNOTAVAIL,
+
   /* ...more here, inspired from errno.h... */
   
 } cci_status_t;

@@ -77,6 +77,9 @@ const char *cci_strerror(enum cci_status status)
     case CCI_ENOMSG:
         return "CCI_ENOMSG";
 
+    case CCI_EADDRNOTAVAIL:
+        return "CCI_EADDRNOTAVAIL";
+
     default:
         return cci_core->strerror(status);
     }
