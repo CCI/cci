@@ -10,6 +10,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <assert.h>
@@ -36,15 +37,17 @@ uint32_t current_size = 0;
 cci_device_t **devices = NULL;
 cci_endpoint_t *endpoint = NULL;
 cci_connection_t *connection = NULL;
+cci_conn_attribute_t attr = CCI_CONN_ATTR_UU;
 
 void
 print_usage()
 {
-    fprintf(stderr, "usage: %s -h <server_uri> [-p <port>] [-s]\n", name);
+    fprintf(stderr, "usage: %s -h <server_uri> [-p <port>] [-s] [-c <type>]\n", name);
     fprintf(stderr, "where:\n");
     fprintf(stderr, "\t-h\tServer's URI\n");
     fprintf(stderr, "\t-p\tPort of the server's connection service (default %d)\n", DFLT_PORT);
-    fprintf(stderr, "\t-s\tSet to run as the server\n\n");
+    fprintf(stderr, "\t-s\tSet to run as the server\n");
+    fprintf(stderr, "\t-c\tConnection type (UU, RU, or RO) set by client only\n\n");
     fprintf(stderr, "Example:\n");
     fprintf(stderr, "server$ %s -h ip://foo -p 2211 -s\n", name);
     fprintf(stderr, "client$ %s -h ip://foo -p 2211\n", name);
@@ -131,10 +134,9 @@ do_client()
 {
     int ret;
     struct timeval start, end;
-    cci_conn_attribute_t type = CCI_CONN_ATTR_UU;
 
 	/* initiate connect */
-	ret = cci_connect(endpoint, server_uri, port, NULL, 0, type, NULL, 0, NULL);
+	ret = cci_connect(endpoint, server_uri, port, NULL, 0, attr, NULL, 0, NULL);
     if (ret) {
         fprintf(stderr, "cci_connect() returned %d\n", ret);
         return;
@@ -245,7 +247,7 @@ int main(int argc, char *argv[])
 
     name = argv[0];
 
-    while ((c = getopt(argc, argv, "h:p:s")) != -1) {
+    while ((c = getopt(argc, argv, "h:p:sc:")) != -1) {
         switch (c) {
         case 'h':
             server_uri = strdup(optarg);
@@ -255,6 +257,18 @@ int main(int argc, char *argv[])
             break;
         case 's':
             is_server = 1;
+            break;
+        case 'c':
+            if (strncasecmp("ru", optarg, 2) == 0)
+                attr = CCI_CONN_ATTR_RU;
+            else if (strncasecmp("ro", optarg, 2) == 0)
+                attr = CCI_CONN_ATTR_RO;
+            else if (strncasecmp("uu", optarg, 2) == 0)
+                attr = CCI_CONN_ATTR_UU;
+            else
+                print_usage();
+            printf("Using %s connection\n",
+                   attr == CCI_CONN_ATTR_UU ? "UU" : attr == CCI_CONN_ATTR_RU ? "RU" : "RO");
             break;
         default:
             print_usage();
