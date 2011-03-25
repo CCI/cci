@@ -192,8 +192,8 @@ sock_parse_header(sock_header_t *header,
     uint32_t hl = ntohl(header->type);
 
     *type = SOCK_TYPE(hl);
-    *a = (uint32_t) SOCK_A(hl);
-    *b = (uint32_t) SOCK_B(hl);
+    *a = SOCK_A(hl);
+    *b = SOCK_B(hl);
     *c = ntohl(header->c);
 }
 
