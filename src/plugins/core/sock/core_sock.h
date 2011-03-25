@@ -29,6 +29,7 @@ BEGIN_C_DECLS
 #define SOCK_DEFAULT_MSS        (8192)  /* 8 KB - assume jumbo frames */
 #define SOCK_MIN_MSS            (1500 - SOCK_MAX_HDR_SIZE)
 #define SOCK_MAX_SACK           (4)     /* pairs of start/end acks */
+#define SOCK_ACK_DELAY          (1)    /* send an ack after every Nth send */
 
 #define SOCK_EP_MAX_HDR_SIZE    (32)    /* max user header size */
 #define SOCK_EP_TX_TIMEOUT_SEC  (60)    /* seconds for now */
@@ -262,7 +263,7 @@ sock_pack_handshake(sock_handshake_t *hs, uint32_t id, uint32_t ack,
                     uint32_t max_recv_buffer_count, uint32_t mss)
 {
     assert(mss < (SOCK_UDP_MAX - SOCK_MAX_HDR_SIZE));
-    assert(mss > SOCK_MIN_MSS);
+    assert(mss >= SOCK_MIN_MSS);
 
     hs->id = htonl(id);
     hs->ack = htonl(ack);
@@ -398,7 +399,9 @@ sock_pack_conn_ack(sock_header_t *header, uint32_t id)
    +-------------------------------+
 
    The user header and the data follow the send header.
-   The ID is the value assigned to me by the peer.
+   The ID is the value assigned to me by the peer (peer_id).
+
+   If reliable, includes seq and ts
 
  */
 
@@ -475,19 +478,14 @@ sock_pack_ack(sock_header_r_t *header_r, sock_msg_type_t type, uint32_t peer_id,
 /* Caller must provide storage for (SOCK_MAX_SACK * 2) acks */
 /* Count = number of acks. If sack, count each start and end */
 static inline void
-sock_parse_ack(sock_header_r_t *header_r, sock_msg_type_t *type, uint32_t *id,
-              uint32_t *seq, uint32_t *ts, uint32_t *ack, int *count)
+sock_parse_ack(sock_header_r_t *header_r, sock_msg_type_t type,
+              uint32_t *ack, int count)
 {
     int i;
-    uint8_t     a;
-    uint16_t    b;
     uint32_t    *p  = (uint32_t *)&header_r->data;
 
     assert(ack != NULL);
-    sock_parse_header(&header_r->header, type, &a, &b, id);
-    *count = (int) a;
-    sock_parse_seq_ts(&header_r->seq_ts, seq, ts);
-    for (i = 0; i < *count; i++)
+    for (i = 0; i < count; i++)
         ack[i] = (uint32_t) ntohl(p[i]);
 }
 
@@ -762,11 +760,26 @@ typedef struct sock_conn {
     /*! Last sequence number sent */
     uint32_t seq;
 
+    /* Lowest pending seq */
+    uint32_t seq_pending;
+
+    /*! Pending send count (waiting on acks) */
+    uint32_t pending;
+
     /*! Peer's last contiguous seqno acked (ACK_UP_TO) */
     uint32_t acked;
 
     /*! Peer's last timestamp received */
     uint32_t ts;
+
+    /*! Seq of last ack tx */
+    uint32_t last_ack_seq;
+
+    /*! Timestamp of last ack tx */
+    uint64_t last_ack_ts;
+
+    /*! Do we have an ack queued to send? */
+    int ack_queued;
 
     /*! List of sequence numbers to ack */
     TAILQ_HEAD(s_acks, sock_ack) acks;
