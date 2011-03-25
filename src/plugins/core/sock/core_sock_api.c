@@ -2907,7 +2907,7 @@ sock_drop_msg(cci_os_handle_t sock)
 {
     char buf[4];
     struct sockaddr sa;
-    socklen_t slen;
+    socklen_t slen = sizeof(sa);
 
     recvfrom(sock, buf, 4, 0, &sa, &slen);
     return;
