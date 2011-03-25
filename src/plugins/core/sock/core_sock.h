@@ -325,7 +325,7 @@ static inline void
 sock_pack_conn_request(sock_header_t *header, cci_conn_attribute_t attr,
                        uint16_t data_len, uint32_t id)
 {
-    sock_pack_header(header, SOCK_MSG_CONN_REQUEST, attr, data_len, id);
+    sock_pack_header(header, SOCK_MSG_CONN_REQUEST, (uint8_t) attr, data_len, id);
 }
 
 /* connection reply header:
@@ -469,7 +469,7 @@ sock_pack_ack(sock_header_r_t *header_r, sock_msg_type_t type, uint32_t peer_id,
         assert(count / 2 <= SOCK_MAX_SACK);
     }
 
-    sock_pack_header(&header_r->header, type, count, 0, peer_id);
+    sock_pack_header(&header_r->header, type, (uint8_t) count, 0, peer_id);
     sock_pack_seq_ts(&header_r->seq_ts, seq, ts);
     for (i = 0; i < count; i++)
         p[i] = htonl(ack[i]);
