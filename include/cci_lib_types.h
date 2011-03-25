@@ -149,8 +149,8 @@ typedef struct cci__conn {
 static inline int
 cci_conn_is_reliable(cci__conn_t *conn)
 {
-    return (conn->connection.attribute & CCI_CONN_ATTR_RO ||
-            conn->connection.attribute & CCI_CONN_ATTR_RU);
+    return (conn->connection.attribute == CCI_CONN_ATTR_RO ||
+            conn->connection.attribute == CCI_CONN_ATTR_RU);
 }
 
 /*! CCI private connection manager service */
