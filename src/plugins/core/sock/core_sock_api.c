@@ -23,6 +23,7 @@
 #include <netdb.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <sys/select.h>
 
 #include "cci.h"
 #include "plugins/core/core.h"
@@ -1795,7 +1796,7 @@ sock_progress_pending(sock_dev_t *sdev)
 
         /* is it time to resend? */
 
-        if ((tx->last_attempt_us + (SOCK_RESEND_TIME_SEC * 1000000)) > now)
+        if ((tx->last_attempt_us + (tx->send_count++ * SOCK_RESEND_TIME_SEC * 1000000)) > now)
             continue;
 
         /* need to resend it */
@@ -1929,6 +1930,7 @@ sock_progress_queued(sock_dev_t *sdev)
             continue;
 
         tx->last_attempt_us = now;
+        tx->send_count = 1;
 
         if (is_reliable &&
             !(tx->msg_type == SOCK_MSG_CONN_REQUEST ||
@@ -2197,8 +2199,10 @@ static int sock_sendv(cci_connection_t *connection,
     /* if blocking, wait for completion */
 
     if (tx->flags & CCI_FLAG_BLOCKING) {
+        struct timeval tv = { 0, SOCK_PROG_TIME_US / 2 };
+
         while (tx->state != SOCK_TX_COMPLETED)
-            usleep(SOCK_PROG_TIME_US / 2);
+            select(0, NULL, NULL, NULL, &tv);
 
         /* get status and cleanup */
         ret = send->status;
@@ -2967,7 +2971,7 @@ sock_recvfrom_ep(cci__ep_t *ep)
     pthread_mutex_unlock(&sep->lock);
 
     if (!rx) {
-        debug(CCI_DB_WARN, "no rx buffers available on endpoint %d", sep->sock);
+        debug(CCI_DB_INFO, "no rx buffers available on endpoint %d", sep->sock);
         /* FIXME do we drop? */
         CCI_EXIT;
         return 0;
@@ -3371,6 +3375,8 @@ sock_progress_dev(cci__dev_t *dev)
 
 static void *sock_progress_thread(void *arg)
 {
+    struct timeval tv = { 0, SOCK_PROG_TIME_US };
+
     while (!shut_down) {
         cci__dev_t *dev;
         cci_device_t const **device;
@@ -3382,7 +3388,7 @@ static void *sock_progress_thread(void *arg)
             dev = container_of(*device, cci__dev_t, device);
             sock_progress_dev(dev);
         }
-        usleep(SOCK_PROG_TIME_US);
+        select(0, NULL, NULL, NULL, &tv);
     }
 
     pthread_exit(NULL);

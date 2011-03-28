@@ -659,6 +659,9 @@ typedef struct sock_tx {
     /*! Sequence number */
     uint32_t seq;
 
+    /*! Send attempts */
+    uint32_t send_count;
+
     /*! Last send in microseconds */
     uint64_t last_attempt_us;
 
