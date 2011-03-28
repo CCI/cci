@@ -28,7 +28,7 @@
 #include "plugins/core/core.h"
 #include "core_sock.h"
 
-int shut_down = 0;
+volatile int shut_down = 0;
 sock_globals_t *sglobals = NULL;
 pthread_t tid;
 
