@@ -29,7 +29,7 @@
 #include "core_sock.h"
 
 volatile int shut_down = 0;
-sock_globals_t *sglobals = NULL;
+volatile sock_globals_t *sglobals = NULL;
 pthread_t tid;
 
 /*
@@ -319,7 +319,7 @@ out:
         free(devices);
     }
     if (sglobals) {
-        free(sglobals);
+        free((void *)sglobals);
         sglobals = NULL;
     }
     CCI_EXIT;
@@ -378,7 +378,7 @@ static int sock_free_devices(cci_device_t const **devices)
     pthread_mutex_unlock(&globals->lock);
 
     free(sglobals->devices);
-    free(sglobals);
+    free((void *)sglobals);
 
     CCI_EXIT;
     return CCI_SUCCESS;
@@ -950,6 +950,7 @@ static int sock_accept(cci_conn_req_t *conn_req,
         conn->connection.max_send_size = mss;
 
     sconn = conn->priv;
+    TAILQ_INIT(&sconn->tx_seqs);
     TAILQ_INIT(&sconn->acks);
     sconn->conn = conn;
     sconn->status = SOCK_CONN_READY; /* set ready since the app thinks it is */
@@ -959,7 +960,8 @@ static int sock_accept(cci_conn_req_t *conn_req,
     sconn->seq = sock_get_new_seq(); /* even for UU since this reply is reliable */
     sconn->seq_pending = sconn->seq - 1;
     if (cci_conn_is_reliable(conn)) {
-        sconn->max_tx_cnt = max_recv_buffer_count;
+        sconn->max_tx_cnt = max_recv_buffer_count < ep->tx_buf_cnt ?
+                            max_recv_buffer_count : ep->tx_buf_cnt;
         sconn->last_ack_seq = sconn->seq;
         sconn->last_ack_ts = sock_get_usecs();
     }
@@ -1257,6 +1259,7 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     }
     sconn = conn->priv;
     sconn->conn = conn;
+    TAILQ_INIT(&sconn->tx_seqs);
     TAILQ_INIT(&sconn->acks);
 
     /* conn->tx_timeout = 0  by default */
@@ -1734,7 +1737,7 @@ sock_progress_pending(sock_dev_t *sdev)
 
         /* has it timed out? */
 
-        if (tx->timeout_us < now) { /* FIXME need to handle rollover */
+        if (SOCK_U64_LT(tx->timeout_us, now)) { 
 
             /* dequeue */
 
@@ -1838,7 +1841,7 @@ sock_progress_pending(sock_dev_t *sdev)
 static void
 sock_progress_queued(sock_dev_t *sdev)
 {
-    int                 ret;
+    int                 ret, is_reliable;
     uint32_t            timeout;
     uint64_t            now;
     sock_tx_t           *tx, *tmp;
@@ -1867,6 +1870,7 @@ sock_progress_queued(sock_dev_t *sdev)
         conn = evt->conn;
         connection = &conn->connection;
         sconn = conn->priv;
+        is_reliable = cci_conn_is_reliable(conn);
 
         endpoint = connection->endpoint;
         ep = container_of(endpoint, cci__ep_t, endpoint);
@@ -1879,7 +1883,7 @@ sock_progress_queued(sock_dev_t *sdev)
             tx->timeout_us = now + (uint64_t) timeout;
         }
 
-        if (tx->timeout_us < now) { /* FIXME nned to handle rollover */
+        if (SOCK_U64_LT(tx->timeout_us, now)) { 
 
             /* set status and add to completed events */
 
@@ -1926,6 +1930,14 @@ sock_progress_queued(sock_dev_t *sdev)
 
         tx->last_attempt_us = now;
 
+        if (is_reliable &&
+            !(tx->msg_type == SOCK_MSG_CONN_REQUEST ||
+              tx->msg_type == SOCK_MSG_CONN_REPLY)) {
+            pthread_mutex_lock(&sconn->lock);
+            TAILQ_INSERT_TAIL(&sconn->tx_seqs, tx, tx_seq);
+            pthread_mutex_unlock(&sconn->lock);
+        }
+
         /* need to send it */
             
         debug(CCI_DB_MSG, "sending %s msg seq %u",
@@ -1940,6 +1952,11 @@ sock_progress_queued(sock_dev_t *sdev)
             case EAGAIN:
             case ENOMEM:
             case ENOBUFS:
+                if (is_reliable &&
+                    !(tx->msg_type == SOCK_MSG_CONN_REQUEST ||
+                      tx->msg_type == SOCK_MSG_CONN_REPLY)) {
+                    TAILQ_REMOVE(&sconn->tx_seqs, tx, tx_seq);
+                }
                 continue;
             }
         }
@@ -1949,7 +1966,7 @@ sock_progress_queued(sock_dev_t *sdev)
         /* if reliable or connection, add to pending
          * else add to idle txs */
 
-        if (cci_conn_is_reliable(conn) ||
+        if (is_reliable ||
             tx->msg_type == SOCK_MSG_CONN_REQUEST ||
             tx->msg_type == SOCK_MSG_CONN_REPLY) {
 
@@ -2477,44 +2494,49 @@ sock_handle_ack(sock_conn_t *sconn,
     }
 
     pthread_mutex_lock(&sdev->lock);
-    TAILQ_FOREACH_SAFE(tx, &sdev->pending, dentry, tmp) {
-        if (tx->evt.conn != conn)
-            continue;
+    pthread_mutex_lock(&sconn->lock);
+    TAILQ_FOREACH_SAFE(tx, &sconn->tx_seqs, tx_seq, tmp) {
         if (type == SOCK_MSG_ACK_ONLY) {
             if (tx->seq == acks[0]) {
-                debug(CCI_DB_MSG, "%s acking only seq %u", __func__, acks[0]);
-                TAILQ_REMOVE(&sdev->pending, tx, dentry);
-                /* if SILENT, put idle tx */
-                if (tx->flags & CCI_FLAG_SILENT) {
-                    tx->state = SOCK_TX_IDLE;
-                    /* store locally until we can drop the sdev->lock */
-                    TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
-                } else {
-                    tx->state = SOCK_TX_COMPLETED;
-                    tx->evt.event.info.send.status = CCI_SUCCESS;
-                    /* store locally until we can drop the sdev->lock */
-                    TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
+                if (tx->state == SOCK_TX_PENDING) {
+                    debug(CCI_DB_MSG, "%s acking only seq %u", __func__, acks[0]);
+                    TAILQ_REMOVE(&sdev->pending, tx, dentry);
+                    TAILQ_REMOVE(&sconn->tx_seqs, tx, tx_seq);
+                    /* if SILENT, put idle tx */
+                    if (tx->flags & CCI_FLAG_SILENT) {
+                        tx->state = SOCK_TX_IDLE;
+                        /* store locally until we can drop the locks */
+                        TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
+                    } else {
+                        tx->state = SOCK_TX_COMPLETED;
+                        tx->evt.event.info.send.status = CCI_SUCCESS;
+                        /* store locally until we can drop the locks */
+                        TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
+                    }
                 }
                 found = 1;
                 break;
             }
         } else if (type == SOCK_MSG_ACK_UP_TO) {
             if (SOCK_SEQ_LTE(tx->seq, acks[0])) {
-                debug(CCI_DB_MSG, "%s acking tx seq %u (up to seq %u)",
-                      __func__, tx->seq, acks[0]);
-                TAILQ_REMOVE(&sdev->pending, tx, dentry);
-                /* if SILENT, put idle tx */
-                if (tx->flags & CCI_FLAG_SILENT) {
-                    tx->state = SOCK_TX_IDLE;
-                    /* store locally until we can drop the sdev->lock */
-                    TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
-                } else {
-                    tx->state = SOCK_TX_COMPLETED;
-                    tx->evt.event.info.send.status = CCI_SUCCESS;
-                    /* store locally until we can drop the sdev->lock */
-                    TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
+                if (tx->state == SOCK_TX_PENDING) {
+                    debug(CCI_DB_MSG, "%s acking tx seq %u (up to seq %u)",
+                          __func__, tx->seq, acks[0]);
+                    TAILQ_REMOVE(&sdev->pending, tx, dentry);
+                    TAILQ_REMOVE(&sconn->tx_seqs, tx, tx_seq);
+                    /* if SILENT, put idle tx */
+                    if (tx->flags & CCI_FLAG_SILENT) {
+                        tx->state = SOCK_TX_IDLE;
+                        /* store locally until we can drop the locks */
+                        TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
+                    } else {
+                        tx->state = SOCK_TX_COMPLETED;
+                        tx->evt.event.info.send.status = CCI_SUCCESS;
+                        /* store locally until we can drop the locks */
+                        TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
+                    }
+                    found++;
                 }
-                found++;
             } else {
                 break;
             }
@@ -2524,24 +2546,28 @@ sock_handle_ack(sock_conn_t *sconn,
                     SOCK_SEQ_LTE(tx->seq, acks[i + 1])) {
                     if (sconn->seq_pending == acks[i] - 1)
                         sconn->seq_pending = acks[i + 1];
-                    debug(CCI_DB_MSG, "%s sacking seq %u", __func__, acks[0]);
-                    found++;
-                    TAILQ_REMOVE(&sdev->pending, tx, dentry);
-                    /* if SILENT, put idle tx */
-                    if (tx->flags & CCI_FLAG_SILENT) {
-                        tx->state = SOCK_TX_IDLE;
-                        /* store locally until we can drop the sdev->lock */
-                        TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
-                    } else {
-                        tx->state = SOCK_TX_COMPLETED;
-                        tx->evt.event.info.send.status = CCI_SUCCESS;
-                        /* store locally until we can drop the sdev->lock */
-                        TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
+                    if (tx->state == SOCK_TX_PENDING) {
+                        debug(CCI_DB_MSG, "%s sacking seq %u", __func__, acks[0]);
+                        found++;
+                        TAILQ_REMOVE(&sdev->pending, tx, dentry);
+                        TAILQ_REMOVE(&sconn->tx_seqs, tx, tx_seq);
+                        /* if SILENT, put idle tx */
+                        if (tx->flags & CCI_FLAG_SILENT) {
+                            tx->state = SOCK_TX_IDLE;
+                            /* store locally until we can drop the sdev->lock */
+                            TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
+                        } else {
+                            tx->state = SOCK_TX_COMPLETED;
+                            tx->evt.event.info.send.status = CCI_SUCCESS;
+                            /* store locally until we can drop the sdev->lock */
+                            TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
+                        }
                     }
                 }
             }
         }
     }
+    pthread_mutex_unlock(&sconn->lock);
     pthread_mutex_unlock(&sdev->lock);
 
     debug(CCI_DB_MSG, "%s acked %d msgs (%s %u)", __func__, found,
@@ -2705,7 +2731,8 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
             conn->connection.max_send_size = mss;
 
         if (cci_conn_is_reliable(conn))
-            sconn->max_tx_cnt = max_recv_buffer_count;
+            sconn->max_tx_cnt = max_recv_buffer_count < ep->tx_buf_cnt ?
+                                max_recv_buffer_count : ep->tx_buf_cnt;
 
         /* get cci__evt_t to hang on ep->events */
 
@@ -3322,12 +3349,14 @@ sock_progress_dev(cci__dev_t *dev)
 
     sock_progress_sends(sdev);
 
+    /* FIXME need to hold ep->lock */
     TAILQ_FOREACH(ep, &dev->eps, entry) {
         int again = 1;
         while (again)
             again = sock_recvfrom_ep(ep);
         sock_ack_conns(ep);
     }
+    /* FIXME need to hold dev->lock and svc->lock? */
     TAILQ_FOREACH(lep, &dev->leps, dentry)
         sock_recvfrom_lep(lep);
     /* TODO progress lep->passive? */

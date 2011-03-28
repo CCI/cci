@@ -203,12 +203,26 @@ sock_parse_header(sock_header_t *header,
 #define SOCK_SEQ_MASK       (~0)
 #define SOCK_ACK_MASK       (SOCK_SEQ_MASK)
 
-#define SOCK_SEQ_LT(a,b)    ((int)((a)-(b)) < 0)
-#define SOCK_SEQ_LTE(a,b)   ((int)((a)-(b)) <= 0)
-#define SOCK_SEQ_GT(a,b)    ((int)((a)-(b)) > 0)
-#define SOCK_SEQ_GTE(a,b)   ((int)((a)-(b)) >= 0)
-#define SOCK_SEQ_MIN(a,b)   ((SOCK_SEQ_LT(a, b)) ? (a) : (b))
-#define SOCK_SEQ_MAX(a,b)   ((SOCK_SEQ_GT(a, b)) ? (a) : (b))
+#define SOCK_U32_LT(a,b)    ((int)((a)-(b)) < 0)
+#define SOCK_U32_LTE(a,b)   ((int)((a)-(b)) <= 0)
+#define SOCK_U32_GT(a,b)    ((int)((a)-(b)) > 0)
+#define SOCK_U32_GTE(a,b)   ((int)((a)-(b)) >= 0)
+#define SOCK_U32_MIN(a,b)   ((SOCK_U32_LT(a, b)) ? (a) : (b))
+#define SOCK_U32_MAX(a,b)   ((SOCK_U32_GT(a, b)) ? (a) : (b))
+
+#define SOCK_U64_LT(a,b)    ((int64_t)((a)-(b)) < 0)
+#define SOCK_U64_LTE(a,b)   ((int64_t)((a)-(b)) <= 0)
+#define SOCK_U64_GT(a,b)    ((int64_t)((a)-(b)) > 0)
+#define SOCK_U64_GTE(a,b)   ((int64_t)((a)-(b)) >= 0)
+#define SOCK_U64_MIN(a,b)   ((SOCK_U64_LT(a, b)) ? (a) : (b))
+#define SOCK_U64_MAX(a,b)   ((SOCK_U64_GT(a, b)) ? (a) : (b))
+
+#define SOCK_SEQ_LT(a,b)    SOCK_U32_LT(a,b)
+#define SOCK_SEQ_LTE(a,b)   SOCK_U32_LTE(a,b)
+#define SOCK_SEQ_GT(a,b)    SOCK_U32_GT(a,b)
+#define SOCK_SEQ_GTE(a,b)   SOCK_U32_GTE(a,b)
+#define SOCK_SEQ_MIN(a,b)   SOCK_U32_MIN(a,b)
+#define SOCK_SEQ_MAX(a,b)   SOCK_U32_MAX(a,b)
 
 /* sequence and timestamp
 
@@ -637,6 +651,9 @@ typedef struct sock_tx {
     /*! Entry for hanging on ep->txs */
     TAILQ_ENTRY(sock_tx) tentry;
 
+    /*! Entry for sconn->tx_seqs */
+    TAILQ_ENTRY(sock_tx) tx_seq;
+
     /*! If reliable, use the following: */
 
     /*! Sequence number */
@@ -766,6 +783,9 @@ typedef struct sock_conn {
     /*! Pending send count (waiting on acks) */
     uint32_t pending;
 
+    /*! Pending sends waiting on acks */
+    TAILQ_HEAD(s_tx_seqs, sock_tx) tx_seqs;
+
     /*! Peer's last contiguous seqno acked (ACK_UP_TO) */
     uint32_t acked;
 
@@ -849,7 +869,7 @@ typedef struct sock_globals {
     cci_device_t const ** const devices;
 } sock_globals_t;
 
-extern sock_globals_t *sglobals;
+extern volatile sock_globals_t *sglobals;
 
 
 int cci_core_sock_post_load(cci_plugin_t *me);
