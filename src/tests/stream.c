@@ -89,7 +89,8 @@ again:
                 ready = 1;
             } else {
                 if (!is_server) {
-                    recv++;
+                    if (event->info.recv.data_len == current_size)
+                        recv++;
                 } else {
                     if (event->info.recv.data_len > current_size)
                         current_size = event->info.recv.data_len;
