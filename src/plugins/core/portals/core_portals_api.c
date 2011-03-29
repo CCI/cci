@@ -361,6 +361,7 @@ static int portals_init(
 }
 
 
+// Todo
 static const char *portals_strerror(
     enum cci_status status ) {
 
@@ -399,6 +400,7 @@ static int portals_get_devices(
 }
 
 
+// Todo
 static int portals_free_devices(
     cci_device_t const **devices ) {
 
@@ -580,6 +582,7 @@ out:
 }
 
 
+// Todo
 static int portals_destroy_endpoint(
     cci_endpoint_t        *endpoint ) {
 
@@ -697,6 +700,7 @@ out:
 }
 
 
+// Todo
 static int portals_unbind(cci_service_t *service,
                           cci_device_t *device)
 {
@@ -705,6 +709,7 @@ static int portals_unbind(cci_service_t *service,
 }
 
 
+// Todo
 static int portals_get_conn_req(cci_service_t *service, 
                                 cci_conn_req_t **conn_req)
 {
@@ -743,6 +748,7 @@ portals_get_new_seq(void)
 }
 
 
+// Todo
 static int portals_accept(cci_conn_req_t *conn_req, 
                           cci_endpoint_t *endpoint, 
                           cci_connection_t **connection)
@@ -752,6 +758,7 @@ static int portals_accept(cci_conn_req_t *conn_req,
 }
 
 
+// Todo
 static int portals_reject(cci_conn_req_t *conn_req)
 {
     printf("In portals_reject\n");
@@ -989,6 +996,7 @@ out:
 }
 
 
+// Todo
 static int portals_disconnect(cci_connection_t *connection)
 {
     printf("In portals_disconnect\n");
@@ -996,6 +1004,7 @@ static int portals_disconnect(cci_connection_t *connection)
 }
 
 
+// Todo
 static int portals_set_opt(cci_opt_handle_t *handle, 
                            cci_opt_level_t level, 
                            cci_opt_name_t name,
@@ -1007,6 +1016,7 @@ static int portals_set_opt(cci_opt_handle_t *handle,
 }
 
 
+// Todo
 static int portals_get_opt(cci_opt_handle_t *handle, 
                            cci_opt_level_t level, 
                            cci_opt_name_t name,
@@ -1018,6 +1028,7 @@ static int portals_get_opt(cci_opt_handle_t *handle,
 }
 
 
+// Todo
 static int portals_arm_os_handle(cci_endpoint_t *endpoint,
                                  int flags)
 {
@@ -1026,6 +1037,7 @@ static int portals_arm_os_handle(cci_endpoint_t *endpoint,
 }
 
 
+// Todo
 static int portals_get_event(cci_endpoint_t *endpoint, 
                              cci_event_t ** const event,
                              uint32_t flags)
@@ -1035,6 +1047,7 @@ static int portals_get_event(cci_endpoint_t *endpoint,
 }
 
 
+// Todo
 static int portals_return_event(cci_endpoint_t *endpoint, 
                                 cci_event_t *event)
 {
@@ -1043,6 +1056,7 @@ static int portals_return_event(cci_endpoint_t *endpoint,
 }
 
 
+// Todo
 static int portals_send(cci_connection_t *connection, 
                         void *header_ptr,
                         uint32_t header_len, 
@@ -1056,6 +1070,7 @@ static int portals_send(cci_connection_t *connection,
 }
 
 
+// Todo
 static int portals_sendv(cci_connection_t *connection, 
                          void *header_ptr,
                          uint32_t header_len, 
@@ -1070,6 +1085,7 @@ static int portals_sendv(cci_connection_t *connection,
 }
 
 
+// Todo
 static int portals_rma_register(cci_endpoint_t *endpoint,
                                 void *start, 
                                 uint64_t length,
@@ -1080,6 +1096,7 @@ static int portals_rma_register(cci_endpoint_t *endpoint,
 }
 
 
+// Todo
 static int portals_rma_register_phys(cci_endpoint_t *endpoint, 
                                      cci_sg_t *sg_list,
                                      uint32_t sg_cnt, 
@@ -1090,6 +1107,7 @@ static int portals_rma_register_phys(cci_endpoint_t *endpoint,
 }
 
 
+// Todo
 static int portals_rma_deregister(uint64_t rma_handle)
 {
     printf("In portals_rma_deregister\n");
@@ -1097,6 +1115,7 @@ static int portals_rma_deregister(uint64_t rma_handle)
 }
 
 
+// Todo
 static int portals_rma(cci_connection_t *connection, 
                        void *header_ptr,
                        uint32_t header_len, 
@@ -1113,6 +1132,7 @@ static int portals_rma(cci_connection_t *connection,
 }
 
 
+// Todo
 static void portals_recvfrom_ep(cci__ep_t *ep)
 {
     printf("In portals_recvfrom_ep\n");
@@ -1120,6 +1140,7 @@ static void portals_recvfrom_ep(cci__ep_t *ep)
 }
 
 
+// Todo
 static void portals_recvfrom_lep(cci__lep_t *lep)
 {
     printf("In portals_recvfrom_lep\n");
@@ -1189,6 +1210,7 @@ static void *portals_progress_thread(void *arg)
 }
 
 
+// Todo
 static void portals_progress_pending(portals_dev_t *pdev)
 {
 
@@ -1199,6 +1221,7 @@ static void portals_progress_pending(portals_dev_t *pdev)
 }
 
 
+// Todo
 static void portals_progress_queued(portals_dev_t *pdev)
 {
 
