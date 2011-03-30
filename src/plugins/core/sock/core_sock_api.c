@@ -23,7 +23,6 @@
 #include <netdb.h>
 #include <fcntl.h>
 #include <inttypes.h>
-#include <sys/select.h>
 
 #include "cci.h"
 #include "plugins/core/core.h"
@@ -31,7 +30,7 @@
 
 volatile int shut_down = 0;
 volatile sock_globals_t *sglobals = NULL;
-pthread_t tid;
+pthread_t progress_tid, recv_tid;
 
 /*
  * Local functions
@@ -96,6 +95,7 @@ static int sock_rma(cci_connection_t *connection,
 
 static void sock_progress_sends(sock_dev_t *sdev);
 static void *sock_progress_thread(void *arg);
+static void *sock_recv_thread(void *arg);
 static inline void sock_progress_dev(cci__dev_t *dev);
 static int sock_sendto(cci_os_handle_t sock, void *buf, int len,
                        const struct sockaddr_in sin);
@@ -298,7 +298,11 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 
     *((cci_device_t ***) &sglobals->devices) = devices;
 
-    ret = pthread_create(&tid, NULL, sock_progress_thread, NULL);
+    ret = pthread_create(&recv_tid, NULL, sock_recv_thread, NULL);
+    if (ret)
+        goto out;
+
+    ret = pthread_create(&progress_tid, NULL, sock_progress_thread, NULL);
     if (ret)
         goto out;
 
@@ -371,7 +375,8 @@ static int sock_free_devices(cci_device_t const **devices)
 
     /* let the progress thread know we are going away */
     shut_down = 1;
-    pthread_join(tid, NULL);
+    pthread_join(progress_tid, NULL);
+    pthread_join(recv_tid, NULL);
 
     pthread_mutex_lock(&globals->lock);
     TAILQ_FOREACH(dev, &globals->devs, entry)
@@ -386,7 +391,7 @@ static int sock_free_devices(cci_device_t const **devices)
 }
 
 static inline int
-sock_set_nonblocking(cci_os_handle_t sock)
+sock_set_nonblocking(cci_os_handle_t sock, sock_fd_type_t type, void *p)
 {
     int ret, flags;
 
@@ -396,7 +401,44 @@ sock_set_nonblocking(cci_os_handle_t sock)
     ret = fcntl(sock, F_SETFL, flags | O_NONBLOCK);
     if (-1 == ret)
         return errno;
+    pthread_mutex_lock(&globals->lock);
+    FD_SET(sock, &sglobals->fds);
+    if (sock >= sglobals->nfds)
+        sglobals->nfds = sock + 1;
+    sglobals->fd_idx[sock].type = type;
+    if (type == SOCK_FD_EP)
+        sglobals->fd_idx[sock].ep = p;
+    else
+        sglobals->fd_idx[sock].lep = p;
+    pthread_mutex_unlock(&globals->lock);
     return 0;
+}
+
+static inline void
+sock_close_socket(cci_os_handle_t sock)
+{
+    int found = 0;
+
+    pthread_mutex_lock(&globals->lock);
+    FD_CLR(sock, &sglobals->fds);
+    sglobals->fd_idx[sock].type = SOCK_FD_UNUSED;
+    if (sock == sglobals->nfds - 1) {
+        int i = sock - 1;
+        sock_fd_idx_t *idx;
+        for (i = sock - 1; i >= 0; i--) {
+            idx = (sock_fd_idx_t *) &sglobals->fd_idx[i];
+            if (idx->type != SOCK_FD_UNUSED) {
+                sglobals->nfds = i + 1;
+                found = 1;
+                break;
+            }
+        }
+        if (!found)
+            sglobals->nfds = 0;
+    }
+    pthread_mutex_unlock(&globals->lock);
+    close(sock);
+    return;
 }
 
 static int sock_create_endpoint(cci_device_t *device, 
@@ -451,10 +493,6 @@ static int sock_create_endpoint(cci_device_t *device,
         ret = errno;
         goto out;
     }
-    ret = sock_set_nonblocking(sep->sock);
-    if (ret)
-        goto out;
-
     /* bind socket to device */
     sdev = dev->priv;
     memset(&sin, 0, sizeof(sin));
@@ -520,6 +558,10 @@ static int sock_create_endpoint(cci_device_t *device,
         TAILQ_INSERT_TAIL(&sep->idle_rxs, rx, entry);
     }
 
+    ret = sock_set_nonblocking(sep->sock, SOCK_FD_EP, ep);
+    if (ret)
+        goto out;
+
     CCI_EXIT;
     return CCI_SUCCESS;
 
@@ -551,7 +593,7 @@ out:
         if (sep->ids)
             free(sep->ids);
         if (sep->sock)
-            close(sep->sock);
+            sock_close_socket(sep->sock);
         free(sep);
     }
     if (ep)
@@ -566,6 +608,7 @@ static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
 {
     cci__ep_t   *ep     = NULL;
     sock_ep_t   *sep    = NULL;
+    sock_dev_t  *sdev   = NULL;
 
     CCI_ENTER;
 
@@ -576,11 +619,21 @@ static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
 
     ep = container_of(endpoint, cci__ep_t, endpoint);
     sep = ep->priv;
+    sdev = ep->dev->priv;
+
+    pthread_mutex_lock(&sdev->lock);
+
+    ep->priv = NULL;
 
     if (sep) {
         int i;
         cci__conn_t *conn;
         sock_conn_t *sconn;
+
+        sep->closing = 1;
+
+        if (sep->sock)
+            sock_close_socket(sep->sock);
 
         for (i = 0; i < SOCK_EP_HASH_SIZE; i++) {
             while (!TAILQ_EMPTY(&sep->conn_hash[i])) {
@@ -605,6 +658,10 @@ static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
 
             tx = TAILQ_FIRST(&sep->txs);
             TAILQ_REMOVE(&sep->txs, tx, tentry);
+            if (tx->state == SOCK_TX_QUEUED)
+                TAILQ_REMOVE(&sdev->queued, tx, dentry);
+            else if (tx->state == SOCK_TX_PENDING)
+                TAILQ_REMOVE(&sdev->pending, tx, dentry);
             if (tx->buffer)
                 free(tx->buffer);
             free(tx);
@@ -620,10 +677,9 @@ static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
         }
         if (sep->ids)
             free(sep->ids);
-        if (sep->sock)
-            close(sep->sock);
         free(sep);
     }
+    pthread_mutex_unlock(&sdev->lock);
 
     CCI_EXIT;
     return CCI_SUCCESS;
@@ -703,10 +759,6 @@ static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
         goto out;
     }
 
-    ret = sock_set_nonblocking(slep->sock);
-    if (ret)
-        goto out;
-
     /* bind socket to device and port */
     sdev = dev->priv;
     memset(&sin, 0, sizeof(sin));
@@ -725,6 +777,10 @@ static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
 
     lep->priv = slep;
 
+    ret = sock_set_nonblocking(slep->sock, SOCK_FD_LEP, lep);
+    if (ret)
+        goto out;
+
     CCI_EXIT;
     return CCI_SUCCESS;
 
@@ -740,7 +796,7 @@ out:
             }
         }
         if (slep->sock > 0)
-            close(slep->sock);
+            sock_close_socket(slep->sock);
         free(slep);
         lep->priv = NULL;
     }
@@ -784,7 +840,7 @@ static int sock_unbind(cci_service_t *service, cci_device_t *device)
         free(scrq->buffer);
         free(scrq);
     }
-    close(slep->sock);
+    sock_close_socket(slep->sock);
     /* TODO close(slep->fd); */
     pthread_mutex_unlock(&lep->lock);
 
@@ -954,6 +1010,7 @@ static int sock_accept(cci_conn_req_t *conn_req,
     TAILQ_INIT(&sconn->tx_seqs);
     TAILQ_INIT(&sconn->acks);
     sconn->conn = conn;
+    sconn->cwnd = 2;
     sconn->status = SOCK_CONN_READY; /* set ready since the app thinks it is */
     *((struct sockaddr_in *) &sconn->sin) = scrq->sin;
     sconn->peer_id = id;
@@ -965,6 +1022,7 @@ static int sock_accept(cci_conn_req_t *conn_req,
                             max_recv_buffer_count : ep->tx_buf_cnt;
         sconn->last_ack_seq = sconn->seq;
         sconn->last_ack_ts = sock_get_usecs();
+        sconn->ssthresh = sconn->max_tx_cnt;
     }
 
     pthread_mutex_init(&sconn->lock, NULL);
@@ -1272,6 +1330,7 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     /* set up sock specific info */
 
     sconn->status = SOCK_CONN_ACTIVE;
+    sconn->cwnd = 2;
     sin = (struct sockaddr_in *) &sconn->sin;
     memset(sin, 0, sizeof(*sin));
     sin->sin_family = AF_INET;
@@ -1335,7 +1394,6 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     sock_pack_conn_request(&hdr_r->header, attribute,
                            (uint16_t) data_len, 0);
     tx->len = sizeof(*hdr_r);
-    ptr = tx->buffer + tx->len;
 
     /* add seq and ack */
 
@@ -1346,7 +1404,7 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     sock_pack_seq_ts(&hdr_r->seq_ts, tx->seq, ts);
 
     /* add handshake */
-    hs = (sock_handshake_t *) ptr;
+    hs = (sock_handshake_t *) &hdr_r->data;
     sock_pack_handshake(hs, sconn->id, 0,
                         endpoint->max_recv_buffer_count,
                         connection->max_send_size);
@@ -1680,6 +1738,35 @@ static int sock_return_event(cci_endpoint_t *endpoint,
     return CCI_SUCCESS;
 }
 
+static int sock_sendmsg(cci_os_handle_t sock, void **ptrs, uint32_t *lens,
+                        uint8_t count, const struct sockaddr_in sin)
+{
+    int ret, i;
+    struct iovec *iov = NULL;
+    struct msghdr msg;
+    ssize_t sent = 0;
+
+    iov = calloc(count, sizeof(*iov));
+    if (!iov)
+        return CCI_ENOMEM;
+
+    for (i = 0; i < count; i++) {
+        iov[i].iov_base = (void *) ptrs[i];
+        iov[i].iov_len = (size_t) lens[i];
+        sent += lens[i];
+    }
+
+    msg.msg_name = (void *) &sin;
+    msg.msg_namelen = sizeof(sin);
+    msg.msg_iov = iov;
+    msg.msg_iovlen = count;
+
+    ret = sendmsg(sock, &msg, 0);
+    if (ret != -1)
+        assert(ret == sent);
+
+    return ret;
+}
 
 static int sock_sendto(cci_os_handle_t sock, void *buf, int len,
                        const struct sockaddr_in sin)
@@ -1687,6 +1774,8 @@ static int sock_sendto(cci_os_handle_t sock, void *buf, int len,
     int ret;
     const struct sockaddr *s = (const struct sockaddr *)&sin;
     socklen_t slen = sizeof(sin);
+
+    if (0) sock_sendmsg(sock, NULL, NULL, 0, sin);
 
     ret = sendto(sock, buf, len, 0, s, slen);
     if (ret != -1)
@@ -1746,6 +1835,8 @@ sock_progress_pending(sock_dev_t *sdev)
 
             /* set status and add to completed events */
 
+            sconn->pending--;
+
             switch (tx->msg_type) {
             case SOCK_MSG_SEND:
                 event->info.send.status = CCI_ETIMEDOUT;
@@ -1796,15 +1887,16 @@ sock_progress_pending(sock_dev_t *sdev)
 
         /* is it time to resend? */
 
-        if ((tx->last_attempt_us + (tx->send_count++ * SOCK_RESEND_TIME_SEC * 1000000)) > now)
+        if ((tx->last_attempt_us + (tx->send_count * SOCK_RESEND_TIME_SEC * 1000000)) > now)
             continue;
 
         /* need to resend it */
 
         tx->last_attempt_us = now;
+        tx->send_count++;
 
-        debug(CCI_DB_MSG, "re-sending %s msg seq %u",
-              sock_msg_type(tx->msg_type), tx->seq);
+        debug(CCI_DB_MSG, "re-sending %s msg seq %u count %d",
+              sock_msg_type(tx->msg_type), tx->seq, tx->send_count);
         ret = sock_sendto(sep->sock, tx->buffer, tx->len, sconn->sin);
         if (ret != tx->len) {
             debug((CCI_DB_MSG|CCI_DB_INFO), "sendto() failed with %s\n", cci_strerror(errno));
@@ -1964,6 +2056,7 @@ sock_progress_queued(sock_dev_t *sdev)
         }
         /* msg sent, dequeue */
         TAILQ_REMOVE(&sdev->queued, tx, dentry);
+        sconn->pending++;
 
         /* if reliable or connection, add to pending
          * else add to idle txs */
@@ -2127,7 +2220,7 @@ static int sock_sendv(cci_connection_t *connection,
 
     if (is_reliable) {
         sock_header_r_t *hdr_r = tx->buffer;
-        uint32_t ts;
+        uint32_t ts = 0;
 
         pthread_mutex_lock(&sconn->lock);
         tx->seq = ++(sconn->seq);
@@ -2506,6 +2599,9 @@ sock_handle_ack(sock_conn_t *sconn,
                     debug(CCI_DB_MSG, "%s acking only seq %u", __func__, acks[0]);
                     TAILQ_REMOVE(&sdev->pending, tx, dentry);
                     TAILQ_REMOVE(&sconn->tx_seqs, tx, tx_seq);
+                    sconn->pending--;
+                    if (sconn->pending <= sconn->ssthresh)
+                        sconn->cwnd++;
                     /* if SILENT, put idle tx */
                     if (tx->flags & CCI_FLAG_SILENT) {
                         tx->state = SOCK_TX_IDLE;
@@ -2528,6 +2624,9 @@ sock_handle_ack(sock_conn_t *sconn,
                           __func__, tx->seq, acks[0]);
                     TAILQ_REMOVE(&sdev->pending, tx, dentry);
                     TAILQ_REMOVE(&sconn->tx_seqs, tx, tx_seq);
+                    sconn->pending--;
+                    if (sconn->pending <= sconn->ssthresh)
+                        sconn->cwnd++;
                     /* if SILENT, put idle tx */
                     if (tx->flags & CCI_FLAG_SILENT) {
                         tx->state = SOCK_TX_IDLE;
@@ -2555,6 +2654,9 @@ sock_handle_ack(sock_conn_t *sconn,
                         found++;
                         TAILQ_REMOVE(&sdev->pending, tx, dentry);
                         TAILQ_REMOVE(&sconn->tx_seqs, tx, tx_seq);
+                        sconn->pending--;
+                        if (sconn->pending <= sconn->ssthresh)
+                            sconn->cwnd++;
                         /* if SILENT, put idle tx */
                         if (tx->flags & CCI_FLAG_SILENT) {
                             tx->state = SOCK_TX_IDLE;
@@ -2734,9 +2836,11 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
         if (mss < conn->connection.max_send_size)
             conn->connection.max_send_size = mss;
 
-        if (cci_conn_is_reliable(conn))
+        if (cci_conn_is_reliable(conn)) {
             sconn->max_tx_cnt = max_recv_buffer_count < ep->tx_buf_cnt ?
                                 max_recv_buffer_count : ep->tx_buf_cnt;
+            sconn->ssthresh = sconn->max_tx_cnt;
+        }
 
         /* get cci__evt_t to hang on ep->events */
 
@@ -2963,6 +3067,9 @@ sock_recvfrom_ep(cci__ep_t *ep)
     /* get idle rx */
 
     sep = ep->priv;
+    if (!sep || sep->closing)
+        return 0;
+
     pthread_mutex_lock(&sep->lock);
     if (!TAILQ_EMPTY(&sep->idle_rxs)) {
         rx = TAILQ_FIRST(&sep->idle_rxs);
@@ -3013,7 +3120,7 @@ sock_recvfrom_ep(cci__ep_t *ep)
         goto out;
     }
 
-    if (cci_conn_is_reliable(sconn->conn) &&
+    if (sconn && cci_conn_is_reliable(sconn->conn) &&
         !(type == SOCK_MSG_CONN_REPLY)) {
         sock_header_r_t *hdr_r = rx->buffer;
         uint32_t seq;
@@ -3106,6 +3213,8 @@ sock_recvfrom_lep(cci__lep_t *lep)
     /* get idle crq */
 
     slep = lep->priv;
+    if (!slep)
+        return;
     pthread_mutex_lock(&lep->lock);
     if (lep->state == CCI_LEP_CLOSING) {
         pthread_mutex_unlock(&lep->lock);
@@ -3244,7 +3353,7 @@ sock_ack_conns(cci__ep_t *ep)
 
     if (last == 0ULL)
         last = now;
-    else if (last + 1000ULL > now)
+    else if (last + 100ULL > now)
         return;
 
     last = now;
@@ -3335,7 +3444,6 @@ sock_progress_dev(cci__dev_t *dev)
     int have_token = 0;
     sock_dev_t *sdev;
     cci__ep_t *ep;
-    cci__lep_t *lep;
 
     CCI_ENTER;
 
@@ -3354,15 +3462,9 @@ sock_progress_dev(cci__dev_t *dev)
     sock_progress_sends(sdev);
 
     /* FIXME need to hold ep->lock */
-    TAILQ_FOREACH(ep, &dev->eps, entry) {
-        int again = 1;
-        while (again)
-            again = sock_recvfrom_ep(ep);
+    TAILQ_FOREACH(ep, &dev->eps, entry)
         sock_ack_conns(ep);
-    }
-    /* FIXME need to hold dev->lock and svc->lock? */
-    TAILQ_FOREACH(lep, &dev->leps, dentry)
-        sock_recvfrom_lep(lep);
+
     /* TODO progress lep->passive? */
 
     pthread_mutex_lock(&sdev->lock);
@@ -3389,6 +3491,60 @@ static void *sock_progress_thread(void *arg)
             sock_progress_dev(dev);
         }
         select(0, NULL, NULL, NULL, &tv);
+    }
+
+    pthread_exit(NULL);
+}
+
+static void *sock_recv_thread(void *arg)
+{
+    int         i       = 0;
+    int         found   = 0;
+    int         ret     = 0;
+    static int      start   = 0;
+    struct timeval  tv      = { 0, 100 };
+    int         nfds;
+    fd_set      fds;
+
+    while (!shut_down) {
+        found = 0;
+
+        pthread_mutex_lock(&globals->lock);
+        FD_COPY((fd_set *)&sglobals->fds, &fds);
+        nfds = sglobals->nfds;
+        pthread_mutex_unlock(&globals->lock);
+
+        ret = select(nfds, &fds, NULL, NULL, &tv);
+        if (ret == -1) {
+            switch (errno) {
+            case EBADF:
+                debug(CCI_DB_INFO, "select() failed with %s", strerror(errno));
+                break;
+            default:
+                break;
+            }
+            continue;
+        } else if (ret == 0) {
+            continue;
+        }
+
+        if (start >= nfds)
+            start = 0;
+
+        i = start;
+        do {
+            if (FD_ISSET(i, &fds)) {
+                sock_fd_idx_t *idx = (sock_fd_idx_t *)&sglobals->fd_idx[i];
+
+                if (idx->type == SOCK_FD_EP) {
+                    sock_recvfrom_ep(idx->ep);
+                } else if (idx->type == SOCK_FD_LEP) {
+                    sock_recvfrom_lep(idx->lep);
+                }
+                start = i;
+            }
+            i = (i + 1) % nfds;
+        } while (i != start);
     }
 
     pthread_exit(NULL);

@@ -15,6 +15,7 @@
 #include <netinet/in.h>
 #include <assert.h>
 #include <arpa/inet.h>
+#include <sys/select.h>
 
 
 #include "cci/config.h"
@@ -28,7 +29,7 @@ BEGIN_C_DECLS
 #define SOCK_MAX_HDRS           (SOCK_MAX_HDR_SIZE + 20 + 8) /* IP + UDP */
 #define SOCK_DEFAULT_MSS        (8192)  /* 8 KB - assume jumbo frames */
 #define SOCK_MIN_MSS            (1500 - SOCK_MAX_HDR_SIZE)
-#define SOCK_MAX_SACK           (4)     /* pairs of start/end acks */
+#define SOCK_MAX_SACK           (4)    /* pairs of start/end acks */
 #define SOCK_ACK_DELAY          (1)    /* send an ack after every Nth send */
 
 #define SOCK_EP_MAX_HDR_SIZE    (32)    /* max user header size */
@@ -37,6 +38,7 @@ BEGIN_C_DECLS
 #define SOCK_EP_TX_CNT          (128)   /* number of tx active messages */
 
 #define SOCK_EP_HASH_SIZE       (256)   /* nice round number */
+#define SOCK_MAX_EPS            (256)   /* max sock fd value - 1 */
 
 #define SOCK_BLOCK_SIZE         (64)    /* use 64b blocks for id storage */
 #define SOCK_NUM_BLOCKS         (16384) /* number of blocks */
@@ -44,8 +46,6 @@ BEGIN_C_DECLS
                                         /* 1048576 conns per endpoint */
 #define SOCK_PROG_TIME_US       (10000) /* try to progress every N microseconds */
 #define SOCK_RESEND_TIME_SEC    (1)     /* time between resends in seconds */
-#define SOCK_RESEND_CYCLES      (SOCK_RESEND_TIME_SEC * 1000000 / SOCK_PROG_TIME_US)
-                                        /* progress attempts every N cycles */
 #define SOCK_PEEK_LEN           (32)    /* large enough for RMA header */
 #define SOCK_CONN_REQ_HDR_LEN   ((int) (sizeof(struct sock_header_r)))
                                         /* header + seqack */
@@ -690,6 +690,9 @@ typedef struct sock_rx {
 } sock_rx_t;
 
 typedef struct sock_ep {
+    /*! Is closing? */
+    int closing;
+
     /*! Socket for sending/recving */
     cci_os_handle_t sock;
 
@@ -771,7 +774,7 @@ typedef struct sock_conn {
     /*! ID we assigned to peer - peer uses to send to us and we use to look up conn */
     uint32_t id;
 
-    /*! Max sends in flight to this peer */
+    /*! Max sends in flight to this peer (i.e. rwnd) */
     uint32_t max_tx_cnt;
 
     /*! Entry to hang on sock_ep->conns[hash] */
@@ -783,8 +786,14 @@ typedef struct sock_conn {
     /* Lowest pending seq */
     uint32_t seq_pending;
 
-    /*! Pending send count (waiting on acks) */
+    /*! Pending send count (waiting on acks) (i.e. flightsize) */
     uint32_t pending;
+
+    /*! Congestion window */
+    uint32_t cwnd;
+
+    /*! Slow start threshhold */
+    uint32_t ssthresh;
 
     /*! Pending sends waiting on acks */
     TAILQ_HEAD(s_tx_seqs, sock_tx) tx_seqs;
@@ -864,13 +873,40 @@ typedef struct sock_crq {
     uint64_t timeout_us;
 } sock_crq_t;
 
+typedef enum sock_fd_type {
+    SOCK_FD_UNUSED  = 0,
+    SOCK_FD_EP,
+    SOCK_FD_LEP
+} sock_fd_type_t;
+
+typedef struct sock_fd_idx {
+    sock_fd_type_t type;
+    union {
+        cci__ep_t *ep;
+        cci__lep_t *lep;
+    };
+} sock_fd_idx_t;
+
 typedef struct sock_globals {
     /*! Number of sock devices */
     int count;
 
     /*! Array of sock devices */
     cci_device_t const ** const devices;
+
+    /*! Array of devices indexed by sock fd */
+    sock_fd_idx_t fd_idx[SOCK_MAX_EPS];
+
+    /*! Highest open endpoint sock fd + 1 for select */
+    int nfds;
+
+    /*! fd_set for open endpoint sock fds */
+    fd_set fds;
 } sock_globals_t;
+
+#ifndef FD_COPY
+#define FD_COPY(a,b) memcpy(a,b,sizeof(fd_set))
+#endif
 
 extern volatile sock_globals_t *sglobals;
 
