@@ -94,7 +94,7 @@ again:
                         return;
                     }
                     ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
-                    if (ret)
+                    if (ret && 0)
                         fprintf(stderr, "%s: send returned %s\n", __func__, cci_strerror(ret));
                 }
             }
