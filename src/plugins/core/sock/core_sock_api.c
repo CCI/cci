@@ -3572,7 +3572,11 @@ static void *sock_recv_thread(void *arg)
     pthread_mutex_lock(&globals->lock);
     while (!shut_down) {
         found = 0;
-        FD_COPY((fd_set *)&sglobals->fds, &fds);
+        FD_ZERO(&fds);
+        for (i = 0; i < nfds; i++) {
+            if (sglobals->fd_idx[i].type != SOCK_FD_UNUSED)
+                FD_SET(i, &fds);
+        }
         nfds = sglobals->nfds;
         pthread_mutex_unlock(&globals->lock);
 
@@ -3585,9 +3589,9 @@ static void *sock_recv_thread(void *arg)
             default:
                 break;
             }
-            continue;
+            goto relock;
         } else if (ret == 0) {
-            continue;
+            goto relock;
         }
 
         if (start >= nfds)
@@ -3607,6 +3611,7 @@ static void *sock_recv_thread(void *arg)
             }
             i = (i + 1) % nfds;
         } while (i != start);
+relock:
         pthread_mutex_lock(&globals->lock);
     }
     pthread_mutex_unlock(&globals->lock);
