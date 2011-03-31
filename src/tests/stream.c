@@ -16,6 +16,7 @@
 #include <assert.h>
 #include <sys/time.h>
 #include <signal.h>
+#include <pthread.h>
 
 #include "cci.h"
 
@@ -35,12 +36,16 @@ char *server_uri;
 char *buffer;
 int timeout = TIMEOUT;
 int running = 1;
+pthread_mutex_t lock;
 uint32_t port = DFLT_PORT;
 uint32_t current_size = 0;
 cci_device_t **devices = NULL;
 cci_endpoint_t *endpoint = NULL;
 cci_connection_t *connection = NULL;
 cci_conn_attribute_t attr = CCI_CONN_ATTR_UU;
+
+#define LOCK   pthread_mutex_lock(&lock);
+#define UNLOCK pthread_mutex_unlock(&lock);
 
 void
 print_usage()
@@ -65,7 +70,13 @@ poll_events(void)
     cci_event_t *event;
 
 again:
-    if (!running) return;
+    LOCK;
+    if (!running) {
+        UNLOCK;
+        return;
+    }
+    UNLOCK;
+
     ret = cci_get_event(endpoint, &event, 0);
     if (ret == CCI_SUCCESS) {
         assert(event);
@@ -73,14 +84,19 @@ again:
         case CCI_EVENT_SEND:
             if (!is_server) {
                 send_completed++;
+                LOCK;
                 if (running) {
+                    UNLOCK;
                     ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
                     if (ret) {
                         if (0)
                             fprintf(stderr, "%s: send returned %s\n", __func__, cci_strerror(ret));
                     } else
                         send++;
+
+                    LOCK;
                 }
+                UNLOCK;
             }
             break;
         case CCI_EVENT_RECV:
@@ -137,7 +153,9 @@ usecs(struct timeval start, struct timeval end)
 
 void handle_alarm(int sig)
 {
+    LOCK;
     running = 0;
+    UNLOCK;
     return;
 }
 
@@ -183,7 +201,9 @@ do_client()
         int i;
 
         send = send_completed = recv = 0;
+        LOCK;
         running = 1;
+        UNLOCK;
 
         alarm(timeout);
         gettimeofday(&start, NULL);
@@ -194,8 +214,13 @@ do_client()
                 send++;
         }
 
-        while (running)
+        LOCK;
+        while (running) {
+            UNLOCK;
             poll_events();
+            LOCK;
+        }
+        UNLOCK;
 
         gettimeofday(&end, NULL);
 
