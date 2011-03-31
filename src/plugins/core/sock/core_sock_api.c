@@ -93,7 +93,7 @@ static int sock_rma(cci_connection_t *connection,
                         uint64_t data_len, void *context, int flags);
 
 
-static void sock_progress_sends(sock_dev_t *sdev);
+static void sock_progress_sends(cci__dev_t *dev);
 static void *sock_progress_thread(void *arg);
 static void *sock_recv_thread(void *arg);
 static inline void sock_progress_dev(cci__dev_t *dev);
@@ -260,7 +260,6 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
             sdev = dev->priv;
             TAILQ_INIT(&sdev->queued);
             TAILQ_INIT(&sdev->pending);
-            pthread_mutex_init(&sdev->lock, NULL);
             sdev->is_progressing = 0;
 
             /* parse conf_argv */
@@ -374,7 +373,9 @@ static int sock_free_devices(cci_device_t const **devices)
     }
 
     /* let the progress thread know we are going away */
+    pthread_mutex_lock(&globals->lock);
     shut_down = 1;
+    pthread_mutex_unlock(&globals->lock);
     pthread_join(progress_tid, NULL);
     pthread_join(recv_tid, NULL);
 
@@ -514,7 +515,6 @@ static int sock_create_endpoint(cci_device_t *device,
     TAILQ_INIT(&sep->idle_txs);
     TAILQ_INIT(&sep->rxs);
     TAILQ_INIT(&sep->idle_rxs);
-    pthread_mutex_init(&sep->lock, NULL);
 
     /* alloc txs */
     for (i = 0; i < ep->tx_buf_cnt; i++) {
@@ -607,6 +607,7 @@ out:
 static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
 {
     cci__ep_t   *ep     = NULL;
+    cci__dev_t  *dev    = NULL;
     sock_ep_t   *sep    = NULL;
     sock_dev_t  *sdev   = NULL;
 
@@ -618,10 +619,11 @@ static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
     }
 
     ep = container_of(endpoint, cci__ep_t, endpoint);
+    dev = ep->dev;
     sep = ep->priv;
-    sdev = ep->dev->priv;
+    sdev = dev->priv;
 
-    pthread_mutex_lock(&sdev->lock);
+    pthread_mutex_lock(&dev->lock);
 
     ep->priv = NULL;
 
@@ -679,7 +681,7 @@ static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
             free(sep->ids);
         free(sep);
     }
-    pthread_mutex_unlock(&sdev->lock);
+    pthread_mutex_unlock(&dev->lock);
 
     CCI_EXIT;
     return CCI_SUCCESS;
@@ -976,12 +978,12 @@ static int sock_accept(cci_conn_req_t *conn_req,
     }
 
     /* get a tx */
-    pthread_mutex_lock(&sep->lock);
+    pthread_mutex_lock(&ep->lock);
     if (!TAILQ_EMPTY(&sep->idle_txs)) {
         tx = TAILQ_FIRST(&sep->idle_txs);
         TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
     }
-    pthread_mutex_unlock(&sep->lock);
+    pthread_mutex_unlock(&ep->lock);
 
     if (!tx) {
         free(conn->priv);
@@ -1010,7 +1012,7 @@ static int sock_accept(cci_conn_req_t *conn_req,
     TAILQ_INIT(&sconn->tx_seqs);
     TAILQ_INIT(&sconn->acks);
     sconn->conn = conn;
-    sconn->cwnd = 2;
+    sconn->cwnd = SOCK_INITIAL_CWND;
     sconn->status = SOCK_CONN_READY; /* set ready since the app thinks it is */
     *((struct sockaddr_in *) &sconn->sin) = scrq->sin;
     sconn->peer_id = id;
@@ -1025,14 +1027,12 @@ static int sock_accept(cci_conn_req_t *conn_req,
         sconn->ssthresh = sconn->max_tx_cnt;
     }
 
-    pthread_mutex_init(&sconn->lock, NULL);
-
     /* insert in sock ep's list of conns */
 
     i = sock_ip_hash(sconn->sin.sin_addr.s_addr, sconn->sin.sin_port);
-    pthread_mutex_lock(&sep->lock);
+    pthread_mutex_lock(&ep->lock);
     TAILQ_INSERT_TAIL(&sep->conn_hash[i], sconn, entry);
-    pthread_mutex_unlock(&sep->lock);
+    pthread_mutex_unlock(&ep->lock);
 
     debug(CCI_DB_CONN, "accepting conn with hash %d", i);
 
@@ -1069,9 +1069,9 @@ static int sock_accept(cci_conn_req_t *conn_req,
     /* insert at tail of device's queued list */
 
     tx->state = SOCK_TX_QUEUED;
-    pthread_mutex_lock(&sdev->lock);
+    pthread_mutex_lock(&dev->lock);
     TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
-    pthread_mutex_unlock(&sdev->lock);
+    pthread_mutex_unlock(&dev->lock);
 
     /* try to progress txs */
 
@@ -1330,7 +1330,7 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     /* set up sock specific info */
 
     sconn->status = SOCK_CONN_ACTIVE;
-    sconn->cwnd = 2;
+    sconn->cwnd = SOCK_INITIAL_CWND;
     sin = (struct sockaddr_in *) &sconn->sin;
     memset(sin, 0, sizeof(*sin));
     sin->sin_family = AF_INET;
@@ -1343,8 +1343,6 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
 
     /* peer will assign id */
 
-    pthread_mutex_init(&sconn->lock, NULL);
-
     /* get our endpoint and device */
     ep = container_of(endpoint, cci__ep_t, endpoint);
     sep = ep->priv;
@@ -1355,17 +1353,17 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
 
     i = sock_ip_hash(ip, 0);
     active_list = &sep->active_hash[i];
-    pthread_mutex_lock(&sep->lock);
+    pthread_mutex_lock(&ep->lock);
     TAILQ_INSERT_TAIL(active_list, sconn, entry);
-    pthread_mutex_unlock(&sep->lock);
+    pthread_mutex_unlock(&ep->lock);
 
     /* get a tx */
-    pthread_mutex_lock(&sep->lock);
+    pthread_mutex_lock(&ep->lock);
     if (!TAILQ_EMPTY(&sep->idle_txs)) {
         tx = TAILQ_FIRST(&sep->idle_txs);
         TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
     }
-    pthread_mutex_unlock(&sep->lock);
+    pthread_mutex_unlock(&ep->lock);
 
     if (!tx) {
         CCI_EXIT;
@@ -1432,9 +1430,9 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     sdev = dev->priv;
 
     tx->state = SOCK_TX_QUEUED;
-    pthread_mutex_lock(&sdev->lock);
+    pthread_mutex_lock(&dev->lock);
     TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
-    pthread_mutex_unlock(&sdev->lock);
+    pthread_mutex_unlock(&dev->lock);
 
     /* try to progress txs */
 
@@ -1489,9 +1487,9 @@ static int sock_disconnect(cci_connection_t *connection)
         free((char *) conn->uri);
 
     i = sock_ip_hash(sconn->sin.sin_addr.s_addr, sconn->sin.sin_port);
-    pthread_mutex_lock(&sep->lock);
+    pthread_mutex_lock(&ep->lock);
     TAILQ_REMOVE(&sep->conn_hash[i], sconn, entry);
-    pthread_mutex_unlock(&sep->lock);
+    pthread_mutex_unlock(&ep->lock);
 
     free(sconn);
     free(conn);
@@ -1716,17 +1714,17 @@ static int sock_return_event(cci_endpoint_t *endpoint,
     switch (event->type) {
     case CCI_EVENT_SEND:
         tx = container_of(evt, sock_tx_t, evt);
-        pthread_mutex_lock(&sep->lock);
+        pthread_mutex_lock(&ep->lock);
         /* insert at head to keep it in cache */
         TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
-        pthread_mutex_unlock(&sep->lock);
+        pthread_mutex_unlock(&ep->lock);
         break;
     case CCI_EVENT_RECV:
         rx = container_of(evt, sock_rx_t, evt);
-        pthread_mutex_lock(&sep->lock);
+        pthread_mutex_lock(&ep->lock);
         /* insert at head to keep it in cache */
         TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
-        pthread_mutex_unlock(&sep->lock);
+        pthread_mutex_unlock(&ep->lock);
         break;
     default:
         /* TODO */
@@ -1785,7 +1783,7 @@ static int sock_sendto(cci_os_handle_t sock, void *buf, int len,
 }
 
 static void
-sock_progress_pending(sock_dev_t *sdev)
+sock_progress_pending(cci__dev_t *dev)
 {
     int ret;
     uint64_t            now;
@@ -1797,8 +1795,12 @@ sock_progress_pending(sock_dev_t *sdev)
     sock_conn_t         *sconn;
     cci__ep_t           *ep;
     sock_ep_t           *sep;
+    sock_dev_t          *sdev = dev->priv;
 
     CCI_ENTER;
+
+    if (!sdev)
+        return;
 
     TAILQ_HEAD(s_idle_txs, sock_tx) idle_txs = TAILQ_HEAD_INITIALIZER(idle_txs);
     TAILQ_HEAD(s_evts, cci__evt) evts = TAILQ_HEAD_INITIALIZER(evts);
@@ -1811,7 +1813,7 @@ sock_progress_pending(sock_dev_t *sdev)
      * Do not dequeue txs, just walk the list.
      */
 
-    pthread_mutex_lock(&sdev->lock);
+    pthread_mutex_lock(&dev->lock);
     TAILQ_FOREACH_SAFE(tx, &sdev->pending, dentry, tmp) {
 
         evt = &(tx->evt);
@@ -1835,7 +1837,8 @@ sock_progress_pending(sock_dev_t *sdev)
 
             /* set status and add to completed events */
 
-            sconn->pending--;
+            if (tx->msg_type == SOCK_MSG_SEND)
+                sconn->pending--;
 
             switch (tx->msg_type) {
             case SOCK_MSG_SEND:
@@ -1852,9 +1855,9 @@ sock_progress_pending(sock_dev_t *sdev)
                 sconn->status = SOCK_CONN_CLOSING;
                 i = sock_ip_hash(sconn->sin.sin_addr.s_addr, 0);
                 active_list = &sep->active_hash[i];
-                pthread_mutex_lock(&sep->lock);
+                pthread_mutex_lock(&ep->lock);
                 TAILQ_REMOVE(active_list, sconn, entry);
-                pthread_mutex_unlock(&sep->lock);
+                pthread_mutex_unlock(&ep->lock);
                 free(sconn);
                 free(conn);
                 sconn = NULL;
@@ -1875,11 +1878,11 @@ sock_progress_pending(sock_dev_t *sdev)
                 tx->flags & CCI_FLAG_SILENT) {
 
                 tx->state = SOCK_TX_IDLE;
-                /* store locally until we can drop the sdev->lock */
+                /* store locally until we can drop the dev->lock */
                 TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
             } else {
                 tx->state = SOCK_TX_COMPLETED;
-                /* store locally until we can drop the sdev->lock */
+                /* store locally until we can drop the dev->lock */
                 TAILQ_INSERT_TAIL(&evts, evt, entry);
             }
             continue;
@@ -1892,6 +1895,18 @@ sock_progress_pending(sock_dev_t *sdev)
 
         /* need to resend it */
 
+        if (tx->send_count == 1 && tx->msg_type == SOCK_MSG_SEND && 0) {
+            debug(CCI_DB_INFO, "%s: reducing cwnd from %d to %d\n"
+                               "    reducing ssthresh from %d to %d",
+                               __func__, sconn->cwnd, 2, sconn->ssthresh,
+                               sconn->pending / 2 + 1);
+            /* reduce the slow start threshhold */
+            sconn->ssthresh = (sconn->pending / 2) + 1;
+            if (sconn->ssthresh < 2)
+                sconn->ssthresh = 2;
+            sconn->cwnd = 2;
+        }
+
         tx->last_attempt_us = now;
         tx->send_count++;
 
@@ -1903,7 +1918,7 @@ sock_progress_pending(sock_dev_t *sdev)
             continue;
         }
     }
-    pthread_mutex_unlock(&sdev->lock);
+    pthread_mutex_unlock(&dev->lock);
 
     /* transfer txs to sock ep's list */
     while (!TAILQ_EMPTY(&idle_txs)) {
@@ -1911,9 +1926,9 @@ sock_progress_pending(sock_dev_t *sdev)
         TAILQ_REMOVE(&idle_txs, tx, dentry);
         ep = tx->evt.ep;
         sep = ep->priv;
-        pthread_mutex_lock(&sep->lock);
+        pthread_mutex_lock(&ep->lock);
         TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
-        pthread_mutex_unlock(&sep->lock);
+        pthread_mutex_unlock(&ep->lock);
     }
 
     /* transfer evts to the ep's list */
@@ -1932,7 +1947,7 @@ sock_progress_pending(sock_dev_t *sdev)
 }
 
 static void
-sock_progress_queued(sock_dev_t *sdev)
+sock_progress_queued(cci__dev_t *dev)
 {
     int                 ret, is_reliable;
     uint32_t            timeout;
@@ -1943,6 +1958,7 @@ sock_progress_queued(sock_dev_t *sdev)
     cci__conn_t         *conn;
     sock_ep_t           *sep;
     sock_conn_t         *sconn;
+    sock_dev_t          *sdev = dev->priv;
     cci_event_t         *event;         /* generic CCI event */
     cci_connection_t    *connection;    /* generic CCI connection */
     cci_endpoint_t      *endpoint;      /* generic CCI endpoint */
@@ -1954,9 +1970,12 @@ sock_progress_queued(sock_dev_t *sdev)
     TAILQ_INIT(&idle_txs);
     TAILQ_INIT(&evts);
 
+    if (!sdev)
+        return;
+
     now = sock_get_usecs();
 
-    pthread_mutex_lock(&sdev->lock);
+    pthread_mutex_lock(&dev->lock);
     TAILQ_FOREACH_SAFE(tx, &sdev->queued, dentry, tmp) {
         evt = &(tx->evt);
         event = &(evt->event);
@@ -2004,11 +2023,11 @@ sock_progress_queued(sock_dev_t *sdev)
                 tx->flags & CCI_FLAG_SILENT) {
 
                 tx->state = SOCK_TX_IDLE;
-                /* store locally until we can drop the sdev->lock */
+                /* store locally until we can drop the dev->lock */
                 TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
             } else {
                 tx->state = SOCK_TX_COMPLETED;
-                /* store locally until we can drop the sdev->lock */
+                /* store locally until we can drop the dev->lock */
                 TAILQ_INSERT_TAIL(&evts, evt, entry);
             }
             continue;
@@ -2017,9 +2036,12 @@ sock_progress_queued(sock_dev_t *sdev)
         if ((tx->last_attempt_us + (SOCK_RESEND_TIME_SEC * 1000000)) > now)
             continue;
 
-        if (sconn->pending >= sconn->max_tx_cnt &&
-            tx->msg_type == SOCK_MSG_SEND)
+        if (sconn->pending > sconn->cwnd &&
+            tx->msg_type == SOCK_MSG_SEND && 0) {
+            //debug(CCI_DB_INFO, "%s: skipping tx *** pending %d cwnd %d", __func__,
+                  //sconn->pending, sconn->cwnd);
             continue;
+        }
 
         tx->last_attempt_us = now;
         tx->send_count = 1;
@@ -2027,9 +2049,9 @@ sock_progress_queued(sock_dev_t *sdev)
         if (is_reliable &&
             !(tx->msg_type == SOCK_MSG_CONN_REQUEST ||
               tx->msg_type == SOCK_MSG_CONN_REPLY)) {
-            pthread_mutex_lock(&sconn->lock);
+            pthread_mutex_lock(&ep->lock);
             TAILQ_INSERT_TAIL(&sconn->tx_seqs, tx, tx_seq);
-            pthread_mutex_unlock(&sconn->lock);
+            pthread_mutex_unlock(&ep->lock);
         }
 
         /* need to send it */
@@ -2056,7 +2078,8 @@ sock_progress_queued(sock_dev_t *sdev)
         }
         /* msg sent, dequeue */
         TAILQ_REMOVE(&sdev->queued, tx, dentry);
-        sconn->pending++;
+        if (tx->msg_type == SOCK_MSG_SEND)
+            sconn->pending++;
 
         /* if reliable or connection, add to pending
          * else add to idle txs */
@@ -2074,7 +2097,7 @@ sock_progress_queued(sock_dev_t *sdev)
             TAILQ_INSERT_TAIL(&idle_txs, tx, dentry);
         }
     }
-    pthread_mutex_unlock(&sdev->lock);
+    pthread_mutex_unlock(&dev->lock);
 
     /* transfer txs to sock ep's list */
     while (!TAILQ_EMPTY(&idle_txs)) {
@@ -2082,9 +2105,9 @@ sock_progress_queued(sock_dev_t *sdev)
         TAILQ_REMOVE(&idle_txs, tx, dentry);
         ep = tx->evt.ep;
         sep = ep->priv;
-        pthread_mutex_lock(&sep->lock);
+        pthread_mutex_lock(&ep->lock);
         TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
-        pthread_mutex_unlock(&sep->lock);
+        pthread_mutex_unlock(&ep->lock);
     }
 
     /* transfer evts to the ep's list */
@@ -2103,10 +2126,10 @@ sock_progress_queued(sock_dev_t *sdev)
 }
 
 static void
-sock_progress_sends(sock_dev_t *sdev)
+sock_progress_sends(cci__dev_t *dev)
 {
-    sock_progress_pending(sdev);
-    sock_progress_queued(sdev);
+    sock_progress_pending(dev);
+    sock_progress_queued(dev);
 
     return;
 }
@@ -2178,12 +2201,12 @@ static int sock_sendv(cci_connection_t *connection,
     is_reliable = cci_conn_is_reliable(conn);
 
     /* get a tx */
-    pthread_mutex_lock(&sep->lock);
+    pthread_mutex_lock(&ep->lock);
     if (!TAILQ_EMPTY(&sep->idle_txs)) {
         tx = TAILQ_FIRST(&sep->idle_txs);
         TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
     }
-    pthread_mutex_unlock(&sep->lock);
+    pthread_mutex_unlock(&ep->lock);
 
     if (!tx) {
         debug(CCI_DB_FUNC, "exiting %s", func);
@@ -2222,9 +2245,9 @@ static int sock_sendv(cci_connection_t *connection,
         sock_header_r_t *hdr_r = tx->buffer;
         uint32_t ts = 0;
 
-        pthread_mutex_lock(&sconn->lock);
+        pthread_mutex_lock(&ep->lock);
         tx->seq = ++(sconn->seq);
-        pthread_mutex_unlock(&sconn->lock);
+        pthread_mutex_unlock(&ep->lock);
 
         sock_pack_seq_ts(&hdr_r->seq_ts, tx->seq, ts);
         tx->len = sizeof(*hdr_r);
@@ -2273,9 +2296,9 @@ static int sock_sendv(cci_connection_t *connection,
     /* insert at tail of sock device's queued list */
 
     tx->state = SOCK_TX_QUEUED;
-    pthread_mutex_lock(&sdev->lock);
+    pthread_mutex_lock(&dev->lock);
     TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
-    pthread_mutex_unlock(&sdev->lock);
+    pthread_mutex_unlock(&dev->lock);
 
     /* try to progress txs */
 
@@ -2308,9 +2331,9 @@ static int sock_sendv(cci_connection_t *connection,
         TAILQ_REMOVE(&ep->evts, evt, entry);
         pthread_mutex_unlock(&ep->lock);
 
-        pthread_mutex_lock(&sep->lock);
+        pthread_mutex_lock(&ep->lock);
         TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
-        pthread_mutex_unlock(&sep->lock);
+        pthread_mutex_unlock(&ep->lock);
     }
 
     debug(CCI_DB_FUNC, "exiting %s", func);
@@ -2400,10 +2423,15 @@ static int sock_rma(cci_connection_t *connection,
 static inline void
 sock_handle_seq(sock_conn_t *sconn, uint32_t seq)
 {
-    int done            = 0;
-    sock_ack_t  *ack    = NULL;
-    sock_ack_t  *last   = NULL;
-    sock_ack_t  *tmp    = NULL;
+    int                 done        = 0;
+    sock_ack_t          *ack        = NULL;
+    sock_ack_t          *last       = NULL;
+    sock_ack_t          *tmp        = NULL;
+    cci__conn_t         *conn       = sconn->conn;
+    cci_connection_t    *connection = &conn->connection;
+    cci_endpoint_t      *endpoint   = connection->endpoint;
+    cci__ep_t           *ep         = container_of(endpoint, cci__ep_t, endpoint);
+
 
     if (SOCK_SEQ_LTE(seq, sconn->acked)) {
         debug(CCI_DB_MSG, "%s ignoring seq %u (acked %u) ***", __func__, seq,
@@ -2411,7 +2439,7 @@ sock_handle_seq(sock_conn_t *sconn, uint32_t seq)
         return;
     }
 
-    pthread_mutex_lock(&sconn->lock);
+    pthread_mutex_lock(&ep->lock);
     TAILQ_FOREACH_SAFE(ack, &sconn->acks, entry, tmp) {
         if (SOCK_SEQ_GTE(seq, ack->start) &&
             SOCK_SEQ_LTE(seq, ack->end)) {
@@ -2473,7 +2501,7 @@ sock_handle_seq(sock_conn_t *sconn, uint32_t seq)
             debug(CCI_DB_MSG, "%s seq %u add at tail", __func__, seq);
         }
     }
-    pthread_mutex_unlock(&sconn->lock);
+    pthread_mutex_unlock(&ep->lock);
 
     return;
 }
@@ -2590,8 +2618,8 @@ sock_handle_ack(sock_conn_t *sconn,
         sconn->seq_pending = acks[0];
     }
 
-    pthread_mutex_lock(&sdev->lock);
-    pthread_mutex_lock(&sconn->lock);
+    pthread_mutex_lock(&dev->lock);
+    pthread_mutex_lock(&ep->lock);
     TAILQ_FOREACH_SAFE(tx, &sconn->tx_seqs, tx_seq, tmp) {
         if (type == SOCK_MSG_ACK_ONLY) {
             if (tx->seq == acks[0]) {
@@ -2599,9 +2627,16 @@ sock_handle_ack(sock_conn_t *sconn,
                     debug(CCI_DB_MSG, "%s acking only seq %u", __func__, acks[0]);
                     TAILQ_REMOVE(&sdev->pending, tx, dentry);
                     TAILQ_REMOVE(&sconn->tx_seqs, tx, tx_seq);
-                    sconn->pending--;
-                    if (sconn->pending <= sconn->ssthresh)
-                        sconn->cwnd++;
+                    if (tx->msg_type == SOCK_MSG_SEND) {
+                        sconn->pending--;
+                        if (sconn->pending <= sconn->ssthresh) {
+                            sconn->cwnd++;
+                            debug(CCI_DB_INFO, "%s increase cwnd from %d to %d",
+                                  __func__, sconn->cwnd - 1, sconn->cwnd);
+                        } else {
+                            sconn->cwnd++;
+                        }
+                    }
                     /* if SILENT, put idle tx */
                     if (tx->flags & CCI_FLAG_SILENT) {
                         tx->state = SOCK_TX_IDLE;
@@ -2624,9 +2659,16 @@ sock_handle_ack(sock_conn_t *sconn,
                           __func__, tx->seq, acks[0]);
                     TAILQ_REMOVE(&sdev->pending, tx, dentry);
                     TAILQ_REMOVE(&sconn->tx_seqs, tx, tx_seq);
-                    sconn->pending--;
-                    if (sconn->pending <= sconn->ssthresh)
-                        sconn->cwnd++;
+                    if (tx->msg_type == SOCK_MSG_SEND) {
+                        sconn->pending--;
+                        if (sconn->pending <= sconn->ssthresh) {
+                            sconn->cwnd++;
+                            debug(CCI_DB_INFO, "%s increase cwnd from %d to %d",
+                                  __func__, sconn->cwnd - 1, sconn->cwnd);
+                        } else {
+                            sconn->cwnd++;
+                        }
+                    }
                     /* if SILENT, put idle tx */
                     if (tx->flags & CCI_FLAG_SILENT) {
                         tx->state = SOCK_TX_IDLE;
@@ -2654,18 +2696,25 @@ sock_handle_ack(sock_conn_t *sconn,
                         found++;
                         TAILQ_REMOVE(&sdev->pending, tx, dentry);
                         TAILQ_REMOVE(&sconn->tx_seqs, tx, tx_seq);
-                        sconn->pending--;
-                        if (sconn->pending <= sconn->ssthresh)
-                            sconn->cwnd++;
+                        if (tx->msg_type == SOCK_MSG_SEND) {
+                            sconn->pending--;
+                            if (sconn->pending <= sconn->ssthresh) {
+                                sconn->cwnd++;
+                                debug(CCI_DB_INFO, "%s increase cwnd from %d to %d",
+                                      __func__, sconn->cwnd - 1, sconn->cwnd);
+                            } else {
+                                sconn->cwnd++;
+                            }
+                        }
                         /* if SILENT, put idle tx */
                         if (tx->flags & CCI_FLAG_SILENT) {
                             tx->state = SOCK_TX_IDLE;
-                            /* store locally until we can drop the sdev->lock */
+                            /* store locally until we can drop the dev->lock */
                             TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
                         } else {
                             tx->state = SOCK_TX_COMPLETED;
                             tx->evt.event.info.send.status = CCI_SUCCESS;
-                            /* store locally until we can drop the sdev->lock */
+                            /* store locally until we can drop the dev->lock */
                             TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
                         }
                     }
@@ -2673,23 +2722,23 @@ sock_handle_ack(sock_conn_t *sconn,
             }
         }
     }
-    pthread_mutex_unlock(&sconn->lock);
-    pthread_mutex_unlock(&sdev->lock);
+    pthread_mutex_unlock(&ep->lock);
+    pthread_mutex_unlock(&dev->lock);
 
     debug(CCI_DB_MSG, "%s acked %d msgs (%s %u)", __func__, found,
           sock_msg_type(type), acks[0]);
 
-    pthread_mutex_lock(&sep->lock);
+    pthread_mutex_lock(&ep->lock);
     TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
-    pthread_mutex_unlock(&sep->lock);
+    pthread_mutex_unlock(&ep->lock);
 
     /* transfer txs to sock ep's list */
     while (!TAILQ_EMPTY(&idle_txs)) {
         tx = TAILQ_FIRST(&idle_txs);
         TAILQ_REMOVE(&idle_txs, tx, dentry);
-        pthread_mutex_lock(&sep->lock);
+        pthread_mutex_lock(&ep->lock);
         TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
-        pthread_mutex_unlock(&sep->lock);
+        pthread_mutex_unlock(&ep->lock);
     }
 
     /* transfer evts to the ep's list */
@@ -2774,9 +2823,9 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
                 debug((CCI_DB_CONN|CCI_DB_MSG), "ep %d failed to send conn_ack with %s",
                       sep->sock, cci_strerror(ret));
             }
-            pthread_mutex_lock(&sep->lock);
+            pthread_mutex_lock(&ep->lock);
             TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
-            pthread_mutex_unlock(&sep->lock);
+            pthread_mutex_unlock(&ep->lock);
             CCI_EXIT;
             return;
         }
@@ -2806,7 +2855,7 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
         sock_parse_handshake(hs, &peer_id, &ack, &max_recv_buffer_count, &mss);
 
         /* get pending conn_req tx, create event, move conn to conn_hash */
-        pthread_mutex_lock(&sdev->lock);
+        pthread_mutex_lock(&dev->lock);
         TAILQ_FOREACH_SAFE(t, &sdev->pending, dentry, tmp) {
             if (t->seq == ack) {
                 TAILQ_REMOVE(&sdev->pending, t, dentry);
@@ -2814,7 +2863,7 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
                 break;
             }
         }
-        pthread_mutex_unlock(&sdev->lock);
+        pthread_mutex_unlock(&dev->lock);
 
         if (!tx) {
             char from[32];
@@ -2854,9 +2903,9 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
 
         i = sock_ip_hash(sin.sin_addr.s_addr, 0);
         active_list = &sep->active_hash[i];
-        pthread_mutex_lock(&sep->lock);
+        pthread_mutex_lock(&ep->lock);
         TAILQ_REMOVE(active_list, sconn, entry);
-        pthread_mutex_unlock(&sep->lock);
+        pthread_mutex_unlock(&ep->lock);
 
         if (CCI_EVENT_CONNECT_SUCCESS == reply) {
             event->info.other.u.connect.connection = &conn->connection;
@@ -2866,9 +2915,9 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
             sconn->acked = seq;
 
             i = sock_ip_hash(sin.sin_addr.s_addr, sin.sin_port);
-            pthread_mutex_lock(&sep->lock);
+            pthread_mutex_lock(&ep->lock);
             TAILQ_INSERT_TAIL(&sep->conn_hash[i], sconn, entry);
-            pthread_mutex_unlock(&sep->lock);
+            pthread_mutex_unlock(&ep->lock);
 
             debug(CCI_DB_CONN, "conn ready on hash %d", i);
 
@@ -2907,12 +2956,12 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
             return;
         }
     } else if (sconn->status == SOCK_CONN_READY) {
-        pthread_mutex_lock(&sep->lock);
+        pthread_mutex_lock(&ep->lock);
         if (!TAILQ_EMPTY(&sep->idle_txs)) {
             tx = TAILQ_FIRST(&sep->idle_txs);
             TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
         }
-        pthread_mutex_unlock(&sep->lock);
+        pthread_mutex_unlock(&ep->lock);
 
         if (!tx) {
             char to[32];
@@ -2923,9 +2972,9 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
             /* we can't ack, cleanup */
             debug((CCI_DB_CONN|CCI_DB_MSG), "ep %d does not have any tx "
                   "buffs to send a conn_ack to %s", sep->sock, to);
-            pthread_mutex_lock(&sep->lock);
+            pthread_mutex_lock(&ep->lock);
             TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
-            pthread_mutex_unlock(&sep->lock);
+            pthread_mutex_unlock(&ep->lock);
 
             CCI_EXIT;
             return;
@@ -2955,9 +3004,9 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
     debug(CCI_DB_CONN, "queuing conn_ack with seq %u", tx->seq);
 
     tx->state = SOCK_TX_QUEUED;
-    pthread_mutex_lock(&sdev->lock);
+    pthread_mutex_lock(&dev->lock);
     TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
-    pthread_mutex_unlock(&sdev->lock);
+    pthread_mutex_unlock(&dev->lock);
 
     /* try to progress txs */
 
@@ -3004,7 +3053,7 @@ sock_handle_conn_ack(sock_conn_t *sconn,
 
     debug(CCI_DB_CONN, "%s: seq %u ack %u", __func__, seq, ts);
 
-    pthread_mutex_lock(&sdev->lock);
+    pthread_mutex_lock(&dev->lock);
     TAILQ_FOREACH_SAFE(t, &sdev->pending, dentry, tmp) {
         /* the conn_ack stores the ack for the conn_reply in ts */
         if (t->seq == ts) {
@@ -3014,7 +3063,7 @@ sock_handle_conn_ack(sock_conn_t *sconn,
             break;
         }
     }
-    pthread_mutex_unlock(&sdev->lock);
+    pthread_mutex_unlock(&dev->lock);
 
     if (!tx) {
         /* FIXME do what here? */
@@ -3023,14 +3072,14 @@ sock_handle_conn_ack(sock_conn_t *sconn,
         debug((CCI_DB_MSG|CCI_DB_CONN), "received conn_ack and no matching tx "
               "(seq %u ack %u)", seq, ts); //FIXME
     } else {
-        pthread_mutex_lock(&sep->lock);
+        pthread_mutex_lock(&ep->lock);
         TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
-        pthread_mutex_unlock(&sep->lock);
+        pthread_mutex_unlock(&ep->lock);
     }
 
-    pthread_mutex_lock(&sep->lock);
+    pthread_mutex_lock(&ep->lock);
     TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
-    pthread_mutex_unlock(&sep->lock);
+    pthread_mutex_unlock(&ep->lock);
 
     CCI_EXIT;
 
@@ -3070,12 +3119,12 @@ sock_recvfrom_ep(cci__ep_t *ep)
     if (!sep || sep->closing)
         return 0;
 
-    pthread_mutex_lock(&sep->lock);
+    pthread_mutex_lock(&ep->lock);
     if (!TAILQ_EMPTY(&sep->idle_rxs)) {
         rx = TAILQ_FIRST(&sep->idle_rxs);
         TAILQ_REMOVE(&sep->idle_rxs, rx, entry);
     }
-    pthread_mutex_unlock(&sep->lock);
+    pthread_mutex_unlock(&ep->lock);
 
     if (!rx) {
         debug(CCI_DB_INFO, "no rx buffers available on endpoint %d", sep->sock);
@@ -3178,9 +3227,9 @@ sock_recvfrom_ep(cci__ep_t *ep)
 
 out:
     if (drop_msg || q_rx) {
-        pthread_mutex_lock(&sep->lock);
+        pthread_mutex_lock(&ep->lock);
         TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
-        pthread_mutex_unlock(&sep->lock);
+        pthread_mutex_unlock(&ep->lock);
     }
     if (drop_msg)
         sock_drop_msg(sep->sock);
@@ -3347,6 +3396,9 @@ sock_ack_conns(cci__ep_t *ep)
     static uint64_t last = 0ULL;
     uint64_t    now     = 0ULL;
 
+    TAILQ_HEAD(s_txs, sock_tx) txs = TAILQ_HEAD_INITIALIZER(txs);
+    TAILQ_INIT(&txs);
+
     CCI_ENTER;
 
     now = sock_get_usecs();
@@ -3358,7 +3410,7 @@ sock_ack_conns(cci__ep_t *ep)
 
     last = now;
 
-    pthread_mutex_lock(&sep->lock);
+    pthread_mutex_lock(&ep->lock);
     for (i = 0; i < SOCK_EP_HASH_SIZE; i++) {
         if (!TAILQ_EMPTY(&sep->conn_hash[i])) {
             TAILQ_FOREACH(sconn, &sep->conn_hash[i], entry) {
@@ -3425,14 +3477,20 @@ sock_ack_conns(cci__ep_t *ep)
 
                     debug((CCI_DB_MSG|CCI_DB_CONN), "queuing %s with ack %u",
                           sock_msg_type(type), acks[0]);
-                    pthread_mutex_lock(&sdev->lock);
-                    TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
-                    pthread_mutex_unlock(&sdev->lock);
+                    TAILQ_INSERT_TAIL(&txs, tx, dentry);
                 }
             }
         }
     }
-    pthread_mutex_unlock(&sep->lock);
+    pthread_mutex_unlock(&ep->lock);
+
+    while (!TAILQ_EMPTY(&txs)) {
+        tx = TAILQ_FIRST(&txs);
+        TAILQ_REMOVE(&txs, tx, dentry);
+        pthread_mutex_lock(&dev->lock);
+        TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
+        pthread_mutex_unlock(&dev->lock);
+    }
 
     CCI_EXIT;
     return;
@@ -3448,18 +3506,18 @@ sock_progress_dev(cci__dev_t *dev)
     CCI_ENTER;
 
     sdev = dev->priv;
-    pthread_mutex_lock(&sdev->lock);
+    pthread_mutex_lock(&dev->lock);
     if (sdev->is_progressing == 0) {
         sdev->is_progressing = 1;
         have_token = 1;
     }
-    pthread_mutex_unlock(&sdev->lock);
+    pthread_mutex_unlock(&dev->lock);
     if (!have_token) {
         CCI_EXIT;
         return;
     }
 
-    sock_progress_sends(sdev);
+    sock_progress_sends(dev);
 
     /* FIXME need to hold ep->lock */
     TAILQ_FOREACH(ep, &dev->eps, entry)
@@ -3467,9 +3525,9 @@ sock_progress_dev(cci__dev_t *dev)
 
     /* TODO progress lep->passive? */
 
-    pthread_mutex_lock(&sdev->lock);
+    pthread_mutex_lock(&dev->lock);
     sdev->is_progressing = 0;
-    pthread_mutex_unlock(&sdev->lock);
+    pthread_mutex_unlock(&dev->lock);
 
     CCI_EXIT;
     return;
@@ -3479,9 +3537,12 @@ static void *sock_progress_thread(void *arg)
 {
     struct timeval tv = { 0, SOCK_PROG_TIME_US };
 
+    pthread_mutex_lock(&globals->lock);
     while (!shut_down) {
         cci__dev_t *dev;
         cci_device_t const **device;
+
+        pthread_mutex_unlock(&globals->lock);
 
         /* for each device, try progressing */
         for (device = sglobals->devices;
@@ -3491,7 +3552,9 @@ static void *sock_progress_thread(void *arg)
             sock_progress_dev(dev);
         }
         select(0, NULL, NULL, NULL, &tv);
+        pthread_mutex_lock(&globals->lock);
     }
+    pthread_mutex_unlock(&globals->lock);
 
     pthread_exit(NULL);
 }
@@ -3506,10 +3569,9 @@ static void *sock_recv_thread(void *arg)
     int         nfds;
     fd_set      fds;
 
+    pthread_mutex_lock(&globals->lock);
     while (!shut_down) {
         found = 0;
-
-        pthread_mutex_lock(&globals->lock);
         FD_COPY((fd_set *)&sglobals->fds, &fds);
         nfds = sglobals->nfds;
         pthread_mutex_unlock(&globals->lock);
@@ -3545,7 +3607,9 @@ static void *sock_recv_thread(void *arg)
             }
             i = (i + 1) % nfds;
         } while (i != start);
+        pthread_mutex_lock(&globals->lock);
     }
+    pthread_mutex_unlock(&globals->lock);
 
     pthread_exit(NULL);
 }

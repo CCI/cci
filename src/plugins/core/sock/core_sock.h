@@ -711,9 +711,6 @@ typedef struct sock_ep {
     /*! List of idle rxs */
     TAILQ_HEAD(s_rxsi, sock_rx) idle_rxs;
 
-    /*! Lock for lists */
-    pthread_mutex_t lock;
-
     /*! Connection id blocks */
     uint64_t *ids;
 
@@ -789,6 +786,7 @@ typedef struct sock_conn {
     /*! Pending send count (waiting on acks) (i.e. flightsize) */
     uint32_t pending;
 
+#define SOCK_INITIAL_CWND 2
     /*! Congestion window */
     uint32_t cwnd;
 
@@ -815,9 +813,6 @@ typedef struct sock_conn {
 
     /*! List of sequence numbers to ack */
     TAILQ_HEAD(s_acks, sock_ack) acks;
-
-    /*! Lock to protect seq, ack */
-    pthread_mutex_t lock;
 } sock_conn_t;
 
 /* Only call if holding the sconn->lock and sconn->acks is not empty
@@ -840,9 +835,6 @@ typedef struct sock_dev {
 
     /*! Pending (in-flight) sends */
     TAILQ_HEAD(s_pending, sock_tx) pending;
-
-    /*! Lock to protect queued and pending */
-    pthread_mutex_t lock;
 
     /*! Being progressed? */
     int is_progressing;
