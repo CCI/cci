@@ -7,11 +7,11 @@
   module load PrgEnv-gnu
 
 # Get access to more current releases of autotools.
-  module load autoconf automake libtool
+  module load autoconf automake libtool git
 
 # At least for now, we will avoid Cray Programming Environment
 # interfaces, so we need to set CPPFLAGS and LDFLAGS.
   setenv CFLAGS		"-g -pthread"
   setenv CPPFLAGS	-I/opt/cray/portals/default/include
   setenv LDFLAGS	"-L/opt/cray/portals/default/lib64 -lportals"
-  setenv CCI_CONFIG	../../contrib/ornl.ini
+  setenv CCI_CONFIG	../../contrib/ornl-portals.ini
