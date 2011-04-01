@@ -88,9 +88,8 @@ again:
                 if (running) {
                     UNLOCK;
                     ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
-                    if (ret) {
-                        if (0)
-                            fprintf(stderr, "%s: send returned %s\n", __func__, cci_strerror(ret));
+                    if (ret && 0) {
+                        fprintf(stderr, "%s: send returned %s\n", __func__, cci_strerror(ret));
                     } else
                         send++;
 
@@ -114,10 +113,11 @@ again:
                         done = 1;
                         return;
                     }
+#if 0
                     ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
-                    if (ret)
-                        if (0)
+                    if (ret && 0)
                         fprintf(stderr, "%s: send returned %s\n", __func__, cci_strerror(ret));
+#endif
                 }
             }
             break;
