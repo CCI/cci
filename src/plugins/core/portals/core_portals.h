@@ -16,6 +16,10 @@ BEGIN_C_DECLS
 #define PORTALS_EP_MAX_HDR_SIZE   (8)        /* bytes */
 #define PORTALS_BLOCK_SIZE        (64)       /* bytes for id storage */
 #define PORTALS_EP_BUF_LEN        (8192)     /* 8 kB for now */
+#define PORTALS_EP_RX_CNT         (1024)     /* max rx messages */
+#define PORTALS_EP_TX_CNT         (128)      /* max tx messages */
+#define PORTALS_EQ_RX_CNT         PORTALS_EP_RX_CNT * 3
+#define PORTALS_EQ_TX_CNT         PORTALS_EP_TX_CNT * 4
 #define PORTALS_EP_TX_TIMEOUT_SEC (60)       /* seconds for now */
 #define PORTALS_EP_HASH_SIZE      (256)      /* nice round number */
 #define PORTALS_BLOCK_SIZE        (64)       /* 64b blocks for id */
@@ -25,6 +29,10 @@ BEGIN_C_DECLS
 #define PORTALS_PROG_TIME_US      (10000)    /* try progress N usecs */
 #define PORTALS_RESEND_CYCLES     (PORTALS_RESEND_TIME_SEC*1000000/\
                                    PORTALS_PROG_TIME_US)
+
+#define PORTALS_WILDCARD          {PTL_NID_ANY, PTL_PID_ANY};
+#define PORTALS_EP_MATCH          ((uint64_t)0)
+#define PORTALS_EP_IGNORE         (~((uint64_t)0))
 
 static inline uint64_t portals_tv_to_usecs(
     struct timeval         tv ) {
@@ -349,6 +357,8 @@ typedef struct portals_dev {
     ptl_process_id_t       idp;
     ptl_pt_index_t         table_index;
     ptl_handle_ni_t        niHandle;         /* Seastar handle */
+    ptl_handle_eq_t        eqhSend;          /* EQ handle for Send */
+    ptl_handle_eq_t        eqhRecv;          /* EQ handle for Recv */
     int                    max_mes;          /* Match Entries */
     int                    max_mds;          /* Memory Descriptors */
     int                    max_eqs;          /* Event Queues */

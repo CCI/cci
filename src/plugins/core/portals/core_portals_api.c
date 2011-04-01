@@ -110,7 +110,8 @@ static inline void portals_progress_dev(
 static int portals_sendto(           cci_os_handle_t      portals,
                                      void                 *buf,
                                      int                  len,
-                                     const ptl_process_id_t idp );
+                                     const ptl_process_id_t idp,
+                                     const ptl_pt_index_t portals_table );
 
 
 
@@ -182,6 +183,8 @@ static int portals_init(
     ptl_interface_t        ifID;
     ptl_ni_limits_t        niLimit;
     ptl_handle_ni_t        niHandle;
+    ptl_handle_eq_t        eqhSend;
+    ptl_handle_eq_t        eqhRecv;
 
     CCI_ENTER;
 printf( "In portals_init\n" );
@@ -246,6 +249,59 @@ printf( "In portals_init\n" );
     }
 
 /*
+ * Step 5.  Create event queues for notifications.  Hint:  OMPI uses
+ *          two EQs (sends, default depth 8192; receives default depth
+ *          16384).  Note that total must not exceed niLimit.max_eqs
+ *          (currently 65534).
+ */
+    iRC=PtlEQAlloc( niHandle, PORTALS_EQ_TX_CNT, PTL_EQ_HANDLER_NONE, &eqhSend );
+    if( iRC!=PTL_OK ) {
+
+        switch(iRC) {
+
+            case PTL_NO_INIT:      /* Portals library issue */
+                 return CCI_ENODEV;;
+
+            case PTL_NI_INVALID:   /* Bad NI Handle */
+                 return CCI_ENODEV;;
+
+            case PTL_NO_SPACE:     /* Well, well, well */
+                 return CCI_ENOMEM;;
+
+            case PTL_SEGV:         /* This one should not happen */
+                 return CCI_EINVAL;;
+
+            default:               /* Undocumented portals error */
+                 return CCI_ERROR;
+        }
+    }
+fprintf( stderr, "Allocated Send EQ\n" );
+
+    iRC=PtlEQAlloc( niHandle, PORTALS_EQ_RX_CNT, PTL_EQ_HANDLER_NONE, &eqhRecv );
+    if( iRC!=PTL_OK ) {
+
+        switch(iRC) {
+
+            case PTL_NO_INIT:      /* Portals library issue */
+                 return CCI_ENODEV;;
+
+            case PTL_NI_INVALID:   /* Bad NI Handle */
+                 return CCI_ENODEV;;
+
+            case PTL_NO_SPACE:     /* Well, well, well */
+                 return CCI_ENOMEM;;
+
+            case PTL_SEGV:         /* This one should not happen */
+                 return CCI_EINVAL;;
+
+            default:               /* Undocumented portals error */
+                 return CCI_ERROR;
+        }
+    }
+fprintf( stderr, "Allocated Recv EQ\n" );
+
+
+/*
  * Start searching global configuration for portals devices.
  */
     iReject=1;
@@ -287,6 +343,8 @@ printf( "In portals_init\n" );
 
 /*      Save off portals ID of device. */
         pdev->niHandle=niHandle;
+        pdev->eqhSend=eqhSend;
+        pdev->eqhRecv=eqhRecv;
         PtlGetId( niHandle, &pdev->idp );
         pdev->max_mes=niLimit.max_mes;
         pdev->max_mds=niLimit.max_mds;
@@ -436,6 +494,7 @@ static int portals_free_devices(
 }
 
 
+    ptl_md_t               md;
 static int portals_create_endpoint(
     cci_device_t           *device, 
     int                    flags, 
@@ -448,6 +507,13 @@ static int portals_create_endpoint(
     cci__ep_t              *ep=NULL;
     portals_ep_t           *pep=NULL;
     portals_dev_t          *pdev;
+    ptl_handle_ni_t        niHandle;
+    ptl_pt_index_t         table_index;
+    ptl_handle_eq_t        eqhSend;
+    ptl_handle_eq_t        eqhRecv;
+    ptl_process_id_t       pid_any=PORTALS_WILDCARD;
+    ptl_handle_me_t        meh;
+    ptl_handle_md_t        mdh;
 
     CCI_ENTER;
 printf( "In portals_create_endpoint\n" );
@@ -465,6 +531,10 @@ printf( "In portals_create_endpoint\n" );
         goto out;
     }
     pdev=dev->priv;
+    niHandle=pdev->niHandle;
+    table_index=pdev->table_index;
+    eqhSend=pdev->eqhSend;
+    table_index=12;
 
     ep=container_of(*endpoint, cci__ep_t, endpoint);
     ep->priv=calloc(1, sizeof(*pep));
@@ -476,8 +546,8 @@ printf( "In portals_create_endpoint\n" );
 
     (*endpoint)->max_recv_buffer_count=pdev->max_mds;
     ep->max_hdr_size=PORTALS_EP_MAX_HDR_SIZE;
-    ep->rx_buf_cnt=pdev->max_mds;
-    ep->tx_buf_cnt=pdev->max_mds;
+    ep->rx_buf_cnt=PORTALS_EP_RX_CNT;
+    ep->tx_buf_cnt=PORTALS_EP_TX_CNT;
     ep->buffer_len=PORTALS_EP_BUF_LEN;
     ep->tx_timeout=PORTALS_EP_TX_TIMEOUT_SEC*1000000;
 
@@ -518,6 +588,7 @@ printf( "In portals_create_endpoint\n" );
         TAILQ_INSERT_TAIL( &pep->idle_txs, tx, dentry );
     }
 
+/*  Creating receive buffers/MDs/MEs. */
     for( i=0; i<ep->rx_buf_cnt; i++ ) {
 
         portals_rx_t       *rx;
@@ -539,7 +610,67 @@ printf( "In portals_create_endpoint\n" );
         rx->len=0;
         TAILQ_INSERT_TAIL( &pep->rxs, rx, gentry );
         TAILQ_INSERT_TAIL( &pep->idle_rxs, rx, entry );
+
+        /*  Create the memory descriptor. */
+        md.start=    rx->buffer;
+        md.max_size= ep->buffer_len;
+        md.threshold=PTL_MD_THRESH_INF;
+        md.user_ptr =NULL;
+        md.eq_handle=eqhSend;
+        md.options  =PTL_MD_OP_PUT;
+        md.options |=PTL_MD_OP_GET;
+        md.options |=PTL_MD_TRUNCATE;
+        md.options |=PTL_MD_EVENT_START_DISABLE;
+
+        iRC=PtlMEAttach( niHandle, table_index, pid_any, 
+                         PORTALS_EP_MATCH, PORTALS_EP_IGNORE,
+                         PTL_RETAIN, PTL_INS_AFTER, &meh );
+        if( iRC!=PTL_OK ) {
+
+            fprintf( stderr, "PtlMEAttach failure\n" );
+            return CCI_ERROR;
+        }
+
+        iRC=PtlMDAttach( meh, md, PTL_RETAIN, &mdh );
+        if( iRC!=PTL_OK ) {
+
+            switch(iRC) {
+
+                case PTL_NO_INIT:            /* Portals library issue */
+                     fprintf( stderr, "Portals library issue\n" );
+                     return CCI_ENODEV;;
+
+                case PTL_ME_IN_USE:          /* ME in use */
+                     fprintf( stderr, "Tried to reuse ME\n" );
+                     return CCI_ENODEV;;
+
+                case PTL_ME_INVALID:         /* Bad ME handle */
+                     fprintf( stderr, "Bad ME handle\n" );
+                     return CCI_ENODEV;;
+
+                case PTL_MD_ILLEGAL:         /* Bad MD */
+                     fprintf( stderr, "Bad MD\n" );
+                     return CCI_ENODEV;;
+
+                case PTL_EQ_INVALID:         /* Bad EQ */
+                     fprintf( stderr, "Bad EQ\n" );
+                     return CCI_ENODEV;;
+
+                case PTL_NO_SPACE:           /* Well, well, well */
+                     fprintf( stderr, "Out of memory\n" );
+                     return CCI_ENOMEM;;
+
+                case PTL_SEGV:               /* This shouldn't happen */
+                     fprintf( stderr, "Oops!\n" );
+                     return CCI_EINVAL;;
+
+                default:                     /* Undocumented error */
+                     fprintf( stderr, "Failed with iRC=%d\n", iRC );
+                     return CCI_ERROR;
+            }
+        }
     }
+    fprintf( stdout, "Allocated %d buffers\n", ep->rx_buf_cnt );
 
     CCI_EXIT;
     return CCI_SUCCESS;
@@ -1237,14 +1368,13 @@ static int portals_sendto(
     cci_os_handle_t        niHandle,
     void                   *buf,
     int                    len,
-    const ptl_process_id_t idp ) {
+    const ptl_process_id_t idp,
+    const ptl_pt_index_t   portals_table ) {
 
     int                    iRC;
-    ptl_md_t               md;
     ptl_handle_md_t        mdHandle;         /* MD handle */
-    ptl_handle_eq_t        eqHandle;
+    ptl_handle_eq_t        eqhSend;
     ptl_match_bits_t       bits;
-    ptl_pt_index_t         portals_table;
     ptl_hdr_data_t         hdr;
 
 /*  First, create the memory descriptor. */
@@ -1252,10 +1382,10 @@ static int portals_sendto(
     md.max_size= len;
     md.threshold=PTL_MD_THRESH_INF;
     md.user_ptr =NULL;
-    md.eq_handle=eqHandle;
+    md.eq_handle=eqhSend;
     md.options  =PTL_MD_OP_PUT;
     md.options |=PTL_MD_OP_GET;
-//  md.options |=PTL_MD_EVENT_START_DISABLE;
+    md.options |=PTL_MD_EVENT_START_DISABLE;
 //  md.options |=PTL_MD_MANAGE_REMOTE;
 
     iRC=PtlMDBind( niHandle,                 /* Handle to Seastar */
@@ -1271,7 +1401,7 @@ static int portals_sendto(
                    bits,                     /* match bits */
                    0,                        /* remote offset */
                    hdr );                    /* hdr_data */
-fprintf( stderr, "In portals_sendto: message posted: iRC=%d\n", iRC );
+fprintf( stderr, "In portals_sendto: (%d,%d) table %d: message posted: iRC=%d\n", idp.nid, idp.pid, portals_table, iRC );
 
     return iRC;
 }
@@ -1321,8 +1451,8 @@ static void portals_progress_pending(
         debug( CCI_DB_MSG, "sending %s msg seq %u", portals_msg_type(tx->msg_type), tx->seq );
 
         niHandle=pdev->niHandle;
-        iRC=portals_sendto( niHandle, tx->buffer, tx->len, pconn->idp );
-        if( iRC!=tx->len ) {
+        iRC=portals_sendto( niHandle, tx->buffer, tx->len, pconn->idp, pconn->table_index );
+        if( iRC!=0 ) {
 
             debug( (CCI_DB_MSG|CCI_DB_INFO), "sendto() failed with %s\n", cci_strerror(errno) );
             continue;
@@ -1397,8 +1527,8 @@ static void portals_progress_pending(
         debug( CCI_DB_MSG, "re-sending %s msg seq %u", portals_msg_type(tx->msg_type), tx->seq );
 
         niHandle=pdev->niHandle;
-        iRC=portals_sendto( niHandle, tx->buffer, tx->len, pconn->idp );
-        if( iRC!=tx->len ) {
+        iRC=portals_sendto( niHandle, tx->buffer, tx->len, pconn->idp, pconn->table_index );
+        if( iRC!=0 ) {
 
             debug( (CCI_DB_MSG|CCI_DB_INFO), "sendto() failed with %s\n", cci_strerror(errno) );
             continue;
@@ -1479,8 +1609,8 @@ static void portals_progress_queued(
         debug( CCI_DB_MSG, "sending %s msg seq %u", portals_msg_type(tx->msg_type), tx->seq );
 
         niHandle=pdev->niHandle;
-        iRC=portals_sendto( niHandle, tx->buffer, tx->len, pconn->idp );
-        if( iRC!=tx->len ) {
+        iRC=portals_sendto( niHandle, tx->buffer, tx->len, pconn->idp, pconn->table_index );
+        if( iRC!=0 ) {
 
             debug( (CCI_DB_MSG|CCI_DB_INFO), "sendto() failed with %s\n", cci_strerror(errno) );
             continue;
@@ -1555,8 +1685,8 @@ static void portals_progress_queued(
         debug( CCI_DB_MSG, "re-sending %s msg seq %u", portals_msg_type(tx->msg_type), tx->seq );
 
         niHandle=pdev->niHandle;
-        iRC=portals_sendto( niHandle, tx->buffer, tx->len, pconn->idp );
-        if( iRC!=tx->len ) {
+        iRC=portals_sendto( niHandle, tx->buffer, tx->len, pconn->idp, pconn->table_index );
+        if( iRC!=0 ) {
 
             debug( (CCI_DB_MSG|CCI_DB_INFO), "sendto() failed with %s\n", cci_strerror(errno) );
             continue;
