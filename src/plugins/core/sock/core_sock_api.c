@@ -2038,8 +2038,6 @@ sock_progress_queued(cci__dev_t *dev)
 
         if (sconn->pending > sconn->cwnd &&
             tx->msg_type == SOCK_MSG_SEND && 0) {
-            //debug(CCI_DB_INFO, "%s: skipping tx *** pending %d cwnd %d", __func__,
-                  //sconn->pending, sconn->cwnd);
             continue;
         }
 
@@ -3136,8 +3134,8 @@ sock_recvfrom_ep(cci__ep_t *ep)
     /* peek at msg header.
      * handler must call recvfrom for the full msg. */
 
-    ret = recvfrom(sep->sock, rx->buffer, SOCK_PEEK_LEN,
-                   MSG_PEEK, (struct sockaddr *)&sin, &sin_len);
+    ret = recvfrom(sep->sock, rx->buffer, ep->buffer_len,
+                   0, (struct sockaddr *)&sin, &sin_len);
     if (ret < (int) sizeof(sock_header_t)) {
         q_rx = 1;
         goto out;
@@ -3165,7 +3163,7 @@ sock_recvfrom_ep(cci__ep_t *ep)
         debug((CCI_DB_CONN|CCI_DB_MSG), "no sconn for incoming %s msg "
                "from %s:%d", sock_msg_type(type),
                inet_ntoa(sin.sin_addr), ntohs(sin.sin_port));
-        drop_msg = 1;
+        q_rx = 1;
         goto out;
     }
 
@@ -3185,23 +3183,17 @@ sock_recvfrom_ep(cci__ep_t *ep)
         debug((CCI_DB_MSG|CCI_DB_CONN), "conn request on non-listening "
                 "endpoint from %s:%d", inet_ntoa(sin.sin_addr),
                 ntohs(sin.sin_port));
-        drop_msg = 1;
+        q_rx = 1;
         break;
     case SOCK_MSG_CONN_REPLY:
-        recvfrom(sep->sock, rx->buffer, ep->buffer_len,
-                 0, (struct sockaddr *)&sin, &sin_len);
         sock_handle_conn_reply(sconn, rx, a, b, id, sin, ep);
         break;
     case SOCK_MSG_CONN_ACK:
-        recvfrom(sep->sock, rx->buffer, ep->buffer_len,
-                 0, (struct sockaddr *)&sin, &sin_len);
         sock_handle_conn_ack(sconn, rx, a, b, id, sin);
         break;
     case SOCK_MSG_DISCONNECT:
         break;
     case SOCK_MSG_SEND:
-        recvfrom(sep->sock, rx->buffer, ep->buffer_len,
-                 0, (struct sockaddr *)&sin, &sin_len);
         sock_handle_active_message(sconn, rx, a, b, id);
         break;
     case SOCK_MSG_KEEPALIVE:
@@ -3209,8 +3201,6 @@ sock_recvfrom_ep(cci__ep_t *ep)
     case SOCK_MSG_ACK_ONLY:
     case SOCK_MSG_ACK_UP_TO:
     case SOCK_MSG_SACK:
-        recvfrom(sep->sock, rx->buffer, ep->buffer_len,
-                 0, (struct sockaddr *)&sin, &sin_len);
         sock_handle_ack(sconn, type, rx, (int) a, id);
         break;
     case SOCK_MSG_RMA_WRITE:
@@ -3405,7 +3395,7 @@ sock_ack_conns(cci__ep_t *ep)
 
     if (last == 0ULL)
         last = now;
-    else if (last + 100ULL > now)
+    else if (last + 1000ULL > now)
         return;
 
     last = now;
@@ -3420,21 +3410,11 @@ sock_ack_conns(cci__ep_t *ep)
                     uint32_t acks[SOCK_MAX_SACK * 2];
                     sock_ack_t *ack = NULL;
                     sock_msg_type_t type = SOCK_MSG_ACK_UP_TO;
+                    char buffer[SOCK_MAX_HDR_SIZE];
+                    int len = 0;
 
-                    if (!TAILQ_EMPTY(&sep->idle_txs)) {
-                        tx = TAILQ_FIRST(&sep->idle_txs);
-                        TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
-                    }
-                    if (!tx) {
-                        debug(CCI_DB_INFO, "need to ack and no txs available");
-                        continue;
-                    }
+                    memset(buffer, 0, sizeof(buffer));
 
-                    tx->flags = CCI_FLAG_SILENT; /* no completion */
-                    tx->seq = ++(sconn->seq);
-                    tx->last_attempt_us = 0ULL;
-                    tx->timeout_us = 0ULL;
-                    tx->state = SOCK_TX_QUEUED;
                     if (1 == sock_need_sack(sconn)) {
                         sock_ack_t *tmp;
 
@@ -3461,23 +3441,15 @@ sock_ack_conns(cci__ep_t *ep)
                         if (ack->start == ack->end)
                             type = SOCK_MSG_ACK_ONLY;
                         free(ack);
-                        tx->len = sizeof(*hdr_r) + sizeof(acks[0]);
                     }
-
-                    tx->msg_type = type;
-                    tx->evt.conn = sconn->conn;
-                    sconn->last_ack_seq = tx->seq;
-                    sconn->last_ack_ts = sock_get_usecs();
-
-                    hdr_r = (sock_header_r_t *) tx->buffer;
+                    hdr_r = (sock_header_r_t *) buffer;
                     sock_pack_ack(hdr_r, type, sconn->peer_id,
-                                  sconn->last_ack_seq,
-                                  sconn->last_ack_ts,
+                                  0,
+                                  0,
                                   acks, count);
 
-                    debug((CCI_DB_MSG|CCI_DB_CONN), "queuing %s with ack %u",
-                          sock_msg_type(type), acks[0]);
-                    TAILQ_INSERT_TAIL(&txs, tx, dentry);
+                    len = sizeof(*hdr_r) + (count * sizeof(acks[0]));
+                    sock_sendto(sep->sock, buffer, len, sconn->sin);
                 }
             }
         }
@@ -3566,18 +3538,18 @@ static void *sock_recv_thread(void *arg)
     int         ret     = 0;
     static int      start   = 0;
     struct timeval  tv      = { 0, 100 };
-    int         nfds;
+    int         nfds    = 0;
     fd_set      fds;
 
     pthread_mutex_lock(&globals->lock);
     while (!shut_down) {
         found = 0;
+        nfds = sglobals->nfds;
         FD_ZERO(&fds);
         for (i = 0; i < nfds; i++) {
             if (sglobals->fd_idx[i].type != SOCK_FD_UNUSED)
                 FD_SET(i, &fds);
         }
-        nfds = sglobals->nfds;
         pthread_mutex_unlock(&globals->lock);
 
         ret = select(nfds, &fds, NULL, NULL, &tv);

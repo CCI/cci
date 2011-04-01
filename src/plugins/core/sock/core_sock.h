@@ -815,7 +815,7 @@ typedef struct sock_conn {
     TAILQ_HEAD(s_acks, sock_ack) acks;
 } sock_conn_t;
 
-/* Only call if holding the sconn->lock and sconn->acks is not empty
+/* Only call if holding the ep->lock and sconn->acks is not empty
  *
  * If only one item, return 0
  * If more than one item, return 1
