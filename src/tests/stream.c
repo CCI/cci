@@ -38,11 +38,12 @@ int timeout = TIMEOUT;
 int running = 1;
 pthread_mutex_t lock;
 uint32_t port = DFLT_PORT;
-uint32_t current_size = 0;
+uint32_t current_size = 32;
 cci_device_t **devices = NULL;
 cci_endpoint_t *endpoint = NULL;
 cci_connection_t *connection = NULL;
 cci_conn_attribute_t attr = CCI_CONN_ATTR_UU;
+struct timeval start, end;
 
 #define LOCK   pthread_mutex_lock(&lock);
 #define UNLOCK pthread_mutex_unlock(&lock);
@@ -61,6 +62,13 @@ print_usage()
     fprintf(stderr, "server$ %s -h ip://foo -p 2211 -s\n", name);
     fprintf(stderr, "client$ %s -h ip://foo -p 2211\n", name);
     exit(EXIT_FAILURE);
+}
+
+double
+usecs(struct timeval start, struct timeval end)
+{
+    return ((double) (end.tv_sec  - start.tv_sec)) * 1000000.0 +
+           ((double) (end.tv_usec - start.tv_usec));
 }
 
 static void
@@ -103,21 +111,24 @@ again:
             if (!ready) {
                 ready = 1;
             } else {
-                if (!is_server) {
-                    if (event->info.recv.data_len == current_size)
-                        recv++;
-                } else {
-                    if (event->info.recv.data_len > current_size)
+                if (event->info.recv.data_len == current_size)
+                    recv++;
+                if (is_server) {
+                    if (event->info.recv.data_len > current_size ||
+                        event->info.recv.header_len == 3) {
+                        gettimeofday(&end, NULL);
+                        printf("%5d\t\t%6d\t\t%6.2lf Mb/s\n",
+                               current_size, recv,
+                               (double) recv * (double) current_size * 8.0 /
+                                    usecs(start, end));
                         current_size = event->info.recv.data_len;
+                        gettimeofday(&start, NULL);
+                        recv = 1;
+                    }
                     if (event->info.recv.header_len == 3) {
                         done = 1;
                         return;
                     }
-#if 0
-                    ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
-                    if (ret && 0)
-                        fprintf(stderr, "%s: send returned %s\n", __func__, cci_strerror(ret));
-#endif
                 }
             }
             break;
@@ -144,13 +155,6 @@ again:
     return;
 }
 
-double
-usecs(struct timeval start, struct timeval end)
-{
-    return ((double) (end.tv_sec  - start.tv_sec)) * 1000000.0 +
-           ((double) (end.tv_usec - start.tv_usec));
-}
-
 void handle_alarm(int sig)
 {
     LOCK;
@@ -163,7 +167,6 @@ void
 do_client()
 {
     int ret;
-    struct timeval start, end;
 
 	/* initiate connect */
 	ret = cci_connect(endpoint, server_uri, port, NULL, 0, attr, NULL, 0, NULL);
@@ -190,7 +193,7 @@ do_client()
     while (!ready)
         poll_events();
 
-    printf("Bytes\t    Sent\t\tCompleted\t\tRecv'd\n");
+    printf("Bytes\t\t# Sent\t\tSent\n");
 
     signal(SIGALRM, handle_alarm);
 
@@ -224,11 +227,10 @@ do_client()
 
         gettimeofday(&end, NULL);
 
-        printf("%4d\t%6.2lf Mb/s\t\t%6.2lf Mb/s\t\t%6.2lf Mb/s\n",
-               current_size,
-               (double) send * (double) current_size * 8.0 / usecs(start, end) / 2.0,
-               (double) send_completed * (double) current_size * 8.0 / usecs(start, end) / 2.0,
-               (double) recv * (double) current_size * 8.0 / usecs(start, end) / 2.0);
+        printf("%5d\t\t%6d\t\t%6.2lf Mb/s\n",
+               current_size, send,
+               (double) send * (double) current_size * 8.0 /
+                    usecs(start, end));
 
         if (current_size == 0)
             current_size++;
@@ -268,7 +270,9 @@ do_server()
                 fprintf(stderr, "unable to alloc buffer\n");
                 return;
             }
+            gettimeofday(&start, NULL);
             cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
+            printf("Bytes\t\t# Rcvd\t\tRcvd\n");
         }
     }
 
