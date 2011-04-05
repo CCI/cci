@@ -515,6 +515,7 @@ static int sock_create_endpoint(cci_device_t *device,
     TAILQ_INIT(&sep->idle_txs);
     TAILQ_INIT(&sep->rxs);
     TAILQ_INIT(&sep->idle_rxs);
+    TAILQ_INIT(&sep->handles);
 
     /* alloc txs */
     for (i = 0; i < ep->tx_buf_cnt; i++) {
@@ -2342,12 +2343,35 @@ static int sock_sendv(cci_connection_t *connection,
 static int sock_rma_register(cci_endpoint_t *endpoint, void *start, 
                                  uint64_t length, uint64_t *rma_handle)
 {
+    cci__ep_t           *ep     = NULL;
+    sock_ep_t           *sep    = NULL;
+    sock_rma_handle_t   *handle = NULL;
+
     CCI_ENTER;
 
     if (!sglobals) {
         CCI_EXIT;
         return CCI_ENODEV;
     }
+
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    sep = ep->priv;
+
+    handle = calloc(1, sizeof(*handle));
+    if (!handle) {
+        CCI_EXIT;
+        return CCI_ENOMEM;
+    }
+
+    handle->ep = ep;
+    handle->length = length;
+    handle->start = start;
+
+    pthread_mutex_lock(&ep->lock);
+    TAILQ_INSERT_TAIL(&sep->handles, handle, entry);
+    pthread_mutex_unlock(&ep->lock);
+
+    *rma_handle = (uint64_t)((uintptr_t)handle);
 
     CCI_EXIT;
 
@@ -2373,12 +2397,25 @@ static int sock_rma_register_phys(cci_endpoint_t *endpoint,
 
 static int sock_rma_deregister(uint64_t rma_handle)
 {
+    sock_rma_handle_t   *handle = (sock_rma_handle_t *) rma_handle;
+    cci__ep_t           *ep     = NULL;
+    sock_ep_t           *sep    = NULL;
+
     CCI_ENTER;
 
     if (!sglobals) {
         CCI_EXIT;
         return CCI_ENODEV;
     }
+
+    ep = handle->ep;
+    sep = ep->priv;
+
+    pthread_mutex_lock(&ep->lock);
+    TAILQ_REMOVE(&sep->handles, handle, entry);
+    pthread_mutex_unlock(&ep->lock);
+
+    free(handle);
 
     CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
@@ -3537,7 +3574,7 @@ static void *sock_recv_thread(void *arg)
     int         found   = 0;
     int         ret     = 0;
     static int      start   = 0;
-    struct timeval  tv      = { 0, 100 };
+    struct timeval  tv      = { 0, 1000 };
     int         nfds    = 0;
     fd_set      fds;
 

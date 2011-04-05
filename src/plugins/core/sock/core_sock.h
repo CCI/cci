@@ -689,6 +689,20 @@ typedef struct sock_rx {
     TAILQ_ENTRY(sock_rx) gentry;
 } sock_rx_t;
 
+typedef struct sock_rma_handle {
+    /*! Owning endpoint */
+    cci__ep_t *ep;
+
+    /*! Registered length */
+    uint64_t length;
+
+    /*! Application memory */
+    void *start;
+
+    /* Entry for hanging on ep->regs */
+    TAILQ_ENTRY(sock_rma_handle) entry;
+} sock_rma_handle_t;
+
 typedef struct sock_ep {
     /*! Is closing? */
     int closing;
@@ -716,6 +730,9 @@ typedef struct sock_ep {
 
     /*! List of active connections awaiting replies */
     TAILQ_HEAD(s_active, sock_conn) active_hash[SOCK_EP_HASH_SIZE];
+
+    /*! List of RMA registrations */
+    TAILQ_HEAD(s_handles, sock_rma_handle) handles;
 } sock_ep_t;
 
 /* Connection info */
