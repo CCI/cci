@@ -24,13 +24,13 @@
 
 BEGIN_C_DECLS
 
-#define SOCK_UDP_MAX            (65507) /* 64 KB - 8 B UDP - 20 B IP */
-#define SOCK_MAX_HDR_SIZE       (64)    /* max sock header size */
+#define SOCK_UDP_MAX            (65508) /* 64 KB - 8 B UDP - 20 B IP */
+#define SOCK_MAX_HDR_SIZE       (48)    /* max sock header size (RMA) */
 #define SOCK_MAX_HDRS           (SOCK_MAX_HDR_SIZE + 20 + 8) /* IP + UDP */
 #define SOCK_DEFAULT_MSS        (8192)  /* 8 KB - assume jumbo frames */
 #define SOCK_MIN_MSS            (1500 - SOCK_MAX_HDR_SIZE)
-#define SOCK_MAX_SACK           (4)    /* pairs of start/end acks */
-#define SOCK_ACK_DELAY          (1)    /* send an ack after every Nth send */
+#define SOCK_MAX_SACK           (4)     /* pairs of start/end acks */
+#define SOCK_ACK_DELAY          (1)     /* send an ack after every Nth send */
 
 #define SOCK_EP_MAX_HDR_SIZE    (32)    /* max user header size */
 #define SOCK_EP_TX_TIMEOUT_SEC  (60)    /* seconds for now */
@@ -276,7 +276,7 @@ static inline void
 sock_pack_handshake(sock_handshake_t *hs, uint32_t id, uint32_t ack,
                     uint32_t max_recv_buffer_count, uint32_t mss)
 {
-    assert(mss < (SOCK_UDP_MAX - SOCK_MAX_HDR_SIZE));
+    assert(mss <= (SOCK_UDP_MAX - SOCK_MAX_HDR_SIZE));
     assert(mss >= SOCK_MIN_MSS);
 
     hs->id = htonl(id);
@@ -551,8 +551,7 @@ typedef struct sock_rma_header {
     sock_header_r_t header_r;
     sock_rma_handle_offset_t local;
     sock_rma_handle_offset_t remote;
-    uint32_t segment;
-    uint32_t total;
+    char data[0];
 } sock_rma_header_t;
 
 /* RMA write
@@ -588,25 +587,41 @@ typedef struct sock_rma_header {
    +-------------------------------+
    |     remote offset (32 - 63)   |
    +-------------------------------+
-   |            segment            |
-   +-------------------------------+
-   |             total             |
-   +-------------------------------+
 
    +-------------------------------+
    |             data              |
 
-   handle: remote handle
-   offset: offset of this packet into handle (i.e. offset + packet offset)
-   segment: Nth segment of RMA
-   total: total segments for RMA
+   a = unused
+   data_len = number of data bytes in this message
+   local handle: cci_rma() caller's handle (stays same for each packet)
+   local offset: offset into the local handle (changes for each packet)
+   remote handle: passive peer's handle (stays same for each packet)
+   remote offset: offset into the remote handle (changes for each packet)
  */
+
+static inline void
+sock_pack_rma_write(sock_rma_header_t *write, uint16_t data_len,
+                    uint32_t peer_id, uint32_t seq, uint32_t ts,
+                    uint64_t local_handle, uint64_t local_offset,
+                    uint64_t remote_handle, uint64_t remote_offset)
+{
+    sock_pack_header(&write->header_r.header, SOCK_MSG_RMA_WRITE,
+                     0, data_len, peer_id);
+    sock_pack_seq_ts(&write->header_r.seq_ts, seq, ts);
+    sock_pack_rma_handle_offset(&write->local, local_handle, local_offset);
+    sock_pack_rma_handle_offset(&write->remote, remote_handle, remote_offset);
+}
 
 /************* Windowing and Acking *******************/
 
 
 
 /************* SOCK private structures ****************/
+
+typedef struct sock_iov {
+    void *addr;
+    uint16_t len;
+} sock_iov_t;
 
 typedef enum sock_tx_state_t {
     /*! available, held by endpoint */
@@ -667,6 +682,9 @@ typedef struct sock_tx {
 
     /*! Timeout in microseconds */
     uint64_t timeout_us;
+
+    /*! Owning RMA op if not active message */
+    struct sock_rma_op *rma_op;
 } sock_tx_t;
 
 /*! Receive active message context.
@@ -703,6 +721,44 @@ typedef struct sock_rma_handle {
     TAILQ_ENTRY(sock_rma_handle) entry;
 } sock_rma_handle_t;
 
+typedef struct sock_rma_op {
+    /*! Entry to hang on ep->rma_ops */
+    TAILQ_ENTRY(sock_rma_op) entry;
+
+    /*! Entry to hang on sconn->rmas */
+    TAILQ_ENTRY(sock_rma_op) rmas;
+
+    /*! RMA id for ordering in case of fence */
+    uint32_t id;
+
+    /*! Number of msgs for data transfer (excluding remote compeltion msg) */
+    uint32_t num_msgs;
+
+    /*! Number of messages in-flight */
+    uint32_t pending;
+
+    /*! Number of messages completed */
+    uint32_t completed;
+
+    /*! Status of the RMA op */
+    cci_status_t status;
+
+    /*! Application context */
+    void *context;
+
+    /*! Flags */
+    int flags;
+
+    /*! Pointer to tx for remote completion if needed */
+    sock_tx_t *tx;
+
+    /*! Application header len */
+    uint8_t header_len;
+
+    /*! Application header if provided */
+    char header[32];
+} sock_rma_op_t;
+
 typedef struct sock_ep {
     /*! Is closing? */
     int closing;
@@ -733,6 +789,9 @@ typedef struct sock_ep {
 
     /*! List of RMA registrations */
     TAILQ_HEAD(s_handles, sock_rma_handle) handles;
+
+    /*! List of RMA ops */
+    TAILQ_HEAD(s_ops, sock_rma_op) rma_ops;
 } sock_ep_t;
 
 /* Connection info */
@@ -830,6 +889,12 @@ typedef struct sock_conn {
 
     /*! List of sequence numbers to ack */
     TAILQ_HEAD(s_acks, sock_ack) acks;
+
+    /*! Last RMA started */
+    uint32_t rma_id;
+
+    /*! List of RMA ops in process in case of fence */
+    TAILQ_HEAD(s_rmas, sock_rma_op) rmas;
 } sock_conn_t;
 
 /* Only call if holding the ep->lock and sconn->acks is not empty
