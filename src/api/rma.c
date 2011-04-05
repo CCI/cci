@@ -23,8 +23,30 @@ int cci_rma(cci_connection_t *connection,
             uint64_t remote_handle, uint64_t remote_offset,
             uint64_t data_len, void *context, int flags)
 {
+    cci__conn_t *conn = NULL;
+
     if (NULL == connection ||
-        (NULL == header_ptr && header_len > 0)) {
+        (NULL == header_ptr && header_len > 0) ||
+        0 == data_len) {
+        return CCI_EINVAL;
+    }
+
+    conn = container_of(connection, cci__conn_t, connection);
+    if (!cci_conn_is_reliable(conn)) {
+        debug(CCI_DB_INFO, "%s: RMA requires a reliable connection", __func__);
+        return CCI_EINVAL;
+    }
+
+    if (flags & CCI_FLAG_READ &&
+        flags & CCI_FLAG_WRITE) {
+        debug(CCI_DB_INFO, "%s: RMA requires either CCI_FLAG_READ or CCI_FLAG_WRITE,"
+              " but not both", __func__);
+        return CCI_EINVAL;
+    }
+
+    if (!(flags & CCI_FLAG_READ ||
+          flags & CCI_FLAG_WRITE)) {
+        debug(CCI_DB_INFO, "%s: RMA requires either CCI_FLAG_READ or CCI_FLAG_WRITE", __func__);
         return CCI_EINVAL;
     }
 

@@ -1274,6 +1274,9 @@ CCI_DECLSPEC int cci_send(cci_connection_t *connection,
 #define CCI_FLAG_BLOCKING   (1 << 0)
 #define CCI_FLAG_NO_COPY    (1 << 1)
 #define CCI_FLAG_SILENT     (1 << 3)
+#define CCI_FLAG_READ       (1 << 4)    /* for RMA only */
+#define CCI_FLAG_WRITE      (1 << 5)    /* for RMA only */
+#define CCI_FLAG_FENCE      (1 << 6)    /* for RMA only */
 
 /*! JMS Fill me in
 

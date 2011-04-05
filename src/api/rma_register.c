@@ -21,7 +21,9 @@ int cci_rma_register(cci_endpoint_t *endpoint, void *start,
                      uint64_t length, uint64_t *rma_handle)
 {
     if (NULL == endpoint ||
-        NULL == rma_handle) {
+        NULL == rma_handle ||
+        NULL == start ||
+        0ULL == length) {
         return CCI_EINVAL;
     }
 
