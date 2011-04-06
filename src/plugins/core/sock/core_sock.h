@@ -50,6 +50,8 @@ BEGIN_C_DECLS
 #define SOCK_CONN_REQ_HDR_LEN   ((int) (sizeof(struct sock_header_r)))
                                         /* header + seqack */
 
+#define SOCK_RMA_DEPTH          (16)    /* how many in-flight msgs per RMA */
+
 static inline uint64_t
 sock_tv_to_usecs(struct timeval tv)
 {
@@ -94,23 +96,25 @@ sock_get_usecs(void)
 
 typedef enum sock_msg_type {
     SOCK_MSG_INVALID = 0,
-    SOCK_MSG_CONN_REQUEST,  /* SYN */
-    SOCK_MSG_CONN_REPLY,    /* SYN-ACK */
-    SOCK_MSG_CONN_ACK,      /* ACK */
-    SOCK_MSG_DISCONNECT,    /* spec says no disconnect is sent */
+    SOCK_MSG_CONN_REQUEST,      /* SYN */
+    SOCK_MSG_CONN_REPLY,        /* SYN-ACK */
+    SOCK_MSG_CONN_ACK,          /* ACK */
+    SOCK_MSG_DISCONNECT,        /* spec says no disconnect is sent */
     SOCK_MSG_SEND,
+    SOCK_MSG_RNR,               /* for both active msg and RMA */
     SOCK_MSG_KEEPALIVE,
 
     /* the rest apply to reliable connections only */
 
-    SOCK_MSG_PING,          /* no data, just echo timestamp for RTTM */
-    SOCK_MSG_ACK_ONLY,      /* ack only this seqno */
-    SOCK_MSG_ACK_UP_TO,     /* ack up to and including this seqno */
-    SOCK_MSG_SACK,          /* ack these blocks of sequences */
+    SOCK_MSG_PING,              /* no data, just echo timestamp for RTTM */
+    SOCK_MSG_ACK_ONLY,          /* ack only this seqno */
+    SOCK_MSG_ACK_UP_TO,         /* ack up to and including this seqno */
+    SOCK_MSG_SACK,              /* ack these blocks of sequences */
     SOCK_MSG_RMA_WRITE,
     SOCK_MSG_RMA_WRITE_DONE,
     SOCK_MSG_RMA_READ_REQUEST,
     SOCK_MSG_RMA_READ_REPLY,
+    SOCK_MSG_RMA_INVALID,       /* invalid handle */
     SOCK_MSG_TYPE_MAX
 } sock_msg_type_t;
 
@@ -711,6 +715,9 @@ typedef struct sock_rma_handle {
     /*! Owning endpoint */
     cci__ep_t *ep;
 
+    /*! Owning connection, if any */
+    cci__conn_t *conn;
+
     /*! Registered length */
     uint64_t length;
 
@@ -719,20 +726,33 @@ typedef struct sock_rma_handle {
 
     /* Entry for hanging on ep->regs */
     TAILQ_ENTRY(sock_rma_handle) entry;
+
+    /*! Reference count */
+    uint32_t refcnt;
 } sock_rma_handle_t;
 
 typedef struct sock_rma_op {
-    /*! Entry to hang on ep->rma_ops */
+    /*! Entry to hang on sep->rma_ops */
     TAILQ_ENTRY(sock_rma_op) entry;
 
     /*! Entry to hang on sconn->rmas */
     TAILQ_ENTRY(sock_rma_op) rmas;
+
+    uint64_t local_handle;
+    uint64_t local_offset;
+    uint64_t remote_handle;
+    uint64_t remote_offset;
+
+    uint64_t data_len;
 
     /*! RMA id for ordering in case of fence */
     uint32_t id;
 
     /*! Number of msgs for data transfer (excluding remote compeltion msg) */
     uint32_t num_msgs;
+
+    /*! Next segment to send */
+    uint32_t next;
 
     /*! Number of messages in-flight */
     uint32_t pending;
