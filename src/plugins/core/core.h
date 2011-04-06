@@ -75,9 +75,12 @@ typedef int (*cci_sendv_fn_t)(cci_connection_t *connection,
                               void *header_ptr, uint32_t header_len, 
                               char **data_ptrs, int *data_lens,
                               uint8_t segment_cnt, void *context, int flags);
-typedef int (*cci_rma_register_fn_t)(cci_endpoint_t *endpoint, void *start, 
-                                     uint64_t length, uint64_t *rma_handle);
+typedef int (*cci_rma_register_fn_t)(cci_endpoint_t *endpoint,
+                                     cci_connection_t *connection,
+                                     void *start, uint64_t length,
+                                     uint64_t *rma_handle);
 typedef int (*cci_rma_register_phys_fn_t)(cci_endpoint_t *endpoint, 
+                                          cci_connection_t *connection,
                                           cci_sg_t *sg_list, uint32_t sg_cnt, 
                                           uint64_t *rma_handle);
 typedef int (*cci_rma_deregister_fn_t)(uint64_t rma_handle);

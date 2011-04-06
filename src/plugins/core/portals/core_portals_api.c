@@ -84,10 +84,12 @@ static int portals_sendv(            cci_connection_t     *connection,
                                      void                 *context,
                                      int                  flags );
 static int portals_rma_register(     cci_endpoint_t       *endpoint,
+                                     cci_connection_t     *connection,
                                      void                 *start, 
                                      uint64_t             length,
                                      uint64_t             *rma_handle );
 static int portals_rma_register_phys(cci_endpoint_t       *endpoint, 
+                                     cci_connection_t     *connection,
                                      cci_sg_t             *sg_list,
                                      uint32_t             sg_cnt, 
                                      uint64_t             *rma_handle );
@@ -1237,6 +1239,7 @@ static int portals_sendv(
 // Todo
 static int portals_rma_register(
     cci_endpoint_t         *endpoint,
+    cci_connection_t       *connection,
     void                   *start, 
     uint64_t               length,
     uint64_t               *rma_handle ) {
@@ -1249,6 +1252,7 @@ static int portals_rma_register(
 // Todo
 static int portals_rma_register_phys(
     cci_endpoint_t         *endpoint, 
+    cci_connection_t       *connection,
     cci_sg_t               *sg_list,
     uint32_t               sg_cnt, 
     uint64_t               *rma_handle ) {
