@@ -17,8 +17,10 @@
 #include "plugins/core/core.h"
 
 
-int cci_rma_register(cci_endpoint_t *endpoint, void *start, 
-                     uint64_t length, uint64_t *rma_handle)
+int cci_rma_register(cci_endpoint_t *endpoint,
+                     cci_connection_t *connection,
+                     void *start, uint64_t length,
+                     uint64_t *rma_handle)
 {
     if (NULL == endpoint ||
         NULL == rma_handle ||
@@ -27,5 +29,5 @@ int cci_rma_register(cci_endpoint_t *endpoint, void *start,
         return CCI_EINVAL;
     }
 
-    return cci_core->rma_register(endpoint, start, length, rma_handle);
+    return cci_core->rma_register(endpoint, connection, start, length, rma_handle);
 }

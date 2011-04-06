@@ -1313,10 +1313,16 @@ CCI_DECLSPEC int cci_sendv(cci_connection_t *connection,
   should probably have a registration cache so that at least repeated
   registrations are fast.
 
+  If the connection is provided, the memory is only exposed to that
+  connection. If it is NULL, then any reliable connection on that
+  endpoint can access that memory.
+
   \ingroup communications
 */
-CCI_DECLSPEC int cci_rma_register(cci_endpoint_t *endpoint, void *start, 
-                                  uint64_t length, uint64_t *rma_handle);
+CCI_DECLSPEC int cci_rma_register(cci_endpoint_t *endpoint,
+                                  cci_connection_t *connection,
+                                  void *start, uint64_t length,
+                                  uint64_t *rma_handle);
 
 /*! \private
 
@@ -1340,8 +1346,9 @@ typedef struct cci_sg {
 
   \ingroup communications
  */
-CCI_DECLSPEC int cci_rma_register_phys(cci_endpoint_t *endpoint, 
-                                       cci_sg_t *sg_list, uint32_t sg_cnt, 
+CCI_DECLSPEC int cci_rma_register_phys(cci_endpoint_t *endpoint,
+                                       cci_connection_t *connection,
+                                       cci_sg_t *sg_list, uint32_t sg_cnt,
                                        uint64_t *rma_handle);
 
 /*! JMS Fill me in
@@ -1354,11 +1361,10 @@ CCI_DECLSPEC int cci_rma_deregister(uint64_t rma_handle);
 /*! 
   Perform a RMA operation on remote RMA area.
   
-  Local RMA area is not required, local data may be copied or corresponding 
-  RMA area may be looked up (cache). No order guaranteed on data delivery 
-  (no last-byte-written-last), but order is guaranteed between data delivery 
-  and remote recv event (if any). Completion is local, fence/order is remote.
-  Remote recv event only if (header_len != 0).
+  No order guaranteed on data delivery (no last-byte-written-last), but order
+  is guaranteed between data delivery and remote recv event (if any).
+  Completion is local, fence/order is remote.  Remote recv event only if
+  (header_len != 0).
 
   \param[in] connection	Connection (destination/reliability).
   \param[in] header_ptr	Pointer to local header segment.
@@ -1367,7 +1373,7 @@ CCI_DECLSPEC int cci_rma_deregister(uint64_t rma_handle);
   \param[in] local_offset	Offset in the local RMA area.
   \param[in] remote_handle	Handle of the remote RMA area.
   \param[in] remote_offset	Offset in the remote RMA area.
-  \param[in] data_len	Length of local data segment (limited to max AM size).
+  \param[in] data_len	Length of data segment.
   \param[in] context	Cookie to identify the completion through a Send event 
 			when non-blocking.
   \param[in] flags	Optional flags:

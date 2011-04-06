@@ -17,7 +17,8 @@
 #include "plugins/core/core.h"
 
 
-int cci_rma_register_phys(cci_endpoint_t *endpoint, 
+int cci_rma_register_phys(cci_endpoint_t *endpoint,
+                          cci_connection_t *connection,
                           cci_sg_t *sg_list, uint32_t sg_cnt, 
                           uint64_t *rma_handle)
 {
@@ -27,5 +28,5 @@ int cci_rma_register_phys(cci_endpoint_t *endpoint,
         return CCI_EINVAL;
     }
 
-    return cci_core->rma_register_phys(endpoint, sg_list, sg_cnt, rma_handle);
+    return cci_core->rma_register_phys(endpoint, connection, sg_list, sg_cnt, rma_handle);
 }
