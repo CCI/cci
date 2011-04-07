@@ -2412,7 +2412,7 @@ static int sock_rma_register(cci_endpoint_t *endpoint,
 
     CCI_EXIT;
 
-    return CCI_ERR_NOT_IMPLEMENTED;
+    return CCI_SUCCESS;
 }
 
 
@@ -2477,10 +2477,10 @@ static int sock_rma_deregister(uint64_t rma_handle)
 
 
 static int sock_rma(cci_connection_t *connection, 
-                        void *header_ptr, uint32_t header_len, 
-                        uint64_t local_handle, uint64_t local_offset, 
-                        uint64_t remote_handle, uint64_t remote_offset,
-                        uint64_t data_len, void *context, int flags)
+                    void *header_ptr, uint32_t header_len, 
+                    uint64_t local_handle, uint64_t local_offset, 
+                    uint64_t remote_handle, uint64_t remote_offset,
+                    uint64_t data_len, void *context, int flags)
 {
     int                 ret     = CCI_ERR_NOT_IMPLEMENTED;
     cci__ep_t           *ep     = NULL;
@@ -2507,7 +2507,11 @@ static int sock_rma(cci_connection_t *connection,
     dev = ep->dev;
     sdev = dev->priv;
 
-    if (local->conn && local->conn != conn) {
+    if (!local) {
+        debug(CCI_DB_INFO, "%s: invalid local RMA handle", __func__);
+        CCI_EXIT;
+        return CCI_EINVAL;
+    } else if (local->conn && local->conn != conn) {
         debug(CCI_DB_INFO, "%s: invalid connection for this RMA handle", __func__);
         CCI_EXIT;
         return CCI_EINVAL;
@@ -2516,7 +2520,6 @@ static int sock_rma(cci_connection_t *connection,
     pthread_mutex_lock(&ep->lock);
     TAILQ_FOREACH(h, &sep->handles, entry) {
         if (h == local) {
-            debug(CCI_DB_INFO, "%s: invalid endpoint for this RMA handle", __func__);
             local->refcnt++;
             break;
         }
@@ -2524,6 +2527,7 @@ static int sock_rma(cci_connection_t *connection,
     pthread_mutex_unlock(&ep->lock);
 
     if (h != local) {
+        debug(CCI_DB_INFO, "%s: invalid endpoint for this RMA handle", __func__);
         CCI_EXIT;
         return CCI_EINVAL;
     }
@@ -2637,6 +2641,7 @@ static int sock_rma(cci_connection_t *connection,
         for (i = 0; i < cnt; i++)
             TAILQ_INSERT_TAIL(&sdev->queued, txs[i], dentry);
         TAILQ_INSERT_TAIL(&sconn->rmas, rma_op, rmas);
+        TAILQ_INSERT_TAIL(&sep->rma_ops, rma_op, entry);
         pthread_mutex_unlock(&ep->lock);
 
         /* it is no longer needed */
@@ -3081,6 +3086,7 @@ sock_handle_ack(sock_conn_t *sconn,
                     continue;
                 } else {
                     int flags = rma_op->flags;
+                    void *context = rma_op->context;
 
                     /* complete now */
                     TAILQ_REMOVE(&sep->rma_ops, rma_op, entry);
@@ -3090,7 +3096,7 @@ sock_handle_ack(sock_conn_t *sconn,
 
                     if (!(flags & CCI_FLAG_SILENT)) {
                         tx->evt.event.info.send.status = CCI_SUCCESS;
-                        tx->evt.event.info.send.context = rma_op->context;
+                        tx->evt.event.info.send.context = context;
                         TAILQ_INSERT_HEAD(&evts, &tx->evt, entry);
                         continue;
                     }
@@ -3446,6 +3452,80 @@ sock_handle_conn_ack(sock_conn_t *sconn,
     return;
 }
 
+static void
+sock_handle_rma_write(sock_conn_t *sconn, sock_rx_t *rx, uint16_t len)
+{
+    cci__ep_t           *ep             = NULL;
+    cci__conn_t         *conn           = sconn->conn;
+    sock_ep_t           *sep            = NULL;
+    sock_rma_header_t   *write          = rx->buffer;
+    uint64_t            local_handle;
+    uint64_t            local_offset;
+    uint64_t            remote_handle;  /* our handle */
+    uint64_t            remote_offset;  /* our offset */
+    sock_rma_handle_t   *remote, *h;
+
+    ep = container_of(conn->connection.endpoint, cci__ep_t, endpoint);
+    sep = ep->priv;
+
+    sock_parse_rma_handle_offset(&write->local, &local_handle, &local_offset);
+    sock_parse_rma_handle_offset(&write->remote, &remote_handle, &remote_offset);
+    remote = (sock_rma_handle_t *)(uintptr_t)remote_handle;
+
+    pthread_mutex_lock(&ep->lock);
+    TAILQ_FOREACH (h, &sep->handles, entry) {
+        if (h == remote) {
+            break;
+        }
+    }
+    pthread_mutex_unlock(&ep->lock);
+
+    if (h != remote) {
+        /* remote is no longer valid, send nack */
+        debug(CCI_DB_WARN, "%s: remote handle not valid", __func__);
+        // TODO
+        // Note: we have already handled the seq for this rx
+        //       and we may have acked it. If it was the last
+        //       piece, then we lost the race. We should defer
+        //       the ack until we deliver the data.
+
+        goto out;
+    } else if (remote->start + (uintptr_t) remote_offset >
+        remote->start + (uintptr_t) remote->length) {
+        /* offset exceeds remote handle's range, send nak */
+        debug(CCI_DB_WARN, "%s: remote offset not valid", __func__);
+        // TODO
+        // Note: we have already handled the seq for this rx
+        //       and we may have acked it. If it was the last
+        //       piece, then we lost the race. We should defer
+        //       the ack until we deliver the data.
+
+        goto out;
+    } else if (remote->start + (uintptr_t) remote_offset + (uintptr_t) len >
+        remote->start + (uintptr_t) remote->length) {
+        /* length exceeds remote handle's range, send nak */
+        debug(CCI_DB_WARN, "%s: remote length not valid", __func__);
+        // TODO
+        // Note: we have already handled the seq for this rx
+        //       and we may have acked it. If it was the last
+        //       piece, then we lost the race. We should defer
+        //       the ack until we deliver the data.
+
+        goto out;
+    }
+
+    /* valid remote handle, copy the data */
+    debug(CCI_DB_INFO, "%s: copying data into target buffer", __func__);
+    memcpy(remote->start + (uintptr_t)remote_offset, &write->data, len);
+
+out:
+    pthread_mutex_lock(&ep->lock);
+    TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
+    pthread_mutex_unlock(&ep->lock);
+
+    return;
+}
+
 static inline void
 sock_drop_msg(cci_os_handle_t sock)
 {
@@ -3566,6 +3646,7 @@ sock_recvfrom_ep(cci__ep_t *ep)
         sock_handle_ack(sconn, type, rx, (int) a, id);
         break;
     case SOCK_MSG_RMA_WRITE:
+        sock_handle_rma_write(sconn, rx, b);
         break;
     case SOCK_MSG_RMA_WRITE_DONE:
         break;
@@ -3759,7 +3840,7 @@ sock_ack_conns(cci__ep_t *ep)
 
     if (last == 0ULL)
         last = now;
-    else if (last + 1000ULL > now)
+    else if (last + 10ULL > now)
         return;
 
     last = now;

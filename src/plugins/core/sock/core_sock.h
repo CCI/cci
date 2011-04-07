@@ -546,9 +546,9 @@ sock_parse_rma_handle_offset(sock_rma_handle_offset_t *ho,
                              uint64_t *handle, uint64_t *offset)
 {
     *handle = ((uint64_t) ntohl(ho->handle_high)) << 32;
-    *handle |= (uint64_t) ho->handle_low;
+    *handle |= (uint64_t) ntohl(ho->handle_low);
     *offset = ((uint64_t) ntohl(ho->offset_high)) << 32;
-    *offset |= (uint64_t) ho->offset_low;
+    *offset |= (uint64_t) ntohl(ho->offset_low);
 }
 
 typedef struct sock_rma_header {
@@ -724,7 +724,7 @@ typedef struct sock_rma_handle {
     /*! Application memory */
     void *start;
 
-    /* Entry for hanging on ep->regs */
+    /* Entry for hanging on ep->handles */
     TAILQ_ENTRY(sock_rma_handle) entry;
 
     /*! Reference count */
