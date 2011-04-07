@@ -1923,7 +1923,7 @@ sock_progress_pending(cci__dev_t *dev)
 
         /* is it time to resend? */
 
-        if ((tx->last_attempt_us + (tx->send_count * SOCK_RESEND_TIME_SEC * 1000000)) > now)
+        if ((tx->last_attempt_us + ((1 << tx->send_count) * SOCK_RESEND_TIME_SEC * 1000000)) > now)
             continue;
 
         /* need to resend it */

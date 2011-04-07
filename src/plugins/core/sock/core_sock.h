@@ -33,7 +33,7 @@ BEGIN_C_DECLS
 #define SOCK_ACK_DELAY          (1)     /* send an ack after every Nth send */
 
 #define SOCK_EP_MAX_HDR_SIZE    (32)    /* max user header size */
-#define SOCK_EP_TX_TIMEOUT_SEC  (60)    /* seconds for now */
+#define SOCK_EP_TX_TIMEOUT_SEC  (64)    /* seconds for now */
 #define SOCK_EP_RX_CNT          (1024)  /* number of rx active messages */
 #define SOCK_EP_TX_CNT          (128)   /* number of tx active messages */
 
