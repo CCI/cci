@@ -103,6 +103,9 @@ typedef struct cci__ep {
     /*! Lock to protect evts */
     pthread_mutex_t lock;
 
+    /*! Is closing down? */
+    int closing;
+
     /*! Owning dev */
     cci__dev_t *dev;
 

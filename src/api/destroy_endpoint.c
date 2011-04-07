@@ -30,6 +30,7 @@ int cci_destroy_endpoint(cci_endpoint_t *endpoint)
     dev = ep->dev;
 
     pthread_mutex_lock(&dev->lock);
+    ep->closing = 1;
     TAILQ_REMOVE(&dev->eps, ep, entry);
     pthread_mutex_unlock(&dev->lock);
 
