@@ -633,6 +633,7 @@ static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
     sdev = dev->priv;
 
     pthread_mutex_lock(&dev->lock);
+    pthread_mutex_lock(&ep->lock);
 
     ep->priv = NULL;
 
@@ -686,10 +687,22 @@ static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
                 free(rx->buffer);
             free(rx);
         }
+        while (!TAILQ_EMPTY(&sep->rma_ops)) {
+            sock_rma_op_t *rma_op = TAILQ_FIRST(&sep->rma_ops);
+            TAILQ_REMOVE(&sep->rma_ops, rma_op, entry);
+            free(rma_op);
+        }
+        while (!TAILQ_EMPTY(&sep->handles)) {
+            sock_rma_handle_t *handle = TAILQ_FIRST(&sep->handles);
+            TAILQ_REMOVE(&sep->handles, handle, entry);
+            free(handle);
+        }
         if (sep->ids)
             free(sep->ids);
         free(sep);
+        ep->priv = NULL;
     }
+    pthread_mutex_unlock(&ep->lock);
     pthread_mutex_unlock(&dev->lock);
 
     CCI_EXIT;
@@ -2456,7 +2469,7 @@ static int sock_rma_deregister(uint64_t rma_handle)
     TAILQ_FOREACH_SAFE(h, &sep->handles, entry, tmp) {
         if (h == handle) {
             handle->refcnt--;
-            if (handle->refcnt == 0)
+            if (handle->refcnt == 1)
                 TAILQ_REMOVE(&sep->handles, handle, entry);
             break;
         }
@@ -2464,7 +2477,7 @@ static int sock_rma_deregister(uint64_t rma_handle)
     pthread_mutex_unlock(&ep->lock);
 
     if (h == handle) {
-        if (handle->refcnt == 0) {
+        if (handle->refcnt == 1) {
             memset(handle, 0, sizeof(*handle));
             free(handle);
         }
@@ -2573,6 +2586,7 @@ static int sock_rma(cci_connection_t *connection,
             pthread_mutex_lock(&ep->lock);
             local->refcnt--;
             pthread_mutex_unlock(&ep->lock);
+            free(rma_op);
             CCI_EXIT;
             return CCI_ENOMEM;
         }
@@ -2599,6 +2613,7 @@ static int sock_rma(cci_connection_t *connection,
 
         if (err) {
             free(txs);
+            free(rma_op);
             CCI_EXIT;
             return CCI_ENOBUFS;
         }
@@ -2637,12 +2652,14 @@ static int sock_rma(cci_connection_t *connection,
             /* now include the header */
             tx->len += sizeof(sock_rma_header_t);
         }
+        pthread_mutex_lock(&dev->lock);
         pthread_mutex_lock(&ep->lock);
         for (i = 0; i < cnt; i++)
             TAILQ_INSERT_TAIL(&sdev->queued, txs[i], dentry);
         TAILQ_INSERT_TAIL(&sconn->rmas, rma_op, rmas);
         TAILQ_INSERT_TAIL(&sep->rma_ops, rma_op, entry);
         pthread_mutex_unlock(&ep->lock);
+        pthread_mutex_unlock(&dev->lock);
 
         /* it is no longer needed */
         free(txs);
@@ -2851,6 +2868,8 @@ sock_handle_ack(sock_conn_t *sconn,
     TAILQ_HEAD(s_evts, cci__evt) evts = TAILQ_HEAD_INITIALIZER(evts);
     TAILQ_INIT(&idle_txs);
     TAILQ_INIT(&evts);
+    TAILQ_HEAD(s_queued, sock_tx) queued = TAILQ_HEAD_INITIALIZER(queued);
+    TAILQ_INIT(&queued);
 
     assert(id == sconn->id);
     assert(count > 0);
@@ -3005,18 +3024,21 @@ sock_handle_ack(sock_conn_t *sconn,
 
             /* progress RMA */
             if (tx == rma_op->tx) {
+                int flags = rma_op->flags;
+                void *context = rma_op->context;
+
                 /* they acked our remote completion */
                 TAILQ_REMOVE(&sep->rma_ops, rma_op, entry);
                 TAILQ_REMOVE(&sconn->rmas, rma_op, rmas);
                 local->refcnt--;
 
-                if (!(rma_op->flags & CCI_FLAG_SILENT)) {
+                free(rma_op);
+                if (!(flags & CCI_FLAG_SILENT)) {
                     tx->evt.event.info.send.status = CCI_SUCCESS;
-                    tx->evt.event.info.send.context = rma_op->context;
+                    tx->evt.event.info.send.context = context;
                     TAILQ_INSERT_HEAD(&evts, &tx->evt, entry);
                     continue;
                 }
-                free(rma_op);
             }
             /* they acked a data segment,
              * do we need to send more or send the remote completion? */
@@ -3054,7 +3076,7 @@ sock_handle_ack(sock_conn_t *sconn,
                 memcpy(write->data, local->start + offset, tx->len);
                 /* now include the header */
                 tx->len += sizeof(sock_rma_header_t);
-                TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
+                TAILQ_INSERT_TAIL(&queued, tx, dentry);
                 continue;
             } else if (rma_op->completed == rma_op->num_msgs) {
                 /* send remote completion? */
@@ -3082,7 +3104,7 @@ sock_handle_ack(sock_conn_t *sconn,
                     sock_pack_seq_ts(&hdr_r->seq_ts, tx->seq, 0);
                     memcpy(&hdr_r->data, rma_op->header, tx->len);
                     tx->len += sizeof(*hdr_r);
-                    TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
+                    TAILQ_INSERT_TAIL(&queued, tx, dentry);
                     continue;
                 } else {
                     int flags = rma_op->flags;
@@ -3115,6 +3137,17 @@ sock_handle_ack(sock_conn_t *sconn,
         TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
     }
     pthread_mutex_unlock(&ep->lock);
+
+    pthread_mutex_lock(&dev->lock);
+    pthread_mutex_lock(&ep->lock);
+    while (!TAILQ_EMPTY(&queued)) {
+        sock_tx_t *tx;
+        tx = TAILQ_FIRST(&queued);
+        TAILQ_REMOVE(&queued, tx, dentry);
+        TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
+    }
+    pthread_mutex_unlock(&ep->lock);
+    pthread_mutex_unlock(&dev->lock);
 
     CCI_EXIT;
     return;
@@ -3560,6 +3593,11 @@ sock_recvfrom_ep(cci__ep_t *ep)
         return 0;
 
     pthread_mutex_lock(&ep->lock);
+    if (ep->closing) {
+        pthread_mutex_unlock(&ep->lock);
+        CCI_EXIT;
+        return 0;
+    }
     if (!TAILQ_EMPTY(&sep->idle_rxs)) {
         rx = TAILQ_FIRST(&sep->idle_rxs);
         TAILQ_REMOVE(&sep->idle_rxs, rx, entry);
