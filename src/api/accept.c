@@ -26,6 +26,7 @@ int cci_accept(cci_conn_req_t *conn_req, cci_endpoint_t *endpoint,
     cci__lep_t *lep;
     cci__dev_t *dev;
 
+fprintf( stderr, "In cci_accept\n" );
     if (NULL == conn_req ||
         NULL == endpoint ||
         NULL == connection) {
@@ -44,6 +45,7 @@ int cci_accept(cci_conn_req_t *conn_req, cci_endpoint_t *endpoint,
         return CCI_EINVAL;
     }
 
+fprintf( stderr, "calling portals_accept\n" );
     ret = cci_core->accept(conn_req, endpoint, connection);
 
     /* queue crq */

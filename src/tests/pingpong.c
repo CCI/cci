@@ -217,6 +217,7 @@ do_server()
         cci_conn_req_t *conn_req;
 
         ret = cci_get_conn_req(service, &conn_req);
+//fprintf( stderr, "ret=%d  conn_req=%x\n", ret, conn_req );
         if (ret == 0 && conn_req) {
             accept = 1;
             ready = 1;
@@ -227,6 +228,7 @@ do_server()
                 fprintf(stderr, "unable to alloc buffer\n");
                 return;
             }
+fprintf( stderr, "Calling cci_send\n" );
             cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
         }
     }

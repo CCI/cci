@@ -201,6 +201,7 @@ static inline void portals_pack_header(
     assert( type<PORTALS_MSG_TYPE_MAX && type>PORTALS_MSG_INVALID );
     header->type=htonl(PORTALS_PACK_TYPE( type, a, b ));
     header->c=htonl(c);
+    fprintf( stderr, "type=%d a=%d b=%d c=%d\n", type, a, b, c );
 }
 
 static inline void portals_parse_header(
