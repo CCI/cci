@@ -84,10 +84,12 @@ static int portals_sendv(            cci_connection_t     *connection,
                                      void                 *context,
                                      int                  flags );
 static int portals_rma_register(     cci_endpoint_t       *endpoint,
+                                     cci_connection_t     *connection,
                                      void                 *start, 
                                      uint64_t             length,
                                      uint64_t             *rma_handle );
 static int portals_rma_register_phys(cci_endpoint_t       *endpoint, 
+                                     cci_connection_t     *connection,
                                      cci_sg_t             *sg_list,
                                      uint32_t             sg_cnt, 
                                      uint64_t             *rma_handle );
@@ -450,7 +452,7 @@ static const char *portals_strerror(
 static int portals_get_devices(
     cci_device_t const     ***devices ) {
 
-    cci_device_t           *device;
+    cci_device_t const     *device;
     cci__dev_t             *dev;
     portals_dev_t          *pdev;
 
@@ -870,11 +872,19 @@ static int portals_get_conn_req(
 
     cci__crq_t *crq;
     cci__lep_t *lep;
+    const cci_device_t **devices;
+    cci__dev_t *dev;
     
-    crq = container_of(conn_req, cci__crq_t, conn_req);
-    lep = crq->lep;
+    if(!pglobals) {
 
-fprintf( stderr, "In portals_get_conn_req: *conn_req=%x\n", *conn_req );
+        CCI_EXIT;
+        return CCI_ENODEV;
+    }
+
+    devices=pglobals->devices;
+    dev=container_of(*devices, cci__dev_t, device);
+    TAILQ_FOREACH( lep, &dev->leps, dentry )
+        fprintf( stderr, "In portals_get_conn_req:  lep=%x\n", lep );
 sleep(1);
     return CCI_ENODEV;
     return CCI_SUCCESS;
@@ -1265,6 +1275,7 @@ static int portals_sendv(
 // Todo
 static int portals_rma_register(
     cci_endpoint_t         *endpoint,
+    cci_connection_t       *connection,
     void                   *start, 
     uint64_t               length,
     uint64_t               *rma_handle ) {
@@ -1277,6 +1288,7 @@ static int portals_rma_register(
 // Todo
 static int portals_rma_register_phys(
     cci_endpoint_t         *endpoint, 
+    cci_connection_t       *connection,
     cci_sg_t               *sg_list,
     uint32_t               sg_cnt, 
     uint64_t               *rma_handle ) {
@@ -1318,7 +1330,8 @@ static void portals_recvfrom_ep(
     cci__ep_t              *ep ) {
 
     portals_events();
-    //printf("In portals_recvfrom_ep\n");
+//  printf("In portals_recvfrom_ep\n");
+    sleep(1);
     return;
 }
 
@@ -1328,7 +1341,7 @@ static void portals_recvfrom_lep(
     cci__lep_t             *lep ) {
 
     portals_events();
-    //printf("In portals_recvfrom_lep\n");
+    printf("In portals_recvfrom_lep  lep=%lx\n", lep );
     return;
 }
 
