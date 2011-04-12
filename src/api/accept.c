@@ -26,7 +26,6 @@ int cci_accept(cci_conn_req_t *conn_req, cci_endpoint_t *endpoint,
     cci__lep_t *lep;
     cci__dev_t *dev;
 
-fprintf( stderr, "In cci_accept\n" );
     if (NULL == conn_req ||
         NULL == endpoint ||
         NULL == connection) {
@@ -37,6 +36,7 @@ fprintf( stderr, "In cci_accept\n" );
     dev = ep->dev;
     crq = container_of(conn_req, cci__crq_t, conn_req);
     lep = crq->lep;
+fprintf( stderr, "In cci_accept:  ep->dev=%lx lep->dev=%lx\n", ep->dev, lep->dev );
     if (ep->dev != lep->dev) {
         /* FIXME
          * now what? is the conn request stale or still valid?
