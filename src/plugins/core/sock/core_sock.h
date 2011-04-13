@@ -689,6 +689,9 @@ typedef struct sock_tx {
 
     /*! Owning RMA op if not active message */
     struct sock_rma_op *rma_op;
+
+    /*! Number of RNR nacks received */
+    uint32_t rnr;
 } sock_tx_t;
 
 /*! Receive active message context.
