@@ -356,7 +356,7 @@ static inline void portals_pack_conn_reply(
 typedef struct portals_dev {
 
     ptl_process_id_t       idp;
-    ptl_pt_index_t         table_index;
+    ptl_pt_index_t         send_index;
     ptl_handle_ni_t        niHandle;         /* Seastar handle */
     ptl_handle_eq_t        eqhSend;          /* EQ handle for Send */
     ptl_handle_eq_t        eqhRecv;          /* EQ handle for Recv */
@@ -424,7 +424,7 @@ typedef struct portals_conn {
     cci__conn_t            *conn;            /* Owning conn */
     portals_conn_status_t  status;           /* Status */
     ptl_process_id_t       idp;              /* Peer's (NID, PID) */
-    ptl_pt_index_t         table_index;      /* Peer's (NID, PID) */
+    ptl_pt_index_t         send_index;       /* portals send table index */
     uint32_t               peer_id;          /* ID assigned by peer */
     uint32_t               id;               /* ID assigned to peer */
     uint32_t               max_tx_cnt;       /* Max sends in flight */
