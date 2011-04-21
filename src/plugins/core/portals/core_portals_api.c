@@ -110,12 +110,14 @@ static int portals_rma(              cci_connection_t     *connection,
 static void *portals_progress_thread(void                 *arg );
 static inline void portals_progress_dev(
                                      cci__dev_t *dev);
+#if 0
 static int portals_sendto(           cci_os_handle_t      portals,
                                      ptl_handle_eq_t      eqh,
                                      void                 *buf,
                                      int                  len,
                                      const ptl_process_id_t idp,
                                      const ptl_pt_index_t pt_index );
+#endif
 static int portals_events(           ptl_event_t          *event );
 
 
@@ -1161,8 +1163,10 @@ static int portals_connect(
     cci_event_t            *event=NULL;
     cci_event_other_t      *other=NULL;
     ptl_process_id_t       idp;
-    void                   *ptr=NULL;
-    portals_handshake_t    *hs=NULL;
+    portals_conn_request_t conn_request;
+    ptl_match_bits_t       bits = 0ULL;
+    ptl_md_iovec_t         iov[2];
+    ptl_md_t               md;
 
     CCI_ENTER;
 
@@ -1209,9 +1213,6 @@ static int portals_connect(
 
     connection->max_send_size=dev->device.max_send_size;
     pconn->idp=idp;
-    pconn->table_index=pdev->table_index;;
-    fprintf( stderr, "Got server address (%d,%d) table_index %d\n",
-             idp.nid, idp.pid, pdev->table_index );
 
     /* get a tx */
     pthread_mutex_lock(&ep->lock);
@@ -1222,13 +1223,14 @@ static int portals_connect(
     pthread_mutex_unlock(&ep->lock);
 
     if(!tx) {
-
+        // FIXME leak
         CCI_EXIT;
         return CCI_ENOBUFS;
     }
 
     /* prep the tx */
     tx->msg_type=PORTALS_MSG_OOB_CONN_REQUEST;
+    pconn->tx = tx; /* we need its event for the accept|reject */
 
     evt=&tx->evt;
     evt->ep=ep;
@@ -1240,45 +1242,49 @@ static int portals_connect(
     other->context=context;
     other->u.connect.connection=connection;
 
-    /* pack the msg */
-    //hdr_r=(portals_header_r_t *)tx->buffer;
-    //portals_get_id( pep, &pconn->id ); FIXME
-    /* FIXME silence -Wall -Werror until it is used */
-    //if(0)portals_put_id( pep, 0 );
-    //portals_pack_conn_request( &hdr_r->header, attribute,
-                               //(uint16_t)data_len, 0 );
-    //tx->len=sizeof(*hdr_r);
-    //ptr=tx->buffer+tx->len;
+    /* pack the bits */
+    bits = ((ptl_match_bits_t) port) << PORTALS_EP_SHIFT;
+    bits |= ((ptl_match_bits_t) data_len) << 16;
+    bits |= ((ptl_match_bits_t) attribute) << 8;
+    bits |= (ptl_match_bits_t) PORTALS_MSG_OOB;
 
-#if 0
-    /* add handshake */
-    hs=(portals_handshake_t *)ptr;
-    portals_pack_handshake( hs, pconn->id, 0,   //FIXME
-                            endpoint->max_recv_buffer_count,
-                            connection->max_send_size);
+    /* pack the payload */
+    conn_request.msg_oob_type = PORTALS_MSG_OOB_CONN_REQUEST;
+    conn_request.max_send_size = connection->max_send_size;
+    conn_request.max_recv_buffer_count = endpoint->max_recv_buffer_count;
+    conn_request.client_ep_id = pep->id;
 
-    tx->len+=sizeof(*hs);
-    ptr=tx->buffer+tx->len;
-#endif
+    /* prepare memory descriptor */
+    memset(&md, 0, sizeof(md));
+    md.threshold = PTL_MD_THRESH_INF;
+    md.options = PTL_MD_OP_PUT;
+    /* disable events - we only want the server's accept|reject */
+    md.eq_handle = PTL_EQ_NONE;
 
-    if(data_len)
-            memcpy( ptr, data_ptr, data_len );
+    if (data_len) {
+        iov[0].iov_base = &conn_request;
+        iov[0].iov_len = sizeof(conn_request);
+        iov[1].iov_base = data_ptr;
+        iov[1].iov_len = data_len;
+        md.options |= PTL_MD_IOVEC;
+        md.start = iov;
+        md.length = 2;
+    } else {
+        md.start = &conn_request;
+        md.length = sizeof(conn_request);
+    }
+    
+    PtlMDBind(pdev->niHandle, md, PTL_RETAIN, &tx->mdh);
+    /* FIXME check return */
 
-    tx->len+=data_len;
-    assert( tx->len<=ep->buffer_len );
-
-    /* insert at tail of device's queued list */
-    dev=ep->dev;
-    pdev=dev->priv;
-
-    //pthread_mutex_lock(&dev->lock);
-    //TAILQ_INSERT_TAIL( &pdev->queued, tx, dentry ); FIXME
-    //pthread_mutex_unlock(&dev->lock);
-
-    /* try to progress txs */
-    fprintf( stderr, "Enter portals_progress_dev\n" );
-    portals_progress_dev(dev);
-    fprintf( stderr, "Returning from portals_connect\n" );
+    iRC = PtlPut(tx->mdh,           /* Handle to MD */
+                 PTL_NOACK_REQ,     /* ACK disposition */
+                 pconn->idp,        /* target port */
+                 pdev->table_index, /* table entry to use */
+                 0,                 /* access entry to use */
+                 bits,              /* match bits */
+                 0,                 /* remote offset */
+                 (uintptr_t) conn); /* hdr_data */
 
     CCI_EXIT;
     return CCI_SUCCESS;
@@ -1486,7 +1492,6 @@ static int portals_send(
     }
 
     if (header_len && data_len) {
-        memset(iov, 0, sizeof(iov));
         iov[0].iov_base = header_ptr;
         iov[0].iov_len = header_len;
         iov[1].iov_base = data_ptr;
@@ -1523,7 +1528,7 @@ static int portals_send(
                  0,                 /* access entry to use */
                  bits,              /* match bits */
                  0,                 /* remote offset */
-                 pconn->peer_id);   /* hdr_data */
+                 pconn->peer_conn); /* hdr_data */
     fprintf( stderr,
              "In portals_send: (%d,%d) table %d: posted:"
              " ret=%d len=%d\n", pconn->idp.nid, pconn->idp.pid,
@@ -1744,6 +1749,7 @@ static void *portals_progress_thread(
 }
 
 
+#if 0
 static int portals_sendto(
     cci_os_handle_t        niHandle,
     ptl_handle_eq_t        eqhSend,
@@ -1793,6 +1799,7 @@ static int portals_sendto(
     free(pmd);
     return iRC;
 }
+#endif
 
 static int portals_events(
     ptl_event_t            *event ) {

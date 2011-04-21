@@ -1391,6 +1391,7 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     pthread_mutex_unlock(&ep->lock);
 
     if (!tx) {
+        /* FIXME leak */
         CCI_EXIT;
         return CCI_ENOBUFS;
     }
