@@ -13,7 +13,12 @@
 
 BEGIN_C_DECLS
 
+#define PORTALS_DEFAULT_MSS       (8192)     /* 8 KB */
+#define PORTALS_MIN_MSS           (1024)
+#define PORTALS_MAX_MSS           (64 * 1024)
+
 #define PORTALS_BLOCK_SIZE        (64)       /* bytes for id storage */
+#define PORTALS_EP_MAX_HDR_SIZE   (32)       /* per spec */
 #define PORTALS_EP_BUF_LEN        (8192)     /* 8 kB for now */
 #define PORTALS_EP_RX_CNT         (1024)     /* max rx messages */
 #define PORTALS_EP_TX_CNT         (128)      /* max tx messages */
@@ -21,6 +26,10 @@ BEGIN_C_DECLS
 #define PORTALS_EQ_TX_CNT         PORTALS_EP_TX_CNT * 4
 #define PORTALS_BLOCK_SIZE        (64)       /* 64b blocks for id */
 #define PORTALS_NUM_BLOCKS        (16384)    /* number of blocks */
+#define PORTALS_MAX_EP_ID         (PORTALS_BLOCK_SIZE * PORTALS_NUM_BLOCKS)
+#define PORTALS_EP_BITS           (32)
+#define PORTALS_EP_SHIFT          (32)
+#define PORTALS_PROG_TIME_US      (10000) /* try to progress every N microseconds */
 
 #define PORTALS_WILDCARD          {PTL_NID_ANY, PTL_PID_ANY};
 #define PORTALS_EP_MATCH          ((uint64_t)0)
@@ -146,7 +155,7 @@ typedef enum portals_msg_oob_type {
 
    Matchbits:
     <--------------------------- 62 bits -------------------------> 2b
-    <------------ 32b ------------> <---- 16b ----> <- 8b ->
+    <------------ 32b ------------> <---- 16b ----> <- 8b -> <-6b->
    +-------------------------------+---------------+--------+------+--+
    |      server endpoint id       |      len      |  attr  | rsrv |T |
    +-------------------------------+---------------+--------+------+--+
@@ -233,9 +242,9 @@ typedef struct portals_tx {
     cci__evt_t              evt;        /* associated event */
     portals_msg_type_t      msg_type;   /* message type */
     int                     flags;      /* (CCI_FLAG_[BLOCKING|SILENT|NO_COPY]) */
-    void                    *buffer;    /* Buffer */
-    uint16_t                len;        /* Buffer length */
-    ptl_md_t                md;         /* Memory descriptor */
+    void                    *buffer;    /* active msg buffer */
+    uint16_t                len;        /* length of buffer */
+    ptl_handle_md_t         mdh;        /* Memory descriptor handle */
     TAILQ_ENTRY(portals_tx) dentry;     /* Hangs on ep->idle_txs  dev->queued */
                                         /*   dev->pending */
     TAILQ_ENTRY(portals_tx) tentry;     /* Hangs on ep->txs */
@@ -243,9 +252,10 @@ typedef struct portals_tx {
 
 typedef struct portals_rx {
     cci__evt_t              evt;        /* associated event */
-    void                    *buffer;    /* Buffer */
-    uint16_t                len;        /* Buffer length */
-    ptl_md_t                md;         /* Memory descriptor */
+    void                    *buffer;    /* active msg buffer */
+    uint16_t                len;        /* length of buffer */
+    ptl_handle_md_t         mdh;        /* Memory descriptor handle */
+    ptl_handle_me_t         meh;        /* Match list entry handle */
     TAILQ_ENTRY(portals_rx) entry;      /* Hangs on ep->idle_rxs, ep->loaned */
     TAILQ_ENTRY(portals_rx) gentry;     /* Hangs on ep->rxs */
 }   portals_rx_t;
@@ -254,8 +264,6 @@ typedef struct portals_dev {
     ptl_process_id_t       idp;
     ptl_pt_index_t         table_index;
     ptl_handle_ni_t        niHandle;         /* Seastar handle */
-    ptl_handle_eq_t        eqhSend;          /* EQ handle for Send */
-    ptl_handle_eq_t        eqhRecv;          /* EQ handle for Recv */
     int                    max_mes;          /* Match Entries */
     int                    max_mds;          /* Memory Descriptors */
     int                    max_eqs;          /* Event Queues */
@@ -264,26 +272,23 @@ typedef struct portals_dev {
     int                    max_md_iovecs;    /* Number of IO vectors */
     int                    max_me_list;      /* ME's to Portals Index */
     int                    max_getput_md;    /* Max len atomic swap */
-    TAILQ_HEAD( p_queued, portals_tx ) queued;           /* Queued sends */
-    TAILQ_HEAD( p_pending, portals_tx ) pending;          /* Pending sends */
     int                    is_progressing;   /* Being progressed? */
-    uint64_t               *ids;             /* Endpoint id blocks */
+    uint64_t               *ep_ids;          /* Endpoint id blocks */
 }   portals_dev_t;
 
 typedef struct portals_globals {
     int                    count;            /* portals devices */
     const cci_device_t     **devices;        /* Array of devices */
-    int                    shutdown;         /* In shutdown? */
 }   portals_globals_t;
 extern portals_globals_t   *pglobals;
 
 typedef struct portals_ep {
     uint32_t                        id;         /* id for endpoint multiplexing */
+    ptl_handle_eq_t                 eqh;        /* eventq handle */
     TAILQ_HEAD(p_txs, portals_tx)   txs;        /* List of all txs */
     TAILQ_HEAD(p_txsi, portals_tx)  idle_txs;   /* List of idle txs */
     TAILQ_HEAD(p_rxs, portals_rx)   rxs;        /* List of all rxs */
     TAILQ_HEAD(p_rxsi, portals_rx)  idle_rxs;   /* List of idle rxs */
-    uint64_t                        *conn_ids;  /* Connection id blocks */
     TAILQ_HEAD(p_conns, portals_conn) conns;    /* List of all conns for cleanup */
 }   portals_ep_t;
 
@@ -315,6 +320,7 @@ typedef struct portals_conn {
     portals_conn_status_t   status;         /* Status */
     ptl_process_id_t        idp;            /* Peer's (NID, PID) */
     ptl_pt_index_t          table_index;    /* Peer's (NID, PID) */
+    uint64_t                peer_id;        /* Peer's conn addr */
     uint32_t                peer_ep_id;     /* Peer's endpoint ID */
     uint32_t                max_tx_cnt;     /* Max sends in flight */
     uint32_t                mss;            /* max_segment_size for this conn */
