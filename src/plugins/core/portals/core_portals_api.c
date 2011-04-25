@@ -1153,7 +1153,6 @@ static int portals_accept(
     portals_conn_t  *pconn	= NULL;
     ptl_md_t        md;
     portals_conn_accept_t accept;
-    //portals_tx_t    *tx	    = NULL;
 
     CCI_ENTER;
 
@@ -1185,7 +1184,6 @@ static int portals_accept(
 
     /* prepare accept msg */
 
-    memset(&accept, 0, sizeof(accept));
     accept.max_send_size = pcrq->mss;
     accept.max_recv_buffer_count = pcrq->max_recv_buffer_count;
     accept.server_conn_upper = (uint32_t)((uintptr_t)conn >> 32);
@@ -1194,7 +1192,7 @@ static int portals_accept(
     memset(&md, 0, sizeof(md));
     md.threshold = PTL_MD_THRESH_INF;
     md.options = PTL_MD_OP_PUT;
-    /* disable events - we only want the server's accept|reject */
+    /* disable events */
     md.eq_handle = PTL_EQ_NONE;
     md.start = &accept;
     md.length = sizeof(accept);
@@ -1377,9 +1375,10 @@ static int portals_connect(
 
     /* prepare memory descriptor */
     memset(&md, 0, sizeof(md));
-    md.threshold = PTL_MD_THRESH_INF;
+    md.threshold = 1;
     md.options = PTL_MD_OP_PUT;
-    /* disable events - we only want the server's accept|reject */
+    md.options |= PTL_MD_EVENT_START_DISABLE; /* we don't care */
+    /* ignore events - we only want the server's accept|reject */
     md.eq_handle = PTL_EQ_NONE;
 
     if (data_len) {
@@ -1395,7 +1394,7 @@ static int portals_connect(
         md.length = sizeof(conn_request);
     }
     
-    PtlMDBind(pdev->niHandle, md, PTL_RETAIN, &tx->mdh);
+    PtlMDBind(pdev->niHandle, md, PTL_UNLINK, &tx->mdh);
     /* FIXME check return */
 
     iRC = PtlPut(tx->mdh,           /* Handle to MD */
@@ -1958,6 +1957,30 @@ static void portals_handle_conn_request(cci__lep_t *lep, ptl_event_t event)
     return;
 }
 
+static void portals_handle_active_msg(cci__ep_t *ep, ptl_event_t event)
+{
+    portals_rx_t    *rx     = event.md.user_ptr;
+    cci__evt_t      *evt    = &rx->evt;
+
+    evt->event.type = CCI_EVENT_RECV;
+
+    *((uint32_t *)&evt->event.info.recv.header_len) =
+        (uint32_t) ((event.match_bits >> 27) & 0x1F);
+    *((uint32_t *)&evt->event.info.recv.data_len) =
+        (uint32_t) ((event.match_bits >> 11) & 0xFFFF);
+    *((void **)&evt->event.info.recv.header_ptr) = rx->buffer;
+    *((void **)&evt->event.info.recv.data_ptr) =
+        rx->buffer + evt->event.info.recv.header_len;
+
+    /* queue event on endpoint's completed event queue */
+
+    pthread_mutex_lock(&ep->lock);
+    TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+    pthread_mutex_unlock(&ep->lock);
+
+    return;
+}
+
 static void portals_get_event_ep(cci__ep_t *ep)
 {
     int             ret     = CCI_SUCCESS;
@@ -2014,6 +2037,7 @@ static void portals_get_event_ep(cci__ep_t *ep)
         switch (type) {
         case PORTALS_MSG_SEND:
             /* incoming active message */
+            portals_handle_active_msg(ep, event);
             break;
         case PORTALS_MSG_RMA_WRITE:
             /* incoming RMA write */
