@@ -31,7 +31,7 @@ BEGIN_C_DECLS
 #define PORTALS_EP_SHIFT          (32)
 #define PORTALS_PROG_TIME_US      (10000) /* try to progress every N microseconds */
 
-#define PORTALS_WILDCARD          {PTL_NID_ANY, PTL_PID_ANY};
+#define PORTALS_WILDCARD          {PTL_NID_ANY, PTL_PID_ANY}
 #define PORTALS_EP_MATCH          ((uint64_t)0)
 #define PORTALS_EP_IGNORE         (~((uint64_t)0))
 
@@ -144,9 +144,9 @@ static inline void portals_parse_match_bits(
 /* OOB msg types */
 
 typedef enum portals_msg_oob_type {
-    PORTALS_MSG_OOB_CONN_REQUEST,
-    PORTALS_MSG_OOB_CONN_REPLY,
-    PORTALS_MSG_KEEPALIVE
+    PORTALS_MSG_OOB_CONN_REQUEST = 0x1,
+    PORTALS_MSG_OOB_CONN_REPLY = 0x2,
+    PORTALS_MSG_KEEPALIVE = 0x3
 }   portals_msg_oob_type_t;
 
 /* OOB msg payload is a minimum of one uint32_t with the OOB msg type */
@@ -155,18 +155,16 @@ typedef enum portals_msg_oob_type {
 
    Matchbits:
     <--------------------------- 62 bits -------------------------> 2b
-    <------------ 32b ------------> <---- 16b ----> <- 8b -> <-6b->
-   +-------------------------------+---------------+--------+------+--+
-   |      server endpoint id       |      len      |  attr  | rsrv |T |
-   +-------------------------------+---------------+--------+------+--+
-   where T is PORTALS_MSG_OOB
+    <------------ 32b ------------> <---- 16b ----> <- 8b -> <4b> 2b 2b
+   +-------------------------------+---------------+--------+----+--+--+
+   |      server endpoint id       |      len      |  attr  |rsv |O |T |
+   +-------------------------------+---------------+--------+----+--+--+
+   where T is PORTALS_MSG_OOB and O is PORTALS_MSG_OOB_CONN_REQUEST
 
    hdr_data is the client's conn opaque handle
 
    Payload:
     <------------- 32b ------------>
-   +--------------------------------+
-   |  PORTALS_MSG_OOB_CONN_REQUEST  |
    +--------------------------------+
    |          max_send_size         |
    +--------------------------------+
@@ -178,7 +176,6 @@ typedef enum portals_msg_oob_type {
  */
 
 typedef struct portals_conn_request {
-    uint32_t msg_oob_type;
     uint32_t max_send_size;         /* mss that the client supports */
     uint32_t max_recv_buffer_count; /* max recvs the client can handle */
     uint32_t client_ep_id;          /* client's endpoint id */
@@ -212,7 +209,6 @@ typedef struct portals_conn_request {
  */
 
 typedef struct portals_conn_accept {
-    uint32_t msg_oob_type;
     uint32_t max_send_size;         /* the min of the two mss */
     uint32_t max_recv_buffer_count; /* max recvs the server can handle */
     uint32_t server_conn_upper;     /* upper 32 bits of server conn opaque */
@@ -241,6 +237,7 @@ typedef struct portals_conn_accept {
 typedef struct portals_tx {
     cci__evt_t              evt;        /* associated event */
     portals_msg_type_t      msg_type;   /* message type */
+    portals_msg_oob_type_t  oob_type;   /* if PORTALS_MSG_OOB above, set oob type here */
     int                     flags;      /* (CCI_FLAG_[BLOCKING|SILENT|NO_COPY]) */
     void                    *buffer;    /* active msg buffer */
     uint16_t                len;        /* length of buffer */
@@ -295,14 +292,18 @@ typedef struct portals_ep {
 typedef struct portals_lep {
 
     cci_os_handle_t        fd;               /* OS handle for poll */
+    ptl_handle_eq_t                 eqh;        /* eventq handle */
 }   portals_lep_t;
 
 typedef struct portals_crq {
-    void                   *buffer;          /* Buffer for request */
-    ptl_process_id_t       idp;              /* Client's address */
-    uint32_t               peer_id;          /* Peer's id reject */
-    uint64_t               last_attempt_us;  /* Last send usec reject */
-    uint64_t               timeout_us;       /* Timeout usec reject */
+    void                   *buffer;     /* Buffer for optional payload */
+    ptl_handle_md_t         mdh;        /* Memory descriptor handle */
+    ptl_handle_me_t         meh;        /* Match list entry handle */
+    ptl_process_id_t       idp;         /* Client's nid, pid */
+    uint32_t               client_id;   /* Client's ep id */
+    uint32_t               mss;         /* Client's MSS */
+    uint32_t               max_recv_buffer_count;
+    uint64_t               client_conn; /* Client's conn addr */
 }   portals_crq_t;
 
 /* Connection info */
