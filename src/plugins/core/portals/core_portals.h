@@ -184,18 +184,16 @@ typedef struct portals_conn_request {
 /* connection reply (accept):
 
    Matchbits:
-    <--------------------------- 62 bits ------------------------> 2b
-   +-------------------------------+------------------------------+--+
-   |      client endpoint id       |           reserved           |T |
-   +-------------------------------+------------------------------+--+
-   where T is PORTALS_MSG_OOB
+    <--------------------------- 62 bits ----------------------> 2b 2b
+   +-------------------------------+----------------------------+--+--+
+   |      client endpoint id       |           reserved         |O |T |
+   +-------------------------------+----------------------------+--+--+
+   where T is PORTALS_MSG_OOB and O is PORTALS_MSG_OOB_CONN_REPLY
 
    hdr_data is the client's conn opaque handle
 
    Payload:
     <------------- 32b ------------>
-   +--------------------------------+
-   |   PORTALS_MSG_OOB_CONN_ACCEPT  |
    +--------------------------------+
    |          max_send_size         |
    +--------------------------------+
@@ -218,19 +216,15 @@ typedef struct portals_conn_accept {
 /* connection reply (reject):
 
    Matchbits:
-    <--------------------------- 62 bits ------------------------> 2b
+    <--------------------------- 62 bits ----------------------> 2b 2b
    +-------------------------------+------------------------------+--+
-   |      client endpoint id       |           reserved           |T |
-   +-------------------------------+------------------------------+--+
-   where T is PORTALS_MSG_OOB
+   |      client endpoint id       |           reserved         |O |T |
+   +-------------------------------+----------------------------+--+--+
+   where T is PORTALS_MSG_OOB and O is PORTALS_MSG_OOB_CONN_REPLY
 
-   hdr_data is NULL
+   hdr_data is the client's conn opaque handle
 
-   Payload:
-    <------------- 32b ------------>
-   +--------------------------------+
-   |   PORTALS_MSG_OOB_CONN_REJECT  |
-   +--------------------------------+
+   NO Payload
 
  */
 

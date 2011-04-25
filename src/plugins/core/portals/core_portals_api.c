@@ -1476,27 +1476,150 @@ static int portals_arm_os_handle(
 
 
 // Todo
-static int portals_get_event(
-    cci_endpoint_t         *endpoint, 
-    cci_event_t            **const event,
-    uint32_t               flags ) {
+static int portals_get_event(cci_endpoint_t *endpoint, 
+                             cci_event_t **const event,
+                             uint32_t flags )
+{
+    int             ret = CCI_SUCCESS;
+    cci__ep_t       *ep;
+    cci__evt_t      *ev = NULL, *e;
+    cci__dev_t      *dev;
+    portals_ep_t    *pep;
+    cci_event_t     *tmp;
 
     CCI_ENTER;
+
+    if (!pglobals) {
+        CCI_EXIT;
+        return CCI_ENODEV;
+    }
+
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    pep = ep->priv;
+    dev = ep->dev;
+
+    pthread_mutex_lock(&ep->lock);
+    if (TAILQ_EMPTY(&ep->evts)) {
+        pthread_mutex_unlock(&ep->lock);
+        *event = NULL;
+        CCI_EXIT;
+        return CCI_EAGAIN;
+    }
+
+    if (!flags) {
+        /* give the user the first event */
+        TAILQ_FOREACH(e, &ep->evts, entry) {
+            if (e->event.type == CCI_EVENT_SEND) {
+                /* NOTE: if it is blocking, skip it since portals_send()
+                 * is waiting on it
+                 */
+                portals_tx_t *tx = container_of(e, portals_tx_t, evt);
+                if (tx->flags & CCI_FLAG_BLOCKING) {
+                    continue;
+                } else {
+                    ev = e;
+                    break;
+                }
+            } else {
+                ev = e;
+                break;
+            }
+        }
+    } else {
+        TAILQ_FOREACH(e, &ep->evts, entry) {
+            tmp = &e->event;
+
+            if (flags & CCI_PE_SEND_EVENT &&
+                tmp->type == CCI_EVENT_SEND) {
+                portals_tx_t *tx = container_of(e, portals_tx_t, evt);
+                if (tx->flags & CCI_FLAG_BLOCKING) {
+                    continue;
+                } else {
+                    ev = e;
+                    break;
+                }
+            } else if (flags & CCI_PE_RECV_EVENT &&
+                       tmp->type == CCI_EVENT_RECV) {
+                ev = e;
+                break;
+            } else if (flags & CCI_PE_OTHER_EVENT &&
+                       !(tmp->type == CCI_EVENT_SEND ||
+                         tmp->type == CCI_EVENT_RECV)) {
+                ev = e;
+                break;
+            }
+        }
+    }
+
+    if (ev)
+        TAILQ_REMOVE(&ep->evts, ev, entry);
+    else
+        ret = CCI_EAGAIN;
+
+    pthread_mutex_unlock(&ep->lock);
+
+    /* TODO drain fd so that they can block again */
+
+    *event = &ev->event;
+
     CCI_EXIT;
 
-    return CCI_ERR_NOT_IMPLEMENTED;
+    return ret;
 }
 
 
 // Todo
-static int portals_return_event(
-    cci_endpoint_t         *endpoint, 
-    cci_event_t            *event ) {
+static int portals_return_event(cci_endpoint_t *endpoint, 
+                                cci_event_t *event )
+{
+    cci__ep_t       *ep;
+    portals_ep_t    *sep;
+    cci__evt_t      *evt;
+    portals_tx_t    *tx;
+    portals_rx_t    *rx;
 
     CCI_ENTER;
+
+    if (!pglobals) {
+        CCI_EXIT;
+        return CCI_ENODEV;
+    }
+
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    sep = ep->priv;
+
+    evt = container_of(event, cci__evt_t, event);
+
+    if (evt->ep != ep) {
+        CCI_EXIT;
+        return CCI_EINVAL;
+    }
+
+    /* enqueue the event */
+
+    switch (event->type) {
+    case CCI_EVENT_SEND:
+        tx = container_of(evt, portals_tx_t, evt);
+        pthread_mutex_lock(&ep->lock);
+        /* insert at head to keep it in cache */
+        TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
+        pthread_mutex_unlock(&ep->lock);
+        break;
+    case CCI_EVENT_RECV:
+        rx = container_of(evt, portals_rx_t, evt);
+        pthread_mutex_lock(&ep->lock);
+        /* insert at head to keep it in cache */
+        TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
+        pthread_mutex_unlock(&ep->lock);
+        break;
+    default:
+        /* TODO */
+        break;
+    }
+
     CCI_EXIT;
 
-    return CCI_ERR_NOT_IMPLEMENTED;
+    return CCI_SUCCESS;
 }
 
 
@@ -1957,6 +2080,47 @@ static void portals_handle_conn_request(cci__lep_t *lep, ptl_event_t event)
     return;
 }
 
+/* If hdr_data is 0, it is a reject */
+static void portals_handle_conn_reply(cci__ep_t *ep, ptl_event_t event)
+{
+    cci__conn_t     *conn   = (void *)((uintptr_t)event.hdr_data);
+    portals_conn_t  *pconn  = conn->priv;
+    portals_ep_t    *pep    = ep->priv;
+    portals_rx_t    *rx     = event.md.user_ptr;
+    portals_conn_accept_t *accept = rx->buffer;
+    cci__evt_t      *evt    = &rx->evt;
+
+    if (event.mlength == 16) {
+        /* accept */
+
+        conn->connection.max_send_size = accept->max_send_size;
+        pconn->peer_conn = ((uint64_t)accept->server_conn_upper) << 32;
+        pconn->peer_conn |= (uint64_t)accept->server_conn_lower;
+
+        evt->event.type = CCI_EVENT_CONNECT_SUCCESS;
+        /* context already set in connect() */
+        /* connection aready set in connect() */
+        //evt->event.info.other.u.connect.connection = &conn->connection;
+
+        pthread_mutex_lock(&ep->lock);
+        TAILQ_INSERT_TAIL(&pep->conns, pconn, entry);
+        pthread_mutex_unlock(&ep->lock);
+    } else {
+        /* reject */
+        free(pconn);
+        if (conn->uri)
+            free((void *)conn->uri);
+        free(conn);
+        evt->event.type = CCI_EVENT_CONNECT_REJECTED;
+        /* context already set in connect() */
+    }
+    pthread_mutex_lock(&ep->lock);
+    TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+    pthread_mutex_unlock(&ep->lock);
+
+    return;
+}
+
 static void portals_handle_active_msg(cci__ep_t *ep, ptl_event_t event)
 {
     portals_rx_t    *rx     = event.md.user_ptr;
@@ -2051,6 +2215,9 @@ static void portals_get_event_ep(cci__ep_t *ep)
             portals_msg_oob_type_t oob_type = *((uint32_t *)rx->buffer);
 
             switch (oob_type) {
+                case PORTALS_MSG_OOB_CONN_REPLY:
+                portals_handle_conn_reply(ep, event);
+                break;
             case PORTALS_MSG_OOB_CONN_REQUEST:
                 break;
             default:
