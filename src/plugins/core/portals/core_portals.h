@@ -207,6 +207,7 @@ typedef struct portals_conn_request {
  */
 
 typedef struct portals_conn_accept {
+    uint32_t server_ep_id;
     uint32_t max_send_size;         /* the min of the two mss */
     uint32_t max_recv_buffer_count; /* max recvs the server can handle */
     uint32_t server_conn_upper;     /* upper 32 bits of server conn opaque */

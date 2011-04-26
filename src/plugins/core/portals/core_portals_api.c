@@ -1198,6 +1198,7 @@ static int portals_accept(
 
     /* prepare accept msg */
 
+    accept.server_ep_id = pep->id;
     accept.max_send_size = pcrq->mss;
     accept.max_recv_buffer_count = pcrq->max_recv_buffer_count;
     accept.server_conn_upper = (uint32_t)((uintptr_t)conn >> 32);
@@ -1749,7 +1750,7 @@ static int portals_send(
 
     /* prepare memory descriptor */
     memset(&md, 0, sizeof(md));
-    md.threshold = PTL_MD_THRESH_INF;
+    md.threshold = 1;
     md.options = PTL_MD_OP_PUT;
     md.options |= PTL_MD_EVENT_START_DISABLE; /* we don't care */
     md.eq_handle = pep->eqh;
@@ -2140,10 +2141,11 @@ static void portals_handle_conn_reply(cci__ep_t *ep, ptl_event_t event)
 
     evt->event.info.other.context = pconn->tx->evt.event.info.other.context;
 
-    if (event.mlength == 16) {
+    if (event.mlength == sizeof(*accept)) {
         /* accept */
 
         conn->connection.max_send_size = accept->max_send_size;
+        pconn->peer_ep_id = accept->server_ep_id;
         pconn->peer_conn = ((uint64_t)accept->server_conn_upper) << 32;
         pconn->peer_conn |= (uint64_t)accept->server_conn_lower;
 
