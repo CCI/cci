@@ -1049,6 +1049,7 @@ static int portals_unbind(
 }
 
 
+/* currently, never called */
 static int portals_get_conn_req(
     cci_service_t          *service, 
     cci_conn_req_t         **conn_req ) {
@@ -1071,6 +1072,8 @@ static int portals_get_conn_req(
     devices=pglobals->devices;
     dev=container_of(*devices, cci__dev_t, device);
     TAILQ_FOREACH( lep, &dev->leps, dentry ) {
+
+        portals_get_event_lep(lep);
 
         pthread_mutex_lock(&lep->lock);
         TAILQ_FOREACH( crq, &lep->crqs, entry ) {
@@ -1498,6 +1501,8 @@ static int portals_get_event(cci_endpoint_t *endpoint,
     pep = ep->priv;
     dev = ep->dev;
 
+    portals_get_event_ep(ep);
+
     pthread_mutex_lock(&ep->lock);
     if (TAILQ_EMPTY(&ep->evts)) {
         pthread_mutex_unlock(&ep->lock);
@@ -1894,6 +1899,8 @@ static void portals_recvfrom_ep(
 
     ptl_event_t          event;
 
+    return;
+
     portals_events(&event);
 //  printf("In portals_recvfrom_ep\n");
     //sleep(2);
@@ -1908,6 +1915,8 @@ static void portals_recvfrom_lep(
     int                  iRC;
     ptl_event_t          event;
     cci__crq_t           *crq;
+
+    return;
 
     iRC=portals_events(&event);
     if(!iRC) {                               /* Got an event */
@@ -1974,7 +1983,6 @@ static inline void portals_progress_dev(
     pdev->is_progressing=0;
     pthread_mutex_unlock(&dev->lock);
 
-    fprintf( stderr, "Exit portals_progress_dev\n");
     CCI_EXIT;
     return;
 }
