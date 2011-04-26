@@ -15,6 +15,7 @@
 volatile int shut_down = 0;
 portals_globals_t *pglobals=NULL;
 
+extern const char *ptl_event_str[];
 
 /*
  * Local functions
@@ -2232,7 +2233,7 @@ static void portals_get_event_ep(cci__ep_t *ep)
     if (ret == PTL_EQ_DROPPED)
         debug(CCI_DB_INFO, "portals dropped one or more events");
 
-    debug(CCI_DB_INFO, "%s: got event %d", __func__, event.type);
+    debug(CCI_DB_INFO, "%s: got portals %s event", __func__, ptl_event_str[event.type]);
     switch (event.type) {
     case PTL_EVENT_SEND_START:
         debug(CCI_DB_INFO, "we missed disabling a portals send_start");
@@ -2290,8 +2291,6 @@ static void portals_get_event_ep(cci__ep_t *ep)
                 case PORTALS_MSG_OOB_CONN_REPLY:
                 portals_handle_conn_reply(ep, event);
                 break;
-            case PORTALS_MSG_OOB_CONN_REQUEST:
-                break;
             default:
                 debug(CCI_DB_INFO, "missed oob type %d", oob_type);
                 break;
@@ -2330,7 +2329,7 @@ static void portals_get_event_ep(cci__ep_t *ep)
             }
             break;
         default:
-            debug(CCI_DB_INFO, "we missed disabling a portals send_end for "
+            debug(CCI_DB_INFO, "we missed disabling a portals ack for "
                   "msg_type %d", tx->msg_type);
             break;
         }
