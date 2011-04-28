@@ -1794,8 +1794,8 @@ static int portals_send(
     } else {
         /* else no header or data */
         /* but we need to send 1 byte to ensure it goes */
-        md.start = tx->buffer;
-        md.length = 1;
+        md.start = NULL; //tx->buffer;
+        md.length = 0; //1;
     }
 
     PtlMDBind(pdev->niHandle, md, PTL_RETAIN, &tx->mdh);
