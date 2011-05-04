@@ -730,11 +730,16 @@ static int portals_create_endpoint(
 /*  Creating receive buffers/MDs/MEs. */
     am_length = pdev->max_mds * dev->device.max_send_size / 2;
     for (i = 0; i < 2; i++) {
+        int j;
+
         pep->am[i].buffer = calloc(1, am_length);
         if (!pep->am[i].buffer) {
             iRC = CCI_ENOMEM;
             goto out;
         }
+        for (j = 0; j < am_length; j += 4096)
+            *((char *)pep->am[i].buffer + j) = 1;
+
         pep->am[i].length = am_length;
         pep->am[i].pep = pep;
         md.start=    pep->am[i].buffer;
@@ -1196,7 +1201,7 @@ static int portals_accept(
     debug(CCI_DB_CONN, "accept.server_conn_lower = 0x%x", accept.server_conn_lower);
 
     memset(&md, 0, sizeof(md));
-    md.threshold = PTL_MD_THRESH_INF; //1;
+    md.threshold = 1;
     md.options = PTL_MD_OP_PUT;
     md.options |= PTL_MD_EVENT_START_DISABLE;
     /* disable events */
@@ -1234,6 +1239,9 @@ static int portals_accept(
                  0,                 /* remote offset */
                  (uintptr_t) pconn->peer_conn); /* hdr_data */
 
+    //FIXME we never unlink this MD
+    //      does it need a threshold of 2 to auto unlink?
+    //      or do we need to enable SEND_END and manually unlink it?
     *connection = &conn->connection;
 
     CCI_EXIT;
@@ -1400,7 +1408,7 @@ static int portals_connect(
 
     /* prepare memory descriptor */
     memset(&md, 0, sizeof(md));
-    md.threshold = PTL_MD_THRESH_INF; //1;
+    md.threshold = 1;
     md.options = PTL_MD_OP_PUT;
     md.options |= PTL_MD_EVENT_START_DISABLE; /* we don't care */
     /* ignore events - we only want the server's accept|reject */
@@ -1419,8 +1427,10 @@ static int portals_connect(
         md.length = sizeof(conn_request);
     }
     
-    PtlMDBind(pdev->niHandle, md, PTL_UNLINK, &tx->mdh);
-    /* FIXME check return */
+    iRC = PtlMDBind(pdev->niHandle, md, PTL_UNLINK, &tx->mdh);
+    if (iRC)
+        debug(CCI_DB_WARN, "%s: PtlMDBind() returned %s", __func__, ptl_err_str[iRC]);
+    /* FIXME now what? */
 
     debug(CCI_DB_CONN, "%s: to %d,%d port %d client_id=%d conn=%p",
           __func__, pconn->idp.nid, pconn->idp.pid, port, pep->id, conn);
@@ -1793,7 +1803,7 @@ static int portals_send(
 
     /* prepare memory descriptor */
     memset(&md, 0, sizeof(md));
-    md.threshold = 1; /* send start and end */
+    md.threshold = 1; /* send end */
     md.options = PTL_MD_OP_PUT;
     md.options |= PTL_MD_EVENT_START_DISABLE; /* we don't care */
     md.eq_handle = pep->eqh;
@@ -1844,7 +1854,7 @@ static int portals_send(
     ret = PtlMDBind(pdev->niHandle, md, PTL_UNLINK, &tx->mdh);
     if (ret)
         debug(CCI_DB_INFO, "%s: PtlMDBind() returned %s", __func__, ptl_err_str[ret]);
-    /* FIXME check return */
+    /* FIXME now what? */
 
     /* pack match bits */
     bits = ((ptl_match_bits_t) pconn->peer_ep_id) << PORTALS_EP_SHIFT;
@@ -2367,20 +2377,28 @@ again:
         break;
     case PTL_EVENT_SEND_END:
     {
-        portals_tx_t *tx = event.md.user_ptr;
+        portals_tx_t *tx = (void *)event.md.user_ptr;
+        cci_connection_t *connection = tx->evt.event.info.send.connection;
+        cci__conn_t  *conn = container_of(connection, cci__conn_t, connection);
 
         /* cleanup tx for connect and UU sends */
         switch (tx->msg_type) {
         case PORTALS_MSG_SEND:
             debug(CCI_DB_MSG, "%s: send_end for SEND", __func__);
             /* unlink md and queue on idle_txs */
-#if 0
-            ret = PtlMDUnlink(tx->mdh);
-            if (ret != PTL_OK) debug(CCI_DB_WARN, "%s: SEND_END's PtlMDUnlink() returned %d", __func__, ret);
+#if 1
+            if (cci_conn_is_reliable(conn)) {
+                ret = PtlMDUnlink(tx->mdh);
+                if (ret != PTL_OK)
+                    debug(CCI_DB_WARN, "%s: SEND_END's PtlMDUnlink() returned %s (%s)",
+                          __func__, ptl_err_str[ret],
+                          connection->attribute == CCI_CONN_ATTR_UU ? "UU" :
+                          connection->attribute == CCI_CONN_ATTR_RU ? "RU" : "RO");
+            }
 #endif
-            //pthread_mutex_lock(&ep->lock);
+            pthread_mutex_lock(&ep->lock);
             TAILQ_INSERT_HEAD(&pep->idle_txs, tx, dentry);
-            //pthread_mutex_unlock(&ep->lock);
+            pthread_mutex_unlock(&ep->lock);
             break;
         default:
             debug(CCI_DB_INFO, "we missed disabling a portals send_end for "
