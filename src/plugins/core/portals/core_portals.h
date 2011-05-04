@@ -242,12 +242,21 @@ typedef struct portals_tx {
     TAILQ_ENTRY(portals_tx) tentry;     /* Hangs on ep->txs */
 }   portals_tx_t;
 
+typedef struct portals_am_buffer {
+    void                   *buffer;          /* large buffer for incoming msgs */
+    uint32_t               length;           /* max_recv_buffer_count * mss / 2 */
+    int                    active;           /* whether able to recv or not */
+    uint32_t               refcnt;           /* how many fragments held by app */
+    struct portals_ep      *pep;             /* owning Portals endpoint */
+    ptl_handle_me_t        meh;              /* ME handle */
+    ptl_handle_md_t        mdh;              /* MD handle */
+} portals_am_buffer_t;
+
 typedef struct portals_rx {
     cci__evt_t              evt;        /* associated event */
-    void                    *buffer;    /* active msg buffer */
-    uint16_t                len;        /* length of buffer */
-    ptl_handle_md_t         mdh;        /* Memory descriptor handle */
-    ptl_handle_me_t         meh;        /* Match list entry handle */
+    ptl_event_t             pevent;     /* Portals event */
+    portals_am_buffer_t     *am;        /* owning buffer */
+    TAILQ_ENTRY(portals_rx) entry;      /* Hangs on ep->idle_rxs */
     TAILQ_ENTRY(portals_rx) gentry;     /* Hangs on ep->rxs */
 }   portals_rx_t;
 
@@ -276,9 +285,12 @@ extern portals_globals_t   *pglobals;
 typedef struct portals_ep {
     uint32_t                        id;         /* id for endpoint multiplexing */
     ptl_handle_eq_t                 eqh;        /* eventq handle */
+    portals_am_buffer_t             am[2];      /* each holds 1/2 of active msg buffer */
+    int                             in_use;     /* token to serialize get_event */
     TAILQ_HEAD(p_txs, portals_tx)   txs;        /* List of all txs */
     TAILQ_HEAD(p_txsi, portals_tx)  idle_txs;   /* List of idle txs */
     TAILQ_HEAD(p_rxs, portals_rx)   rxs;        /* List of all rxs */
+    TAILQ_HEAD(p_rxsi, portals_rx)  idle_rxs;   /* List of all rxs */
     TAILQ_HEAD(p_conns, portals_conn) conns;    /* List of all conns for cleanup */
 }   portals_ep_t;
 
