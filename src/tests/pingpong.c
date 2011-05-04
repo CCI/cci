@@ -39,15 +39,22 @@ cci_endpoint_t *endpoint = NULL;
 cci_connection_t *connection = NULL;
 cci_conn_attribute_t attr = CCI_CONN_ATTR_UU;
 
+typedef struct options {
+    int flags;
+} options_t;
+
+options_t opts = { 0 };
+
 void
 print_usage()
 {
-    fprintf(stderr, "usage: %s -h <server_uri> [-p <port>] [-s] [-c <type>]\n", name);
+    fprintf(stderr, "usage: %s -h <server_uri> [-p <port>] [-s] [-c <type>] [-n]\n", name);
     fprintf(stderr, "where:\n");
     fprintf(stderr, "\t-h\tServer's URI\n");
     fprintf(stderr, "\t-p\tPort of the server's connection service (default %d)\n", DFLT_PORT);
     fprintf(stderr, "\t-s\tSet to run as the server\n");
-    fprintf(stderr, "\t-c\tConnection type (UU, RU, or RO) set by client only\n\n");
+    fprintf(stderr, "\t-c\tConnection type (UU, RU, or RO) set by client only\n");
+    fprintf(stderr, "\t-n\tSet CCI_FLAG_NO_COPY ito avoid copying\n\n");
     fprintf(stderr, "Example:\n");
     fprintf(stderr, "server$ %s -h ip://foo -p 2211 -s\n", name);
     fprintf(stderr, "client$ %s -h ip://foo -p 2211\n", name);
@@ -93,7 +100,7 @@ again:
                         done = 1;
                         return;
                     }
-                    ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
+                    ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, opts.flags);
                     if (ret && 0)
                         fprintf(stderr, "%s: send returned %s\n", __func__, cci_strerror(ret));
                 }
@@ -136,7 +143,7 @@ do_client()
     struct timeval start, end;
 
 	/* initiate connect */
-	ret = cci_connect(endpoint, server_uri, port, NULL, 0, attr, NULL, 0, NULL);
+	ret = cci_connect(endpoint, server_uri, port, &opts, sizeof(opts), attr, NULL, 0, NULL);
     if (ret) {
         fprintf(stderr, "cci_connect() returned %d\n", ret);
         return;
@@ -169,7 +176,7 @@ do_client()
 
         send++;
         recv++;
-        ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
+        ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, opts.flags);
         if (ret) fprintf(stderr, "send returned %d\n", ret);
 
         while (count < WARMUP)
@@ -194,7 +201,7 @@ do_client()
         else
             current_size *= 2;
     }
-    cci_send(connection, "bye", 3, NULL, 0, NULL, 0);
+    cci_send(connection, "bye", 3, NULL, 0, NULL, opts.flags);
 
     return;
 }
@@ -217,10 +224,10 @@ do_server()
         cci_conn_req_t *conn_req;
 
         ret = cci_get_conn_req(service, &conn_req);
-//fprintf( stderr, "ret=%d  conn_req=%x\n", ret, conn_req );
         if (ret == 0 && conn_req) {
             accept = 1;
             ready = 1;
+            opts = *((options_t *)conn_req->data_ptr);
             cci_accept(conn_req, endpoint, &connection);
 
             buffer = calloc(1, connection->max_send_size);
@@ -228,8 +235,7 @@ do_server()
                 fprintf(stderr, "unable to alloc buffer\n");
                 return;
             }
-fprintf( stderr, "Calling cci_send\n" );
-            cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
+            cci_send(connection, NULL, 0, buffer, current_size, NULL, opts.flags);
         }
     }
 
@@ -249,7 +255,7 @@ int main(int argc, char *argv[])
 
     name = argv[0];
 
-    while ((c = getopt(argc, argv, "h:p:sc:")) != -1) {
+    while ((c = getopt(argc, argv, "h:p:sc:n")) != -1) {
         switch (c) {
         case 'h':
             server_uri = strdup(optarg);
@@ -271,6 +277,9 @@ int main(int argc, char *argv[])
                 print_usage();
             printf("Using %s connection\n",
                    attr == CCI_CONN_ATTR_UU ? "UU" : attr == CCI_CONN_ATTR_RU ? "RU" : "RO");
+            break;
+        case 'n':
+            opts.flags = CCI_FLAG_NO_COPY;
             break;
         default:
             print_usage();
