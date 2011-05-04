@@ -248,7 +248,6 @@ typedef struct portals_rx {
     uint16_t                len;        /* length of buffer */
     ptl_handle_md_t         mdh;        /* Memory descriptor handle */
     ptl_handle_me_t         meh;        /* Match list entry handle */
-    TAILQ_ENTRY(portals_rx) entry;      /* Hangs on ep->idle_rxs, ep->loaned */
     TAILQ_ENTRY(portals_rx) gentry;     /* Hangs on ep->rxs */
 }   portals_rx_t;
 
@@ -280,7 +279,6 @@ typedef struct portals_ep {
     TAILQ_HEAD(p_txs, portals_tx)   txs;        /* List of all txs */
     TAILQ_HEAD(p_txsi, portals_tx)  idle_txs;   /* List of idle txs */
     TAILQ_HEAD(p_rxs, portals_rx)   rxs;        /* List of all rxs */
-    TAILQ_HEAD(p_rxsi, portals_rx)  idle_rxs;   /* List of idle rxs */
     TAILQ_HEAD(p_conns, portals_conn) conns;    /* List of all conns for cleanup */
 }   portals_ep_t;
 
