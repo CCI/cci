@@ -59,9 +59,9 @@ int cci_unbind(cci_service_t *service, cci_device_t *device)
     TAILQ_REMOVE(&svc->leps, lep, sentry);
     pthread_mutex_unlock(&svc->lock);
 
-    while (!TAILQ_EMPTY(&lep->crqs)) {
-        cci__crq_t *crq = TAILQ_FIRST(&lep->crqs);
-        TAILQ_REMOVE(&lep->crqs, crq, entry);
+    while (!TAILQ_EMPTY(&lep->all_crqs)) {
+        cci__crq_t *crq = TAILQ_FIRST(&lep->all_crqs);
+        TAILQ_REMOVE(&lep->all_crqs, crq, lentry);
         free(crq);
     }
     free(lep);
