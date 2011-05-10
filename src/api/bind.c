@@ -147,9 +147,9 @@ out:
         if (lep->dev)
             TAILQ_REMOVE(&dev->leps, lep, dentry);
 
-        while (!TAILQ_EMPTY(&lep->crqs)) {
-            crq = TAILQ_FIRST(&lep->crqs);
-            TAILQ_REMOVE(&lep->crqs, crq, entry);
+        while (!TAILQ_EMPTY(&lep->all_crqs)) {
+            crq = TAILQ_FIRST(&lep->all_crqs);
+            TAILQ_REMOVE(&lep->all_crqs, crq, lentry);
             free(crq);
         }
         free(lep);

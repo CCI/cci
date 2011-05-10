@@ -28,7 +28,6 @@ int cci_send(cci_connection_t *connection,
         return CCI_EINVAL;
     }
 
-fprintf( stderr, "In cci_send\n" );
     return cci_core->send(connection, header_ptr, header_len, 
                           data_ptr, data_len,
                           context, flags);

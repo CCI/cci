@@ -48,8 +48,8 @@
 
     CCI_EXIT;
 
-//    return ret;
+    return ret;
 
-//fprintf( stderr, "Inside cci_get_conn_req\n" );
-    return cci_core->get_conn_req(service, conn_req);
+    //fprintf( stderr, "Inside cci_get_conn_req\n" );
+    //return cci_core->get_conn_req(service, conn_req);
 }

@@ -7,12 +7,101 @@
 #include "cci/config.h"
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
+#include <inttypes.h>
 #include "cci.h"
 #include "plugins/core/core.h"
 #include "core_portals.h"
 
+volatile int portals_shut_down = 0;
 portals_globals_t *pglobals=NULL;
+pthread_t progress_tid;
 
+/******* cycle counting sampling code ****/
+#define ENABLE_PORTALS_SAMPLING 0
+#if ENABLE_PORTALS_SAMPLING
+#define PORTALS_NUM_SAMPLES (1000)
+uint64_t *portals_start_ns;
+uint64_t *portals_end_ns;
+static int portals_num_samples = PORTALS_NUM_SAMPLES;
+static int portals_sample = 0;
+#define PORTALS_SAMPLE_START                                    \
+do {                                                            \
+    if (!portals_start_ns)                                      \
+        break;                                                  \
+    if (portals_sample < portals_num_samples)                   \
+        portals_start_ns[portals_sample] = portals_get_nsecs(); \
+} while(0)
+
+#define PORTALS_SAMPLE_END                                      \
+do {                                                            \
+    if (!portals_end_ns)                                        \
+        break;                                                  \
+    if (portals_sample < portals_num_samples)                   \
+        portals_end_ns[portals_sample++] = portals_get_nsecs(); \
+} while(0)
+int portals_debug_is_server = 0;
+#define PORTALS_IS_SERVER           \
+do {                                \
+    portals_debug_is_server = 1;    \
+} while (0)
+
+static inline void portals_sample_init(void)
+{
+    int i;
+
+    portals_start_ns = calloc(PORTALS_NUM_SAMPLES, sizeof(*portals_start_ns));
+    portals_end_ns = calloc(PORTALS_NUM_SAMPLES, sizeof(*portals_end_ns));
+    if (!portals_start_ns || !portals_end_ns) {
+        if (portals_start_ns)
+            free(portals_start_ns);
+        else
+            free(portals_end_ns);
+        portals_num_samples = 0;
+        return;
+    }
+    for (i = 0; i < PORTALS_NUM_SAMPLES; i++) {
+        portals_start_ns[i] = 0;
+        portals_end_ns[i] = 0;
+    }
+    portals_sample = 0;
+}
+#define PORTALS_SAMPLE_INIT     \
+do {                            \
+    portals_sample_init();      \
+} while (0)
+
+#define PORTALS_SAMPLE_FREE     \
+do {                            \
+    if (portals_start_ns)       \
+        free(portals_start_ns); \
+    if (portals_end_ns)         \
+        free(portals_end_ns);   \
+} while (0)
+
+#define PORTALS_SAMPLE_PRINT                                \
+do {                                                        \
+    int i;                                                  \
+    for (i = 0; i < PORTALS_NUM_SAMPLES; i++) {             \
+        debug(CCI_DB_WARN, "%4d %6lld",                     \
+              i, (unsigned long long) (portals_end_ns[i] - portals_start_ns[i])); \
+    }                                                       \
+} while (0)
+
+#else /* ENABLE_PORTALS_SAMPLING == 1 */
+#define PORTALS_SAMPLE_INIT
+#define PORTALS_SAMPLE_START
+#define PORTALS_SAMPLE_END
+#define PORTALS_SAMPLE_PRINT
+#define PORTALS_SAMPLE_FREE
+#define PORTALS_IS_SERVER
+#endif /* ENABLE_PORTALS_SAMPLING == 1 */
+/******* end cycle counting sampling code ****/
+
+
+
+extern const char *ptl_err_str[];
+extern const char *ptl_event_str[];
 
 /*
  * Local functions
@@ -105,18 +194,20 @@ static int portals_rma(              cci_connection_t     *connection,
                                      void                 *context,
                                      int                  flags);
 
-static void portals_progress_sends(  portals_dev_t        *pdev );
 static void *portals_progress_thread(void                 *arg );
 static inline void portals_progress_dev(
                                      cci__dev_t *dev);
+#if 0
 static int portals_sendto(           cci_os_handle_t      portals,
                                      ptl_handle_eq_t      eqh,
                                      void                 *buf,
                                      int                  len,
                                      const ptl_process_id_t idp,
                                      const ptl_pt_index_t pt_index );
+#endif
 static int portals_events(           ptl_event_t          *event );
-
+static void portals_get_event_ep(cci__ep_t *ep);
+static void portals_get_event_lep(cci__lep_t *lep);
 
 portals_msg_type_t portals_msg_type (portals_msg_type_t     type ) {
 
@@ -186,17 +277,17 @@ static int portals_init(
     int                    iRC;
     int                    iMax_devices;
     int                    iReject;
-    pthread_t              tid;
     cci_device_t           **ds;
     cci__dev_t             *dev;
     ptl_interface_t        ifID;
     ptl_ni_limits_t        niLimit;
     ptl_handle_ni_t        niHandle;
-    ptl_handle_eq_t        eqhSend;
-    ptl_handle_eq_t        eqhRecv;
+    //ptl_handle_eq_t        eqhSend;
+    //ptl_handle_eq_t        eqhRecv;
 
     CCI_ENTER;
-    fprintf( stderr, "In portals_init\n" );
+
+    PORTALS_SAMPLE_INIT;
 
 /*
  * Step 1.  Extract portals devices from global configuration.
@@ -210,6 +301,8 @@ static int portals_init(
         pglobals=NULL;
         return CCI_ENOMEM;         /* cannot save list of devices */
     }
+
+    srandom((unsigned int) portals_get_usecs());
 
 /*
  * Step 3.  Initialize the portals library.
@@ -236,7 +329,6 @@ static int portals_init(
     if( iRC!=PTL_OK ) {
 
         switch(iRC) {
-
             case PTL_NO_INIT:      /* Usually dup PtlNIInit() call */
                  return CCI_ENODEV;;
 
@@ -256,6 +348,9 @@ static int portals_init(
                  return CCI_ERROR;
         }
     }
+
+#if 0
+    /* Create cq for each endpoint */
 
 /*
  * Step 5.  Create event queues for notifications.  Hint:  OMPI uses
@@ -285,7 +380,7 @@ static int portals_init(
                  return CCI_ERROR;
         }
     }
-    fprintf( stderr, "...Allocated Send EQ\n" );
+    fprintf( stderr, "Allocated Send EQ\n" );
 
     iRC=PtlEQAlloc( niHandle, PORTALS_EQ_RX_CNT, PTL_EQ_HANDLER_NONE,
                     &eqhRecv );
@@ -309,7 +404,8 @@ static int portals_init(
                  return CCI_ERROR;
         }
     }
-    fprintf( stderr, "...Allocated Recv EQ\n" );
+    fprintf( stderr, "Allocated Recv EQ\n" );
+#endif
 
 
 /*
@@ -321,8 +417,8 @@ static int portals_init(
         const char         **arg;
         cci_device_t       *device;
         portals_dev_t      *pdev;
-        cci__lep_t         *lep;
-        cci__crq_t         *crq;
+        //cci__lep_t         *lep;
+        //cci__crq_t         *crq;
 
 /*      Reject until portals driver found in configuration. */
         if(strcmp( "portals", dev->driver )) continue;
@@ -338,15 +434,14 @@ static int portals_init(
         iReject=0;                 /* portals configured */
         device=&dev->device;       /* Select device */
 
-/*      Wired to 256MB for now; need testing for good size. */
-        device->max_send_size=268435456;
+        device->max_send_size=PORTALS_DEFAULT_MSS;
         device->rate=46000000000;  /* SeaStar2+, 6 ports, bps */
         device->pci.domain=-1;     /* per CCI spec */
         device->pci.bus=-1;        /* per CCI spec */
         device->pci.dev=-1;        /* per CCI spec */
         device->pci.func=-1;       /* per CCI spec */
 
-        if( !(dev->priv=calloc( 1, sizeof(*dev->priv) )) ) {
+        if( !(dev->priv=calloc( 1, sizeof(*pdev) )) ) {
 
             free(pglobals->devices);
             free(pglobals);
@@ -355,17 +450,13 @@ static int portals_init(
         }
 
         pdev=dev->priv;            /* select private device */
-        TAILQ_INIT(&pdev->queued); /* create request queue */
-        TAILQ_INIT(&pdev->pending);/* create pending queue */
 
-/*      Create mutex lock for queues. */
-        pthread_mutex_init( &pdev->lock, NULL );
         pdev->is_progressing=0;    /* initialize progress flag */
 
 /*      Save off portals ID of device. */
         pdev->niHandle=niHandle;
-        pdev->eqhSend=eqhSend;
-        pdev->eqhRecv=eqhRecv;
+        //pdev->eqhSend=eqhSend;
+        //pdev->eqhRecv=eqhRecv;
         PtlGetId( niHandle, &pdev->idp );
         pdev->max_mes=niLimit.max_mes;
         pdev->max_mds=niLimit.max_mds;
@@ -375,23 +466,27 @@ static int portals_init(
         pdev->max_md_iovecs=niLimit.max_md_iovecs;
         pdev->max_me_list=niLimit.max_me_list;
         pdev->max_getput_md=niLimit.max_getput_md;
-        fprintf( stderr, "...My portals limits are: max_mes=%d\n",
+        fprintf( stdout, "My portals ID is: (%10d, %5d).\n",
+                 (pdev->idp).nid, (pdev->idp).pid );
+        fprintf( stdout, "My portals limits are: max_mes=%d\n",
                  pdev->max_mes );
-        fprintf( stderr, "...                       max_mds=%d\n",
+        fprintf( stdout, "                       max_mds=%d\n",
                  pdev->max_mds );
-        fprintf( stderr, "...                       max_eqs=%d\n",
+        fprintf( stdout, "                       max_eqs=%d\n",
                  pdev->max_eqs );
-        fprintf( stderr, "...                       max_ac_index=%d\n",
+        fprintf( stdout, "                       max_ac_index=%d\n",
                  pdev->max_ac_index );
-        fprintf( stderr, "...                       max_pt_index=%d\n",
+        fprintf( stdout, "                       max_pt_index=%d\n",
                  pdev->max_pt_index );
-        fprintf( stderr, "...                       max_md_iovecs=%d\n",
+        fprintf( stdout, "                       max_md_iovecs=%d\n",
                  pdev->max_md_iovecs );
-        fprintf( stderr, "...                       max_me_list=%d\n",
+        fprintf( stdout, "                       max_me_list=%d\n",
                  pdev->max_me_list );
-        fprintf( stderr, "...                       max_getput_md=%d\n",
+        fprintf( stdout, "                       max_getput_md=%d\n",
                  pdev->max_getput_md );
 
+        pdev->ep_ids = calloc(PORTALS_NUM_BLOCKS, sizeof(*pdev->ep_ids));
+        // FIXME check ep_ids
         ds[pglobals->count]=device;
         pglobals->count++;
         dev->is_up=1;
@@ -403,8 +498,20 @@ static int portals_init(
 
                const char *table = *arg + 9;
     
-               pdev->send_index= atoi(table);
+               pdev->table_index= atoi(table);
+               fprintf( stderr, "found portals index=%d\n",
+                        pdev->table_index );
+            } else if (0 == strncmp("mtu=", *arg, 4)) {
+                const char *mss_str = *arg + 4;
+                uint32_t mss = strtol(mss_str, NULL, 0);
+                if (mss > PORTALS_MAX_MSS)
+                    mss = PORTALS_MAX_MSS;
+                else if (mss < PORTALS_MIN_MSS)
+                    mss = PORTALS_MIN_MSS;
+
+                device->max_send_size = mss;
             }
+
         }
     }
 
@@ -422,16 +529,20 @@ static int portals_init(
     *((cci_device_t ***)&pglobals->devices)=ds;
 
 /*  Try to create progress thread. */
-    iRC=pthread_create( &tid, NULL, portals_progress_thread, NULL );
+    iRC=pthread_create( &progress_tid, NULL, portals_progress_thread, NULL );
     if(iRC) {                      /* Failed */
 
         if(ds){                    /* Free private device */
 
             cci_device_t  *device;
    
-            dev=container_of( device, cci__dev_t, device );
-            if(dev->priv)
-                free(dev->priv);
+            for (device = ds[0];
+             device != NULL;
+             device++) {
+                dev=container_of( device, cci__dev_t, device );
+                if(dev->priv)
+                    free(dev->priv);
+            }
         }
         free(ds);                  /* Free pointer to private device */
 
@@ -455,7 +566,9 @@ static int portals_init(
 static const char *portals_strerror(
     enum cci_status        status ) {
 
-    fprintf( stderr, "In portals_sterrror\n" );
+    CCI_ENTER;
+    CCI_EXIT;
+
     return NULL;
 }
 
@@ -468,7 +581,6 @@ static int portals_get_devices(
     portals_dev_t          *pdev;
 
     CCI_ENTER;
-    fprintf( stderr, "In portals_get_devices\n" );
 
     if(!pglobals) {
 
@@ -477,13 +589,13 @@ static int portals_get_devices(
     }
 
     *devices=pglobals->devices;
-    fprintf( stderr, "...There are %d devices.\n", pglobals->count );
+    fprintf( stdout, "There are %d devices.\n", pglobals->count );
 
     device=**devices;
     dev=container_of( device, cci__dev_t, device );
     pdev=dev->priv;
 
-    fprintf( stderr, "...My URI is: port://%d,%d\n",
+    fprintf( stdout, "Got portals ID of: (%10d, %5d).\n",
              pdev->idp.nid, pdev->idp.pid );
 
     CCI_EXIT;
@@ -491,37 +603,90 @@ static int portals_get_devices(
 }
 
 
-// Todo
-static int portals_free_devices(
-    cci_device_t const     **devices ) {
+static int portals_free_devices(cci_device_t const **devices )
+{
+    cci__dev_t  *dev;
 
     CCI_ENTER;
+
     if(!pglobals) {
 
         CCI_EXIT;
         return CCI_ENODEV;
     }
 
-    /* tear everything down */
+    pthread_mutex_lock(&globals->lock);
+    portals_shut_down = 1;
+    pthread_mutex_unlock(&globals->lock);
+    pthread_join(progress_tid, NULL);
 
-    /* for each device
-     *     for each endpoint
-     *         for each connection
-     *             close conn
-     *         for each tx/rx
-     *             free it
-     *         close portal
-     *     for each listening endpoint
-     *         remove from service
-     *         for each conn_req
-     *             free it
-     *         close portal
-     */
+    pthread_mutex_lock(&globals->lock);
+    TAILQ_FOREACH(dev, &globals->devs, entry) {
+        portals_dev_t *pdev = dev->priv;
+        PtlNIFini(pdev->niHandle);
+        if (pdev->ep_ids)
+            free(pdev->ep_ids);
+        free(dev->priv);
+    }
+    pthread_mutex_unlock(&globals->lock);
+    PtlFini();
+
+    free(pglobals->devices);
+    free((void *)pglobals);
+
+    PORTALS_SAMPLE_PRINT;
+    PORTALS_SAMPLE_FREE;
 
     CCI_EXIT;
-    return CCI_ERR_NOT_IMPLEMENTED;
+    return CCI_SUCCESS;
 }
 
+/* NOTE never return 0 */
+static void portals_get_ep_id(
+    portals_dev_t          *pdev,
+    uint32_t               *id ) {
+
+    uint32_t               n;
+    uint32_t               block;
+    uint32_t               offset;
+    uint64_t               *b;
+
+    while (1) {
+
+        n=random()%PORTALS_MAX_EP_ID;
+        if ( n==0 )
+            continue;
+        block=n/PORTALS_BLOCK_SIZE;
+        offset=n%PORTALS_BLOCK_SIZE;
+        b=&pdev->ep_ids[block];
+
+        if( (*b & (1ULL<<offset))==0 ) {
+
+            *b|=(1ULL<<offset);
+            *id=(block*PORTALS_BLOCK_SIZE)+offset;
+            debug(CCI_DB_CONN, "getting EP id %u block=%"PRIx64"", *id, *b);
+            break;
+        }
+    }
+    return;
+}
+
+static void
+portals_put_ep_id(portals_dev_t *pdev, uint32_t id)
+{
+    uint32_t block, offset;
+    uint64_t *b;
+
+    block = id / PORTALS_BLOCK_SIZE;
+    offset = id % PORTALS_BLOCK_SIZE;
+    b = &pdev->ep_ids[block];
+
+    debug(CCI_DB_CONN, "putting EP id %u block=%"PRIx64"", id, *b);
+    assert(((*b >> offset) & 0x1) == 1);
+    *b &= ~(1ULL << offset);
+
+    return;
+}
 
 static int portals_create_endpoint(
     cci_device_t           *device, 
@@ -536,15 +701,14 @@ static int portals_create_endpoint(
     portals_ep_t           *pep=NULL;
     portals_dev_t          *pdev;
     ptl_handle_ni_t        niHandle;
-    ptl_pt_index_t         send_index;
-    ptl_handle_eq_t        eqhSend;
-    ptl_handle_eq_t        eqhRecv;
     ptl_process_id_t       pid_any=PORTALS_WILDCARD;
-    ptl_handle_me_t        meh;
-    ptl_handle_md_t        mdh;
+    ptl_match_bits_t       bits = 0ULL;
+    ptl_match_bits_t       ignore = 0ULL;
+    uint32_t               am_length;
+    ptl_md_t               md;
 
     CCI_ENTER;
-    fprintf( stderr, "In portals_create_endpoint\n" );
+
     if(!pglobals) {
 
         CCI_EXIT;
@@ -559,9 +723,6 @@ static int portals_create_endpoint(
     }
     pdev=dev->priv;
     niHandle=pdev->niHandle;
-    send_index=pdev->send_index;
-    eqhSend=pdev->eqhSend;
-    fprintf( stderr, "...Using send_index=%d\n", send_index );
 
     ep=container_of(*endpoint, cci__ep_t, endpoint);
     ep->priv=calloc(1, sizeof(*pep));
@@ -571,26 +732,59 @@ static int portals_create_endpoint(
         goto out;
     }
 
-    (*endpoint)->max_recv_buffer_count=pdev->max_mds;
+    (*endpoint)->max_recv_buffer_count=PORTALS_EP_RX_CNT;
     ep->max_hdr_size=PORTALS_EP_MAX_HDR_SIZE;
     ep->rx_buf_cnt=PORTALS_EP_RX_CNT;
     ep->tx_buf_cnt=PORTALS_EP_TX_CNT;
     ep->buffer_len=PORTALS_EP_BUF_LEN;
-    ep->tx_timeout=PORTALS_EP_TX_TIMEOUT_SEC*1000000;
+    ep->tx_timeout=0;
 
     pep=ep->priv;
-    pep->ids=calloc( PORTALS_NUM_BLOCKS, sizeof(*pep->ids ));
-    if(!pep->ids) {
-
-        iRC=CCI_ENOMEM;
-        goto out;
-    }
 
     TAILQ_INIT(&pep->txs);
     TAILQ_INIT(&pep->idle_txs);
     TAILQ_INIT(&pep->rxs);
     TAILQ_INIT(&pep->idle_rxs);
-    pthread_mutex_init( &pep->lock, NULL );
+    TAILQ_INIT(&pep->conns);
+
+    /* get endpoint id */
+    pthread_mutex_lock(&dev->lock);
+    portals_get_ep_id(pdev, &pep->id);
+    pthread_mutex_unlock(&dev->lock);
+    debug(CCI_DB_CONN, "%s: id=%u", __func__, pep->id);
+
+    /* create event queue for endpoint */
+    iRC=PtlEQAlloc( pdev->niHandle,
+                    PORTALS_EP_RX_CNT + PORTALS_EP_TX_CNT,
+                    PTL_EQ_HANDLER_NONE,
+                    &(pep->eqh) );
+    if( iRC!=PTL_OK ) {
+
+        pep->eqh = PTL_EQ_NONE;
+        switch(iRC) {
+
+            case PTL_NO_INIT:      /* Portals library issue */
+            case PTL_NI_INVALID:   /* Bad NI Handle */
+                 iRC = CCI_ENODEV;;
+
+            case PTL_NO_SPACE:     /* Well, well, well */
+                 iRC = CCI_ENOMEM;;
+
+            case PTL_SEGV:         /* This one should not happen */
+                 iRC = CCI_EINVAL;;
+
+            default:               /* Undocumented portals error */
+                 iRC = CCI_ERROR;
+        }
+        goto out;
+    }
+
+    /*  Create the memory descriptor. */
+    md.threshold=PTL_MD_THRESH_INF;
+    md.eq_handle=pep->eqh;
+    md.options  =PTL_MD_OP_PUT;
+    md.options |=PTL_MD_TRUNCATE;
+    md.options |=PTL_MD_EVENT_START_DISABLE;
 
     for( i=0; i<ep->tx_buf_cnt; i++ ) {
 
@@ -604,23 +798,94 @@ static int portals_create_endpoint(
         }
         tx->evt.event.type=CCI_EVENT_SEND;
         tx->evt.ep=ep;
-        tx->buffer=malloc(ep->buffer_len);
+        tx->buffer=calloc(1, ep->buffer_len);
         if(!tx->buffer) {
 
             iRC=CCI_ENOMEM;
             goto out;
         }
         tx->len=0;
+
+        md.user_ptr = tx;
+        md.start = tx->buffer;
+        md.length = ep->buffer_len;
+
+        iRC = PtlMDBind(pdev->niHandle, md, PTL_RETAIN, &tx->mdh);
+        if (iRC) {
+            iRC = CCI_ENODEV;
+            goto out;
+        }
+
         TAILQ_INSERT_TAIL( &pep->txs, tx, tentry );
         TAILQ_INSERT_TAIL( &pep->idle_txs, tx, dentry );
     }
-    fprintf( stderr, "...Allocated %d tx buffers\n", ep->tx_buf_cnt );
+
+    /* all non-RMA messages place the endpoint ID in the upper 32 bits */
+    bits = ((ptl_match_bits_t) pep->id) << PORTALS_EP_SHIFT;
+
+    /* and ignore the lower 32 bits */
+    ignore = (((ptl_match_bits_t) 1) << PORTALS_EP_SHIFT) - 1;
+
+    md.max_size= dev->device.max_send_size;
+    md.options |=PTL_MD_MAX_SIZE;
 
 /*  Creating receive buffers/MDs/MEs. */
+    am_length = pdev->max_mds * dev->device.max_send_size / 2;
+    for (i = 0; i < 2; i++) {
+        int j;
+
+        pep->am[i].buffer = calloc(1, am_length);
+        if (!pep->am[i].buffer) {
+            iRC = CCI_ENOMEM;
+            goto out;
+        }
+        for (j = 0; j < am_length; j += 4096)
+            *((char *)pep->am[i].buffer + j) = 1;
+
+        pep->am[i].length = am_length;
+        pep->am[i].pep = pep;
+        md.start=    pep->am[i].buffer;
+        md.length=   pep->am[i].length;
+        md.user_ptr =&pep->am[i];
+        iRC = PtlMEMDAttach(pdev->niHandle,
+                            pdev->table_index,
+                            pid_any,
+                            bits,
+                            ignore,
+                            PTL_RETAIN,
+                            PTL_INS_AFTER,
+                            md,
+                            PTL_RETAIN,
+                            &(pep->am[i].meh),
+                            &(pep->am[i].mdh));
+        if( iRC!=PTL_OK ) {
+
+            pep->eqh = PTL_EQ_NONE;
+            switch(iRC) {
+
+                case PTL_NO_INIT:           /* Portals library issue */
+                case PTL_NI_INVALID:        /* Bad NI Handle */
+                case PTL_PT_INDEX_INVALID:  /* Bad table index */
+                case PTL_PROCESS_INVALID:
+                     iRC = CCI_ENODEV;;
+
+                case PTL_NO_SPACE:     /* Well, well, well */
+                     iRC = CCI_ENOMEM;;
+
+                case PTL_SEGV:         /* This one should not happen */
+                     iRC = CCI_EINVAL;;
+
+                default:               /* Undocumented portals error */
+                     iRC = CCI_ERROR;
+            }
+            goto out;
+        }
+        pep->am[i].active = 1;
+    }
+
     for( i=0; i<ep->rx_buf_cnt; i++ ) {
 
         portals_rx_t       *rx;
-        ptl_md_t           *pmd;
 
         rx=calloc( 1, sizeof(*rx) );
         if(!rx) {
@@ -630,80 +895,9 @@ static int portals_create_endpoint(
         }
         rx->evt.event.type=CCI_EVENT_RECV;
         rx->evt.ep=ep;
-        rx->buffer=malloc(ep->buffer_len);
-        if(!rx->buffer) {
-
-            iRC=CCI_ENOMEM;
-            goto out;
-        }
-        rx->len=0;
         TAILQ_INSERT_TAIL( &pep->rxs, rx, gentry );
         TAILQ_INSERT_TAIL( &pep->idle_rxs, rx, entry );
-        pmd=calloc( 1, sizeof(ptl_md_t) );
-
-        /*  Create the memory descriptor. */
-        pmd->start=    rx->buffer;
-        pmd->max_size= ep->buffer_len;
-        pmd->length=   ep->buffer_len;
-        pmd->threshold=PTL_MD_THRESH_INF;
-        pmd->user_ptr =(void *)0x1111;
-        pmd->eq_handle=eqhSend;
-        pmd->options  =PTL_MD_OP_PUT;
-        pmd->options |=PTL_MD_OP_GET;
-        pmd->options |=PTL_MD_TRUNCATE;
-        pmd->options |=PTL_MD_EVENT_START_DISABLE;
-
-        iRC=PtlMEAttach( niHandle, send_index, pid_any, 
-                         PORTALS_EP_MATCH, PORTALS_EP_IGNORE,
-                         PTL_UNLINK, PTL_INS_AFTER, &meh );
-        if( iRC!=PTL_OK ) {
-
-            fprintf( stderr, "PtlMEAttach failure\n" );
-            return CCI_ERROR;
-        }
-
-        iRC=PtlMDAttach( meh, *pmd, PTL_UNLINK, &mdh );
-        free(pmd);
-        pmd=NULL;
-        if( iRC!=PTL_OK ) {
-
-            switch(iRC) {
-
-                case PTL_NO_INIT:            /* Portals library issue */
-                     fprintf( stderr, "Portals library issue\n" );
-                     return CCI_ENODEV;;
-
-                case PTL_ME_IN_USE:          /* ME in use */
-                     fprintf( stderr, "Tried to reuse ME\n" );
-                     return CCI_ENODEV;;
-
-                case PTL_ME_INVALID:         /* Bad ME handle */
-                     fprintf( stderr, "Bad ME handle\n" );
-                     return CCI_ENODEV;;
-
-                case PTL_MD_ILLEGAL:         /* Bad MD */
-                     fprintf( stderr, "Bad MD\n" );
-                     return CCI_ENODEV;;
-
-                case PTL_EQ_INVALID:         /* Bad EQ */
-                     fprintf( stderr, "Bad EQ\n" );
-                     return CCI_ENODEV;;
-
-                case PTL_NO_SPACE:           /* Well, well, well */
-                     fprintf( stderr, "Out of memory\n" );
-                     return CCI_ENOMEM;;
-
-                case PTL_SEGV:               /* This shouldn't happen */
-                     fprintf( stderr, "Oops!\n" );
-                     return CCI_EINVAL;;
-
-                default:                     /* Undocumented error */
-                     fprintf( stderr, "Failed with iRC=%d\n", iRC );
-                     return CCI_ERROR;
-            }
-        }
     }
-    fprintf( stderr, "...Allocated %d rx buffers\n", ep->rx_buf_cnt );
 
     CCI_EXIT;
     return CCI_SUCCESS;
@@ -714,6 +908,16 @@ out:
     pthread_mutex_unlock(&dev->lock);
     if(pep) {
 
+        if (pep->id)
+            portals_put_ep_id(pdev, pep->id);
+
+        if (pep->eqh != PTL_EQ_NONE)
+            PtlEQFree(pep->eqh);
+
+        if (pep->am[0].buffer)
+            free(pep->am[0].buffer);
+        if (pep->am[1].buffer)
+            free(pep->am[1].buffer);
         while(!TAILQ_EMPTY(&pep->txs)) {
 
             portals_tx_t   *tx;
@@ -731,13 +935,9 @@ out:
 
             rx=TAILQ_FIRST(&pep->rxs);
             TAILQ_REMOVE( &pep->rxs, rx, gentry );
-            if(rx->buffer)
-                free(rx->buffer);
             free(rx);
         }
 
-        if(pep->ids)
-            free(pep->ids);
         free(pep);
     }
 
@@ -750,12 +950,82 @@ out:
 }
 
 
-// Todo
-static int portals_destroy_endpoint(
-    cci_endpoint_t         *endpoint ) {
+static int portals_destroy_endpoint(cci_endpoint_t *endpoint)
+{
+    cci__ep_t       *ep     = NULL;
+    cci__dev_t      *dev    = NULL;
+    portals_ep_t    *pep    = NULL;
+    portals_dev_t   *pdev   = NULL;
 
-    fprintf( stderr, "In portals_destroy_endpoint\n" );
-    return CCI_ERR_NOT_IMPLEMENTED;
+    CCI_ENTER;
+
+    debug(CCI_DB_WARN, "%s: entering", __func__);
+    if(!pglobals) {
+
+        debug(CCI_DB_WARN, "%s: leaving", __func__);
+        CCI_EXIT;
+        return CCI_ENODEV;
+    }
+
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    dev = ep->dev;
+    pep = ep->priv;
+    pdev = dev->priv;
+
+    pthread_mutex_lock(&dev->lock);
+    pthread_mutex_lock(&ep->lock);
+
+    ep->priv = NULL;
+
+    if (pep) {
+        if (pep->id)
+            portals_put_ep_id(pdev, pep->id);
+
+        if (pep->eqh != PTL_EQ_NONE)
+            PtlEQFree(pep->eqh);
+
+        if (pep->am[0].buffer)
+            free(pep->am[0].buffer);
+        if (pep->am[1].buffer)
+            free(pep->am[1].buffer);
+
+        while(!TAILQ_EMPTY(&pep->conns)) {
+            cci__conn_t     *conn;
+            portals_conn_t  *pconn;
+
+            pconn=TAILQ_FIRST(&pep->conns);
+            TAILQ_REMOVE(&pep->conns, pconn, entry);
+            conn = pconn->conn;
+            free(pconn);
+            free(conn);
+        }
+
+        while(!TAILQ_EMPTY(&pep->txs)) {
+            portals_tx_t   *tx;
+
+            tx=TAILQ_FIRST(&pep->txs);
+            TAILQ_REMOVE(&pep->txs, tx, tentry);
+            if(tx->buffer)
+                free(tx->buffer);
+            free(tx);
+        }
+
+        while(!TAILQ_EMPTY(&pep->rxs)) {
+            portals_rx_t   *rx;
+
+            rx=TAILQ_FIRST(&pep->rxs);
+            TAILQ_REMOVE(&pep->rxs, rx, gentry);
+            free(rx);
+        }
+
+        free(pep);
+    }
+    pthread_mutex_unlock(&ep->lock);
+    pthread_mutex_unlock(&dev->lock);
+
+    debug(CCI_DB_WARN, "%s: leaving", __func__);
+    CCI_EXIT;
+    return CCI_SUCCESS;
 }
 
 
@@ -775,9 +1045,13 @@ static int portals_bind(
     portals_lep_t          *plep=NULL;
     portals_crq_t          *pcrq=NULL;
     portals_dev_t          *pdev;
+    uint64_t               bits    = 0ULL;
+    uint64_t               ignore  = 0ULL;
+    ptl_process_id_t       pid_any=PORTALS_WILDCARD;
+    ptl_md_t               md;
 
     CCI_ENTER;
-    fprintf( stderr, "In portals_bind\n" );
+
     if(!pglobals) {
 
         CCI_EXIT;
@@ -792,42 +1066,124 @@ static int portals_bind(
     }
 
     pdev=dev->priv;
-    if(pdev->send_index>pdev->max_pt_index) {
-
+    if(pdev->table_index>pdev->max_pt_index) {
         CCI_EXIT;
         return CCI_ERANGE;
     }
-    fprintf( stderr, "...Bind URI at port://%d,%d send_index=%d\n",
-             pdev->idp.nid, pdev->idp.pid, pdev->send_index );
 
     svc=container_of( *service, cci__svc_t, service );
     TAILQ_FOREACH( lep, &svc->leps, sentry ) {
-
         if( lep->dev==dev )
             break;
     }
 
     /* allocate portals listening endpoint */
     if(!(plep=calloc( 1, sizeof(*plep) ))) {
-
         CCI_EXIT;
         return CCI_ENOMEM;
     }
+
+    /* create event queue for endpoint */
+    iRC=PtlEQAlloc( pdev->niHandle,
+                    backlog * 8,
+                    PTL_EQ_HANDLER_NONE,
+                    &(plep->eqh) );
+    if( iRC!=PTL_OK ) {
+        switch(iRC) {
+
+        case PTL_NO_INIT:      /* Portals library issue */
+        case PTL_NI_INVALID:   /* Bad NI Handle */
+            iRC = CCI_ENODEV;
+            break;
+        case PTL_NO_SPACE:     /* Well, well, well */
+            iRC = CCI_ENOMEM;
+            break;
+        case PTL_SEGV:         /* This one should not happen */
+            iRC = CCI_EINVAL;
+            break;
+        default:               /* Undocumented portals error */
+             iRC = CCI_ERROR;
+        }
+        goto out;
+    }
+
+    /* all conn_req messages place the bound port in the upper 32 bits */
+    bits = ((ptl_match_bits_t) svc->port) << PORTALS_EP_SHIFT;
+    bits |= ((ptl_match_bits_t) PORTALS_MSG_OOB_CONN_REQUEST) << 2;
+    bits |= (ptl_match_bits_t) PORTALS_MSG_OOB;
+
+    /* ignore bits 4-31 */
+    ignore = ((((ptl_match_bits_t) 1) << 28) - 1) << 4;
+
+    /* prepare memory descriptor */
+    memset(&md, 0, sizeof(md));
+    md.max_size= 1024; //FIXME magic number
+    md.length=   1024; //FIXME magic number
+    md.threshold=PTL_MD_THRESH_INF;
+    md.eq_handle=plep->eqh;
+    md.options  =PTL_MD_OP_PUT;
+    md.options |=PTL_MD_TRUNCATE;
+    md.options |=PTL_MD_EVENT_START_DISABLE;
 
     /* alloc portal for each cci__crq_t */
     TAILQ_FOREACH( crq, &lep->crqs, entry ) {
 
         if(!(crq->priv=calloc( 1, sizeof(*pcrq) ))) {
-
+            iRC=CCI_ENOMEM;
+            goto out;
+        }
+        pcrq = crq->priv;
+        len = 1024; //FIXME magic number
+        if( !(pcrq->buffer=calloc( 1, len )) ) {
             iRC=CCI_ENOMEM;
             goto out;
         }
 
-        len=CCI_CONN_REQ_LEN+PORTALS_CONN_REQ_HDR_LEN;
-        pcrq=crq->priv;
-        if( !(pcrq->buffer=calloc( 1, len )) ) {
+        /*  Create the memory descriptor. */
+        md.start = pcrq->buffer;
+        md.user_ptr = crq;
 
-            iRC=CCI_ENOMEM;
+#if 1
+        iRC = PtlMEMDAttach(pdev->niHandle,
+                            pdev->table_index,
+                            pid_any,
+                            bits,
+                            ignore,
+                            PTL_UNLINK,
+                            PTL_INS_AFTER,
+                            md,
+                            PTL_UNLINK,
+                            &pcrq->meh,
+                            &pcrq->mdh);
+#else
+        iRC=PtlMEAttach( pdev->niHandle, pdev->table_index,
+                         pid_any, bits, ignore,
+                         PTL_UNLINK, PTL_INS_AFTER, &pcrq->meh );
+        if( iRC!=PTL_OK ) {
+
+            debug(CCI_DB_WARN, "PtlMEAttach() returned %s", ptl_err_str[iRC]);
+            // FIXME
+            abort();
+            return CCI_ERROR;
+        }
+
+        iRC=PtlMDAttach( pcrq->meh, md, PTL_UNLINK, &pcrq->mdh );
+#endif
+        if( iRC!=PTL_OK ) {
+            switch(iRC) {
+                case PTL_NO_INIT:            /* Portals library issue */
+                    //FIXME
+                    iRC = CCI_ENODEV;
+                    break;
+                case PTL_NO_SPACE:           /* Well, well, well */
+                    //FIXME
+                    iRC = CCI_ENOMEM;
+                    break;
+                default:                     /* Undocumented error */
+                    fprintf( stderr, "Failed with iRC=%d\n", iRC );
+                    //FIXME
+                    iRC = CCI_ERROR;
+            }
             goto out;
         }
     }
@@ -839,7 +1195,8 @@ static int portals_bind(
 
     lep->priv=plep;
 
-    fprintf( stderr, "...Successfully bound portals\n" );
+    PORTALS_IS_SERVER;  /* allows sampling for server vs client */
+
     CCI_EXIT;
     return CCI_SUCCESS;
 
@@ -867,16 +1224,52 @@ out:
 }
 
 
-// Todo
-static int portals_unbind(
-    cci_service_t          *service,
-    cci_device_t           *device ) {
+static int portals_unbind(cci_service_t *service, cci_device_t *device)
+{
+    cci__dev_t      *dev    = NULL;
+    cci__svc_t      *svc    = NULL;
+    cci__lep_t      *lep    = NULL;
+    cci__crq_t      *crq    = NULL;
+    portals_lep_t   *plep   = NULL;
+    portals_crq_t   *pcrq   = NULL;
 
-    fprintf( stderr, "In portals_unbind\n" );
-    return CCI_ERR_NOT_IMPLEMENTED;
+    CCI_ENTER;
+
+    if(!pglobals) {
+
+        CCI_EXIT;
+        return CCI_ENODEV;
+    }
+
+    dev = container_of(device, cci__dev_t, device);
+    svc = container_of(service, cci__svc_t, service);
+
+    pthread_mutex_lock(&svc->lock);
+    TAILQ_FOREACH(lep, &svc->leps, sentry) {
+        if (lep->dev == dev) {
+            break;
+        }
+    }
+    pthread_mutex_unlock(&svc->lock);
+
+    plep = lep->priv;
+
+    pthread_mutex_lock(&lep->lock);
+    TAILQ_FOREACH(crq, &lep->all_crqs, lentry) {
+        pcrq = crq->priv;
+        free(pcrq->buffer);
+        free(pcrq);
+    }
+    pthread_mutex_unlock(&lep->lock);
+
+    free(plep);
+
+    CCI_EXIT;
+    return CCI_SUCCESS;
 }
 
 
+/* currently, never called */
 static int portals_get_conn_req(
     cci_service_t          *service, 
     cci_conn_req_t         **conn_req ) {
@@ -888,7 +1281,7 @@ static int portals_get_conn_req(
     cci__dev_t             *dev;
     
     CCI_ENTER;
-    //fprintf( stderr, "Enter In portals_get_conn_req\n" );
+
     if(!pglobals) {
 
         CCI_EXIT;
@@ -900,10 +1293,11 @@ static int portals_get_conn_req(
     dev=container_of(*devices, cci__dev_t, device);
     TAILQ_FOREACH( lep, &dev->leps, dentry ) {
 
+        portals_get_event_lep(lep);
+
         pthread_mutex_lock(&lep->lock);
         TAILQ_FOREACH( crq, &lep->crqs, entry ) {
 
-            uint32_t i;
             uint32_t count=crq->conn_req.devices_cnt;
             cci_device_t **remote;
             cci_device_t **local;
@@ -932,77 +1326,131 @@ static int portals_get_conn_req(
         }
         pthread_mutex_unlock(&lep->lock);
     }
-
-    sleep(2);
-    CCI_EXIT;
     return iRC;
 }
 
-
-static void portals_get_id(
-    portals_ep_t           *ep,
-    uint32_t               *id ) {
-
-    uint32_t               n;
-    uint32_t               block;
-    uint32_t               offset;
-    uint64_t               *b;
-
-    CCI_ENTER;
-    while (1) {
-
-        n=random()%PORTALS_NUM_BLOCKS;
-        block=n/PORTALS_BLOCK_SIZE;
-        offset=n%PORTALS_BLOCK_SIZE;
-        b=&ep->ids[block];
-
-        if( (*b & (1ULL<<offset))==0 ) {
-
-            *b|=(1ULL<<offset);
-            *id=(block*PORTALS_BLOCK_SIZE)+offset;
-            break;
-        }
-    }
-
-    CCI_EXIT;
-    return;
-}
-
-
-static inline uint32_t portals_get_new_seq(void) {
-
-    return ((uint32_t)random()&PORTALS_SEQ_MASK);
-}
-
-
-// Todo
 static int portals_accept(
     cci_conn_req_t         *conn_req, 
     cci_endpoint_t         *endpoint, 
     cci_connection_t       **connection ) {
 
-    cci__conn_t            *conn;
-    cci_connection_t       *pconn;
-    cci_device_t           **local;
+    int             ret;
+    cci__ep_t       *ep     = NULL;
+    cci__dev_t      *dev    = NULL;
+    cci__conn_t     *conn   = NULL;
+    cci__crq_t      *crq    = NULL;
+    portals_ep_t    *pep    = NULL;
+    portals_dev_t   *pdev   = NULL;
+    portals_crq_t   *pcrq   = NULL;
+    portals_conn_t  *pconn  = NULL;
+    portals_conn_accept_t accept;
+    uint64_t        bits;
+    int             ac_len  = sizeof(accept);
+    portals_tx_t    *tx     = NULL;
 
     CCI_ENTER;
-    fprintf( stderr, "In portals_accept\n" );
-    pconn=calloc( 1, sizeof(cci_connection_t) );
-    pconn->max_send_size=PORTALS_EP_BUF_LEN;
-    pconn->endpoint=endpoint;
-    *connection=pconn;
 
-    conn=container_of( *connection, cci__conn_t, connection );
-    conn->uri=calloc( 1, 24 );
-    strcpy( (char *)conn->uri,
-            (*((cci_device_t ***)&((*conn_req).devices)))[0]->name );
-    conn_req->devices_cnt=0;
-    local=*((cci_device_t ***)&((*conn_req).devices));
-    free((char *)local[0]->name);
-    free(local[0]);
-    free(local);
-   
-    fprintf( stderr, "...conn->uri=\"%s\"\n", conn->uri );
+    if(!pglobals) {
+        CCI_EXIT;
+        return CCI_ENODEV;
+    }
+
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    pep = ep->priv;
+    crq = container_of(conn_req, cci__crq_t, conn_req);
+    pcrq = crq->priv;
+    dev = ep->dev;
+    pdev = dev->priv;
+
+    conn = calloc(1, sizeof(*conn));
+    if (!conn) {
+        CCI_EXIT;
+        return CCI_ENOMEM;
+    }
+
+    conn->tx_timeout = ep->tx_timeout;
+    conn->priv = calloc(1, sizeof(*pconn));
+    if (!conn->priv) {
+        free(conn);
+        CCI_EXIT;
+        return CCI_ENOMEM;
+    }
+    pconn = conn->priv;
+    pconn->conn = conn;
+
+    /* prepare accept msg */
+
+    accept.server_ep_id = pep->id;
+    accept.max_send_size = pcrq->mss;
+    accept.max_recv_buffer_count = pcrq->max_recv_buffer_count;
+    accept.server_conn_upper = (uint32_t)((uintptr_t)conn >> 32);
+    accept.server_conn_lower = (uint32_t)((uintptr_t)conn & 0xFFFFFFFF);
+
+    debug(CCI_DB_CONN, "accept.server_ep_id = %u", accept.server_ep_id);
+    debug(CCI_DB_CONN, "accept.max_send_size = %u", accept.max_send_size);
+    debug(CCI_DB_CONN, "accept.max_recv_buffer_count = %u", accept.max_recv_buffer_count);
+    debug(CCI_DB_CONN, "accept.server_conn_upper = 0x%x", accept.server_conn_upper);
+    debug(CCI_DB_CONN, "accept.server_conn_lower = 0x%x", accept.server_conn_lower);
+
+    /* setup connection */
+
+    conn->connection.attribute = crq->conn_req.attribute;
+    conn->connection.endpoint = endpoint;
+    conn->connection.max_send_size = dev->device.max_send_size;
+
+    pconn->idp = pcrq->idp;
+    pconn->peer_conn = pcrq->client_conn;
+    pconn->peer_ep_id = pcrq->client_id;
+    pconn->mss = pcrq->mss;
+    pconn->max_tx_cnt = pcrq->max_recv_buffer_count;
+
+    pthread_mutex_lock(&ep->lock);
+    TAILQ_INSERT_TAIL(&pep->conns, pconn, entry);
+    pthread_mutex_unlock(&ep->lock);
+
+    bits = ((ptl_match_bits_t) pconn->peer_ep_id) << PORTALS_EP_SHIFT;
+    bits |= ((ptl_match_bits_t) PORTALS_MSG_OOB_CONN_REPLY) << 2;
+    bits |= (ptl_match_bits_t) PORTALS_MSG_OOB;
+
+    /* get a tx */
+    pthread_mutex_lock(&ep->lock);
+    if(!TAILQ_EMPTY(&pep->idle_txs)) {
+        tx=TAILQ_FIRST(&pep->idle_txs);
+        TAILQ_REMOVE( &pep->idle_txs, tx, dentry );
+    }
+    pthread_mutex_unlock(&ep->lock);
+
+    if(!tx) {
+        // FIXME leak
+        CCI_EXIT;
+        return CCI_ENOBUFS;
+    }
+
+    /* prep the tx */
+    tx->msg_type=PORTALS_MSG_OOB;
+    tx->oob_type=PORTALS_MSG_OOB_CONN_REPLY;
+
+    tx->evt.ep=ep;
+    tx->evt.conn=conn;
+    tx->evt.event.type=CCI_EVENT_SEND;
+    memcpy(tx->buffer, &accept, ac_len);
+
+    debug(CCI_DB_CONN, "%s: to %d,%d client_id=%d peer_conn=%llx",
+          __func__, pconn->idp.nid, pconn->idp.pid, pconn->peer_ep_id,
+          (unsigned long long) pconn->peer_conn);
+    ret = PtlPutRegion(tx->mdh,           /* Handle to MD */
+                 0,
+                 ac_len,
+                 PTL_NOACK_REQ,     /* ACK disposition */
+                 pconn->idp,        /* target port */
+                 pdev->table_index, /* table entry to use */
+                 0,                 /* access entry to use */
+                 bits,              /* match bits */
+                 0,                 /* remote offset */
+                 (uintptr_t) pconn->peer_conn); /* hdr_data */
+
+    *connection = &conn->connection;
+
     CCI_EXIT;
     return CCI_SUCCESS;
 }
@@ -1012,7 +1460,9 @@ static int portals_accept(
 static int portals_reject(
     cci_conn_req_t         *conn_req ) {
 
-    printf("In portals_reject\n");
+    CCI_ENTER;
+    CCI_EXIT;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1022,10 +1472,10 @@ static int portals_getaddrinfo(
     const char             *uri,
     ptl_process_id_t       *idp ) {
 
+    CCI_ENTER;
     char                   *addr;
     char                   *cp;
 
-    CCI_ENTER;
     if(!strncmp( "port://", uri, 7 )) {      /* URI to portals ID */
 
         addr=strdup(&uri[7]);                /* ASCII NID,PID */
@@ -1047,25 +1497,6 @@ static int portals_getaddrinfo(
 }
 
 
-/* The endpoint maintains 256 lists. Hash the portals ID and return the
- * index of the list. We use all six bytes and this is endian agnostic.
- * It evenly disperses large blocks of addresses as well as large ranges
- * of ports on the same address.  */
-uint8_t portals_idp_hash(
-    ptl_process_id_t       idp ) {
-
-    uint16_t               port;
-
-    CCI_ENTER;
-    port=idp.pid;                            /* pid is 16 bits */
-    port^=(idp.nid&0x0000FFFF);              /* lower 16 btis of nid */
-    port^=(idp.nid&0xFFFF0000)>>16;          /* upper 16 bits of nid */
-
-    CCI_EXIT;
-    return (port&0x00FF)^((port&0xFF00)>>8);
-}
-
-
 static int portals_connect(
     cci_endpoint_t         *endpoint,
     char                   *server_uri, 
@@ -1077,7 +1508,6 @@ static int portals_connect(
     int                    flags, 
     struct timeval         *timeout ) {
 
-    int                    i;
     int                    iRC;
     cci__ep_t              *ep=NULL;
     cci__dev_t             *dev=NULL;
@@ -1087,18 +1517,16 @@ static int portals_connect(
     cci_connection_t       *connection=NULL;
     portals_conn_t         *pconn=NULL;
     portals_tx_t           *tx=NULL;
-    portals_header_r_t     *hdr_r=NULL;
     cci__evt_t             *evt=NULL;
     cci_event_t            *event=NULL;
     cci_event_other_t      *other=NULL;
     ptl_process_id_t       idp;
-    void                   *ptr=NULL;
-    struct p_active        *active_list;
-    uint32_t               ts=0;
-    portals_handshake_t    *hs=NULL;
+    portals_conn_request_t conn_request;
+    ptl_match_bits_t       bits = 0ULL;
+    int                    cr_len = sizeof(conn_request);
 
     CCI_ENTER;
-    fprintf( stderr, "In portals_connect\n" );
+
     if(!pglobals) {
 
         CCI_EXIT;
@@ -1122,21 +1550,17 @@ static int portals_connect(
 
     pconn=conn->priv;
     pconn->conn=conn;
-    TAILQ_INIT(&pconn->tx_seqs);
-    TAILQ_INIT(&pconn->acks);
 
     /* conn->tx_timeout=0  by default */
     connection=&conn->connection;
     connection->attribute=attribute;
     connection->endpoint=endpoint;
 
-    fprintf( stderr, "...portals_getaddrinfo\n" );
     iRC=portals_getaddrinfo( server_uri, &idp );
     if(iRC)
         goto out;
 
    /* peer will assign id */
-    pthread_mutex_init( &pconn->lock, NULL );
 
     /* get our endpoint and device */
     ep=container_of( endpoint, cci__ep_t, endpoint );
@@ -1146,32 +1570,25 @@ static int portals_connect(
 
     connection->max_send_size=dev->device.max_send_size;
     pconn->idp=idp;
-    pconn->send_index=pdev->send_index;;
-    fprintf( stderr, "...Got URI of port://%d,%d send_index=%d\n",
-             idp.nid, idp.pid, pdev->send_index );
-
-    i=portals_idp_hash(idp);
-    active_list=&pep->active_hash[i];
-    pthread_mutex_lock(&pep->lock);
-    TAILQ_INSERT_HEAD( active_list, pconn, entry );
-    pthread_mutex_unlock(&pep->lock);
 
     /* get a tx */
-    pthread_mutex_lock(&pep->lock);
+    pthread_mutex_lock(&ep->lock);
     if(!TAILQ_EMPTY(&pep->idle_txs)) {
         tx=TAILQ_FIRST(&pep->idle_txs);
         TAILQ_REMOVE( &pep->idle_txs, tx, dentry );
     }
-    pthread_mutex_unlock(&pep->lock);
+    pthread_mutex_unlock(&ep->lock);
 
     if(!tx) {
-
+        // FIXME leak
         CCI_EXIT;
         return CCI_ENOBUFS;
     }
 
     /* prep the tx */
-    tx->msg_type=PORTALS_MSG_CONN_REQUEST;
+    tx->msg_type=PORTALS_MSG_OOB;
+    tx->oob_type=PORTALS_MSG_OOB_CONN_REQUEST;
+    pconn->tx = tx; /* we need its event for the accept|reject */
 
     evt=&tx->evt;
     evt->ep=ep;
@@ -1183,57 +1600,34 @@ static int portals_connect(
     other->context=context;
     other->u.connect.connection=connection;
 
-    /* pack the msg */
-    hdr_r=(portals_header_r_t *)tx->buffer;
-    portals_get_id( pep, &pconn->id );
-    /* FIXME silence -Wall -Werror until it is used */
-    if(0)portals_put_id( pep, 0 );
-    portals_pack_conn_request( &hdr_r->header, attribute,
-                               (uint16_t)data_len, 0 );
-    tx->len=sizeof(*hdr_r);
-    ptr=tx->buffer+tx->len;
+    /* pack the bits */
+    bits = ((ptl_match_bits_t) port) << PORTALS_EP_SHIFT;
+    bits |= ((ptl_match_bits_t) (data_len & 0xFFFF)) << 16;
+    bits |= ((ptl_match_bits_t) attribute) << 8;
+    bits |= ((ptl_match_bits_t) PORTALS_MSG_OOB_CONN_REQUEST) << 2;
+    bits |= (ptl_match_bits_t) PORTALS_MSG_OOB;
 
-    /* add seq and ack */
-    pconn->seq=portals_get_new_seq();
-    pconn->seq_pending=pconn->seq-1;
-    pconn->last_ack_seq=pconn->seq;
-    tx->seq=pconn->seq;
-    portals_pack_seq_ts( &hdr_r->seq_ts, tx->seq, ts );
+    /* pack the payload */
+    conn_request.max_send_size = connection->max_send_size;
+    conn_request.max_recv_buffer_count = endpoint->max_recv_buffer_count;
+    conn_request.client_ep_id = pep->id;
 
-    /* add handshake */
-    hs=(portals_handshake_t *)ptr;
-    portals_pack_handshake( hs, pconn->id, 0,
-                            endpoint->max_recv_buffer_count,
-                            connection->max_send_size);
+    memcpy(tx->buffer, &conn_request, cr_len);
+    if (data_len)
+        memcpy(tx->buffer + cr_len, data_ptr, data_len);
 
-    tx->len+=sizeof(*hs);
-    ptr=tx->buffer+tx->len;
-
-    debug( CCI_DB_CONN, 
-           "queuing conn_request with seq %u ts %x", tx->seq, ts );
-
-    /* zero even if unreliable */
-    tx->last_attempt_us=0ULL;
-    tx->timeout_us=0ULL;
-
-    if(data_len)
-            memcpy( ptr, data_ptr, data_len );
-
-    tx->len+=data_len;
-    assert( tx->len<=ep->buffer_len );
-
-    /* insert at tail of device's queued list */
-    dev=ep->dev;
-    pdev=dev->priv;
-
-    tx->state=PORTALS_TX_QUEUED;
-    pthread_mutex_lock(&pdev->lock);
-    TAILQ_INSERT_TAIL( &pdev->queued, tx, dentry );
-    pthread_mutex_unlock(&pdev->lock);
-
-    /* try to progress txs */
-    portals_progress_dev(dev);
-    fprintf( stderr, "...Returning from portals_connect\n" );
+    debug(CCI_DB_CONN, "%s: to %d,%d port %d client_id=%d conn=%p",
+          __func__, pconn->idp.nid, pconn->idp.pid, port, pep->id, conn);
+    iRC = PtlPutRegion(tx->mdh,           /* Handle to MD */
+                       0,                 /* offset */
+                       cr_len + data_len, /* payload len */
+                       PTL_NOACK_REQ,     /* ACK disposition */
+                       pconn->idp,        /* target port */
+                       pdev->table_index, /* table entry to use */
+                       0,                 /* access entry to use */
+                       bits,              /* match bits */
+                       0,                 /* remote offset */
+                       (uintptr_t) conn); /* hdr_data */
 
     CCI_EXIT;
     return CCI_SUCCESS;
@@ -1255,7 +1649,9 @@ out:
 static int portals_disconnect(
     cci_connection_t       *connection ) {
 
-    printf("In portals_disconnect\n");
+    CCI_ENTER;
+    CCI_EXIT;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1268,7 +1664,9 @@ static int portals_set_opt(
     const void             *val,
     int                    len ) {
 
-    printf("In portals_set_opt\n");
+    CCI_ENTER;
+    CCI_EXIT;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1281,7 +1679,9 @@ static int portals_get_opt(
     void                   **val,
     int                    *len ) {
 
-    printf("In portals_get_opt\n");
+    CCI_ENTER;
+    CCI_EXIT;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1291,33 +1691,224 @@ static int portals_arm_os_handle(
     cci_endpoint_t         *endpoint,
     int                    flags ) {
 
-    printf("In portals_arm_os_handle\n");
+    CCI_ENTER;
+    CCI_EXIT;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
-// Todo
-static int portals_get_event(
-    cci_endpoint_t         *endpoint, 
-    cci_event_t            **const event,
-    uint32_t               flags ) {
+static int portals_get_event(cci_endpoint_t *endpoint, 
+                             cci_event_t **const event,
+                             uint32_t flags )
+{
+    int             ret = CCI_SUCCESS;
+    cci__ep_t       *ep;
+    cci__evt_t      *ev = NULL, *e;
+    cci__dev_t      *dev;
+    portals_ep_t    *pep;
+    cci_event_t     *tmp;
 
-    // fprintf( stderr, "In portals_get_event\n" );
-    return CCI_ERR_NOT_IMPLEMENTED;
+    CCI_ENTER;
+
+    if (!pglobals) {
+        CCI_EXIT;
+        return CCI_ENODEV;
+    }
+
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    pep = ep->priv;
+    dev = ep->dev;
+
+    portals_get_event_ep(ep);
+
+    pthread_mutex_lock(&ep->lock);
+    if (TAILQ_EMPTY(&ep->evts)) {
+        pthread_mutex_unlock(&ep->lock);
+        *event = NULL;
+        CCI_EXIT;
+        return CCI_EAGAIN;
+    }
+
+    if (!flags) {
+        /* give the user the first event */
+        TAILQ_FOREACH(e, &ep->evts, entry) {
+            if (e->event.type == CCI_EVENT_SEND) {
+                /* NOTE: if it is blocking, skip it since portals_send()
+                 * is waiting on it
+                 */
+                portals_tx_t *tx = container_of(e, portals_tx_t, evt);
+                if (tx->flags & CCI_FLAG_BLOCKING) {
+                    continue;
+                } else {
+                    ev = e;
+                    break;
+                }
+            } else {
+                ev = e;
+                break;
+            }
+        }
+    } else {
+        TAILQ_FOREACH(e, &ep->evts, entry) {
+            tmp = &e->event;
+
+            if (flags & CCI_PE_SEND_EVENT &&
+                tmp->type == CCI_EVENT_SEND) {
+                portals_tx_t *tx = container_of(e, portals_tx_t, evt);
+                if (tx->flags & CCI_FLAG_BLOCKING) {
+                    continue;
+                } else {
+                    ev = e;
+                    break;
+                }
+            } else if (flags & CCI_PE_RECV_EVENT &&
+                       tmp->type == CCI_EVENT_RECV) {
+                ev = e;
+                break;
+            } else if (flags & CCI_PE_OTHER_EVENT &&
+                       !(tmp->type == CCI_EVENT_SEND ||
+                         tmp->type == CCI_EVENT_RECV)) {
+                ev = e;
+                break;
+            }
+        }
+    }
+
+    if (ev)
+        TAILQ_REMOVE(&ep->evts, ev, entry);
+    else
+        ret = CCI_EAGAIN;
+
+    pthread_mutex_unlock(&ep->lock);
+
+    /* TODO drain fd so that they can block again */
+
+    *event = &ev->event;
+
+    CCI_EXIT;
+
+    return ret;
 }
 
 
-// Todo
-static int portals_return_event(
-    cci_endpoint_t         *endpoint, 
-    cci_event_t            *event ) {
+static int portals_return_event(cci_endpoint_t *endpoint, 
+                                cci_event_t *event )
+{
+    int iRC;
+    cci__ep_t       *ep;
+    portals_ep_t    *sep;
+    cci__evt_t      *evt;
+    portals_tx_t    *tx;
+    portals_rx_t    *rx;
 
-    printf("In portals_return_event\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+    CCI_ENTER;
+
+    if (!pglobals) {
+        CCI_EXIT;
+        return CCI_ENODEV;
+    }
+
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    sep = ep->priv;
+
+    evt = container_of(event, cci__evt_t, event);
+
+    if (evt->ep != ep) {
+        CCI_EXIT;
+        return CCI_EINVAL;
+    }
+
+    /* enqueue the event */
+
+    switch (event->type) {
+    case CCI_EVENT_SEND:
+        tx = container_of(evt, portals_tx_t, evt);
+        pthread_mutex_lock(&ep->lock);
+        /* insert at head to keep it in cache */
+        TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
+        pthread_mutex_unlock(&ep->lock);
+        break;
+    case CCI_EVENT_CONNECT_SUCCESS:
+    case CCI_EVENT_CONNECT_REJECTED:
+    case CCI_EVENT_RECV:
+    {
+        uint64_t            bits, ignore;
+        portals_ep_t        *pep = ep->priv;
+        cci__dev_t          *dev = ep->dev;
+        portals_dev_t       *pdev = dev->priv;
+        ptl_process_id_t    pid_any=PORTALS_WILDCARD;
+        portals_am_buffer_t *am;
+
+        rx = container_of(evt, portals_rx_t, evt);
+        am = rx->am;
+
+        pthread_mutex_lock(&ep->lock);
+        TAILQ_INSERT_HEAD(&pep->idle_rxs, rx, entry);
+        am->refcnt--;
+        if (am->refcnt == 0 && !am->active) {
+            ptl_md_t    md;
+
+            /* all non-RMA messages place the endpoint ID in the upper 32 bits */
+            bits = ((ptl_match_bits_t) pep->id) << PORTALS_EP_SHIFT;
+
+            /* and ignore the lower 32 bits */
+            ignore = (((ptl_match_bits_t) 1) << PORTALS_EP_SHIFT) - 1;
+
+            md.start=    am->buffer;
+            md.length=   am->length;
+            md.user_ptr =am;
+            md.max_size= dev->device.max_send_size;
+            md.threshold=PTL_MD_THRESH_INF;
+            md.eq_handle=pep->eqh;
+            md.options  =PTL_MD_OP_PUT;
+            md.options |=PTL_MD_TRUNCATE;
+            md.options |=PTL_MD_MAX_SIZE;
+            md.options |=PTL_MD_EVENT_START_DISABLE;
+            iRC = PtlMEMDAttach(pdev->niHandle,
+                                pdev->table_index,
+                                pid_any,
+                                bits,
+                                ignore,
+                                PTL_RETAIN,
+                                PTL_INS_AFTER,
+                                md,
+                                PTL_RETAIN,
+                                &am->meh,
+                                &am->mdh);
+            if (iRC != PTL_OK) {
+                //FIXME
+                debug(CCI_DB_WARN, "PtlMEMDAttach() returned %s", ptl_err_str[iRC]);
+                abort();
+            }
+            am->active = 1;
+        }
+        pthread_mutex_unlock(&ep->lock);
+        break;
+    }
+    default:
+        /* TODO */
+        break;
+    }
+
+    CCI_EXIT;
+
+    return CCI_SUCCESS;
 }
 
 
-// Todo
+/* Portals assumes reliability (retransmission) so we do not ahve to.
+ * A put generates up to four events on the initiator:
+ *   send_start, send_end, ack, and unlink.
+ *
+ * For unreliable connections, we always buffer and completion is when
+ * we return. We ignore send_start and disable ack. We need send_end
+ * but only to return the tx to idle_txs (no CCI event).
+ *
+ * For reliable connections, we buffer unless CCI_FLAG_NO_COPY is set.
+ * We disable send_start and send_end and we request an ack, which will
+ * trigger our CCI event.
+ */
 static int portals_send(
     cci_connection_t       *connection, 
     void                   *header_ptr,
@@ -1327,84 +1918,132 @@ static int portals_send(
     void                   *context,
     int                    flags ) {
 
-    const cci_device_t     **device;         /* Array of devices */
-    cci__dev_t             *dev;
-    cci__conn_t            *conn;
-    portals_dev_t          *pdev;
-    ptl_pt_index_t         send_index;       /* portals send index */
-    ptl_process_id_t       idp;              /* Peer's (NID,PID) */
-    ptl_handle_ni_t        niHandle;         /* Seastar handle */
-    ptl_handle_eq_t        eqhSend;          /* EQ handle for Send */
-    int                    iRC;
-    ptl_handle_md_t        mdHandle;         /* MD handle */
-    ptl_match_bits_t       bits;
-    ptl_hdr_data_t         hdr;
-    ptl_md_t               *pmd;
+    int                    ret          = CCI_SUCCESS;
+    int                    is_reliable  = 0;
+    cci_endpoint_t         *endpoint    = connection->endpoint;
+    cci__conn_t            *conn        = NULL;
+    cci__ep_t              *ep          = NULL;
+    cci__dev_t             *dev         = NULL;
+    portals_conn_t         *pconn       = NULL;
+    portals_ep_t           *pep         = NULL;
+    portals_dev_t          *pdev        = NULL;
+    portals_tx_t           *tx          = NULL;
+    ptl_md_t               md;
+    ptl_match_bits_t       bits         = 0ULL;
+    ptl_ack_req_t          ack          = PTL_ACK_REQ;
 
     CCI_ENTER;
-    fprintf( stderr, "In portals_send \n" );
-    if(!pglobals) {
 
+    if (!pglobals) {
         CCI_EXIT;
         return CCI_ENODEV;
     }
-    for( device=pglobals->devices; *device!=NULL; device++ ) {
 
-        dev=container_of( *device, cci__dev_t, device );
+    if (!data_ptr && data_len) {
+        CCI_EXIT;
+        return CCI_EINVAL;
     }
-    pdev=dev->priv;
-    niHandle=pdev->niHandle;
-    eqhSend=pdev->eqhSend;
-    send_index=pdev->send_index;
 
+    if (header_len + data_len > connection->max_send_size) {
+        CCI_EXIT;
+        return CCI_EMSGSIZE;
+    }
+
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    pep = ep->priv;
     conn=container_of( connection, cci__conn_t, connection );
-    fprintf( stderr, "...conn->uri=\"%s\"\n", conn->uri );
-    fprintf( stderr, "...header_len=%d data_len=%d\n",
-             header_len, data_len );
-    portals_getaddrinfo( conn->uri, &idp );
-    fprintf( stderr, "...target=(%d,%d)  send_index=%d\n",
-             idp.nid, idp.pid, send_index );
-    fprintf( stderr, "...niHandle=%d eqhSend=%d\n",
-             niHandle, eqhSend );
-    hdr=0x5555;
-    bits=0x1111;
+    pconn = conn->priv;
+    dev = ep->dev;
+    pdev = dev->priv;
 
-/*  First, create the memory descriptor. */
-    pmd=calloc( 1, sizeof(ptl_md_t) );
-    pmd->start=    data_ptr;
-    pmd->length=   data_len;
-    pmd->max_size= PORTALS_EP_BUF_LEN;
-    pmd->threshold=PTL_MD_THRESH_INF;
-    pmd->user_ptr =NULL;
-    pmd->eq_handle=eqhSend;
-    pmd->options  =PTL_MD_OP_PUT;
-    pmd->options |=PTL_MD_OP_GET;
-    pmd->options |=PTL_MD_EVENT_START_DISABLE;
-//  pmd->options |=PTL_MD_MANAGE_REMOTE;
+    is_reliable = cci_conn_is_reliable(conn);
 
-    iRC=PtlMDBind( niHandle,                 /* Handle to Seastar */
-                   *pmd,                     /* Memory descriptor */
-                   PTL_UNLINK,               /* MD disposition */
-                   &mdHandle );              /* MD Handle (created) */
-    fprintf( stderr, "...MDBind=%d\n", iRC );
+    /* get a tx */
+    pthread_mutex_lock(&ep->lock);
+    if (!TAILQ_EMPTY(&pep->idle_txs)) {
+        tx = TAILQ_FIRST(&pep->idle_txs);
+        TAILQ_REMOVE(&pep->idle_txs, tx, dentry);
+    }
+    pthread_mutex_unlock(&ep->lock);
 
-    iRC=PtlPut(    mdHandle,                 /* Handle to MD */
-                   PTL_ACK_REQ,              /* ACK disposition */
-                   idp,                      /* target port */
-                   send_index,               /* table entry to use */
-                   0,                        /* access entry to use */
-                   bits,                     /* match bits */
-                   0,                        /* remote offset */
-                   hdr );                    /* hdr_data */
-    fprintf( stderr, "...niHandle=%d eqhSend=%d buf=%lx\n",
-             niHandle, eqhSend, data_ptr );
-    fprintf( stderr, "...(%d,%d) table %d: posted: iRC=%d len=%d\n",
-             idp.nid, idp.pid, send_index, iRC, pmd->length );
-    free(pmd);
-    pmd=NULL;
+    if (!tx) {
+        debug(CCI_DB_WARN, "%s: no txs", __func__);
+        CCI_EXIT;
+        return CCI_ENOBUFS;
+    }
+
+    /* tx bookkeeping */
+    tx->msg_type = PORTALS_MSG_SEND;
+    tx->flags = flags;
+
+    /* setup generic CCI event */
+    tx->evt.conn = conn;
+    tx->evt.ep = ep;
+    tx->evt.event.type = CCI_EVENT_SEND;
+    tx->evt.event.info.send.connection = connection;
+    tx->evt.event.info.send.context = context;
+    tx->evt.event.info.send.status = CCI_SUCCESS; /* for now */
+
+    if (is_reliable) {
+        /* we just want the ack */
+        md.options |= PTL_MD_EVENT_END_DISABLE;
+    } else {
+        /* we need to know when we can reuse the tx 
+         * leave SEND_END enabled, but suppress the the ack */
+        ack = PTL_NOACK_REQ;
+    }
+
+    /* always copy into tx's attached buffer */
+    if (header_len)
+        memcpy(tx->buffer, header_ptr, header_len);
+    if (data_len)
+        memcpy(tx->buffer + header_len, data_ptr, data_len);
+
+    /* pack match bits */
+    bits = ((ptl_match_bits_t) pconn->peer_ep_id) << PORTALS_EP_SHIFT;
+    bits |= ((ptl_match_bits_t) header_len) << 27;
+    bits |= ((ptl_match_bits_t) data_len) << 11;
+    bits |= (ptl_match_bits_t) PORTALS_MSG_SEND;
+
+    ret = PtlPutRegion(tx->mdh,                 /* Handle to MD */
+                       0,                       /* local offset */
+                       header_len + data_len,   /* length */
+                       ack,                     /* ACK disposition */
+                       pconn->idp,              /* target port */
+                       pdev->table_index,       /* table entry to use */
+                       0,                       /* access entry to use */
+                       bits,                    /* match bits */
+                       0,                       /* remote offset */
+                       pconn->peer_conn);       /* hdr_data */
+    debug(CCI_DB_MSG,
+             "%s: (%d,%d) table %d: posted:"
+             " ret=%s len=%d\n", __func__, pconn->idp.nid, pconn->idp.pid,
+                                 pdev->table_index, ptl_err_str[ret], tx->len );
+    if (flags & CCI_FLAG_BLOCKING && is_reliable) {
+        ptl_event_t event;
+
+        do {
+            ret = PtlEQGet(pep->eqh, &event);
+            if (!(ret == PTL_OK || ret == PTL_EQ_DROPPED))
+                continue;
+
+            if (event.md_handle == tx->mdh) {
+                assert(event.type == PTL_EVENT_ACK);
+                if (event.ni_fail_type != PTL_NI_OK)
+                    tx->evt.event.info.send.status = CCI_ERROR;
+                pthread_mutex_lock(&ep->lock);
+                TAILQ_INSERT_HEAD(&pep->idle_txs, tx, dentry);
+                pthread_mutex_unlock(&ep->lock);
+                break;
+            } else {
+                /* queue for cci_get_event() */
+                /* TODO */
+            }
+        } while (1);
+    }
 
     CCI_EXIT;
-    return CCI_SUCCESS;
+    return ret;
 }
 
 
@@ -1419,7 +2058,9 @@ static int portals_sendv(
      void                  *context,
      int                   flags ) {
 
-    printf("In portals_sendv\n");
+    CCI_ENTER;
+    CCI_EXIT;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1432,7 +2073,9 @@ static int portals_rma_register(
     uint64_t               length,
     uint64_t               *rma_handle ) {
 
-    printf("In portals_rma_register\n");
+    CCI_ENTER;
+    CCI_EXIT;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1445,7 +2088,9 @@ static int portals_rma_register_phys(
     uint32_t               sg_cnt, 
     uint64_t               *rma_handle ) {
 
-    printf("In portals_rma_register_phys\n");
+    CCI_ENTER;
+    CCI_EXIT;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1454,7 +2099,9 @@ static int portals_rma_register_phys(
 static int portals_rma_deregister(
     uint64_t               rma_handle ) {
 
-    printf("In portals_rma_deregister\n");
+    CCI_ENTER;
+    CCI_EXIT;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1472,7 +2119,9 @@ static int portals_rma(
      void                  *context,
      int                   flags ) {
 
-    printf("In portals_rma\n");
+    CCI_ENTER;
+    CCI_EXIT;
+
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1483,13 +2132,17 @@ static void portals_recvfrom_ep(
 
     ptl_event_t          event;
 
+    return;
+
+    return;
     portals_events(&event);
-//  fprintf( stderr, "In portals_recvfrom_ep\n" );
-    sleep(2);
+//  printf("In portals_recvfrom_ep\n");
+    //sleep(2);
     return;
 }
 
 
+// Todo
 static void portals_recvfrom_lep(
     cci__lep_t             *lep ) {
 
@@ -1497,7 +2150,9 @@ static void portals_recvfrom_lep(
     ptl_event_t          event;
     cci__crq_t           *crq;
 
-    CCI_ENTER;
+    return;
+
+    return;
     iRC=portals_events(&event);
     if(!iRC) {                               /* Got an event */
 
@@ -1517,10 +2172,8 @@ static void portals_recvfrom_lep(
         fprintf( stderr, "In portals_recvfrom_lep:  added crq  "
                  "remote->name=\"%s\"\n", remote[0]->name );
     } else {
-        fprintf( stderr, "In portals_recvfrom_lep  lep=%lx\n", lep );
+        fprintf( stderr, "In portals_recvfrom_lep  lep=%p\n", lep );
     }
-
-    CCI_EXIT;
     return;
 }
 
@@ -1534,15 +2187,16 @@ static inline void portals_progress_dev(
     cci__lep_t             *lep;
 
     CCI_ENTER;
+
     pdev=dev->priv;
 
-    pthread_mutex_lock(&pdev->lock);
+    pthread_mutex_lock(&dev->lock);
     if( pdev->is_progressing==0) {
 
         pdev->is_progressing=1;
         have_token=1;
     }
-    pthread_mutex_unlock(&pdev->lock);
+    pthread_mutex_unlock(&dev->lock);
 
     if(!have_token) {
 
@@ -1550,18 +2204,19 @@ static inline void portals_progress_dev(
         return;
     }
 
-    portals_progress_sends(pdev);
-
-    TAILQ_FOREACH( ep, &dev->eps, entry)
+    TAILQ_FOREACH( ep, &dev->eps, entry) {
         portals_recvfrom_ep(ep);
+        portals_get_event_ep(ep);
+    }
     TAILQ_FOREACH( lep, &dev->leps, dentry ) {
         lep->dev=dev;
         portals_recvfrom_lep(lep);
+        portals_get_event_lep(lep);
     }
 
-    pthread_mutex_lock(&pdev->lock);
+    pthread_mutex_lock(&dev->lock);
     pdev->is_progressing=0;
-    pthread_mutex_unlock(&pdev->lock);
+    pthread_mutex_unlock(&dev->lock);
 
     CCI_EXIT;
     return;
@@ -1570,8 +2225,7 @@ static inline void portals_progress_dev(
 static void *portals_progress_thread(
     void                   *arg ) {
 
-    CCI_ENTER;
-    while(!pglobals->shutdown) {
+    while(!portals_shut_down) {
 
         cci__dev_t          *dev;
         cci_device_t const  **device;
@@ -1584,12 +2238,11 @@ static void *portals_progress_thread(
         }
         usleep(PORTALS_PROG_TIME_US);
     }
-
-    CCI_EXIT;
     pthread_exit(NULL);
 }
 
 
+#if 0
 static int portals_sendto(
     cci_os_handle_t        niHandle,
     ptl_handle_eq_t        eqhSend,
@@ -1603,19 +2256,6 @@ static int portals_sendto(
     ptl_match_bits_t       bits;
     ptl_hdr_data_t         hdr;
     ptl_md_t               *pmd;
-    portals_msg_type_t     type;
-    uint8_t                a;
-    uint16_t               b;
-    uint32_t               c;
-
-    CCI_ENTER;
-    fprintf( stderr, "In portals_sendto\n" );
-
-    portals_parse_header( buf, &type, &a, &b, &c );
-    fprintf( stderr, "...Send buffer: type=%d a=%d b=%d c=%d\n",
-             type, a, b, c );
-    hdr=0x3333;
-    bits=0x3333;
 
 /*  First, create the memory descriptor. */
     pmd=calloc( 1, sizeof(ptl_md_t) );
@@ -1632,9 +2272,9 @@ static int portals_sendto(
 
     iRC=PtlMDBind( niHandle,                 /* Handle to Seastar */
                    *pmd,                     /* Memory descriptor */
-                   PTL_UNLINK,               /* MD disposition */
+                   PTL_RETAIN,               /* MD disposition */
                    &mdHandle );              /* MD Handle (created) */
-    fprintf( stderr, "...MDBind=%d\n", iRC );
+    fprintf( stderr, "MDBind=%d\n", iRC );
 
     iRC=PtlPut(    mdHandle,                 /* Handle to MD */
                    PTL_ACK_REQ,              /* ACK disposition */
@@ -1644,375 +2284,430 @@ static int portals_sendto(
                    bits,                     /* match bits */
                    0,                        /* remote offset */
                    hdr );                    /* hdr_data */
-    fprintf( stderr, "...niHandle=%d eqhSend=%d buf=%lx\n",
-             niHandle, eqhSend, buf );
-    fprintf( stderr, "...(%d,%d) table %d: posted: iRC=%d len=%d\n",
-             idp.nid, idp.pid, portals_table, iRC, len );
+    fprintf( stderr,
+             "In portals_sendto: (%d,%d) table %d: posted:"
+             " iRC=%d len=%d\n", idp.nid, idp.pid,
+                                 portals_table, iRC, len );
 
     free(pmd);
-    pmd=NULL;
-    CCI_EXIT;
     return iRC;
 }
+#endif
 
-
-static void portals_progress_pending(
-    portals_dev_t          *pdev ) {
-
-    int iRC;
-    uint64_t               now;
-    portals_tx_t           *tx;
-    portals_tx_t           *tmp;
-    cci__evt_t             *evt;
-    cci_event_t            *event;           /* generic CCI event */
-    cci_connection_t       *connection;      /* generic CCI connect */
-    cci__conn_t            *conn;
-    portals_conn_t         *pconn;
-    cci__ep_t              *ep;
-    portals_ep_t           *pep;
-    ptl_handle_ni_t        niHandle;
+static void portals_handle_conn_request(cci__lep_t *lep, ptl_event_t event)
+{
+    cci__crq_t      *crq    = event.md.user_ptr;
+    cci__svc_t      *svc    = lep->svc;
+    portals_crq_t   *pcrq   = crq->priv;
+    portals_conn_request_t  *cr = pcrq->buffer;
 
     CCI_ENTER;
-    TAILQ_HEAD( p_idle_txs, portals_tx ) idle_txs=
-                                       TAILQ_HEAD_INITIALIZER(idle_txs);
-    TAILQ_HEAD( p_evts, cci__evt ) evts=TAILQ_HEAD_INITIALIZER(evts);
-    TAILQ_INIT(&idle_txs);
-    TAILQ_INIT(&evts);
-    now=portals_get_usecs();
 
-    /* This is only for reliable messages.
-     * Do not dequeue txs, just walk the list.
-     */
-    pthread_mutex_lock(&pdev->lock);
-    TAILQ_FOREACH_SAFE( tx, &pdev->pending, dentry, tmp ) {
+    *((cci_device_t ***) &(crq->conn_req.devices)) = (cci_device_t **) pglobals->devices;
+    crq->conn_req.devices_cnt = pglobals->count;
+    crq->conn_req.data_len = (event.match_bits >> 16) & 0xFFFF;
+    crq->conn_req.data_ptr = pcrq->buffer + 12;
+    crq->conn_req.attribute = (event.match_bits >> 8) & 0xFF;
 
-        evt=&(tx->evt);
-        conn=evt->conn;
-        connection=&conn->connection;
-        pconn=conn->priv;
-        event=&evt->event;
+    pcrq->idp = event.initiator;
+    pcrq->mss = cr->max_send_size;
+    pcrq->max_recv_buffer_count = cr->max_recv_buffer_count;
+    pcrq->client_id = cr->client_ep_id;
+    pcrq->client_conn = event.hdr_data;
 
-        ep=container_of( connection->endpoint, cci__ep_t, endpoint );
-        pep=ep->priv;
+    debug(CCI_DB_CONN, "%s: from %d,%d client_id=%d client_conn=0x%llx",
+          __func__, pcrq->idp.nid, pcrq->idp.pid, pcrq->client_id,
+          (unsigned long long) pcrq->client_conn);
 
-        tx->last_attempt_us=now;             /* need to send it */
-        niHandle=pdev->niHandle;
-        fprintf( stderr, "...sending %d msg seq %u\n",
-                 portals_msg_type(tx->msg_type), tx->seq );
-        fprintf( stderr, "...sending tx->len=%d\n", tx->len );
-        iRC=portals_sendto( niHandle, pdev->eqhSend, tx->buffer,
-                            tx->len, pconn->idp, pconn->send_index );
-        if( iRC!=0 ) {
+    pthread_mutex_lock(&svc->lock);
+    TAILQ_INSERT_TAIL(&svc->crqs, crq, entry);
+    pthread_mutex_unlock(&svc->lock);
 
-            fprintf( stderr, "sendto() failed with %s\n",
-                     cci_strerror(errno) );
-            continue;
-        }
+    CCI_EXIT;
+    return;
+}
 
-        /* has it timed out? */
-        if( PORTALS_U64_LT( tx->timeout_us, now )) {
+/* If hdr_data is 0, it is a reject */
+static void portals_handle_conn_reply(cci__ep_t *ep, ptl_event_t pevent)
+{
+    cci__conn_t             *conn   = (void *)((uintptr_t)pevent.hdr_data);
+    portals_conn_t          *pconn  = conn->priv;
+    portals_ep_t            *pep    = ep->priv;
+    portals_rx_t            *rx     = NULL;
+    portals_conn_accept_t   *accept = (void*)(pevent.md.start) + pevent.offset;
+    cci__evt_t              *evt    = NULL;
+    cci__dev_t              *dev    = ep->dev;
+    portals_am_buffer_t     *am     = pevent.md.user_ptr;
 
-            /* dequeue */
-            TAILQ_REMOVE( &pdev->pending, tx, dentry );
+    CCI_ENTER;
 
-            /* set status and add to completed events */
-            switch(tx->msg_type) {
+    debug(CCI_DB_CONN, "accept->server_ep_id = %u", accept->server_ep_id);
+    debug(CCI_DB_CONN, "accept->max_send_size = %u", accept->max_send_size);
+    debug(CCI_DB_CONN, "accept->max_recv_buffer_count = %u", accept->max_recv_buffer_count);
+    debug(CCI_DB_CONN, "accept->server_conn_upper = 0x%x", accept->server_conn_upper);
+    debug(CCI_DB_CONN, "accept->server_conn_lower = 0x%x", accept->server_conn_lower);
 
-                case PORTALS_MSG_SEND:
-                    event->info.send.status=CCI_ETIMEDOUT;
-                    break;
-
-                case PORTALS_MSG_CONN_REQUEST: {
-
-                    int i;
-                    struct p_active *active_list;
-
-                    event->type=CCI_EVENT_CONNECT_TIMEOUT;
-                    if (conn->uri)
-                        free((char *)conn->uri);
-                    pconn->status=PORTALS_CONN_CLOSING;
-                    i=portals_idp_hash(pconn->idp);
-                    active_list=&pep->active_hash[i];
-                    pthread_mutex_lock(&pep->lock);
-                    TAILQ_REMOVE(active_list, pconn, entry);
-                    pthread_mutex_unlock(&pep->lock);
-                    free(pconn);
-                    free(conn);
-                    pconn=NULL;
-                    conn=NULL;
-                    tx->evt.ep=ep;
-                    tx->evt.conn=NULL;
-                    break;
-                }
-
-                case PORTALS_MSG_CONN_REPLY:
-                case PORTALS_MSG_CONN_ACK:
-                default:
-                    /* TODO */
-                    CCI_EXIT;
-                    return;
-            }
-
-            /* if SILENT, put idle tx */
-            if( tx->msg_type==PORTALS_MSG_SEND && 
-                tx->flags&CCI_FLAG_SILENT ) {
-
-                tx->state=PORTALS_TX_IDLE;
-                /* store locally until we can drop the pdev->lock */
-                TAILQ_INSERT_HEAD( &idle_txs, tx, dentry );
-            } else {
-
-                tx->state=PORTALS_TX_COMPLETED;
-                /* store locally until we can drop the pdev->lock */
-                TAILQ_INSERT_TAIL( &evts, evt, entry );
-            }
-            continue;
-        }
-
-        /* is it time to resend? */
-        if( (tx->last_attempt_us+
-             (PORTALS_RESEND_TIME_SEC*1000000*tx->send_count++))>now )
-            continue;
-
-        tx->last_attempt_us=now;             /* need to resend it */
-        niHandle=pdev->niHandle;
-        fprintf( stderr, "...re-sending %d msg seq %u\n",
-                 portals_msg_type(tx->msg_type), tx->seq );
-        fprintf( stderr, "...re-sending tx->len=%d\n", tx->len );
-        iRC=portals_sendto( niHandle, pdev->eqhSend, tx->buffer,
-                            tx->len, pconn->idp, pconn->send_index );
-        if( iRC!=0 ) {
-
-            fprintf( stderr, "sendto() failed with %s\n",
-                     cci_strerror(errno) );
-            continue;
-        }
-    }
-    pthread_mutex_unlock(&pdev->lock);
-
-    /* transfer txs to portals ep's list */
-    while( !TAILQ_EMPTY(&idle_txs) ) {
-
-        tx=TAILQ_FIRST(&idle_txs);
-        TAILQ_REMOVE( &idle_txs, tx, dentry );
-        ep=tx->evt.ep;
-        pep=ep->priv;
-        pthread_mutex_lock(&pep->lock);
-        TAILQ_INSERT_HEAD( &pep->idle_txs, tx, dentry );
-        pthread_mutex_unlock(&pep->lock);
+    /* do we need to unlink this buffer? */
+    if (am->length - (pevent.offset + pevent.mlength) < dev->device.max_send_size) {
+        PtlMEUnlink(am->meh);
+        am->active = 0;
+        debug((CCI_DB_INFO|CCI_DB_CONN), "%s: unlinking active message buffer", __func__);
+        if (pep->am[0].active == 0 && pep->am[1].active == 0)
+            debug(CCI_DB_WARN, "both active message buffers inactive");
     }
 
-    /* transfer evts to the ep's list */
-    while( !TAILQ_EMPTY(&evts) ) {
+    pthread_mutex_lock(&ep->lock);
+    if(!TAILQ_EMPTY(&pep->idle_rxs)) {
+        rx=TAILQ_FIRST(&pep->idle_rxs);
+        TAILQ_REMOVE( &pep->idle_rxs, rx, entry );
+    }
+    pthread_mutex_unlock(&ep->lock);
 
-        evt=TAILQ_FIRST(&evts);
-        TAILQ_REMOVE( &evts, evt, entry );
-        ep=evt->ep;
+    if (!rx) {
+        debug((CCI_DB_WARN|CCI_DB_MSG), "no rx available for incoming conn_reply");
+        return;
+    }
+
+    rx->pevent = pevent;
+    rx->am = am;
+
+    evt = &rx->evt;
+    evt->event.info.other.context = pconn->tx->evt.event.info.other.context;
+
+    if (pevent.mlength == sizeof(*accept)) {
+        /* accept */
+
+        conn->connection.max_send_size = accept->max_send_size;
+        pconn->peer_ep_id = accept->server_ep_id;
+        pconn->peer_conn = ((uint64_t)accept->server_conn_upper) << 32;
+        pconn->peer_conn |= (uint64_t)accept->server_conn_lower;
+
+        evt->event.type = CCI_EVENT_CONNECT_SUCCESS;
+        evt->event.info.other.u.connect.connection = &conn->connection;
+
+        debug(CCI_DB_CONN, "%s: recv'd accept peer_ep_id=%u", __func__, pconn->peer_ep_id);
         pthread_mutex_lock(&ep->lock);
-        TAILQ_INSERT_TAIL( &ep->evts, evt, entry );
+        TAILQ_INSERT_TAIL(&pep->conns, pconn, entry);
         pthread_mutex_unlock(&ep->lock);
+    } else {
+        /* reject */
+        free(pconn);
+        if (conn->uri)
+            free((void *)conn->uri);
+        free(conn);
+        evt->event.type = CCI_EVENT_CONNECT_REJECTED;
+        /* context already set in connect() */
+        debug(CCI_DB_CONN, "%s: recv'd reject", __func__);
     }
+    pthread_mutex_lock(&ep->lock);
+    am->refcnt++;
+    TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+    TAILQ_INSERT_HEAD(&pep->idle_txs, pconn->tx, dentry);
+    pconn->tx = NULL;
+    pthread_mutex_unlock(&ep->lock);
+
+    CCI_EXIT;
+
+    return;
+}
+
+static void portals_handle_active_msg(cci__ep_t *ep, ptl_event_t pevent)
+{
+    portals_ep_t    *pep    = ep->priv;
+    portals_rx_t    *rx     = NULL;
+    cci__evt_t      *evt    = NULL;
+    cci__dev_t      *dev    = ep->dev;
+    portals_am_buffer_t *am = pevent.md.user_ptr;
+
+    CCI_ENTER;
+
+    /* do we need to unlink this buffer? */
+    if (am->length - (pevent.offset + pevent.mlength) < dev->device.max_send_size) {
+        PtlMEUnlink(am->meh);
+        am->active = 0;
+        debug((CCI_DB_INFO|CCI_DB_MSG), "%s: unlinking active message buffer", __func__);
+        if (pep->am[0].active == 0 && pep->am[1].active == 0)
+            debug(CCI_DB_WARN, "both active message buffers inactive");
+    }
+
+    pthread_mutex_lock(&ep->lock);
+    if(!TAILQ_EMPTY(&pep->idle_rxs)) {
+        rx=TAILQ_FIRST(&pep->idle_rxs);
+        TAILQ_REMOVE( &pep->idle_rxs, rx, entry );
+    }
+    pthread_mutex_unlock(&ep->lock);
+
+    if (!rx) {
+        debug((CCI_DB_WARN|CCI_DB_MSG), "no rx available for incoming AM");
+        return;
+    }
+
+    rx->pevent = pevent;
+    rx->am = am;
+
+    evt = &rx->evt;
+    evt->event.type = CCI_EVENT_RECV;
+
+    *((uint32_t *)&evt->event.info.recv.header_len) =
+        (uint32_t) ((pevent.match_bits >> 27) & 0x1F);
+    *((uint32_t *)&evt->event.info.recv.data_len) =
+        (uint32_t) ((pevent.match_bits >> 11) & 0xFFFF);
+    if (evt->event.info.recv.header_len)
+        *((void **)&evt->event.info.recv.header_ptr) = pevent.md.start + pevent.offset;
+    else
+        *((void **)&evt->event.info.recv.header_ptr) = NULL;
+    if (evt->event.info.recv.data_len)
+        *((void **)&evt->event.info.recv.data_ptr) =
+            pevent.md.start + pevent.offset + evt->event.info.recv.header_len;
+    else
+        *((void **)&evt->event.info.recv.data_ptr) = NULL;
+
+    debug(CCI_DB_MSG, "%s: recv'd hdr len=%d ptr=%p data len=%d ptr=%p",
+          __func__, evt->event.info.recv.header_len,
+          evt->event.info.recv.header_ptr,
+          evt->event.info.recv.data_len,
+          evt->event.info.recv.data_ptr);
+
+    /* queue event on endpoint's completed event queue */
+
+    pthread_mutex_lock(&ep->lock);
+    TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+    am->refcnt++;
+    pthread_mutex_unlock(&ep->lock);
 
     CCI_EXIT;
     return;
 }
 
-
-static void portals_progress_queued(
-    portals_dev_t          *pdev ) {
-
-    int iRC;
-    uint64_t               now;
-    portals_tx_t           *tx;
-    portals_tx_t           *tmp;
-    cci__evt_t             *evt;
-    cci_event_t            *event;           /* generic CCI event */
-    cci_connection_t       *connection;      /* generic CCI connect */
-    cci__conn_t            *conn;
-    portals_conn_t         *pconn;
-    cci__ep_t              *ep;
-    portals_ep_t           *pep;
-    ptl_handle_ni_t        niHandle;
+static void portals_get_event_ep(cci__ep_t *ep)
+{
+    int             ret     = CCI_SUCCESS;
+    int             count   = 0;
+    int             have_token   = 0;
+    portals_ep_t    *pep    = ep->priv;
+    ptl_event_t     event;
 
     CCI_ENTER;
-    TAILQ_HEAD( p_idle_txs, portals_tx ) idle_txs=
-                                       TAILQ_HEAD_INITIALIZER(idle_txs);
-    TAILQ_HEAD( p_evts, cci__evt ) evts=TAILQ_HEAD_INITIALIZER(evts);
-    TAILQ_INIT(&idle_txs);
-    TAILQ_INIT(&evts);
-    now=portals_get_usecs();
 
-    /* This is only for reliable messages.
-     * Do not dequeue txs, just walk the list.
-     */
-    pthread_mutex_lock(&pdev->lock);
-    TAILQ_FOREACH_SAFE( tx, &pdev->queued, dentry, tmp ) {
+    pthread_mutex_lock(&ep->lock);
+    if (ep->closing) {
+        pthread_mutex_unlock(&ep->lock);
+        return;
+    }
+    if (pep->in_use == 0) {
+        pep->in_use = 1;
+        have_token = 1;
+    }
+    pthread_mutex_unlock(&ep->lock);
 
-        evt=&(tx->evt);
-        conn=evt->conn;
-        connection=&conn->connection;
-        pconn=conn->priv;
-        event=&evt->event;
+    if (!have_token) {
+        CCI_EXIT;
+        return;
+    }
 
-        ep=container_of( connection->endpoint, cci__ep_t, endpoint );
-        pep=ep->priv;
+again:
+    ret = PtlEQGet(pep->eqh, &event);
+    if (!(ret == PTL_OK || ret == PTL_EQ_DROPPED)) {
+        goto out;
+    }
+    count++;
 
-        tx->last_attempt_us=now;             /* need to send it */
-        niHandle=pdev->niHandle;
-        fprintf( stderr, "...sending %d msg seq %u\n",
-                 portals_msg_type(tx->msg_type), tx->seq );
-        fprintf( stderr, "...sending tx->len=%d\n", tx->len );
-        iRC=portals_sendto( niHandle, pdev->eqhSend, tx->buffer,
-                            tx->len, pconn->idp, pconn->send_index );
-        if( iRC!=0 ) {
+    if (ret == PTL_EQ_DROPPED)
+        debug(CCI_DB_WARN, "portals dropped one or more events");
 
-            fprintf( stderr, "sendto() failed with %s\n",
-                     cci_strerror(errno) );
-            continue;
+    debug(CCI_DB_INFO, "%s: got portals %s event", __func__, ptl_event_str[event.type]);
+    switch (event.type) {
+    case PTL_EVENT_SEND_START:
+        debug((CCI_DB_WARN|CCI_DB_INFO), "we missed disabling a portals send_start");
+        break;
+    case PTL_EVENT_SEND_END:
+    {
+        portals_tx_t *tx = (void *)event.md.user_ptr;
+
+        /* cleanup tx for connect and UU sends */
+        switch (tx->msg_type) {
+        case PORTALS_MSG_OOB:
+        case PORTALS_MSG_SEND:
+            debug(CCI_DB_MSG, "%s: send_end for SEND", __func__);
+            /* queue on idle_txs */
+            pthread_mutex_lock(&ep->lock);
+            TAILQ_INSERT_HEAD(&pep->idle_txs, tx, dentry);
+            pthread_mutex_unlock(&ep->lock);
+            break;
+        default:
+            debug(CCI_DB_INFO, "we missed disabling a portals send_end for "
+                  "msg_type %d", tx->msg_type);
+            break;
         }
+        
+        break;
+    }
+    case PTL_EVENT_PUT_START:
+        debug(CCI_DB_INFO, "we missed disabling a put_start");
+        break;
+    case PTL_EVENT_PUT_END:
+      {
+        portals_msg_type_t  type;
+        uint64_t            a;
 
-        /* has it timed out? */
-        if( PORTALS_U64_LT( tx->timeout_us, now )) {
+        portals_parse_match_bits(event.match_bits, &type, &a);
+        switch (type) {
+        case PORTALS_MSG_SEND:
+            /* incoming active message */
+            portals_handle_active_msg(ep, event);
+            break;
+        case PORTALS_MSG_RMA_WRITE:
+            /* incoming RMA write */
+            break;
+        case PORTALS_MSG_RMA_READ:
+            /* incoming RMA read */
+            break;
+        case PORTALS_MSG_OOB:
+          {
+            /* incoming OOB msg */
+            portals_msg_oob_type_t oob_type = (uint32_t)((event.match_bits >> 2) & 0x3);
 
-            /* dequeue */
-            TAILQ_REMOVE( &pdev->queued, tx, dentry );
-
-            /* set status and add to completed events */
-            switch(tx->msg_type) {
-
-                case PORTALS_MSG_SEND:
-                    event->info.send.status=CCI_ETIMEDOUT;
-                    break;
-
-                case PORTALS_MSG_CONN_REQUEST: {
-
-                    int i;
-                    struct p_active *active_list;
-
-                    event->type=CCI_EVENT_CONNECT_TIMEOUT;
-                    if (conn->uri)
-                        free((char *)conn->uri);
-                    pconn->status=PORTALS_CONN_CLOSING;
-                    i=portals_idp_hash(pconn->idp);
-                    active_list=&pep->active_hash[i];
-                    pthread_mutex_lock(&pep->lock);
-                    TAILQ_REMOVE(active_list, pconn, entry);
-                    pthread_mutex_unlock(&pep->lock);
-                    free(pconn);
-                    free(conn);
-                    pconn=NULL;
-                    conn=NULL;
-                    tx->evt.ep=ep;
-                    tx->evt.conn=NULL;
-                    break;
-                }
-
-                case PORTALS_MSG_CONN_REPLY:
-                case PORTALS_MSG_CONN_ACK:
-                default:
-                    /* TODO */
-                    CCI_EXIT;
-                    return;
+            switch (oob_type) {
+                case PORTALS_MSG_OOB_CONN_REPLY:
+                portals_handle_conn_reply(ep, event);
+                break;
+            default:
+                debug(CCI_DB_INFO, "missed oob type %d", oob_type);
+                break;
             }
+            break;
+          }
+        }
+        /* TODO unlink md and relink? */
+        break;
+      }
+    case PTL_EVENT_GET_START:
+        break;
+    case PTL_EVENT_GET_END:
+        break;
+    case PTL_EVENT_REPLY_START:
+        break;
+    case PTL_EVENT_REPLY_END:
+        break;
+    case PTL_EVENT_ACK:
+    {
+        portals_tx_t *tx = event.md.user_ptr;
 
-            /* if SILENT, put idle tx */
-            if( tx->msg_type==PORTALS_MSG_SEND && 
-                tx->flags&CCI_FLAG_SILENT ) {
-
-                tx->state=PORTALS_TX_IDLE;
-                /* store locally until we can drop the pdev->lock */
-                TAILQ_INSERT_HEAD( &idle_txs, tx, dentry );
+        /* a reliable msg completed, generate CCI event */
+        switch (tx->msg_type) {
+        case PORTALS_MSG_SEND:
+            /* queue on ep->evts unless SILENT */
+            if (tx->flags & CCI_FLAG_SILENT) {
+                pthread_mutex_lock(&ep->lock);
+                TAILQ_INSERT_HEAD(&pep->idle_txs, tx, dentry);
+                pthread_mutex_unlock(&ep->lock);
             } else {
-
-                tx->state=PORTALS_TX_COMPLETED;
-                /* store locally until we can drop the pdev->lock */
-                TAILQ_INSERT_TAIL( &evts, evt, entry );
+                pthread_mutex_lock(&ep->lock);
+                TAILQ_INSERT_HEAD(&ep->evts, &tx->evt, entry);
+                pthread_mutex_unlock(&ep->lock);
             }
-            continue;
+            break;
+        default:
+            debug(CCI_DB_INFO, "we missed disabling a portals ack for "
+                  "msg_type %d", tx->msg_type);
+            break;
         }
-
-        /* is it time to resend? */
-        if( (tx->last_attempt_us+
-             (PORTALS_RESEND_TIME_SEC*1000000*tx->send_count++))>now )
-            continue;
-
-        tx->last_attempt_us=now;             /* need to resend it */
-        niHandle=pdev->niHandle;
-        fprintf( stderr, "...re-sending %d msg seq %u\n",
-                 portals_msg_type(tx->msg_type), tx->seq );
-        fprintf( stderr, "...re-sending tx->len=%d\n", tx->len );
-        iRC=portals_sendto( niHandle, pdev->eqhSend, tx->buffer,
-                            tx->len, pconn->idp, pconn->send_index );
-        if( iRC!=0 ) {
-
-            fprintf( stderr, "sendto() failed with %s\n",
-                     cci_strerror(errno) );
-            continue;
-        }
+        break;
     }
-    pthread_mutex_unlock(&pdev->lock);
-
-    /* transfer txs to portals ep's list */
-    while( !TAILQ_EMPTY(&idle_txs) ) {
-
-        tx=TAILQ_FIRST(&idle_txs);
-        TAILQ_REMOVE( &idle_txs, tx, dentry );
-        ep=tx->evt.ep;
-        pep=ep->priv;
-        pthread_mutex_lock(&pep->lock);
-        TAILQ_INSERT_HEAD( &pep->idle_txs, tx, dentry );
-        pthread_mutex_unlock(&pep->lock);
+    case PTL_EVENT_UNLINK:
+        debug(CCI_DB_WARN, "unlink event");
+        break;
+    default:
+        debug(CCI_DB_INFO, "unexpected portals event %d", event.type);
+        break;
     }
+    if (count < 4) goto again;
 
-    /* transfer evts to the ep's list */
-    while( !TAILQ_EMPTY(&evts) ) {
-
-        evt=TAILQ_FIRST(&evts);
-        TAILQ_REMOVE( &evts, evt, entry );
-        ep=evt->ep;
-        pthread_mutex_lock(&ep->lock);
-        TAILQ_INSERT_TAIL( &ep->evts, evt, entry );
-        pthread_mutex_unlock(&ep->lock);
-    }
-
-    CCI_EXIT;
+out:
+    pthread_mutex_lock(&ep->lock);
+    pep->in_use = 0;
+    pthread_mutex_unlock(&ep->lock);
     return;
 }
 
+static void portals_get_event_lep(cci__lep_t *lep)
+{
+    int             ret     = CCI_SUCCESS;
+    portals_ep_t    *plep   = lep->priv;
+    ptl_event_t     event;
 
-static void portals_progress_sends(
-    portals_dev_t         *pdev ) {
+    if (!plep)
+        return;
 
-    CCI_ENTER;
-    portals_progress_pending(pdev);
-    portals_progress_queued(pdev);
+    ret = PtlEQGet(plep->eqh, &event);
+    if (!(ret == PTL_OK || ret == PTL_EQ_DROPPED)) {
+        return;
+    }
 
-    CCI_EXIT;
+    if (ret == PTL_EQ_DROPPED)
+        debug(CCI_DB_INFO, "portals dropped one or more events");
+
+    switch (event.type) {
+    case PTL_EVENT_PUT_END:
+      {
+        portals_msg_type_t  type;
+        uint64_t            a;
+
+        /* incoming msg - is it a OOB msg? */
+        portals_parse_match_bits(event.match_bits, &type, &a);
+
+        switch (type) {
+        default:
+            debug(CCI_DB_WARN, "ignoring incoming %d msg on listening endpoint", type);
+            break;
+        case PORTALS_MSG_OOB:
+            {
+                portals_msg_oob_type_t oob_type = (a & 0xF) >> 2;
+
+                switch (oob_type) {
+                    case PORTALS_MSG_OOB_CONN_REQUEST:
+                        portals_handle_conn_request(lep, event);
+                        break;
+                    default:
+                        debug(CCI_DB_INFO, "ignoring incoming oob %d msg", oob_type);
+                        break;
+                }
+            }
+            break;
+        }
+        break;
+      }
+    case PTL_EVENT_ACK:
+        /* reject completed */
+        break;
+    default:
+        debug(CCI_DB_INFO, "unexpected portals event %d", event.type);
+        break;
+    }
+    /* TODO unlink md and relink? */
     return;
 }
-
 
 static int portals_events(
     ptl_event_t            *event ) {
 
     int                    iRC;
     int                    id;
-    int                    i;
     const cci_device_t     **devices;
     cci__dev_t             *dev;
     portals_dev_t          *pdev;
     ptl_handle_eq_t        eqh[2];
-    portals_msg_type_t     type;
-    uint8_t                a;
-    uint16_t               b;
-    uint32_t               c;
+    //portals_msg_type_t     type;
+    //uint8_t                a;
+    //uint16_t               b;
+    //uint32_t               c;
 
     CCI_ENTER;
-    fprintf( stderr, "In portals_events\n" );
+
     if(!pglobals) {
 
         CCI_EXIT;
-        return;
+        return 0;
     }
 
     for( devices=pglobals->devices; *devices!=NULL; devices++ ) {
@@ -2020,8 +2715,8 @@ static int portals_events(
         dev=container_of( devices, cci__dev_t, device );
         pdev=dev->priv;
 
-        eqh[0]=pdev->eqhSend;
-        eqh[1]=pdev->eqhRecv;
+        //eqh[0]=pdev->eqhSend;
+        //eqh[1]=pdev->eqhRecv;
 
         iRC=PtlEQPoll( eqh, 2, 10, event, &id );
         if( iRC==PTL_OK ) {
@@ -2029,49 +2724,37 @@ static int portals_events(
             switch( event->type ) {
 
                 case PTL_EVENT_SEND_START:
-                     fprintf( stderr, "...PTL_EVENT_SEND_START\n" );
+                     fprintf( stderr, "PTL_EVENT_SEND_START\n" );
                      break;;
 
                 case PTL_EVENT_SEND_END:
-                     fprintf( stderr, "...PTL_EVENT_SEND_END\n" );
-                     fprintf( stderr, ".....mlength=%d  rlength=%d\n",
+                     fprintf( stderr, "PTL_EVENT_SEND_END "
+                              " mlength=%lld  rlength=%lld\n",
                               event->mlength, event->rlength );
-                     fprintf( stderr, ".....initiator=(%d,%d)\n",
-                              event->initiator.nid, event->initiator.pid );
                      break;;
 
                 case PTL_EVENT_PUT_START:
-                     fprintf( stderr, "...PTL_EVENT_PUT_START\n" );
+                     fprintf( stderr, "PTL_EVENT_PUT_START\n" );
                      break;;
 
                 case PTL_EVENT_PUT_END:
-                     fprintf( stderr, "...PTL_EVENT_PUT_END\n" );
-                     fprintf( stderr, ".....mlength=%d  rlength=%d\n",
+                     fprintf( stderr, "PTL_EVENT_PUT_END "
+                              " mlength=%lld  rlength=%lld\n",
                               event->mlength, event->rlength );
-                     fprintf( stderr, "......md.length=%d\n",
+                     fprintf( stderr, "md.length=%lld\n",
                               event->md.length );
-                     fprintf( stderr, ".....initiator=(%d,%d)\n",
-                              event->initiator.nid, event->initiator.pid );
-                     fprintf( stderr, ".....match_bits=%lx hdr_data=%lx\n", 
-                              event->match_bits, event->hdr_data );
-                     portals_parse_header( event->md.start, &type,
-                                           &a, &b, &c );
-                     fprintf( stderr,
-                              ".....header: type=%d a=%d b=%d c=%d\n",
-                              type, a, b, c );
+                     //portals_parse_header( event->md.start, &type,
+                                           //&a, &b, &c );
+                     //fprintf( stderr,
+                              //"Got buffer: type=%d a=%d b=%d c=%d\n",
+                              //type, a, b, c );
                      
                      break;;
 
                 case PTL_EVENT_ACK:
-                     fprintf( stderr, "PTL_EVENT_ACK\n" );
-                     fprintf( stderr, ".....mlength=%d rlength=%d\n",
+                     fprintf( stderr, "PTL_EVENT_ACK  mlength=%lld "
+                              " rlength=%lld\n",
                               event->mlength, event->rlength );
-                     fprintf( stderr, ".....md.start=%lx md.length=%d\n",
-                              event->md.start, event->md.length );
-                     fprintf( stderr, ".....md.eq_handle=%d pt_index=%d\n",
-                              event->md.eq_handle, event->pt_index );
-                     fprintf( stderr, ".....initiator=(%d,%d)\n",
-                              event->initiator.nid, event->initiator.pid );
                      break;;
 
                 default:
@@ -2080,7 +2763,5 @@ static int portals_events(
             }
         }
     }
-
-    CCI_EXIT;
     return iRC;
 }
