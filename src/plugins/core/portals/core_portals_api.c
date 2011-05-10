@@ -197,14 +197,6 @@ static int portals_rma(              cci_connection_t     *connection,
 static void *portals_progress_thread(void                 *arg );
 static inline void portals_progress_dev(
                                      cci__dev_t *dev);
-#if 0
-static int portals_sendto(           cci_os_handle_t      portals,
-                                     ptl_handle_eq_t      eqh,
-                                     void                 *buf,
-                                     int                  len,
-                                     const ptl_process_id_t idp,
-                                     const ptl_pt_index_t pt_index );
-#endif
 static int portals_events(           ptl_event_t          *event );
 static void portals_get_event_ep(cci__ep_t *ep);
 static void portals_get_event_lep(cci__lep_t *lep);
@@ -349,65 +341,6 @@ static int portals_init(
         }
     }
 
-#if 0
-    /* Create cq for each endpoint */
-
-/*
- * Step 5.  Create event queues for notifications.  Hint:  OMPI uses
- *          two EQs (sends, default depth 8192; receives default depth
- *          16384).  Note that total must not exceed niLimit.max_eqs
- *          (currently 65534).
- */
-    iRC=PtlEQAlloc( niHandle, PORTALS_EQ_TX_CNT, PTL_EQ_HANDLER_NONE,
-                    &eqhSend );
-    if( iRC!=PTL_OK ) {
-
-        switch(iRC) {
-
-            case PTL_NO_INIT:      /* Portals library issue */
-                 return CCI_ENODEV;;
-
-            case PTL_NI_INVALID:   /* Bad NI Handle */
-                 return CCI_ENODEV;;
-
-            case PTL_NO_SPACE:     /* Well, well, well */
-                 return CCI_ENOMEM;;
-
-            case PTL_SEGV:         /* This one should not happen */
-                 return CCI_EINVAL;;
-
-            default:               /* Undocumented portals error */
-                 return CCI_ERROR;
-        }
-    }
-    fprintf( stderr, "Allocated Send EQ\n" );
-
-    iRC=PtlEQAlloc( niHandle, PORTALS_EQ_RX_CNT, PTL_EQ_HANDLER_NONE,
-                    &eqhRecv );
-    if( iRC!=PTL_OK ) {
-
-        switch(iRC) {
-
-            case PTL_NO_INIT:      /* Portals library issue */
-                 return CCI_ENODEV;;
-
-            case PTL_NI_INVALID:   /* Bad NI Handle */
-                 return CCI_ENODEV;;
-
-            case PTL_NO_SPACE:     /* Well, well, well */
-                 return CCI_ENOMEM;;
-
-            case PTL_SEGV:         /* This one should not happen */
-                 return CCI_EINVAL;;
-
-            default:               /* Undocumented portals error */
-                 return CCI_ERROR;
-        }
-    }
-    fprintf( stderr, "Allocated Recv EQ\n" );
-#endif
-
-
 /*
  * Start searching global configuration for portals devices.
  */
@@ -417,20 +350,12 @@ static int portals_init(
         const char         **arg;
         cci_device_t       *device;
         portals_dev_t      *pdev;
-        //cci__lep_t         *lep;
-        //cci__crq_t         *crq;
 
 /*      Reject until portals driver found in configuration. */
         if(strcmp( "portals", dev->driver )) continue;
 
         TAILQ_INIT(&dev->leps);
-/*
-        TAILQ_FOREACH( lep, &dev->leps, dentry ) {
-            TAILQ_FOREACH( crq, &lep->crqs, entry ) {
-                crq->conn_req=NULL;
-            }
-        }
-*/
+
         iReject=0;                 /* portals configured */
         device=&dev->device;       /* Select device */
 
@@ -455,8 +380,6 @@ static int portals_init(
 
 /*      Save off portals ID of device. */
         pdev->niHandle=niHandle;
-        //pdev->eqhSend=eqhSend;
-        //pdev->eqhRecv=eqhRecv;
         PtlGetId( niHandle, &pdev->idp );
         pdev->max_mes=niLimit.max_mes;
         pdev->max_mds=niLimit.max_mds;
@@ -1143,7 +1066,6 @@ static int portals_bind(
         md.start = pcrq->buffer;
         md.user_ptr = crq;
 
-#if 1
         iRC = PtlMEMDAttach(pdev->niHandle,
                             pdev->table_index,
                             pid_any,
@@ -1155,20 +1077,6 @@ static int portals_bind(
                             PTL_UNLINK,
                             &pcrq->meh,
                             &pcrq->mdh);
-#else
-        iRC=PtlMEAttach( pdev->niHandle, pdev->table_index,
-                         pid_any, bits, ignore,
-                         PTL_UNLINK, PTL_INS_AFTER, &pcrq->meh );
-        if( iRC!=PTL_OK ) {
-
-            debug(CCI_DB_WARN, "PtlMEAttach() returned %s", ptl_err_str[iRC]);
-            // FIXME
-            abort();
-            return CCI_ERROR;
-        }
-
-        iRC=PtlMDAttach( pcrq->meh, md, PTL_UNLINK, &pcrq->mdh );
-#endif
         if( iRC!=PTL_OK ) {
             switch(iRC) {
                 case PTL_NO_INIT:            /* Portals library issue */
@@ -2241,58 +2149,6 @@ static void *portals_progress_thread(
     pthread_exit(NULL);
 }
 
-
-#if 0
-static int portals_sendto(
-    cci_os_handle_t        niHandle,
-    ptl_handle_eq_t        eqhSend,
-    void                   *buf,
-    int                    len,
-    const ptl_process_id_t idp,
-    const ptl_pt_index_t   portals_table ) {
-
-    int                    iRC;
-    ptl_handle_md_t        mdHandle;         /* MD handle */
-    ptl_match_bits_t       bits;
-    ptl_hdr_data_t         hdr;
-    ptl_md_t               *pmd;
-
-/*  First, create the memory descriptor. */
-    pmd=calloc( 1, sizeof(ptl_md_t) );
-    pmd->start=    buf;
-    pmd->length=   len;
-    pmd->max_size= PORTALS_EP_BUF_LEN;
-    pmd->threshold=PTL_MD_THRESH_INF;
-    pmd->user_ptr =NULL;
-    pmd->eq_handle=eqhSend;
-    pmd->options  =PTL_MD_OP_PUT;
-    pmd->options |=PTL_MD_OP_GET;
-    pmd->options |=PTL_MD_EVENT_START_DISABLE;
-//  pmd->options |=PTL_MD_MANAGE_REMOTE;
-
-    iRC=PtlMDBind( niHandle,                 /* Handle to Seastar */
-                   *pmd,                     /* Memory descriptor */
-                   PTL_RETAIN,               /* MD disposition */
-                   &mdHandle );              /* MD Handle (created) */
-    fprintf( stderr, "MDBind=%d\n", iRC );
-
-    iRC=PtlPut(    mdHandle,                 /* Handle to MD */
-                   PTL_ACK_REQ,              /* ACK disposition */
-                   idp,                      /* target port */
-                   portals_table,            /* table entry to use */
-                   0,                        /* access entry to use */
-                   bits,                     /* match bits */
-                   0,                        /* remote offset */
-                   hdr );                    /* hdr_data */
-    fprintf( stderr,
-             "In portals_sendto: (%d,%d) table %d: posted:"
-             " iRC=%d len=%d\n", idp.nid, idp.pid,
-                                 portals_table, iRC, len );
-
-    free(pmd);
-    return iRC;
-}
-#endif
 
 static void portals_handle_conn_request(cci__lep_t *lep, ptl_event_t event)
 {
