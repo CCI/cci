@@ -779,6 +779,13 @@ static int portals_create_endpoint(
         goto out;
     }
 
+    /*  Create the memory descriptor. */
+    md.threshold=PTL_MD_THRESH_INF;
+    md.eq_handle=pep->eqh;
+    md.options  =PTL_MD_OP_PUT;
+    md.options |=PTL_MD_TRUNCATE;
+    md.options |=PTL_MD_EVENT_START_DISABLE;
+
     for( i=0; i<ep->tx_buf_cnt; i++ ) {
 
         portals_tx_t       *tx;
@@ -798,6 +805,17 @@ static int portals_create_endpoint(
             goto out;
         }
         tx->len=0;
+
+        md.user_ptr = tx;
+        md.start = tx->buffer;
+        md.length = ep->buffer_len;
+
+        iRC = PtlMDBind(pdev->niHandle, md, PTL_RETAIN, &tx->mdh);
+        if (iRC) {
+            iRC = CCI_ENODEV;
+            goto out;
+        }
+
         TAILQ_INSERT_TAIL( &pep->txs, tx, tentry );
         TAILQ_INSERT_TAIL( &pep->idle_txs, tx, dentry );
     }
@@ -808,14 +826,8 @@ static int portals_create_endpoint(
     /* and ignore the lower 32 bits */
     ignore = (((ptl_match_bits_t) 1) << PORTALS_EP_SHIFT) - 1;
 
-    /*  Create the memory descriptor. */
     md.max_size= dev->device.max_send_size;
-    md.threshold=PTL_MD_THRESH_INF;
-    md.eq_handle=pep->eqh;
-    md.options  =PTL_MD_OP_PUT;
-    md.options |=PTL_MD_TRUNCATE;
     md.options |=PTL_MD_MAX_SIZE;
-    md.options |=PTL_MD_EVENT_START_DISABLE;
 
 /*  Creating receive buffers/MDs/MEs. */
     am_length = pdev->max_mds * dev->device.max_send_size / 2;
@@ -1362,10 +1374,10 @@ static int portals_accept(
     portals_dev_t   *pdev	= NULL;
     portals_crq_t   *pcrq	= NULL;
     portals_conn_t  *pconn	= NULL;
-    ptl_md_t        md;
-    ptl_handle_md_t mdh;
     portals_conn_accept_t accept;
     uint64_t        bits;
+    int             ac_len  = sizeof(accept);
+    portals_tx_t    *tx     = NULL;
 
     CCI_ENTER;
 
@@ -1411,15 +1423,6 @@ static int portals_accept(
     debug(CCI_DB_CONN, "accept.server_conn_upper = 0x%x", accept.server_conn_upper);
     debug(CCI_DB_CONN, "accept.server_conn_lower = 0x%x", accept.server_conn_lower);
 
-    memset(&md, 0, sizeof(md));
-    md.threshold = 1;
-    md.options = PTL_MD_OP_PUT;
-    md.options |= PTL_MD_EVENT_START_DISABLE;
-    /* disable events */
-    md.eq_handle = PTL_EQ_NONE;
-    md.start = &accept;
-    md.length = sizeof(accept);
-
     /* setup connection */
 
     conn->connection.attribute = crq->conn_req.attribute;
@@ -1440,12 +1443,35 @@ static int portals_accept(
     bits |= ((ptl_match_bits_t) PORTALS_MSG_OOB_CONN_REPLY) << 2;
     bits |= (ptl_match_bits_t) PORTALS_MSG_OOB;
 
-    PtlMDBind(pdev->niHandle, md, PTL_UNLINK, &mdh);
+    /* get a tx */
+    pthread_mutex_lock(&ep->lock);
+    if(!TAILQ_EMPTY(&pep->idle_txs)) {
+        tx=TAILQ_FIRST(&pep->idle_txs);
+        TAILQ_REMOVE( &pep->idle_txs, tx, dentry );
+    }
+    pthread_mutex_unlock(&ep->lock);
+
+    if(!tx) {
+        // FIXME leak
+        CCI_EXIT;
+        return CCI_ENOBUFS;
+    }
+
+    /* prep the tx */
+    tx->msg_type=PORTALS_MSG_OOB;
+    tx->oob_type=PORTALS_MSG_OOB_CONN_REPLY;
+
+    tx->evt.ep=ep;
+    tx->evt.conn=conn;
+    tx->evt.event.type=CCI_EVENT_SEND;
+    memcpy(tx->buffer, &accept, ac_len);
 
     debug(CCI_DB_CONN, "%s: to %d,%d client_id=%d peer_conn=%llx",
           __func__, pconn->idp.nid, pconn->idp.pid, pconn->peer_ep_id,
           (unsigned long long) pconn->peer_conn);
-    ret = PtlPut(mdh,           /* Handle to MD */
+    ret = PtlPutRegion(tx->mdh,           /* Handle to MD */
+                 0,
+                 ac_len,
                  PTL_NOACK_REQ,     /* ACK disposition */
                  pconn->idp,        /* target port */
                  pdev->table_index, /* table entry to use */
@@ -1454,9 +1480,6 @@ static int portals_accept(
                  0,                 /* remote offset */
                  (uintptr_t) pconn->peer_conn); /* hdr_data */
 
-    //FIXME we never unlink this MD
-    //      does it need a threshold of 2 to auto unlink?
-    //      or do we need to enable SEND_END and manually unlink it?
     *connection = &conn->connection;
 
     CCI_EXIT;
@@ -1531,8 +1554,7 @@ static int portals_connect(
     ptl_process_id_t       idp;
     portals_conn_request_t conn_request;
     ptl_match_bits_t       bits = 0ULL;
-    ptl_md_iovec_t         iov[2];
-    ptl_md_t               md;
+    int                    cr_len = sizeof(conn_request);
 
     CCI_ENTER;
 
@@ -1621,42 +1643,22 @@ static int portals_connect(
     conn_request.max_recv_buffer_count = endpoint->max_recv_buffer_count;
     conn_request.client_ep_id = pep->id;
 
-    /* prepare memory descriptor */
-    memset(&md, 0, sizeof(md));
-    md.threshold = 1;
-    md.options = PTL_MD_OP_PUT;
-    md.options |= PTL_MD_EVENT_START_DISABLE; /* we don't care */
-    /* ignore events - we only want the server's accept|reject */
-    md.eq_handle = PTL_EQ_NONE;
-
-    if (data_len) {
-        iov[0].iov_base = &conn_request;
-        iov[0].iov_len = sizeof(conn_request);
-        iov[1].iov_base = data_ptr;
-        iov[1].iov_len = data_len;
-        md.options |= PTL_MD_IOVEC;
-        md.start = iov;
-        md.length = 2;
-    } else {
-        md.start = &conn_request;
-        md.length = sizeof(conn_request);
-    }
-    
-    iRC = PtlMDBind(pdev->niHandle, md, PTL_UNLINK, &tx->mdh);
-    if (iRC)
-        debug(CCI_DB_WARN, "%s: PtlMDBind() returned %s", __func__, ptl_err_str[iRC]);
-    /* FIXME now what? */
+    memcpy(tx->buffer, &conn_request, cr_len);
+    if (data_len)
+        memcpy(tx->buffer + cr_len, data_ptr, data_len);
 
     debug(CCI_DB_CONN, "%s: to %d,%d port %d client_id=%d conn=%p",
           __func__, pconn->idp.nid, pconn->idp.pid, port, pep->id, conn);
-    iRC = PtlPut(tx->mdh,           /* Handle to MD */
-                 PTL_NOACK_REQ,     /* ACK disposition */
-                 pconn->idp,        /* target port */
-                 pdev->table_index, /* table entry to use */
-                 0,                 /* access entry to use */
-                 bits,              /* match bits */
-                 0,                 /* remote offset */
-                 (uintptr_t) conn); /* hdr_data */
+    iRC = PtlPutRegion(tx->mdh,           /* Handle to MD */
+                       0,                 /* offset */
+                       cr_len + data_len, /* payload len */
+                       PTL_NOACK_REQ,     /* ACK disposition */
+                       pconn->idp,        /* target port */
+                       pdev->table_index, /* table entry to use */
+                       0,                 /* access entry to use */
+                       bits,              /* match bits */
+                       0,                 /* remote offset */
+                       (uintptr_t) conn); /* hdr_data */
 
     CCI_EXIT;
     return CCI_SUCCESS;
@@ -1958,7 +1960,6 @@ static int portals_send(
     portals_dev_t          *pdev        = NULL;
     portals_tx_t           *tx          = NULL;
     ptl_md_t               md;
-    ptl_md_iovec_t         iov[2];
     ptl_match_bits_t       bits         = 0ULL;
     ptl_ack_req_t          ack          = PTL_ACK_REQ;
 
@@ -2014,60 +2015,20 @@ static int portals_send(
     tx->evt.event.info.send.context = context;
     tx->evt.event.info.send.status = CCI_SUCCESS; /* for now */
 
-    /* prepare memory descriptor */
-    memset(&md, 0, sizeof(md));
-    md.threshold = 1; /* send end */
-    md.options = PTL_MD_OP_PUT;
-    md.options |= PTL_MD_EVENT_START_DISABLE; /* we don't care */
-    md.eq_handle = pep->eqh;
-    md.user_ptr = tx;
     if (is_reliable) {
         /* we just want the ack */
         md.options |= PTL_MD_EVENT_END_DISABLE;
-        md.threshold++; /* ack */
     } else {
         /* we need to know when we can reuse the tx 
          * leave SEND_END enabled, but suppress the the ack */
         ack = PTL_NOACK_REQ;
     }
 
-    /* if unreliable or ! NO_COPY, copy into tx->buffer */
-    if (!(flags & CCI_FLAG_NO_COPY) || !is_reliable) {
-        if (header_len) {
-            memcpy(tx->buffer, header_ptr, header_len);
-            header_ptr = tx->buffer;
-        }
-        if (data_len) {
-            memcpy(tx->buffer + header_len, data_ptr, data_len);
-            data_ptr = tx->buffer + header_len;
-        }
-    }
-
-    if (header_len && data_len) {
-        iov[0].iov_base = header_ptr;
-        iov[0].iov_len = header_len;
-        iov[1].iov_base = data_ptr;
-        iov[1].iov_len = data_len;
-        md.options |= PTL_MD_IOVEC;
-        md.start = iov;
-        md.length = 2;
-    } else if (header_len && !data_len) {
-        md.start = header_ptr;
-        md.length = header_len;
-    } else if (!header_len && data_len) {
-        md.start = data_ptr;
-        md.length = data_len;
-    } else {
-        /* else no header or data */
-        /* but we need to send 1 byte to ensure it goes */
-        md.start = NULL; //tx->buffer;
-        md.length = 0; //1;
-    }
-
-    ret = PtlMDBind(pdev->niHandle, md, PTL_UNLINK, &tx->mdh);
-    if (ret)
-        debug(CCI_DB_INFO, "%s: PtlMDBind() returned %s", __func__, ptl_err_str[ret]);
-    /* FIXME now what? */
+    /* always copy into tx's attached buffer */
+    if (header_len)
+        memcpy(tx->buffer, header_ptr, header_len);
+    if (data_len)
+        memcpy(tx->buffer + header_len, data_ptr, data_len);
 
     /* pack match bits */
     bits = ((ptl_match_bits_t) pconn->peer_ep_id) << PORTALS_EP_SHIFT;
@@ -2075,19 +2036,20 @@ static int portals_send(
     bits |= ((ptl_match_bits_t) data_len) << 11;
     bits |= (ptl_match_bits_t) PORTALS_MSG_SEND;
 
-    ret = PtlPut(tx->mdh,           /* Handle to MD */
-                 ack,               /* ACK disposition */
-                 pconn->idp,        /* target port */
-                 pdev->table_index, /* table entry to use */
-                 0,                 /* access entry to use */
-                 bits,              /* match bits */
-                 0,                 /* remote offset */
-                 pconn->peer_conn); /* hdr_data */
+    ret = PtlPutRegion(tx->mdh,                 /* Handle to MD */
+                       0,                       /* local offset */
+                       header_len + data_len,   /* length */
+                       ack,                     /* ACK disposition */
+                       pconn->idp,              /* target port */
+                       pdev->table_index,       /* table entry to use */
+                       0,                       /* access entry to use */
+                       bits,                    /* match bits */
+                       0,                       /* remote offset */
+                       pconn->peer_conn);       /* hdr_data */
     debug(CCI_DB_MSG,
              "%s: (%d,%d) table %d: posted:"
-             " ret=%d len=%d\n", __func__, pconn->idp.nid, pconn->idp.pid,
-                                 pdev->table_index, ret, tx->len );
-
+             " ret=%s len=%d\n", __func__, pconn->idp.nid, pconn->idp.pid,
+                                 pdev->table_index, ptl_err_str[ret], tx->len );
     if (flags & CCI_FLAG_BLOCKING && is_reliable) {
         ptl_event_t event;
 
@@ -2590,22 +2552,13 @@ again:
     case PTL_EVENT_SEND_END:
     {
         portals_tx_t *tx = (void *)event.md.user_ptr;
-        cci_connection_t *connection = tx->evt.event.info.send.connection;
-        cci__conn_t  *conn = container_of(connection, cci__conn_t, connection);
 
         /* cleanup tx for connect and UU sends */
         switch (tx->msg_type) {
+        case PORTALS_MSG_OOB:
         case PORTALS_MSG_SEND:
             debug(CCI_DB_MSG, "%s: send_end for SEND", __func__);
-            /* unlink md and queue on idle_txs */
-            if (cci_conn_is_reliable(conn)) {
-                ret = PtlMDUnlink(tx->mdh);
-                if (ret != PTL_OK)
-                    debug(CCI_DB_WARN, "%s: SEND_END's PtlMDUnlink() returned %s (%s)",
-                          __func__, ptl_err_str[ret],
-                          connection->attribute == CCI_CONN_ATTR_UU ? "UU" :
-                          connection->attribute == CCI_CONN_ATTR_RU ? "RU" : "RO");
-            }
+            /* queue on idle_txs */
             pthread_mutex_lock(&ep->lock);
             TAILQ_INSERT_HEAD(&pep->idle_txs, tx, dentry);
             pthread_mutex_unlock(&ep->lock);
@@ -2673,11 +2626,7 @@ again:
         /* a reliable msg completed, generate CCI event */
         switch (tx->msg_type) {
         case PORTALS_MSG_SEND:
-            /* unlink md and queue on ep->evts unless SILENT */
-#if 0
-            ret = PtlMDUnlink(tx->mdh);
-            if (ret != PTL_OK) debug(CCI_DB_WARN, "%s: ack's PtlMDUnlink() returned %s", __func__, ptl_err_str[ret]);
-#endif
+            /* queue on ep->evts unless SILENT */
             if (tx->flags & CCI_FLAG_SILENT) {
                 pthread_mutex_lock(&ep->lock);
                 TAILQ_INSERT_HEAD(&pep->idle_txs, tx, dentry);
