@@ -732,7 +732,7 @@ static int portals_create_endpoint(
         goto out;
     }
 
-    (*endpoint)->max_recv_buffer_count=pdev->max_mds;
+    (*endpoint)->max_recv_buffer_count=PORTALS_EP_RX_CNT;
     ep->max_hdr_size=PORTALS_EP_MAX_HDR_SIZE;
     ep->rx_buf_cnt=PORTALS_EP_RX_CNT;
     ep->tx_buf_cnt=PORTALS_EP_TX_CNT;
@@ -755,7 +755,7 @@ static int portals_create_endpoint(
 
     /* create event queue for endpoint */
     iRC=PtlEQAlloc( pdev->niHandle,
-                    (PORTALS_EP_RX_CNT + PORTALS_EP_TX_CNT) * 8,
+                    PORTALS_EP_RX_CNT + PORTALS_EP_TX_CNT,
                     PTL_EQ_HANDLER_NONE,
                     &(pep->eqh) );
     if( iRC!=PTL_OK ) {
