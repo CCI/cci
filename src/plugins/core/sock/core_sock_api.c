@@ -28,7 +28,7 @@
 #include "plugins/core/core.h"
 #include "core_sock.h"
 
-volatile int shut_down = 0;
+volatile int sock_shut_down = 0;
 volatile sock_globals_t *sglobals = NULL;
 pthread_t progress_tid, recv_tid;
 
@@ -381,7 +381,7 @@ static int sock_free_devices(cci_device_t const **devices)
 
     /* let the progress thread know we are going away */
     pthread_mutex_lock(&globals->lock);
-    shut_down = 1;
+    sock_shut_down = 1;
     pthread_mutex_unlock(&globals->lock);
     pthread_join(progress_tid, NULL);
     pthread_join(recv_tid, NULL);
@@ -3994,7 +3994,7 @@ static void *sock_progress_thread(void *arg)
     struct timeval tv = { 0, SOCK_PROG_TIME_US };
 
     pthread_mutex_lock(&globals->lock);
-    while (!shut_down) {
+    while (!sock_shut_down) {
         cci__dev_t *dev;
         cci_device_t const **device;
 
@@ -4026,7 +4026,7 @@ static void *sock_recv_thread(void *arg)
     fd_set      fds;
 
     pthread_mutex_lock(&globals->lock);
-    while (!shut_down) {
+    while (!sock_shut_down) {
         found = 0;
         nfds = sglobals->nfds;
         FD_ZERO(&fds);
