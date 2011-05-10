@@ -26,6 +26,9 @@ int cci_plugins_init(void)
         return CCI_SUCCESS;
     }
 
+    /* Initialise preloaded symbol lookup table. */
+    //LTDL_SET_PRELOADED_SYMBOLS(); /* uncomment to build static binaries */
+
     if (0 != lt_dlinit()) {
         fprintf(stderr, "Failed to initialize libltdl: %s\n", lt_dlerror());
         return CCI_ERROR;
