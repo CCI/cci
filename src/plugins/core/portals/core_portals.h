@@ -51,6 +51,33 @@ static inline uint64_t portals_get_usecs(void) {
     return portals_tv_to_usecs(tv);
 }
 
+#if 0
+static inline uint64_t portals_get_nsecs(void) {
+    struct timespec ts;
+
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+    return (ts.tv_sec * 1000000000) + ts.tv_nsec;
+}
+#else
+static inline uint64_t rdtsc(void)
+{
+    uint32_t lo, hi;
+    __asm__ __volatile__ (      // serialize
+            "xorl %%eax,%%eax \n        cpuid"
+            ::: "%rax", "%rbx", "%rcx", "%rdx");
+    /* We cannot use "=A", since this would use %rax on x86_64
+       and return only the lower 32bits of the TSC */
+    __asm__ __volatile__ ("rdtsc" : "=a" (lo), "=d" (hi));
+    return (uint64_t)hi << 32 | lo;
+}
+
+static inline uint64_t portals_get_nsecs(void)
+{
+    return (uint64_t)((double)rdtsc() / 2.6);
+}
+#endif
+
+
 /* Limit of 4 message types to ensure that we only use 2 bits for msg type */
 typedef enum portals_msg_type {
     PORTALS_MSG_SEND,

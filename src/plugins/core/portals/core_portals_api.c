@@ -13,9 +13,92 @@
 #include "plugins/core/core.h"
 #include "core_portals.h"
 
-volatile int shut_down = 0;
+volatile int portals_shut_down = 0;
 portals_globals_t *pglobals=NULL;
 pthread_t progress_tid;
+
+/******* cycle counting sampling code ****/
+#define ENABLE_PORTALS_SAMPLING 0
+#if ENABLE_PORTALS_SAMPLING
+#define PORTALS_NUM_SAMPLES (1000)
+uint64_t *portals_start_ns;
+uint64_t *portals_end_ns;
+static int portals_num_samples = PORTALS_NUM_SAMPLES;
+static int portals_sample = 0;
+#define PORTALS_SAMPLE_START                                    \
+do {                                                            \
+    if (!portals_start_ns)                                      \
+        break;                                                  \
+    if (portals_sample < portals_num_samples)                   \
+        portals_start_ns[portals_sample] = portals_get_nsecs(); \
+} while(0)
+
+#define PORTALS_SAMPLE_END                                      \
+do {                                                            \
+    if (!portals_end_ns)                                        \
+        break;                                                  \
+    if (portals_sample < portals_num_samples)                   \
+        portals_end_ns[portals_sample++] = portals_get_nsecs(); \
+} while(0)
+int portals_debug_is_server = 0;
+#define PORTALS_IS_SERVER           \
+do {                                \
+    portals_debug_is_server = 1;    \
+} while (0)
+
+static inline void portals_sample_init(void)
+{
+    int i;
+
+    portals_start_ns = calloc(PORTALS_NUM_SAMPLES, sizeof(*portals_start_ns));
+    portals_end_ns = calloc(PORTALS_NUM_SAMPLES, sizeof(*portals_end_ns));
+    if (!portals_start_ns || !portals_end_ns) {
+        if (portals_start_ns)
+            free(portals_start_ns);
+        else
+            free(portals_end_ns);
+        portals_num_samples = 0;
+        return;
+    }
+    for (i = 0; i < PORTALS_NUM_SAMPLES; i++) {
+        portals_start_ns[i] = 0;
+        portals_end_ns[i] = 0;
+    }
+    portals_sample = 0;
+}
+#define PORTALS_SAMPLE_INIT     \
+do {                            \
+    portals_sample_init();      \
+} while (0)
+
+#define PORTALS_SAMPLE_FREE     \
+do {                            \
+    if (portals_start_ns)       \
+        free(portals_start_ns); \
+    if (portals_end_ns)         \
+        free(portals_end_ns);   \
+} while (0)
+
+#define PORTALS_SAMPLE_PRINT                                \
+do {                                                        \
+    int i;                                                  \
+    for (i = 0; i < PORTALS_NUM_SAMPLES; i++) {             \
+        debug(CCI_DB_WARN, "%4d %6lld",                     \
+              i, (unsigned long long) (portals_end_ns[i] - portals_start_ns[i])); \
+    }                                                       \
+} while (0)
+
+#else /* ENABLE_PORTALS_SAMPLING == 1 */
+#define PORTALS_SAMPLE_INIT
+#define PORTALS_SAMPLE_START
+#define PORTALS_SAMPLE_END
+#define PORTALS_SAMPLE_PRINT
+#define PORTALS_SAMPLE_FREE
+#define PORTALS_IS_SERVER
+#endif /* ENABLE_PORTALS_SAMPLING == 1 */
+/******* end cycle counting sampling code ****/
+
+
 
 extern const char *ptl_err_str[];
 extern const char *ptl_event_str[];
@@ -203,6 +286,8 @@ static int portals_init(
     //ptl_handle_eq_t        eqhRecv;
 
     CCI_ENTER;
+
+    PORTALS_SAMPLE_INIT;
 
 /*
  * Step 1.  Extract portals devices from global configuration.
@@ -548,6 +633,9 @@ static int portals_free_devices(cci_device_t const **devices )
 
     free(pglobals->devices);
     free((void *)pglobals);
+
+    PORTALS_SAMPLE_PRINT;
+    PORTALS_SAMPLE_FREE;
 
     CCI_EXIT;
     return CCI_SUCCESS;
@@ -1095,7 +1183,8 @@ static int portals_bind(
 
     lep->priv=plep;
 
-    fprintf( stdout, "Successfully bound portals\n" );
+    PORTALS_IS_SERVER;  /* allows sampling for server vs client */
+
     CCI_EXIT;
     return CCI_SUCCESS;
 
