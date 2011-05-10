@@ -26,7 +26,6 @@
 int connect_done = 0, done = 0;
 int ready = 0;
 int is_server = 0;
-int send = 0, recv = 0;
 int warmup = 0;
 int count = 0;
 char *name;
@@ -73,14 +72,12 @@ again:
         assert(event);
         switch (event->type) {
         case CCI_EVENT_SEND:
-            send--;
             break;
         case CCI_EVENT_RECV:
         {
             if (!ready) {
                 ready = 1;
             } else {
-                recv--;
                 if (!is_server) {
                     if (event->info.recv.data_len == current_size) {
                         if (warmup < WARMUP)
@@ -94,8 +91,6 @@ again:
                 }
                 if (is_server ||
                     count < ITERS) {
-                    send++;
-                    recv++;
                     if (is_server && event->info.recv.header_len == 3) {
                         done = 1;
                         return;
@@ -174,8 +169,6 @@ do_client()
          current_size <= connection->max_send_size;
         ) {
 
-        send++;
-        recv++;
         ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, opts.flags);
         if (ret) fprintf(stderr, "send returned %d\n", ret);
 
