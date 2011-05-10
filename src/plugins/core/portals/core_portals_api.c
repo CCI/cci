@@ -1326,39 +1326,8 @@ static int portals_get_conn_req(
         }
         pthread_mutex_unlock(&lep->lock);
     }
-    //sleep(2);
-    //fprintf( stderr, "Exit portals_get_conn_req\n" );
     return iRC;
 }
-
-
-#if 0
-static void portals_get_conn_id(
-    portals_ep_t           *ep,
-    uint32_t               *id ) {
-
-    uint32_t               n;
-    uint32_t               block;
-    uint32_t               offset;
-    uint64_t               *b;
-
-    while (1) {
-
-        n=random()%PORTALS_NUM_BLOCKS;
-        block=n/PORTALS_BLOCK_SIZE;
-        offset=n%PORTALS_BLOCK_SIZE;
-        b=&ep->conn_ids[block];
-
-        if( (*b & (1ULL<<offset))==0 ) {
-
-            *b|=(1ULL<<offset);
-            *id=(block*PORTALS_BLOCK_SIZE)+offset;
-            break;
-        }
-    }
-    return;
-}
-#endif
 
 static int portals_accept(
     cci_conn_req_t         *conn_req, 
@@ -2518,6 +2487,8 @@ static void portals_get_event_ep(cci__ep_t *ep)
     portals_ep_t    *pep    = ep->priv;
     ptl_event_t     event;
 
+    CCI_ENTER;
+
     pthread_mutex_lock(&ep->lock);
     if (ep->closing) {
         pthread_mutex_unlock(&ep->lock);
@@ -2576,7 +2547,6 @@ again:
         break;
     case PTL_EVENT_PUT_END:
       {
-        //portals_rx_t        *rx = event.md.user_ptr;
         portals_msg_type_t  type;
         uint64_t            a;
 
