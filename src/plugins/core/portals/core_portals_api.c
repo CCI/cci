@@ -616,7 +616,7 @@ static int portals_free_devices(cci_device_t const **devices )
     }
 
     pthread_mutex_lock(&globals->lock);
-    shut_down = 1;
+    portals_shut_down = 1;
     pthread_mutex_unlock(&globals->lock);
     pthread_join(progress_tid, NULL);
 
@@ -2294,7 +2294,7 @@ static inline void portals_progress_dev(
 static void *portals_progress_thread(
     void                   *arg ) {
 
-    while(!shut_down) {
+    while(!portals_shut_down) {
 
         cci__dev_t          *dev;
         cci_device_t const  **device;
