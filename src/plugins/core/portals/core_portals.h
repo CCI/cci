@@ -132,11 +132,13 @@ static inline void portals_parse_match_bits(
 
    Matchbits:
     <---------------------------- 64 bits --------------------------->
-    <----------- 32b -------------->  5b  <---- 16b ----> <-- 9b -> 2b
-   +--------------------------------+----+---------------+---------+--+
-   |      receiver endpoint id      |hlen|   data len    | reservd |T |
-   +--------------------------------+----+---------------+---------+--+
+    <----------- 32b -------------->  5b  <---- 16b ----> <- 8b -> 1 2b
+   +--------------------------------+----+---------------+--------+-+--+
+   |      receiver endpoint id      |hlen|   data len    | reservd|R|T |
+   +--------------------------------+----+---------------+--------+-+--+
    where T is PORTALS_MSG_SEND
+
+   R is 0 for UU and 1 for RO/RU
 
    hdr_data is the receiver's conn opaque handle
 
@@ -151,7 +153,7 @@ static inline void portals_parse_match_bits(
    +--------------------------------------------------------------+--+
    where T is PORTALS_MSG_RMA_WRITE
 
-   hdr_data is NULL
+   hdr_data is the rma_op
 
  */
 
@@ -164,7 +166,7 @@ static inline void portals_parse_match_bits(
    +--------------------------------------------------------------+--+
    where T is PORTALS_MSG_RMA_READ
 
-   hdr_data is NULL
+   hdr_data is the rma_op
 
  */
 
@@ -309,6 +311,72 @@ typedef struct portals_globals {
 }   portals_globals_t;
 extern portals_globals_t   *pglobals;
 
+
+typedef struct portals_rma_handle {
+    /*! Owning endpoint */
+    cci__ep_t *ep;
+
+    /*! Owning connection, if any */
+    cci__conn_t *conn;
+
+    /*! Registered length */
+    uint64_t length;
+
+    /*! Application memory */
+    void *start;
+
+    /* Entry for hanging on ep->handles */
+    TAILQ_ENTRY(portals_rma_handle) entry;
+
+    /*! Reference count */
+    uint32_t refcnt;
+
+    ptl_handle_me_t meh;
+    ptl_handle_md_t mdh;
+} portals_rma_handle_t;
+
+typedef struct portals_rma_op {
+    cci__evt_t evt;
+
+    /*! Entry to hang on pep->rma_ops */
+    TAILQ_ENTRY(portals_rma_op) entry;
+
+    /*! Entry to hang on pconn->rmas */
+    TAILQ_ENTRY(portals_rma_op) rmas;
+
+    uint64_t local_handle;
+    uint64_t local_offset;
+    uint64_t remote_handle;
+    uint64_t remote_offset;
+
+    uint64_t data_len;
+
+    /*! RMA id for ordering in case of fence */
+    uint32_t id;
+
+    /*! Number of messages completed */
+    uint32_t completed;
+
+    /*! Status of the RMA op */
+    cci_status_t status;
+
+    /*! Application context */
+    void *context;
+
+    /*! Flags */
+    int flags;
+
+    /*! Pointer to tx for remote completion if needed */
+    portals_tx_t *tx;
+
+    /*! Application header len */
+    uint8_t header_len;
+
+    /*! Application header if provided */
+    char header[32];
+} portals_rma_op_t;
+
+
 typedef struct portals_ep {
     uint32_t                        id;         /* id for endpoint multiplexing */
     ptl_handle_eq_t                 eqh;        /* eventq handle */
@@ -319,6 +387,8 @@ typedef struct portals_ep {
     TAILQ_HEAD(p_rxs, portals_rx)   rxs;        /* List of all rxs */
     TAILQ_HEAD(p_rxsi, portals_rx)  idle_rxs;   /* List of all rxs */
     TAILQ_HEAD(p_conns, portals_conn) conns;    /* List of all conns for cleanup */
+    TAILQ_HEAD(p_handles, portals_rma_handle) handles; /* List of all registered RMA regions */
+    TAILQ_HEAD(s_ops, portals_rma_op) rma_ops;
 }   portals_ep_t;
 
 typedef struct portals_lep {
@@ -358,6 +428,8 @@ typedef struct portals_conn {
     uint32_t                mss;            /* max_segment_size for this conn */
     portals_tx_t            *tx;            /* for conn request */
     TAILQ_ENTRY(portals_conn) entry;        /* Hangs on pep->conns */
+    uint32_t                rma_id;
+    TAILQ_HEAD(s_rmas, portals_rma_op) rmas;
 }   portals_conn_t;
 
 int cci_core_portals_post_load(cci_plugin_t *me);
