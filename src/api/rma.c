@@ -28,6 +28,12 @@ int cci_rma(cci_connection_t *connection,
     if (NULL == connection ||
         (NULL == header_ptr && header_len > 0) ||
         0 == data_len) {
+        if (NULL == connection)
+            debug(CCI_DB_INFO, "%s: NULL connection", __func__);
+        if (NULL == header_ptr && header_len > 0)
+            debug(CCI_DB_INFO, "%s: NULL header_ptr and non-0 header_len", __func__);
+        if (data_len == 0)
+            debug(CCI_DB_INFO, "%s: data_len is 0", __func__);
         return CCI_EINVAL;
     }
 
