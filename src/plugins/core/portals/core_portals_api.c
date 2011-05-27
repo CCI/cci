@@ -2065,7 +2065,7 @@ static int portals_rma_register(
     md.options  |= PTL_MD_OP_GET;
     md.options  |= PTL_MD_TRUNCATE;
     md.options  |= PTL_MD_EVENT_START_DISABLE;
-    md.options  |= PTL_MD_EVENT_END_DISABLE;    /* we only want the ACK */
+    //md.options  |= PTL_MD_EVENT_END_DISABLE;    /* we only want the ACK */
     md.options  |= PTL_MD_MANAGE_REMOTE;
     md.user_ptr  = handle;
 
@@ -2268,7 +2268,11 @@ static int portals_rma(cci_connection_t *connection,
     if (header_len)
         memcpy(rma_op->header, header_ptr, header_len);
 
+    pthread_mutex_lock(&ep->lock);
     TAILQ_INSERT_TAIL(&local->rma_ops, rma_op, hentry);
+    TAILQ_INSERT_TAIL(&pconn->rmas, rma_op, rmas);
+    TAILQ_INSERT_TAIL(&pep->rma_ops, rma_op, entry);
+    pthread_mutex_unlock(&ep->lock);
 
     if (flags & CCI_FLAG_WRITE) {
         ret = PtlPutRegion(local->mdh,              /* Handle to MD */
@@ -2291,19 +2295,39 @@ static int portals_rma(cci_connection_t *connection,
             ret = CCI_ERROR;
             goto out;
         }
-
     } else if (flags & CCI_FLAG_READ) {
-        goto out;
+        ret = PtlGetRegion(local->mdh,              /* Handle to MD */
+                           local_offset,            /* local offset */
+                           data_len,                /* length */
+                           pconn->idp,              /* target port */
+                           pdev->table_index,       /* table entry to use */
+                           0,                       /* access entry to use */
+                           remote_handle | PORTALS_MSG_RMA_READ, /* match bits */
+                           remote_offset);          /* remote offset */
+        debug(CCI_DB_MSG, "%s: RMA READ bits=0x%"PRIx64" offset=%"PRIu64
+                          " returned=%s len=%"PRIu64"", __func__,
+                          remote_handle | PORTALS_MSG_RMA_READ,
+                          remote_offset, ptl_err_str[ret], data_len);
+        if (ret == PTL_OK) {
+            ret = CCI_SUCCESS;
+        } else {
+            ret = CCI_ERROR;
+            goto out;
+        }
     }
-
-    pthread_mutex_lock(&ep->lock);
-    TAILQ_INSERT_TAIL(&pconn->rmas, rma_op, rmas);
-    TAILQ_INSERT_TAIL(&pep->rma_ops, rma_op, entry);
-    pthread_mutex_unlock(&ep->lock);
 
     /* TODO handle flags & BLOCKING */
 
 out:
+    if (ret != CCI_SUCCESS) {
+        pthread_mutex_lock(&ep->lock);
+        TAILQ_REMOVE(&local->rma_ops, rma_op, hentry);
+        TAILQ_REMOVE(&pconn->rmas, rma_op, rmas);
+        TAILQ_REMOVE(&pep->rma_ops, rma_op, entry);
+        pthread_mutex_unlock(&ep->lock);
+        free(rma_op);
+    }
+
     CCI_EXIT;
     return ret;
 }
@@ -2733,7 +2757,57 @@ again:
     case PTL_EVENT_REPLY_START:
         break;
     case PTL_EVENT_REPLY_END:
+    {
+        portals_msg_type_t msg_type = (portals_msg_type_t) (event.match_bits & 0x3);
+        //portals_tx_t *tx = NULL;
+        portals_rma_handle_t *handle = NULL;
+        portals_rma_op_t *rma_op = NULL, *ro = NULL, *tmp = NULL;
+
+        assert(msg_type == PORTALS_MSG_RMA_READ);
+
+        handle = event.md.user_ptr;
+        TAILQ_FOREACH_SAFE(ro, &handle->rma_ops, hentry, tmp) {
+            portals_conn_t *pconn = ro->evt.conn->priv;
+            if (event.match_bits == (ro->remote_handle | PORTALS_MSG_RMA_READ) &&
+                event.initiator.nid == pconn->idp.nid &&
+                event.initiator.pid == pconn->idp.pid &&
+                event.rlength == ro->data_len &&
+                event.offset == ro->remote_offset) {
+
+                TAILQ_REMOVE(&handle->rma_ops, ro, hentry);
+                rma_op = ro;
+                break;
+            }
+        }
+        if (!rma_op) {
+            /* FIXME do what now? */
+        }
+
+        if (rma_op->header_len) {
+            /* send remote completion msg */
+            /* TODO */
+        } else {
+            if (rma_op->flags & CCI_FLAG_SILENT) {
+                portals_conn_t *pconn = rma_op->evt.conn->priv;
+                portals_rma_handle_t *local = (void *)rma_op->local_handle;
+
+                /* we are done, cleanup */
+                pthread_mutex_lock(&ep->lock);
+                local->refcnt--;
+                /* FIXME check for refcnt == 0 */
+                TAILQ_REMOVE(&pep->rma_ops, rma_op, entry);
+                TAILQ_REMOVE(&pconn->rmas, rma_op, rmas);
+                pthread_mutex_unlock(&ep->lock);
+                free(rma_op);
+            } else {
+                /* we are done, issue completion */
+                pthread_mutex_lock(&ep->lock);
+                TAILQ_INSERT_HEAD(&ep->evts, &rma_op->evt, entry);
+                pthread_mutex_unlock(&ep->lock);
+            }
+        }
         break;
+    }
     case PTL_EVENT_ACK:
     {
         portals_msg_type_t msg_type = (portals_msg_type_t) (event.match_bits & 0x3);
@@ -2777,6 +2851,10 @@ again:
                     rma_op = ro;
                     break;
                 }
+            }
+
+            if (!rma_op) {
+                /* FIXME do what now? */
             }
 
             if (rma_op->header_len) {
