@@ -153,7 +153,7 @@ static inline void portals_parse_match_bits(
    +--------------------------------------------------------------+--+
    where T is PORTALS_MSG_RMA_WRITE
 
-   hdr_data is the rma_op
+   hdr_data is unused
 
  */
 
@@ -166,7 +166,7 @@ static inline void portals_parse_match_bits(
    +--------------------------------------------------------------+--+
    where T is PORTALS_MSG_RMA_READ
 
-   hdr_data is the rma_op
+   hdr_data is unused
 
  */
 
@@ -333,6 +333,7 @@ typedef struct portals_rma_handle {
 
     ptl_handle_me_t meh;
     ptl_handle_md_t mdh;
+    TAILQ_HEAD(s_rma_ops, portals_rma_op) rma_ops;        /* List of all rma_ops */
 } portals_rma_handle_t;
 
 typedef struct portals_rma_op {
@@ -340,6 +341,9 @@ typedef struct portals_rma_op {
 
     /*! Entry to hang on pep->rma_ops */
     TAILQ_ENTRY(portals_rma_op) entry;
+
+    /*! Entry to hang on handle->rma_ops */
+    TAILQ_ENTRY(portals_rma_op) hentry;
 
     /*! Entry to hang on pconn->rmas */
     TAILQ_ENTRY(portals_rma_op) rmas;
