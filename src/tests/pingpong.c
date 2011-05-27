@@ -13,21 +13,24 @@
 #include <strings.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <inttypes.h>
 #include <assert.h>
 #include <sys/time.h>
 
 #include "cci.h"
 
 #define DFLT_PORT   54321
-#define ITERS       100000
-#define WARMUP      1000
+#define ITERS       (128 * 1024)
+#define WARMUP      (1024)
+#define MAX_RMA_SIZE    (4 * 1024 * 1024)
 
 /* Globals */
 int connect_done = 0, done = 0;
 int ready = 0;
 int is_server = 0;
-int warmup = 0;
 int count = 0;
+int iters = ITERS;
+int warmup = WARMUP;
 char *name;
 char *server_uri;
 char *buffer;
@@ -37,27 +40,50 @@ cci_device_t **devices = NULL;
 cci_endpoint_t *endpoint = NULL;
 cci_connection_t *connection = NULL;
 cci_conn_attribute_t attr = CCI_CONN_ATTR_UU;
+uint64_t local_rma_handle = 0ULL;
 
 typedef struct options {
-    int flags;
+    uint64_t    server_rma_handle;
+    uint32_t    max_rma_size;
+#define AM        0
+#define RMA_WRITE 1
+#define RMA_READ  2
+    uint32_t    method;
+    int         flags;
+    int         pad;
 } options_t;
 
-options_t opts = { 0 };
+options_t opts = { 0ULL, 0, 0, 0 };
 
 void
 print_usage()
 {
-    fprintf(stderr, "usage: %s -h <server_uri> [-p <port>] [-s] [-c <type>] [-n]\n", name);
+    fprintf(stderr, "usage: %s -h <server_uri> [-p <port>] [-s] [-c <type>] [-n] "
+                    "[-w] [-r] [-m <max_rma_size>\n", name);
     fprintf(stderr, "where:\n");
     fprintf(stderr, "\t-h\tServer's URI\n");
     fprintf(stderr, "\t-p\tPort of the server's connection service (default %d)\n", DFLT_PORT);
     fprintf(stderr, "\t-s\tSet to run as the server\n");
     fprintf(stderr, "\t-c\tConnection type (UU, RU, or RO) set by client only\n");
-    fprintf(stderr, "\t-n\tSet CCI_FLAG_NO_COPY ito avoid copying\n\n");
+    fprintf(stderr, "\t-n\tSet CCI_FLAG_NO_COPY ito avoid copying\n");
+    fprintf(stderr, "\t-w\tUse RMA WRITE instead of active messages\n");
+    fprintf(stderr, "\t-r\tUse RMA READ instead of active messages\n");
+    fprintf(stderr, "\t-m\tTest RMA messages up to max_rma_size\n\n");
     fprintf(stderr, "Example:\n");
     fprintf(stderr, "server$ %s -h ip://foo -p 2211 -s\n", name);
     fprintf(stderr, "client$ %s -h ip://foo -p 2211\n", name);
     exit(EXIT_FAILURE);
+}
+
+void
+check_return(char *func, int ret, int need_exit)
+{
+    if (ret) {
+        fprintf(stderr, "%s() returned %s\n", func, cci_strerror(ret));
+        if (need_exit)
+            exit(EXIT_FAILURE);
+    }
+    return;
 }
 
 static void
@@ -66,60 +92,70 @@ poll_events(void)
     int ret;
     cci_event_t *event;
 
-again:
     ret = cci_get_event(endpoint, &event, 0);
     if (ret == CCI_SUCCESS) {
         assert(event);
         switch (event->type) {
         case CCI_EVENT_SEND:
+            if (opts.method != AM) {
+                if (!is_server && event->info.send.context == (void*)1) {
+                    count++;
+                    if (count < warmup + iters) {
+                        ret = cci_rma(connection, NULL, 0,
+                                      local_rma_handle, 0,
+                                      opts.server_rma_handle, 0,
+                                      current_size, (void*)1, opts.flags);
+                        check_return("cci_rma", ret, 1);
+                    }
+                }
+            }
             break;
         case CCI_EVENT_RECV:
         {
             if (!ready) {
                 ready = 1;
-            } else {
-                if (!is_server) {
-                    if (event->info.recv.data_len == current_size) {
-                        if (warmup < WARMUP)
-                            warmup++;
-                        else
-                            count++;
-                    }
-                } else {
-                    if (event->info.recv.data_len > current_size)
-                        current_size = event->info.recv.data_len;
+                if (opts.method != AM) {
+                    /* get server_rma_handle */
+                    opts = *((options_t *)event->info.recv.header_ptr);
+                    fprintf(stderr, "server RMA handle is 0x%"PRIx64"\n",
+                                    opts.server_rma_handle);
                 }
-                if (is_server ||
-                    count < ITERS) {
-                    if (is_server && event->info.recv.header_len == 3) {
+            } else {
+                if (is_server) {
+                    if (event->info.recv.data_len > current_size) {
+                        current_size = event->info.recv.data_len;
+                    } else if (event->info.recv.header_len == 3) {
                         done = 1;
                         return;
                     }
+                } else {
+                    if (event->info.recv.data_len == current_size)
+                        count++;
+                }
+                if (is_server ||
+                    count < warmup + iters) {
                     ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, opts.flags);
-                    if (ret && 0)
+                    if (ret)
                         fprintf(stderr, "%s: send returned %s\n", __func__, cci_strerror(ret));
                 }
             }
             break;
         }
         case CCI_EVENT_CONNECT_SUCCESS:
-            if (!is_server) {
-                connect_done = 1;
-                connection = event->info.other.u.connect.connection;
-            }
-            break;
         case CCI_EVENT_CONNECT_TIMEOUT:
         case CCI_EVENT_CONNECT_REJECTED:
             if (!is_server) {
                 connect_done = 1;
-                connection = NULL;
+                if (event->type == CCI_EVENT_CONNECT_SUCCESS)
+                    connection = event->info.other.u.connect.connection;
+                else
+                    connection = NULL;
             }
             break;
         default:
             fprintf(stderr, "ignoring event type %d\n", event->type);
         }
         cci_return_event(endpoint, event);
-        goto again;
     }
     return;
 }
@@ -135,14 +171,13 @@ void
 do_client()
 {
     int ret;
+    uint32_t min = 0, max;
     struct timeval start, end;
+    char *func;
 
 	/* initiate connect */
 	ret = cci_connect(endpoint, server_uri, port, &opts, sizeof(opts), attr, NULL, 0, NULL);
-    if (ret) {
-        fprintf(stderr, "cci_connect() returned %d\n", ret);
-        return;
-    }
+    check_return("cci_connect", ret, 1);
 
 	/* poll for connect completion */
 	while (!connect_done)
@@ -153,48 +188,87 @@ do_client()
         return;
     }
 
-    buffer = calloc(1, connection->max_send_size);
-    if (!buffer) {
-        fprintf(stderr, "unable to alloc buffer\n");
-        return;
-    }
-
     while (!ready)
         poll_events();
 
-    printf("Bytes\tLatency (one-way)\tThroughput\n");
+    if (opts.method == AM) {
+        func = "cci_send";
+        max = connection->max_send_size;
+    } else {
+        func = "cci_rma";
+        max = opts.max_rma_size;
+    }
+
+    buffer = calloc(1, max);
+    if (!buffer)
+        check_return("calloc", CCI_ENOMEM, 1);
+
+    if (opts.method != AM) {
+        ret = cci_rma_register(endpoint, connection, buffer,
+                               max, &local_rma_handle);
+        check_return("cci_rma_register", ret, 1);
+        fprintf(stderr, "local_rma_handle is 0x%"PRIx64"\n", local_rma_handle);
+        min = 1;
+        if (opts.method == RMA_WRITE)
+            opts.flags |= CCI_FLAG_WRITE;
+        else
+            opts.flags |= CCI_FLAG_READ;
+    }
+
+    if (opts.method == AM)
+        printf("Bytes\tLatency (one-way)\tThroughput\n");
+    else
+        printf("Bytes\t\tLatency (round-trip)\tThroughput\n");
 
 	/* begin communication with server */
-    for (current_size = 0;
-         current_size <= connection->max_send_size;
-        ) {
+    for (current_size = min; current_size <= max; ) {
 
-        ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, opts.flags);
-        if (ret) fprintf(stderr, "send returned %d\n", ret);
+        if (opts.method == AM)
+            ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, opts.flags);
+        else
+            ret = cci_rma(connection, NULL, 0,
+                          local_rma_handle, 0,
+                          opts.server_rma_handle, 0,
+                          current_size, (void*)1, opts.flags);
+        check_return(func, ret, 1);
 
-        while (count < WARMUP)
+        while (count < warmup)
             poll_events();
 
         gettimeofday(&start, NULL);
 
-        while (count < ITERS)
+        while (count < warmup + iters)
             poll_events();
 
         gettimeofday(&end, NULL);
 
-        printf("%4d\t%6.2lf us\t\t%6.2lf Mb/s\n",
-               current_size, usecs(start, end) / (double) ITERS / 2.0,
-               (double) ITERS * (double) current_size * 8.0 / usecs(start, end) / 2.0);
+        if (opts.method == AM)
+            printf("%4d\t%6.2lf us\t\t%6.2lf Mb/s\n",
+                   current_size, usecs(start, end) / (double) iters / 2.0,
+                   (double) iters * (double) current_size * 8.0 / usecs(start, end) / 2.0);
+        else
+            printf("%8d\t%8.2lf us\t\t%8.2lf Mb/s\n",
+                   current_size, usecs(start, end) / (double) iters,
+                   (double) iters * (double) current_size * 8.0 / usecs(start, end));
 
         count = 0;
-        warmup = 0;
 
         if (current_size == 0)
             current_size++;
         else
             current_size *= 2;
+
+        if (current_size >= 64*1024) {
+            iters /= 2;
+            if (iters < 16)
+                iters = 16;
+            warmup /= 2;
+            if (warmup < 2)
+                warmup = 2;
+        }
     }
-    cci_send(connection, "bye", 3, NULL, 0, NULL, opts.flags);
+    ret = cci_send(connection, "bye", 3, NULL, 0, NULL, opts.flags);
+    check_return("cci_send", ret, 0);
 
     return;
 }
@@ -208,10 +282,7 @@ do_server()
 
     /* we don't associate the endpoint with the service? */
     ret = cci_bind(devices[0], 10, &port, &service, &bind_fd);
-    if (ret) {
-        fprintf(stderr, "cci_bind() failed with %s\n", cci_strerror(ret));
-        exit(EXIT_FAILURE);
-    }
+    check_return("cci_bind", ret, 1);
 
     while (!accept) {
         cci_conn_req_t *conn_req;
@@ -221,14 +292,25 @@ do_server()
             accept = 1;
             ready = 1;
             opts = *((options_t *)conn_req->data_ptr);
-            cci_accept(conn_req, endpoint, &connection);
+            ret = cci_accept(conn_req, endpoint, &connection);
+            check_return("cci_accept", ret, 1);
 
-            buffer = calloc(1, connection->max_send_size);
-            if (!buffer) {
-                fprintf(stderr, "unable to alloc buffer\n");
-                return;
+            if (opts.method == AM)
+                buffer = calloc(1, connection->max_send_size);
+            else
+                buffer = calloc(1, opts.max_rma_size);
+
+            if (!buffer)
+                check_return("calloc", CCI_ENOMEM, 1);
+
+            if (opts.method != AM) {
+                ret = cci_rma_register(endpoint, connection, buffer,
+                                       opts.max_rma_size, &opts.server_rma_handle);
+                check_return("cci_rma_register", ret, 1);
+                fprintf(stderr, "server_rma_handle is 0x%"PRIx64"\n", opts.server_rma_handle);
             }
-            cci_send(connection, NULL, 0, buffer, current_size, NULL, opts.flags);
+            ret = cci_send(connection, &opts, sizeof(opts), NULL, 0, NULL, 0);
+            check_return("cci_send", ret, 1);
         }
     }
 
@@ -236,7 +318,9 @@ do_server()
         poll_events();
 
     /* clean up */
-    cci_unbind(service, NULL);
+    ret = cci_unbind(service, NULL);
+    check_return("cci_unbind", ret, 0);
+
     return;
 }
 
@@ -248,7 +332,7 @@ int main(int argc, char *argv[])
 
     name = argv[0];
 
-    while ((c = getopt(argc, argv, "h:p:sc:n")) != -1) {
+    while ((c = getopt(argc, argv, "h:p:sc:nwrm:")) != -1) {
         switch (c) {
         case 'h':
             server_uri = strdup(optarg);
@@ -274,9 +358,39 @@ int main(int argc, char *argv[])
         case 'n':
             opts.flags = CCI_FLAG_NO_COPY;
             break;
+        case 'w':
+            opts.method = RMA_WRITE;
+            break;
+        case 'r':
+            opts.method = RMA_READ;
+            break;
+        case 'm':
+            opts.max_rma_size = strtoul(optarg, NULL, 0);
+            break;
         default:
             print_usage();
         }
+    }
+
+    if (attr == CCI_CONN_ATTR_UU) {
+        if (opts.method != AM) {
+            fprintf(stderr, "RMA %s not allowed with UU connections\n",
+                    opts.method == RMA_WRITE ? "WRITE" : "READ");
+            print_usage();
+        }
+        if (opts.max_rma_size) {
+            printf("ignoring max_rma_size (-m) with active messages\n");
+            opts.max_rma_size = 0;
+        }
+    } else {
+        /* RO or RU */
+        if (opts.flags == CCI_FLAG_NO_COPY) {
+            printf("Ignoring CCI_FLAG_NO_COPY (-n) with RMA %s\n",
+                   opts.method == RMA_WRITE ? "WRITE" : "READ");
+            opts.flags &= ~(CCI_FLAG_NO_COPY);
+        }
+        if (!opts.max_rma_size)
+            opts.max_rma_size = MAX_RMA_SIZE;
     }
 
     ret = cci_init(CCI_ABI_VERSION, 0, &caps);
