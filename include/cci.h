@@ -109,6 +109,10 @@
 */
 CCI_DECLSPEC int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps);
 
+/*! \example init.c
+ *  This is an example of using init and strerror.
+ */
+
 
 /* ================================================================== */
 /*                                                                    */
@@ -420,6 +424,10 @@ CCI_DECLSPEC int cci_get_devices(cci_device_t const *** const devices);
 */
 CCI_DECLSPEC int cci_free_devices(cci_device_t const **devices);
 
+/*! \example devices.c
+ *  This is an example of using get_devices and free_devices.
+ *  It also iterates over the conf_argv array.
+ */
 
 /*====================================================================*/
 /*                                                                    */
