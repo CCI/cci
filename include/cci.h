@@ -689,7 +689,13 @@ typedef struct cci_service {
 			incoming connection requests.
 
   \return CCI_SUCCESS	Service successfully bound on that device.
+  \return CCI_EINVAL if port, service, or fd is NULL
+  \return CCI_EINVAL if backlog is zero
+  \return CCI_ENODEV if no default device found (if not specified)
+  \return CCI_ENODEV if the device is not "up"
+  \return CCI_ENOMEM if unable to allocate enough memory
   \return CCI_EBUSY	The service port is already bound on that device.
+  \return Each driver may have additional error codes
    
   If you use the same service port, you get the same service, even for 
   different devices. The connection request will contain all the devices 
@@ -707,7 +713,10 @@ CCI_DECLSPEC int cci_bind(cci_device_t *device, int backlog, uint32_t *port,
   \param[in] device	Specific device to unbind from the service. If 0, 
 			unbinds all devices bound to that service.
   
-  \returns CCI_SUCCESS on success.
+  \return CCI_SUCCESS on success.
+  \return CCI_EINVAL if service or device is NULL
+  \return CCI_ENODEV if the device is not bound on the service
+  \return Each driver may have additional error codes
 
   The service could become stale if there is no more device bound to that 
   service. This does not affect established connections.
@@ -723,6 +732,7 @@ CCI_DECLSPEC int cci_unbind(cci_service_t *service, cci_device_t *device);
   \param[out] conn_req	New connection request.
 
   \return CCI_SUCCESS	A new connection request is available.
+  \return CCI_EINVAL if service or conn_req is NULL.
   \return CCI_EAGAIN	No connection request was ready.
 
   This function always returns immediately, even if nothing is
