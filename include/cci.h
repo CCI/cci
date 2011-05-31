@@ -1247,7 +1247,7 @@ CCI_DECLSPEC int cci_return_event(cci_endpoint_t *endpoint, cci_event_t *event);
   is no event returned for this send via cci_get_event(); the send
   completion status is returned via cci_send().
 
-  If the CCI_FLAG_NOCOPY is specified, the application is
+  If the CCI_FLAG_NO_COPY is specified, the application is
   indicating that it does not need the buffer back until the send
   completion occurs (which is most useful when CCI_FLAG_BLOCKING is
   _not_ specified).  The CCI implementation is therefore free to use
