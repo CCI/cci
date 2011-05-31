@@ -2065,7 +2065,6 @@ static int portals_rma_register(
     md.options  |= PTL_MD_OP_GET;
     md.options  |= PTL_MD_TRUNCATE;
     md.options  |= PTL_MD_EVENT_START_DISABLE;
-    //md.options  |= PTL_MD_EVENT_END_DISABLE;    /* we only want the ACK */
     md.options  |= PTL_MD_MANAGE_REMOTE;
     md.user_ptr  = handle;
 
