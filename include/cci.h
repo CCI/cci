@@ -90,6 +90,7 @@
    \return CCI_ERR_NOT_FOUND if no driver or CCI_CONFIG is not found
    \return CCI_ERROR if unable to parse CCI_CONFIG
    \return Errno if fopen() fails
+   \return Each driver may have additional error codes
 
    If cci_init() completes successfully, then CCI is loaded and
    available to be used in this application.  There is no
@@ -387,7 +388,9 @@ typedef struct cci_device {
   \param[out] devices	Array of pointers to be filled by the function. 
 			Previous value in the pointer will be overwritten.
 
-  \return CCI_SUCCESS on success.
+  \return CCI_SUCCESS on success
+  \return CCI_EINVAL if devices is NULL
+  \return Each driver may have additional error codes
 
   If cci_get_devices() succeeds, the entire returned set of data (to
   include the data pointed to by the individual cci_device
@@ -412,7 +415,9 @@ CCI_DECLSPEC int cci_get_devices(cci_device_t const *** const devices);
   \param[in] devices: array of pointers previously filled in via
   cci_get_devices().
 
-  Returns 0 on success, non-zero on failure.
+  \return CCI_SUCCESS on success
+  \return CCI_EINVAL if devices is NULL
+  \return Each driver may have additional error codes
 
   If cci_free_devices() succeeds, the data pointed to by the devices
   pointer will be stale (and should not be accessed).
@@ -542,7 +547,9 @@ CCI_DECLSPEC int cci_create_endpoint(cci_device_t *device,
    \param[in] endpoint: Handle previously returned from a successful call to
    cci_create_endpoint().
 
-   Returns CCI_SUCCESS on success.
+   \return CCI_SUCCESS on success
+   \return CCI_EINVAL if endpoint is NULL
+   \return Each driver may have additional error codes
 
    Successful completion of this function makes all data structures
    and state associated with the endpoint stale.  All open connections
