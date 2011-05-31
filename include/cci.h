@@ -75,16 +75,21 @@
   This is the first CCI function that must called; no other CCI
   functions can be invoked before this function returns successfully.
 
-   IN abi_ver: A constant describing the ABI version that this
+   \param[in] abi_ver: A constant describing the ABI version that this
    application requires (one of the CCI_ABI_* values).
 
-   IN flags: A constant describing behaviors that this application
+   \param[in] flags: A constant describing behaviors that this application
    requires.  Currently, 0 is the only valid value.
 
-   OUT caps: Capabilities of the underlying library:
+   \param[out] caps: Capabilities of the underlying library:
    * THREAD_SAFETY
 
-   Returns CCI_SUCCESS (0) on success, non-zero on failure.
+   \return CCI_SUCCESS on success
+   \return CCI_EINVAL for invalid parameters
+   \return CCI_ENOMEM if not enough memory to complete
+   \return CCI_ERR_NOT_FOUND if no driver or CCI_CONFIG is not found
+   \return CCI_ERROR if unable to parse CCI_CONFIG
+   \return Errno if fopen() fails
 
    If cci_init() completes successfully, then CCI is loaded and
    available to be used in this application.  There is no
@@ -234,13 +239,15 @@ typedef enum cci_status {
 /*!
   Returns a string corresponding to a CCI status enum.
    
-  IN status: A CCI status enum.
-   
-  Returns a string when the status is valid; NULL otherwise.
+  \param[in] status: A CCI status enum.
+
+  \return A string when the status is valid
+  \return NULL if not valid
 
   \ingroup env
 */
 CCI_DECLSPEC const char *cci_strerror(enum cci_status status);
+
 
 
 /* ================================================================== */
@@ -398,7 +405,7 @@ CCI_DECLSPEC int cci_get_devices(cci_device_t const *** const devices);
   Frees a NULL-terminated array of (cci_device_t*)'s that were
   previously allocated via cci_get_devices().
 
-  IN devices: array of pointers previously filled in via
+  \param[in] devices: array of pointers previously filled in via
   cci_get_devices().
 
   Returns 0 on success, non-zero on failure.
@@ -478,14 +485,14 @@ typedef int cci_os_handle_t;
 /*!
   Create an endpoint.
 
-  IN device: A pointer to a device that was returned via
+  \param[in] device: A pointer to a device that was returned via
   cci_get_devices() or NULL.
   
-  IN flags: Flags specifying behavior of this endpoint.
+  \param[in] flags: Flags specifying behavior of this endpoint.
   
-  OUT endpoint: A handle to the endpoint that was created.
+  \param[out] endpoint: A handle to the endpoint that was created.
 
-  OUT fd: Operating system handle that can be used to block for
+  \param[out] fd: Operating system handle that can be used to block for
   progress on this endpoint.
 
   This function creates a CCI endpoint.  A CCI endpoint represents 
@@ -524,7 +531,7 @@ CCI_DECLSPEC int cci_create_endpoint(cci_device_t *device,
 
 /*! Destroy an endpoint.
 
-   IN endpoint: Handle previously returned from a successful call to
+   \param[in] endpoint: Handle previously returned from a successful call to
    cci_create_endpoint().
 
    Returns CCI_SUCCESS on success.
