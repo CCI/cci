@@ -26,8 +26,7 @@ int cci_bind(cci_device_t *device, int backlog, uint32_t *port,
     cci__svc_t  *svc    = NULL;
     cci__lep_t  *lep    = NULL;
 
-    if (NULL == device ||
-        NULL == port ||
+    if (NULL == port ||
         NULL == service ||
         NULL == fd ||
         0 == backlog) {
