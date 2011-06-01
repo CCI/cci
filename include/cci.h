@@ -508,10 +508,17 @@ typedef int cci_os_handle_t;
   \param[out] fd: Operating system handle that can be used to block for
   progress on this endpoint.
 
-  This function creates a CCI endpoint.  A CCI endpoint represents 
-  a collection of local resources (such as buffers).  An endpoint 
-  is associated with a device that performs the actual communication 
-  (see the description of cci_get_devices(), above).
+  \return CCI_SUCCESS   The endpoint is ready for use.
+  \return CCI_EINVAL    Endpoint or fd is NULL.
+  \return CCI_ENODEV    Device is not "up".
+  \return CCI_ENOMEM    Unable to allocate enough memory.
+  \return Each driver may have additional error codes.
+
+  This function creates a CCI endpoint.  A CCI endpoint represents a
+  collection of local resources (such as buffers and a completion
+  queue).  An endpoint is associated with a device that performs the
+  actual communication (see the description of cci_get_devices(),
+  above).
   
   The device argument can be a pointer that was returned by
   cci_get_devices() to indicate that a specific device should be used
