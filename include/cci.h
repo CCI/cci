@@ -696,13 +696,13 @@ typedef struct cci_service {
 			incoming connection requests.
 
   \return CCI_SUCCESS	Service successfully bound on that device.
-  \return CCI_EINVAL if port, service, or fd is NULL
-  \return CCI_EINVAL if backlog is zero
-  \return CCI_ENODEV if no default device found (if not specified)
-  \return CCI_ENODEV if the device is not "up"
-  \return CCI_ENOMEM if unable to allocate enough memory
-  \return CCI_EBUSY	The service port is already bound on that device.
-  \return Each driver may have additional error codes
+  \return CCI_EINVAL    Port, service, or fd is NULL.
+  \return CCI_EINVAL    Backlog is zero.
+  \return CCI_ENODEV    Device is NULL and no default device found.
+  \return CCI_ENODEV    Device is not "up".
+  \return CCI_ENOMEM    Unable to allocate enough memory.
+  \return CCI_EBUSY	    The service port is already bound on that device.
+  \return Each driver may have additional error codes.
    
   If you use the same service port, you get the same service, even for 
   different devices. The connection request will contain all the devices 
@@ -720,10 +720,10 @@ CCI_DECLSPEC int cci_bind(cci_device_t *device, int backlog, uint32_t *port,
   \param[in] device	Specific device to unbind from the service. If 0, 
 			unbinds all devices bound to that service.
   
-  \return CCI_SUCCESS on success.
-  \return CCI_EINVAL if service or device is NULL
-  \return CCI_ENODEV if the device is not bound on the service
-  \return Each driver may have additional error codes
+  \return CCI_SUCCESS   Device has been unbound from the service.
+  \return CCI_EINVAL    Service or device is NULL.
+  \return CCI_ENODEV    Device is not bound on the service.
+  \return Each driver may have additional error codes.
 
   The service could become stale if there is no more device bound to that 
   service. This does not affect established connections.
@@ -739,8 +739,9 @@ CCI_DECLSPEC int cci_unbind(cci_service_t *service, cci_device_t *device);
   \param[out] conn_req	New connection request.
 
   \return CCI_SUCCESS	A new connection request is available.
-  \return CCI_EINVAL if service or conn_req is NULL.
+  \return CCI_EINVAL    Service or conn_req is NULL.
   \return CCI_EAGAIN	No connection request was ready.
+  \return Each driver may have additional error codes.
 
   This function always returns immediately, even if nothing is
   available.  The application can block on the OS-specific handle
@@ -767,10 +768,12 @@ CCI_DECLSPEC int cci_get_conn_req(cci_service_t *service,
   \param[in,out] connection Pointer to a connection request structure.
 
   \return CCI_SUCCESS   The connection has been established.
+  \return CCI_EINVAL    Conn_req, endpoint, or connection is NULL.
   \return CCI_EINVAL    The endpoint is not bound to one of the devices 
-			in the connection request.
+			            in the connection request.
   \return CCI_ETIMEDOUT The incoming connection request timed out 
-			on the client.
+			            on the client.
+  \return Each driver may have additional error codes.
 
   Upon success, the incoming connection request is bound to the
   desired endpoint and a connection handle is filled in.  The
@@ -788,7 +791,8 @@ CCI_DECLSPEC int cci_accept(cci_conn_req_t *conn_req, cci_endpoint_t *endpoint,
 
   \return CCI_SUCCESS	Connection request has been rejected.
   \return CCI_ETIMEDOUT The incoming connection request timed out 
-			on the client.
+			            on the client.
+  \return Each driver may have additional error codes.
 
    Rejects an incoming connection request.  The connection request
    becomes stale after this function returns successfully; no further
@@ -806,7 +810,6 @@ CCI_DECLSPEC int cci_reject(cci_conn_req_t *conn_req);
 /*                  */
 /********************/
 
-#define CCI_CONN_REQ_LEN    (1024)  /* see below */
 /*! 
   Initiate a connection request (client side).
   
@@ -820,7 +823,7 @@ CCI_DECLSPEC int cci_reject(cci_conn_req_t *conn_req);
   (identification, authentication, etc).
   
   The connect call is always non-blocking, reliable and requires a decision 
-  by the server (accept or reject), even for unreliable connection, except 
+  by the server (accept or reject), even for an unreliable connection, except 
   for multicast.
   
   Multicast connections don't necessarily involve a discrete connection 
@@ -837,18 +840,24 @@ CCI_DECLSPEC int cci_reject(cci_conn_req_t *conn_req);
 		- IB LID or GID: "ib://TBD"
 		- Blah id: "blah://crap0123"
 		- With arguments: "ip://foo.bar.com:eth1,eth3"
-  \param[in] port	The CCI port number use to identify the service on 
-			the server.
+  \param[in] port	    The CCI port number use to identify the service on 
+			            the server.
   \param[in] data_ptr	Pointer to connection data to be sent in the 
-			connection request (for authentication, etc).
+			            connection request (for authentication, etc).
   \param[in] data_len	Length of connection data.  Implementations must 
                         support a data_len values <= 1,024 bytes.
   \param[in] attribute	Attributes of the requested connection (reliability, 
-			ordering, multicast, etc).
+			            ordering, multicast, etc).
   \param[in] context	Cookie to be used to identify the completion through 
-			an Other event.
-  \param[in] flags	Currently unused.
+			            an Other event.
+  \param[in] flags	    Currently unused.
   \param[in] timeout	NULL means forever.
+
+  \return CCI_SUCCESS   The request is buffered and ready to be sent or
+                        has been sent.
+  \return CCI_EINVAL    Endpoint or server_uri is NULL.
+  \return CCI_EINVAL    Data_ptr is NULL but data_len > 0.
+  \return Each driver may have additional error codes.
 
   \ingroup connection
 
@@ -871,6 +880,13 @@ CCI_DECLSPEC int cci_connect(cci_endpoint_t *endpoint, char *server_uri,
                              cci_conn_attribute_t attribute,
                              void *context, int flags, struct timeval *timeout);
 
+/*! 
+  This constant is the maximum value of data_len passed to cci_connect().
+
+  \ingroup connection
+ */
+#define CCI_CONN_REQ_LEN    (1024)  /* see below */
+
 /*!
   Tear down an existing connection. 
 
@@ -879,6 +895,10 @@ CCI_DECLSPEC int cci_connect(cci_endpoint_t *endpoint, char *server_uri,
   if sends are initiated on  this connection.
 
   \param[in] connection	Connection to sever.
+
+  \return CCI_SUCCESS   The connection's resources have been released.
+  \return CCI_EINVAL    Connection is NULL.
+  \return Each driver may have additional error codes.
 
   \ingroup connection
  */
