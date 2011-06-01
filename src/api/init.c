@@ -418,6 +418,9 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
         return CCI_EINVAL;
     }
 
+    if (!caps)
+        return CCI_EINVAL;
+
     if (0 == once) {
         char *str;
 
