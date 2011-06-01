@@ -84,13 +84,13 @@
    \param[out] caps: Capabilities of the underlying library:
    * THREAD_SAFETY
 
-   \return CCI_SUCCESS on success
-   \return CCI_EINVAL for invalid parameters
-   \return CCI_ENOMEM if not enough memory to complete
-   \return CCI_ERR_NOT_FOUND if no driver or CCI_CONFIG is not found
-   \return CCI_ERROR if unable to parse CCI_CONFIG
-   \return Errno if fopen() fails
-   \return Each driver may have additional error codes
+   \return CCI_SUCCESS  CCI is available for use.
+   \return CCI_EINVAL   Caps is NULL or incorrect ABI version.
+   \return CCI_ENOMEM   Not enough memory to complete.
+   \return CCI_ERR_NOT_FOUND    No driver or CCI_CONFIG.
+   \return CCI_ERROR    Unable to parse CCI_CONFIG.
+   \return Errno if fopen() fails.
+   \return Each driver may have additional error codes.
 
    If cci_init() completes successfully, then CCI is loaded and
    available to be used in this application.  There is no
@@ -246,8 +246,8 @@ typedef enum cci_status {
    
   \param[in] status: A CCI status enum.
 
-  \return A string when the status is valid
-  \return NULL if not valid
+  \return A string when the status is valid.
+  \return NULL if not valid.
 
   \ingroup env
 */
