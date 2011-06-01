@@ -388,9 +388,9 @@ typedef struct cci_device {
   \param[out] devices	Array of pointers to be filled by the function. 
 			Previous value in the pointer will be overwritten.
 
-  \return CCI_SUCCESS on success
-  \return CCI_EINVAL if devices is NULL
-  \return Each driver may have additional error codes
+  \return CCI_SUCCESS   The array of "up" devices is available.
+  \return CCI_EINVAL    Devices is NULL.
+  \return Each driver may have additional error codes.
 
   If cci_get_devices() succeeds, the entire returned set of data (to
   include the data pointed to by the individual cci_device
@@ -415,9 +415,9 @@ CCI_DECLSPEC int cci_get_devices(cci_device_t const *** const devices);
   \param[in] devices: array of pointers previously filled in via
   cci_get_devices().
 
-  \return CCI_SUCCESS on success
-  \return CCI_EINVAL if devices is NULL
-  \return Each driver may have additional error codes
+  \return CCI_SUCCESS   All CCI resources have been released.
+  \return CCI_EINVAL    Devices is NULL.
+  \return Each driver may have additional error codes.
 
   If cci_free_devices() succeeds, the data pointed to by the devices
   pointer will be stale (and should not be accessed).
