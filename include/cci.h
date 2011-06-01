@@ -913,7 +913,13 @@ CCI_DECLSPEC int cci_disconnect(cci_connection_t *connection);
 /*                                                                    */
 /*====================================================================*/
 
-/*! Handle defining the scope of an option */
+/*! \defgroup opts Endpoint / Connection Options */
+
+/*! 
+  Handle defining the scope of an option
+
+  \ingroup opts
+*/
 typedef union cci_opt_handle {
   /*! Endpoint */
   cci_endpoint_t *endpoint;
@@ -921,7 +927,11 @@ typedef union cci_opt_handle {
   cci_connection_t *connection;
 } cci_opt_handle_t;
 
-/*! Level defining the scope of an option */
+/*!
+  Level defining the scope of an option
+
+  \ingroup opts
+*/
 typedef enum cci_opt_level {
   /*! Flag indicating that the union is an endpoint */
   CCI_OPT_LEVEL_ENDPOINT,
@@ -929,23 +939,39 @@ typedef enum cci_opt_level {
   CCI_OPT_LEVEL_CONNECTION
 } cci_opt_level_t;
 
-/*! Name of options */
+/*!
+  Name of options
+
+  \ingroup opts
+*/
 typedef enum cci_opt_name {
   /*! Max header size (in bytes) on the endpoint, for both sends and
-      RMA operations. */
-  CCI_OPT_ENDPT_MAX_HEADER_SIZE, /* get */
+      RMA operations.
 
-  /*! Default send timeout for all new connections */
-  CCI_OPT_ENDPT_SEND_TIMEOUT, /* set/get */
+      cci_get_opt() only.
+  */
+  CCI_OPT_ENDPT_MAX_HEADER_SIZE,
+
+  /*! Default send timeout for all new connections.
+
+      cci_get_opt() and cci_set_opt().
+  */
+  CCI_OPT_ENDPT_SEND_TIMEOUT,
   
   /*! How many receiver buffers on the endpoint.  It is the max
-      number of messages the CCI layer can receive without dropping.  */
-  CCI_OPT_ENDPT_RECV_BUF_COUNT, /* set/get */
+      number of messages the CCI layer can receive without dropping.
+
+      cci_get_opt() and cci_set_opt().
+  */
+  CCI_OPT_ENDPT_RECV_BUF_COUNT,
   
   /*! How many send buffers on the endpoint.  It is the max number of
       pending messages the CCI layer can buffer before failing or
-      blocking (depending on reliability mode). */
-  CCI_OPT_ENDPT_SEND_BUF_COUNT, /* set/get */
+      blocking (depending on reliability mode).
+
+      cci_get_opt() and cci_set_opt().
+  */
+  CCI_OPT_ENDPT_SEND_BUF_COUNT,
   
   /*! The "keepalive" timeout is to prevent a client from connecting
       to a server and then the client disappears without the server
@@ -969,23 +995,63 @@ typedef enum cci_opt_name {
       0 (i.e., it must be "re-armed" before it will timeout again),
       but the connection is *not* disconnected.  Recovery decisions
       are up to the application; it may choose to disconnect the
-      connection, re-arm the keepalive timeout, etc. */
-  CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT, /* set/get */
+      connection, re-arm the keepalive timeout, etc.
+
+      cci_get_opt() and cci_set_opt().
+  */
+  CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT,
   
-  /*! Reliable send timeout in microseconds */
-  CCI_OPT_CONN_SEND_TIMEOUT /* set/get */
+  /*! Reliable send timeout in microseconds.
+
+      cci_get_opt() and cci_set_opt().
+  */
+  CCI_OPT_CONN_SEND_TIMEOUT
 } cci_opt_name_t;
 
 /*! 
   JMS Fill me in
 
+  Set an endpoint or connection option value.
+
+  \param[in] handle Endpoint or connection handle.
+  \param[in] level  Indicates type of handle.
+  \param[in] name   Which option to set the value of.
+  \param[in] val    Pointer to the value.
+  \param[in] len    Length of value to be set.
+
+  \return CCI_SUCCESS   Value successfully set.
+  \return CCI_EINVAL    Handle or val is NULL or len is 0.
+  \return CCI_EINVAL    Level/name mismatch.
+  \return CCI_ERR_NOT_IMPLEMENTED   Not supported by this driver.
+  \return Each driver may have additional error codes.
+
   Note that the set may fail if the CCI implementation cannot
   actually set the value.
+
+  \ingroup opts
 */
 CCI_DECLSPEC int cci_set_opt(cci_opt_handle_t *handle, cci_opt_level_t level, 
                              cci_opt_name_t name, const void* val, int len);
 
-/*! JMS Fill me in */
+/*!
+  JMS Fill me in
+
+  Get an endpoint or connection option value.
+
+  \param[in] handle Endpoint or connection handle.
+  \param[in] level  Indicates type of handle.
+  \param[in] name   Which option to set the value of.
+  \param[in] val    Address of the pointer to the value.
+  \param[in] len    Address of the length of value.
+
+  \return CCI_SUCCESS   Value successfully retrieved.
+  \return CCI_EINVAL    Handle or val is NULL or len is 0.
+  \return CCI_EINVAL    Level/name mismatch.
+  \return CCI_ERR_NOT_IMPLEMENTED   Not supported by this driver.
+  \return Each driver may have additional error codes.
+
+  \ingroup opts
+*/
 CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t *handle, cci_opt_level_t level, 
                              cci_opt_name_t name, void** val, int *len);
 
