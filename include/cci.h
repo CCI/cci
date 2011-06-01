@@ -554,9 +554,9 @@ CCI_DECLSPEC int cci_create_endpoint(cci_device_t *device,
    \param[in] endpoint: Handle previously returned from a successful call to
    cci_create_endpoint().
 
-   \return CCI_SUCCESS on success
-   \return CCI_EINVAL if endpoint is NULL
-   \return Each driver may have additional error codes
+   \return CCI_SUCCESS  The endpoint's resources have been released.
+   \return CCI_EINVAL   Endpoint is NULL.
+   \return Each driver may have additional error codes.
 
    Successful completion of this function makes all data structures
    and state associated with the endpoint stale.  All open connections
