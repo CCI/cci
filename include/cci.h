@@ -1148,7 +1148,24 @@ typedef struct cci_event_recv {
 
 
 /*! Other event
-    JMS Fill me in
+
+  JMS Fill me in
+
+  Other event.
+
+  A completion struct to handle non-send and non-receive events.
+
+  It contains a context pointer for application-specific data such
+  as the state of a connection request waiting for a connection accept
+  or reject message (i.e., passed to cci_connect()).
+
+  The event also contains a union depending on the type of other
+  event. If it is CONNECT_SUCCESS (i.e. the server accepted the
+  connection request), the new connection is returned in the union.
+  For all other events, the union has no meaning.
+
+  \note We will need to add a union member for keepalive timeouts
+  that will have a pointer to the connection that timed out.
 
   \ingroup events
  */
@@ -1167,15 +1184,26 @@ typedef struct cci_event_other {
 
 
 /*! JMS Fill me in
+  Event types.
+
+  There are three board categories of events: send, receive, and other.
+  The other class includes connect success, rejected, and timeout as well
+  as a generic endpoint device failure.
+
+  The NONE event type is never passed to the application and is for internal
+  CCI use only.
 
   \ingroup events
  */
 typedef enum cci_event_type {
 
+  /*! Never use - for internal CCI use only. */
   CCI_EVENT_NONE,
 
+  /*! A send or RMA has completed. */
   CCI_EVENT_SEND,
 
+  /*! An active message has been received. */
   CCI_EVENT_RECV,
   
   /*! A new outgoing connection was successfully accepted at the
@@ -1247,10 +1275,16 @@ typedef struct cci_event {
 CCI_DECLSPEC int cci_arm_os_handle(cci_endpoint_t *endpoint, int flags);
 
 typedef enum cci_pe_event {
-    CCI_PE_SEND_EVENT,
-    CCI_PE_RECV_EVENT,
-    CCI_PE_OTHER_EVENT
+    /*! Return SEND event if found. */
+    CCI_PE_SEND_EVENT  = (1 << 0),
+
+    /*! Return RECV event if found. */
+    CCI_PE_RECV_EVENT  = (1 << 1),
+
+    /* Return OTHER event if found. */
+    CCI_PE_OTHER_EVENT = (1 << 2)
 } cci_pe_event_t;
+
 /*!
   Get the next available CCI event.
 
@@ -1276,6 +1310,11 @@ typedef enum cci_pe_event {
 	- CCI_PE_I_SET_THE_DATA_BUFFER_PLEASE_COPY
    Flag value of 0 means (CCI_PE_SEND_EVENT | CCI_PE_RECV_EVENT |
    CCI_PE_OTHER_EVENT).
+
+  \return CCI_SUCCESS  An event was retrieved.
+  \return CCI_EINVAL   Endpoint or event is NULL.
+  \return CCI_EAGAIN   No event is available.
+  \return Each driver may have additional error codes.
 
    To discuss:
 
@@ -1308,6 +1347,14 @@ CCI_DECLSPEC int cci_get_event(cci_endpoint_t *endpoint,
   must be returned, even send completions and "other" events -- not
   just receive events.  However, it is possible (likely) that
   returning send completion and "other" events will be no-ops.
+
+  \param[in] endpoint	Endpoint that provided the event.
+  \param[in] event	    Event to return.
+
+  \return CCI_SUCCESS  The event was returned to CCI.
+  \return CCI_EINVAL   Endpoint is NULL.
+  \return CCI_EINVAL   Event did not come from endpoint.
+  \return Each driver may have additional error codes.
 
   \todo What to do about hardware that cannot return buffers out of
      order?  Is the overhead of software queued returns (to effect
