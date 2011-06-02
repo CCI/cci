@@ -803,6 +803,12 @@ CCI_DECLSPEC int cci_accept(cci_conn_req_t *conn_req, cci_endpoint_t *endpoint,
 CCI_DECLSPEC int cci_reject(cci_conn_req_t *conn_req);
 
 
+/*! \example server.c
+ *  This application demonstrates opening an endpoint, binding to a service,
+ *  getting connection requests, accepting connections, polling for events,
+ *  and echoing received messages back to the client.
+ */
+
 
 /********************/
 /*                  */
@@ -904,6 +910,10 @@ CCI_DECLSPEC int cci_connect(cci_endpoint_t *endpoint, char *server_uri,
  */
 CCI_DECLSPEC int cci_disconnect(cci_connection_t *connection);
 
+/*! \example client.c
+ *  This application demonstrates opening an endpoint, connecting to a
+ *  server, sending messages, and polling for events.
+ */
 
 
 
