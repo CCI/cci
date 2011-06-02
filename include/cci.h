@@ -955,7 +955,9 @@ typedef enum cci_opt_level {
   \ingroup opts
 */
 typedef enum cci_opt_name {
-  /*! Max header size (in bytes) on the endpoint, for both sends and
+  /*! \anchor CCI_OPT_ENDPT_MAX_HEADER_SIZE
+
+      Max header size (in bytes) on the endpoint, for both sends and
       RMA operations.
 
       cci_get_opt() only.
@@ -1392,6 +1394,22 @@ CCI_DECLSPEC int cci_return_event(cci_endpoint_t *endpoint, cci_event_t *event);
   Two segments for Header and Data.  When CCI_FLAG_ASYNC is used and
   the call returns, data has been buffered.
 
+  A short message may have two segments, header and data. The header
+  has a limited size which is retrievable using cci_get_opt() with the
+  \ref CCI_OPT_ENDPT_MAX_HEADER_SIZE flag. The data length is limited
+  to the cci_connection::max_send_size, which may be lower than the
+  cci_device::max_send_size. The application may specify both the
+  header and data, only one, or neither (although nothing will be
+  delivered, the peer will still ack the message on a reliable connection).
+
+  If the application needs to send a message larger than
+  cci_connection::max_send_size, the application is responsible for
+  segmenting and reassembly or it should use cci_rma().
+
+  When cci_send() returns, the application buffer is reusable. By
+  default, CCI will buffer the data internally.
+  
+
   \param[in] connection	Connection (destination/reliability).
   \param[in] header_ptr	Pointer to local header segment.
   \param[in] header_len	Length of local header segment (limited to 32 bytes).
@@ -1402,6 +1420,12 @@ CCI_DECLSPEC int cci_return_event(cci_endpoint_t *endpoint, cci_event_t *event);
   \param[in] flags      Optional flags: CCI_FLAG_BLOCKING,
                         CCI_FLAG_NO_COPY, CCI_FLAG_SILENT.  These flags
                         are explained below.
+
+  \return CCI_SUCCESS   The message has been queued to send.
+  \return CCI_EINVAL    Connection is NULL.
+  \return CCI_EINVAL    header_ptr is NULL and header_len is > 0.
+  \return CCI_EINVAL    data_ptr is NULL and data_len is > 0.
+  \return Each driver may have additional error codes.
 
   \todo When someone implements: it would be nice to have a way for an
   MPI implementation to have a progress thread for long messages.
@@ -1418,29 +1442,32 @@ CCI_DECLSPEC int cci_return_event(cci_endpoint_t *endpoint, cci_event_t *event);
   The send will complete differently in reliable and unreliable
   connections:
 
-  * Reliable: only when remote side ACKs complete delivery -- but not
+  - Reliable: only when remote side ACKs complete delivery -- but not
     necessary consumption (i.e., remote completion).
-  * Unreliable: when the buffer is re-usable (i.e., local completion).
+  - Unreliable: when the buffer is re-usable (i.e., local completion).
 
   When cci_send() returns, the buffer is re-usable by the application.
 
-  If the CCI_FLAG_BLOCKING flag is specified, cci_send() will _also_
+  \anchor CCI_FLAG_BLOCKING
+  If the CCI_FLAG_BLOCKING flag is specified, cci_send() will \a also
   block until the send completion has occurred.  In this case, there
   is no event returned for this send via cci_get_event(); the send
   completion status is returned via cci_send().
 
+  \anchor CCI_FLAG_NO_COPY
   If the CCI_FLAG_NO_COPY is specified, the application is
   indicating that it does not need the buffer back until the send
   completion occurs (which is most useful when CCI_FLAG_BLOCKING is
-  _not_ specified).  The CCI implementation is therefore free to use
+  \a not specified).  The CCI implementation is therefore free to use
   "zero copy" types of transmission with the buffer -- if it wants to.
 
+  \anchor CCI_FLAG_SILENT
   CCI_FLAG_SILENT means that no completion will be generated for
   non-CCI_FLAG_BLOCKING sends.  For reliable ordered connections,
   since completions are issued in order, the completion of any
   non-SILENT send directly implies the completion of any previous
   SILENT sends.  For unordered connections, completion ordering is not
-  guaranteed -- it is *not* safe to assume that application protocol
+  guaranteed -- it is \b not safe to assume that application protocol
   semantics imply specific unordered SILENT send completions.  The
   only ways to know when unordered SILENT sends have completed (and
   that the local send buffer is "owned" by the application again) is
