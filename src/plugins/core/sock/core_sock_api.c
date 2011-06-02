@@ -1488,7 +1488,6 @@ static int sock_disconnect(cci_connection_t *connection)
     cci__ep_t       *ep     = NULL;
     sock_conn_t     *sconn  = NULL;
     sock_ep_t       *sep    = NULL;
-    cci_endpoint_t  *endpoint   = NULL;
 
     CCI_ENTER;
 
@@ -1507,7 +1506,7 @@ static int sock_disconnect(cci_connection_t *connection)
 
     conn = container_of(connection, cci__conn_t, connection);
     sconn = conn->priv;
-    ep = container_of(endpoint, cci__ep_t, endpoint);
+    ep = container_of(connection->endpoint, cci__ep_t, endpoint);
     sep = ep->priv;
 
     if (conn->uri)
