@@ -77,6 +77,8 @@ int main(int argc, char *argv[])
     cci_opt_handle_t handle;
     uint32_t timeout_us = 30 * 1000000; /* microseconds */
 
+    proc_name = argv[0];
+
     while ((c = getopt(argc, argv, "h:")) != -1) {
         switch (c) {
             case 'h':
