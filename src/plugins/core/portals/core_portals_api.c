@@ -299,6 +299,9 @@ static int portals_init(
  */
     if( (iRC=PtlInit( &iMax_devices ))!=PTL_OK ) {
 
+        free(ds);
+        free(pglobals);
+        pglobals=NULL;
         return CCI_ERROR;
     }
 
@@ -321,17 +324,17 @@ static int portals_init(
         switch(iRC) {
             case PTL_NO_INIT:      /* Usually dup PtlNIInit() call */
             case PTL_IFACE_INVALID:/* Bad interface options */
-                 ret = CCI_ENODEV;
+                 iRC = CCI_ENODEV;
                  break;
             case PTL_PID_INVALID:  /* This one should not happen */
             case PTL_SEGV:         /* This one should not happen */
-                 ret = CCI_EINVAL;
+                 iRC = CCI_EINVAL;
                  break;
             case PTL_NO_SPACE:     /* Well, well, well */
-                 ret =  CCI_ENOMEM;
+                 iRC =  CCI_ENOMEM;
                  break;
             default:               /* Undocumented portals error */
-                 ret = CCI_ERROR;
+                 iRC = CCI_ERROR;
         }
         goto out_with_init;
     }
@@ -366,7 +369,7 @@ static int portals_init(
             free(pglobals->devices);
             free(pglobals);
             pglobals=NULL;
-            ret = CCI_ENOMEM;
+            iRC = CCI_ENOMEM;
             goto out_with_ni_init;
         }
 
@@ -409,7 +412,7 @@ static int portals_init(
             free(pglobals->devices);
             free(pglobals);
             pglobals=NULL;
-            ret = CCI_ENOMEM;
+            iRC = CCI_ENOMEM;
             goto out_with_ni_init;
         }
         ds[pglobals->count]=device;
@@ -445,7 +448,7 @@ static int portals_init(
         free(pglobals->devices);
         free(pglobals);
         pglobals=NULL;
-        ret = CCI_ENODEV;
+        iRC = CCI_ENODEV;
         goto out_with_ni_init;
     }
 
@@ -490,6 +493,8 @@ out_with_ni_init:
     PtlNIFini(niHandle);
 out_with_init:
     PtlFini();
+
+    CCI_EXIT;
     return ret;
 }
 
@@ -1194,12 +1199,6 @@ static int portals_get_conn_req(
     cci_service_t          *service, 
     cci_conn_req_t         **conn_req ) {
 
-    int                    iRC;
-    cci__crq_t             *crq;
-    cci__lep_t             *lep;
-    const cci_device_t     **devices;
-    cci__dev_t             *dev;
-    
     CCI_ENTER;
 
     if(!pglobals) {
@@ -1331,7 +1330,7 @@ static int portals_accept(
                  bits,              /* match bits */
                  0,                 /* remote offset */
                  (uintptr_t) pconn->peer_conn); /* hdr_data */
-    if (ret != PtlOK) {
+    if (ret != PTL_OK) {
         switch (ret) {
             case PTL_NO_INIT:
                 ret = CCI_ENODEV;
@@ -1539,7 +1538,7 @@ static int portals_connect(
                        bits,              /* match bits */
                        0,                 /* remote offset */
                        (uintptr_t) conn); /* hdr_data */
-    if (iRC != PtlOK) {
+    if (iRC != PTL_OK) {
         switch (iRC) {
             case PTL_NO_INIT:
                 iRC = CCI_ENODEV;
