@@ -1573,14 +1573,37 @@ out:
 }
 
 
-// Todo
-static int portals_disconnect(
-    cci_connection_t       *connection ) {
+static int portals_disconnect(cci_connection_t *connection)
+{
+    cci__conn_t     *conn   = NULL;
+    cci__ep_t       *ep     = NULL;
+    portals_conn_t  *pconn  = NULL;
+    portals_ep_t    *pep    = NULL;
 
     CCI_ENTER;
-    CCI_EXIT;
 
-    return CCI_ERR_NOT_IMPLEMENTED;
+    if (!pglobals) {
+        CCI_EXIT;
+        return CCI_ENODEV;
+    }
+
+    conn = container_of(connection, cci__conn_t, connection);
+    pconn = conn->priv;
+    ep = container_of(connection->endpoint, cci__ep_t, endpoint);
+    pep = ep->priv;
+
+    if (conn->uri)
+        free((char *) conn->uri);
+
+    pthread_mutex_lock(&ep->lock);
+    TAILQ_REMOVE(&pep->conns, pconn, entry);
+    pthread_mutex_unlock(&ep->lock);
+
+    free(pconn);
+    free(conn);
+
+    CCI_EXIT;
+    return CCI_SUCCESS;
 }
 
 
