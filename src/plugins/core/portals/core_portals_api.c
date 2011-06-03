@@ -1254,9 +1254,8 @@ static int portals_accept(
     conn->tx_timeout = ep->tx_timeout;
     conn->priv = calloc(1, sizeof(*pconn));
     if (!conn->priv) {
-        free(conn);
-        CCI_EXIT;
-        return CCI_ENOMEM;
+        ret = CCI_ENOMEM;
+        goto out_with_conn;
     }
     pconn = conn->priv;
     pconn->conn = conn;
@@ -1306,9 +1305,8 @@ static int portals_accept(
     pthread_mutex_unlock(&ep->lock);
 
     if(!tx) {
-        // FIXME leak
-        CCI_EXIT;
-        return CCI_ENOBUFS;
+        ret = CCI_ENOBUFS;
+        goto out_with_queued;
     }
 
     /* prep the tx */
@@ -1333,11 +1331,38 @@ static int portals_accept(
                  bits,              /* match bits */
                  0,                 /* remote offset */
                  (uintptr_t) pconn->peer_conn); /* hdr_data */
+    if (ret != PtlOK) {
+        switch (ret) {
+            case PTL_NO_INIT:
+                ret = CCI_ENODEV;
+                break;
+            case PTL_MD_INVALID:
+            case PTL_MD_ILLEGAL:
+            default:
+                ret = CCI_ERROR;
+                break;
+            case PTL_PROCESS_INVALID:
+                ret = CCI_EADDRNOTAVAIL;
+                break;
+        }
+        goto out_with_queued;
+    }
 
     *connection = &conn->connection;
 
     CCI_EXIT;
     return CCI_SUCCESS;
+
+out_with_queued:
+    pthread_mutex_lock(&ep->lock);
+    TAILQ_REMOVE(&pep->conns, pconn, entry);
+    pthread_mutex_unlock(&ep->lock);
+    free(pconn);
+out_with_conn:
+    free(conn);
+
+    CCI_EXIT;
+    return ret;
 }
 
 
