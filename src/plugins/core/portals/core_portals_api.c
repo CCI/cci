@@ -1492,9 +1492,8 @@ static int portals_connect(
     pthread_mutex_unlock(&ep->lock);
 
     if(!tx) {
-        // FIXME leak
-        CCI_EXIT;
-        return CCI_ENOBUFS;
+        iRC = CCI_ENOBUFS;
+        goto out;
     }
 
     /* prep the tx */
@@ -1540,6 +1539,23 @@ static int portals_connect(
                        bits,              /* match bits */
                        0,                 /* remote offset */
                        (uintptr_t) conn); /* hdr_data */
+    if (iRC != PtlOK) {
+        switch (iRC) {
+            case PTL_NO_INIT:
+                iRC = CCI_ENODEV;
+                break;
+            case PTL_MD_INVALID:
+            case PTL_MD_ILLEGAL:
+            default:
+                iRC = CCI_ERROR;
+                break;
+            case PTL_PROCESS_INVALID:
+                iRC = CCI_EADDRNOTAVAIL;
+                break;
+        }
+        goto out;
+    }
+
 
     CCI_EXIT;
     return CCI_SUCCESS;
