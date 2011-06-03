@@ -1511,7 +1511,8 @@ CCI_DECLSPEC int cci_sendv(cci_connection_t *connection,
 
 /* RMA Area operations */
 
-/*! JMS Fill me in
+/*!
+  Register memory for RMA operations.
 
   The intent is that this function is invoked frequently -- "just
   register everything" before invoking RMA operations.
@@ -1525,6 +1526,19 @@ CCI_DECLSPEC int cci_sendv(cci_connection_t *connection,
   If the connection is provided, the memory is only exposed to that
   connection. If it is NULL, then any reliable connection on that
   endpoint can access that memory.
+
+  It is allowable to have overlapping registerations.
+
+  \param[in]  endpoint      Local endpoint to use for RMA.
+  \param[in]  connection    Restrict RMA to this connection.
+  \param[in]  start         Pointer to local memory.
+  \param[in]  length        Length of local memory.
+  \param[out] rma_handle    Handle for use with cci_rma().
+
+  \return CCI_SUCCESS   The memory is ready for RMA.
+  \return CCI_EINVAL    endpoint, start, or rma_handle is NULL.
+  \return CCI_EINVAL    length is 0.
+  \return Each driver may have additional error codes.
 
   \ingroup communications
 */
@@ -1560,7 +1574,15 @@ CCI_DECLSPEC int cci_rma_register_phys(cci_endpoint_t *endpoint,
                                        cci_sg_t *sg_list, uint32_t sg_cnt,
                                        uint64_t *rma_handle);
 
-/*! JMS Fill me in
+/*!
+  Deregister memory.
+
+  Once deregistered, the handle is stale.
+
+  \param[in] rma_handle Handle for use with cci_rma().
+
+  \return CCI_SUCCESS   The memory is deregistered.
+  \return Each driver may have additional error codes.
 
   \ingroup communications
  */
