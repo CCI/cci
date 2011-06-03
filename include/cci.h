@@ -1577,6 +1577,9 @@ CCI_DECLSPEC int cci_rma_register_phys(cci_endpoint_t *endpoint,
 /*!
   Deregister memory.
 
+  If an RMA is in progress that uses this handle, the RMA may abort or
+  the deregisteration may fail.
+
   Once deregistered, the handle is stale.
 
   \param[in] rma_handle Handle for use with cci_rma().
@@ -1590,35 +1593,60 @@ CCI_DECLSPEC int cci_rma_deregister(uint64_t rma_handle);
 
 
 /*! 
-  Perform a RMA operation on remote RMA area.
-  
-  No order guaranteed on data delivery (no last-byte-written-last), but order
-  is guaranteed between data delivery and remote recv event (if any).
-  Completion is local, fence/order is remote.  Remote recv event only if
-  (header_len != 0).
+  Perform a RMA operation between local and remote memory.
 
-  \param[in] connection	Connection (destination/reliability).
-  \param[in] header_ptr	Pointer to local header segment.
-  \param[in] header_len	Length of local header segment (limited to 32 bytes)
-  \param[in] local_handle	Handle of the local RMA area.
-  \param[in] local_offset	Offset in the local RMA area.
-  \param[in] remote_handle	Handle of the remote RMA area.
-  \param[in] remote_offset	Offset in the remote RMA area.
-  \param[in] data_len	Length of data segment.
-  \param[in] context	Cookie to identify the completion through a Send event 
-			when non-blocking.
-  \param[in] flags	Optional flags:
-	- CCI_FLAG_BLOCKING: blocking call (see cci_send() for details).
-	- CCI_FLAG_READ: move data from remote to local memory.
-	- CCI_FLAG_WRITE: move data from local to remote memory
-	- CCI_FLAG_FENCE: wait for all previous RMA operations to complete 
-	before performing this operation and all following.
-	- CCI_FLAG_SILENT: generates no completion event (see cci_send() 
-        for details).
+  Initiate a remote memory WRITE access (move local memory to remote
+  memory) or READ (move remote memory to local memory). Adding the FENCE
+  flag ensures all previous operations are guaranteed to complete
+  remotely prior to this operation and all subsequent operations. Remote
+  completion does not imply a remote completion event, merely a successful
+  RMA operation.
+
+  Optionally, send a remote completion event to the target. If header_ptr
+  and header_len are provided, send a completion event to the target after
+  the RMA has completed. It is guaranteed to arrive after the RMA operation
+  has finished.
+
+  CCI makes no guarantees about the data delivery within the RMA operation
+  (e.g., no last-byte-written-last).
+
+  Only a local completion will be generated.
+  
+  \param[in] connection     Connection (destination).
+  \param[in] header_ptr     Pointer to local header segment.
+  \param[in] header_len     Length of local header segment (limited to 32 bytes)
+  \param[in] local_handle   Handle of the local RMA area.
+  \param[in] local_offset   Offset in the local RMA area.
+  \param[in] remote_handle  Handle of the remote RMA area.
+  \param[in] remote_offset  Offset in the remote RMA area.
+  \param[in] data_len       Length of data segment.
+  \param[in] context        Cookie to identify the completion through a Send event 
+                            when non-blocking.
+  \param[in] flags          Optional flags:
+    - CCI_FLAG_BLOCKING:    Blocking call (see cci_send() for details).
+    - CCI_FLAG_READ:        Move data from remote to local memory.
+    - CCI_FLAG_WRITE:       Move data from local to remote memory
+    - CCI_FLAG_FENCE:       All previous operations are guaranteed to
+                            complete remotely prior to this operation
+                            and all subsequent operations.
+    - CCI_FLAG_SILENT:      Generates no local completion event (see cci_send() 
+                            for details).
+
+  \return CCI_SUCCESS   The RMA operation has been initiated.
+  \return CCI_EINVAL    connection is NULL.
+  \return CCI_EINVAL    connection is unreliable.
+  \return CCI_EINVAL    header_ptr is NULL and header_len > 0.
+  \return CCI_EINVAL    data_len is 0.
+  \return CCI_EINVAL    Both READ and WRITE flags are set.
+  \return CCI_EINVAL    Neither the READ or WRITE flag is set.
+  \return Each driver may have additional error codes.
+
+  \note CCI_FLAG_FENCE only applies to RMA operations for this connection. It does
+  not apply to sends on this connection.
 
   \ingroup communications
 
-  FIXME: READ may not be performance efficient
+  \note READ may not be performance efficient.
 */
 CCI_DECLSPEC int cci_rma(cci_connection_t *connection, 
                          void *header_ptr, uint32_t header_len, 
