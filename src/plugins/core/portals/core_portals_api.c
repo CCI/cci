@@ -274,8 +274,6 @@ static int portals_init(
     ptl_interface_t        ifID;
     ptl_ni_limits_t        niLimit;
     ptl_handle_ni_t        niHandle;
-    //ptl_handle_eq_t        eqhSend;
-    //ptl_handle_eq_t        eqhRecv;
 
     CCI_ENTER;
 
@@ -297,7 +295,7 @@ static int portals_init(
     srandom((unsigned int) portals_get_usecs());
 
 /*
- * Step 3.  Initialize the portals library.
+ * Step 2.  Initialize the portals library.
  */
     if( (iRC=PtlInit( &iMax_devices ))!=PTL_OK ) {
 
@@ -315,30 +313,27 @@ static int portals_init(
  */
     ifID=IFACE_FROM_BRIDGE_AND_NALID( PTL_BRIDGE_UK, PTL_IFACE_SS );
 /*
- * Step 4.  Initialize the network interface.
+ * Step 3.  Initialize the network interface.
  */
     iRC=PtlNIInit( ifID, PTL_PID_ANY, NULL, &niLimit, &niHandle );
     if( iRC!=PTL_OK ) {
 
         switch(iRC) {
             case PTL_NO_INIT:      /* Usually dup PtlNIInit() call */
-                 return CCI_ENODEV;;
-
             case PTL_IFACE_INVALID:/* Bad interface options */
-                 return CCI_ENODEV;;
-
+                 ret = CCI_ENODEV;
+                 break;
             case PTL_PID_INVALID:  /* This one should not happen */
-                 return CCI_EINVAL;;
-
-            case PTL_NO_SPACE:     /* Well, well, well */
-                 return CCI_ENOMEM;;
-
             case PTL_SEGV:         /* This one should not happen */
-                 return CCI_EINVAL;;
-
+                 ret = CCI_EINVAL;
+                 break;
+            case PTL_NO_SPACE:     /* Well, well, well */
+                 ret =  CCI_ENOMEM;
+                 break;
             default:               /* Undocumented portals error */
-                 return CCI_ERROR;
+                 ret = CCI_ERROR;
         }
+        goto out_with_init;
     }
 
 /*
@@ -371,7 +366,8 @@ static int portals_init(
             free(pglobals->devices);
             free(pglobals);
             pglobals=NULL;
-            return CCI_ENOMEM;
+            ret = CCI_ENOMEM;
+            goto out_with_ni_init;
         }
 
         pdev=dev->priv;            /* select private device */
@@ -409,7 +405,13 @@ static int portals_init(
                  pdev->max_getput_md );
 
         pdev->ep_ids = calloc(PORTALS_NUM_BLOCKS, sizeof(*pdev->ep_ids));
-        // FIXME check ep_ids
+        if (!pdev->ep_ids) {
+            free(pglobals->devices);
+            free(pglobals);
+            pglobals=NULL;
+            ret = CCI_ENOMEM;
+            goto out_with_ni_init;
+        }
         ds[pglobals->count]=device;
         pglobals->count++;
         dev->is_up=1;
@@ -443,7 +445,8 @@ static int portals_init(
         free(pglobals->devices);
         free(pglobals);
         pglobals=NULL;
-        return CCI_ENODEV;
+        ret = CCI_ENODEV;
+        goto out_with_ni_init;
     }
 
 /*  Increment list of devices. */
@@ -482,6 +485,12 @@ static int portals_init(
 
     CCI_EXIT;
     return CCI_SUCCESS;
+
+out_with_ni_init:
+    PtlNIFini(niHandle);
+out_with_init:
+    PtlFini();
+    return ret;
 }
 
 
