@@ -1094,16 +1094,13 @@ static int portals_bind(
         if( iRC!=PTL_OK ) {
             switch(iRC) {
                 case PTL_NO_INIT:            /* Portals library issue */
-                    //FIXME
                     iRC = CCI_ENODEV;
                     break;
                 case PTL_NO_SPACE:           /* Well, well, well */
-                    //FIXME
                     iRC = CCI_ENOMEM;
                     break;
                 default:                     /* Undocumented error */
                     debug( CCI_DB_WARN, "Failed with iRC=%d\n", iRC );
-                    //FIXME
                     iRC = CCI_ERROR;
             }
             goto out;
@@ -2367,58 +2364,6 @@ out:
 }
 
 
-// Todo
-static void portals_recvfrom_ep(
-    cci__ep_t              *ep ) {
-
-    ptl_event_t          event;
-
-    return;
-
-    return;
-    portals_events(&event);
-//  printf("In portals_recvfrom_ep\n");
-    //sleep(2);
-    return;
-}
-
-
-// Todo
-static void portals_recvfrom_lep(
-    cci__lep_t             *lep ) {
-
-    int                  iRC;
-    ptl_event_t          event;
-    cci__crq_t           *crq;
-
-    return;
-
-    return;
-    iRC=portals_events(&event);
-    if(!iRC) {                               /* Got an event */
-
-        cci_device_t **remote;
-
-        remote=calloc( 1, sizeof(cci_device_t * ) );
-        remote[0]=calloc( 1, sizeof(cci_device_t));
-        remote[0]->name=calloc( 1, 24 );
-        sprintf( (char *)remote[0]->name, "port://%d,%d",
-                 event.initiator.nid, event.initiator.pid );
-        crq=calloc( 1, sizeof(cci__crq_t) );
-        crq->conn_req.devices_cnt=1;
-        *((cci_device_t ***)&(crq->conn_req.devices))=remote;
-        pthread_mutex_lock(&lep->lock);
-        TAILQ_INSERT_HEAD( &lep->crqs, crq, entry );
-        pthread_mutex_unlock(&lep->lock);
-        fprintf( stderr, "In portals_recvfrom_lep:  added crq  "
-                 "remote->name=\"%s\"\n", remote[0]->name );
-    } else {
-        fprintf( stderr, "In portals_recvfrom_lep  lep=%p\n", lep );
-    }
-    return;
-}
-
-
 static inline void portals_progress_dev(
     cci__dev_t             *dev ) {
 
@@ -2994,82 +2939,4 @@ static void portals_get_event_lep(cci__lep_t *lep)
     }
     /* TODO unlink md and relink? */
     return;
-}
-
-static int portals_events(
-    ptl_event_t            *event ) {
-
-    int                    iRC;
-    int                    id;
-    const cci_device_t     **devices;
-    cci__dev_t             *dev;
-    portals_dev_t          *pdev;
-    ptl_handle_eq_t        eqh[2];
-    //portals_msg_type_t     type;
-    //uint8_t                a;
-    //uint16_t               b;
-    //uint32_t               c;
-
-    CCI_ENTER;
-
-    if(!pglobals) {
-
-        CCI_EXIT;
-        return 0;
-    }
-
-    for( devices=pglobals->devices; *devices!=NULL; devices++ ) {
-
-        dev=container_of( devices, cci__dev_t, device );
-        pdev=dev->priv;
-
-        //eqh[0]=pdev->eqhSend;
-        //eqh[1]=pdev->eqhRecv;
-
-        iRC=PtlEQPoll( eqh, 2, 10, event, &id );
-        if( iRC==PTL_OK ) {
-
-            switch( event->type ) {
-
-                case PTL_EVENT_SEND_START:
-                     fprintf( stderr, "PTL_EVENT_SEND_START\n" );
-                     break;;
-
-                case PTL_EVENT_SEND_END:
-                     fprintf( stderr, "PTL_EVENT_SEND_END "
-                              " mlength=%lld  rlength=%lld\n",
-                              event->mlength, event->rlength );
-                     break;;
-
-                case PTL_EVENT_PUT_START:
-                     fprintf( stderr, "PTL_EVENT_PUT_START\n" );
-                     break;;
-
-                case PTL_EVENT_PUT_END:
-                     fprintf( stderr, "PTL_EVENT_PUT_END "
-                              " mlength=%lld  rlength=%lld\n",
-                              event->mlength, event->rlength );
-                     fprintf( stderr, "md.length=%lld\n",
-                              event->md.length );
-                     //portals_parse_header( event->md.start, &type,
-                                           //&a, &b, &c );
-                     //fprintf( stderr,
-                              //"Got buffer: type=%d a=%d b=%d c=%d\n",
-                              //type, a, b, c );
-                     
-                     break;;
-
-                case PTL_EVENT_ACK:
-                     fprintf( stderr, "PTL_EVENT_ACK  mlength=%lld "
-                              " rlength=%lld\n",
-                              event->mlength, event->rlength );
-                     break;;
-
-                default:
-                     fprintf( stderr, "Unexpected event\n" );
-                     break;;
-            }
-        }
-    }
-    return iRC;
 }
