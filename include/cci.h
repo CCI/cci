@@ -1537,6 +1537,7 @@ CCI_DECLSPEC int cci_sendv(cci_connection_t *connection,
 
   \return CCI_SUCCESS   The memory is ready for RMA.
   \return CCI_EINVAL    endpoint, start, or rma_handle is NULL.
+  \return CCI_EINVAL    connection is unreliable.
   \return CCI_EINVAL    length is 0.
   \return Each driver may have additional error codes.
 
