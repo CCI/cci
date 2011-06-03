@@ -1208,45 +1208,8 @@ static int portals_get_conn_req(
         return CCI_ENODEV;
     }
 
-    iRC=CCI_ENODEV;
-    devices=pglobals->devices;
-    dev=container_of(*devices, cci__dev_t, device);
-    TAILQ_FOREACH( lep, &dev->leps, dentry ) {
-
-        portals_get_event_lep(lep);
-
-        pthread_mutex_lock(&lep->lock);
-        TAILQ_FOREACH( crq, &lep->crqs, entry ) {
-
-            uint32_t count=crq->conn_req.devices_cnt;
-            cci_device_t **remote;
-            cci_device_t **local;
-
-            if( count==1 ) {
-
-                local=calloc( 1, sizeof(cci_device_t * ) );
-                local[0]=calloc( 1, sizeof(cci_device_t));
-                local[0]->name=calloc( 1, 24 );
-                remote=*((cci_device_t ***)&(crq->conn_req.devices));
-                strcpy( (char *)local[0]->name,
-                        (char *)remote[0]->name );
-                *((cci_device_t ***)&((**conn_req).devices))=local;
-                TAILQ_REMOVE( &lep->crqs, crq, entry );
-                free((char *)remote[0]->name);
-                free(remote[0]);
-                free(remote);
-                free(crq);
-                crq=container_of( conn_req[0], cci__crq_t, conn_req );
-                crq->lep=lep;
-                iRC=CCI_SUCCESS;
-                fprintf( stderr, "In portals_get_conn_req:  "
-                    "**conn_req.devices[0].name=\"%s\"\n",
-                    (*(&((**conn_req).devices)))[0]->name );
-            }
-        }
-        pthread_mutex_unlock(&lep->lock);
-    }
-    return iRC;
+    CCI_EXIT;
+    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 static int portals_accept(
