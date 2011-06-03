@@ -495,7 +495,7 @@ out_with_init:
     PtlFini();
 
     CCI_EXIT;
-    return ret;
+    return iRC;
 }
 
 
