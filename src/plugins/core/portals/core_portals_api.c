@@ -1216,6 +1216,7 @@ static int portals_accept(
     cci__dev_t      *dev    = NULL;
     cci__conn_t     *conn   = NULL;
     cci__crq_t      *crq    = NULL;
+    cci__lep_t      *lep    = NULL;
     portals_ep_t    *pep    = NULL;
     portals_dev_t   *pdev   = NULL;
     portals_crq_t   *pcrq   = NULL;
@@ -1238,11 +1239,13 @@ static int portals_accept(
     pcrq = crq->priv;
     dev = ep->dev;
     pdev = dev->priv;
+    lep = crq->lep;
 
     conn = calloc(1, sizeof(*conn));
     if (!conn) {
         CCI_EXIT;
-        return CCI_ENOMEM;
+        ret = CCI_ENOMEM;
+        goto out_with_crq;
     }
 
     conn->tx_timeout = ep->tx_timeout;
@@ -1342,6 +1345,10 @@ static int portals_accept(
         goto out_with_queued;
     }
 
+    pthread_mutex_lock(&lep->lock);
+    TAILQ_INSERT_HEAD(&lep->crqs, crq, entry);
+    pthread_mutex_lock(&lep->lock);
+
     *connection = &conn->connection;
 
     CCI_EXIT;
@@ -1354,6 +1361,10 @@ out_with_queued:
     free(pconn);
 out_with_conn:
     free(conn);
+out_with_crq:
+    pthread_mutex_lock(&lep->lock);
+    TAILQ_INSERT_HEAD(&lep->crqs, crq, entry);
+    pthread_mutex_lock(&lep->lock);
 
     CCI_EXIT;
     return ret;
