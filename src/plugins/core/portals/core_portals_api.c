@@ -196,7 +196,6 @@ static int portals_rma(              cci_connection_t     *connection,
 static void *portals_progress_thread(void                 *arg );
 static inline void portals_progress_dev(
                                      cci__dev_t *dev);
-static int portals_events(           ptl_event_t          *event );
 static void portals_get_event_ep(cci__ep_t *ep);
 static void portals_get_event_lep(cci__lep_t *lep);
 
@@ -2408,12 +2407,10 @@ static inline void portals_progress_dev(
     }
 
     TAILQ_FOREACH( ep, &dev->eps, entry) {
-        portals_recvfrom_ep(ep);
         portals_get_event_ep(ep);
     }
     TAILQ_FOREACH( lep, &dev->leps, dentry ) {
         lep->dev=dev;
-        portals_recvfrom_lep(lep);
         portals_get_event_lep(lep);
     }
 
