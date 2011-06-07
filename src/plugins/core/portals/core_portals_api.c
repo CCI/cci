@@ -1980,12 +1980,14 @@ static int portals_return_event(cci_endpoint_t *endpoint,
  * We always buffer (we ignore CCI_FLAG_NO_COPY) to avoid having to
  * re-bind the TX buffer.
  *
- * For unreliable connections, we ignore send_start and disable ack. We need
- * send_end to generate the CCI_EVENT_SEND or, if CCI_FLAG_SILENT is set,
- * to return it to idle_txs.
+ * For all connections, we have disabled send_start.
  *
- * For reliable connections, we disable send_start, ignore send_end, and we
- * request an ack, which will trigger our CCI event.
+ * For unreliable connections, we do not request an ack. We need send_end to
+ * generate the CCI_EVENT_SEND or, if CCI_FLAG_SILENT is set, to return it to
+ * idle_txs.
+ *
+ * For reliable connections, we ignore send_end, and we request an ack, which
+ * will trigger our CCI event.
  */
 static int portals_sendv(
     cci_connection_t       *connection, 
@@ -2099,31 +2101,58 @@ static int portals_sendv(
                        bits,                    /* match bits */
                        0,                       /* remote offset */
                        pconn->peer_conn);       /* hdr_data */
+    if (ret != PTL_OK) {
+        switch (ret) {
+            case PTL_NO_INIT:
+                ret = CCI_ENODEV;
+                break;
+            case PTL_PROCESS_INVALID:
+                ret = CCI_EADDRNOTAVAIL;
+                break;
+            default: /* PTL_MD_[INVALID|ILLEGAL] */
+                ret = CCI_ERROR;
+                break;
+        }
+        goto out;
+    }
     debug(CCI_DB_MSG,
              "%s: (%d,%d) table %d: posted:"
              " ret=%s len=%d\n", __func__, pconn->idp.nid, pconn->idp.pid,
                                  pdev->table_index, ptl_err_str[ret], tx->len );
+    /*
+     * If blocking, only wait if reliable. Unreliable only needs local
+     * completion and since we always buffer, they are locally complete.
+     * If unreliable, we will silently ignore the send_end.
+     *
+     * Check for event in ep->evts.
+     */
     if (flags & CCI_FLAG_BLOCKING && is_reliable) {
-        ptl_event_t event;
-
+        cci__evt_t *e, *evt = NULL;
         do {
-            ret = PtlEQGet(pep->eqh, &event);
-            if (!(ret == PTL_OK || ret == PTL_EQ_DROPPED))
-                continue;
-
-            if (event.md_handle == tx->mdh) {
-                assert(event.type == PTL_EVENT_ACK);
-                if (event.ni_fail_type != PTL_NI_OK)
-                    tx->evt.event.info.send.status = CCI_ERROR;
-                pthread_mutex_lock(&ep->lock);
-                TAILQ_INSERT_HEAD(&pep->idle_txs, tx, dentry);
-                pthread_mutex_unlock(&ep->lock);
-                break;
-            } else {
-                /* queue for cci_get_event() */
-                /* TODO */
+            pthread_mutex_lock(&ep->lock);
+            TAILQ_FOREACH(e, &ep->evts, entry) {
+                if (&tx->evt == e) {
+                    evt = e;
+                    TAILQ_REMOVE(&ep->evts, evt, entry);
+                    ret = evt->event.info.send.status;
+                }
             }
-        } while (1);
+            pthread_mutex_unlock(&ep->lock);
+        } while (evt == NULL);
+        /* if successful, queue the tx now,
+         * if not, queue it below */
+        if (ret == CCI_SUCCESS) {
+            pthread_mutex_lock(&ep->lock);
+            TAILQ_INSERT_HEAD(&pep->idle_txs, tx, dentry);
+            pthread_mutex_unlock(&ep->lock);
+        }
+    }
+
+out:
+    if (ret) {
+        pthread_mutex_lock(&ep->lock);
+        TAILQ_INSERT_HEAD(&pep->idle_txs, tx, dentry);
+        pthread_mutex_unlock(&ep->lock);
     }
 
     CCI_EXIT;
