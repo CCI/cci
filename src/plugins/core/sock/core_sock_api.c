@@ -78,8 +78,8 @@ static int sock_send(cci_connection_t *connection,
                          void *context, int flags);
 static int sock_sendv(cci_connection_t *connection, 
                           void *header_ptr, uint32_t header_len, 
-                          char **data_ptrs, int *data_lens,
-                          uint8_t segment_cnt, void *context, int flags);
+                          struct iovec *data, uint8_t iovcnt,
+                          void *context, int flags);
 static int sock_rma_register(cci_endpoint_t *endpoint,
                              cci_connection_t *connection,
                              void *start, uint64_t length,
@@ -2181,24 +2181,28 @@ static int sock_send(cci_connection_t *connection,
                          void *data_ptr, uint32_t data_len, 
                          void *context, int flags)
 {
-    uint8_t segment_cnt = 0;
+    uint8_t iovcnt = 0;
+    struct iovec iov = { NULL, 0 };
 
-    if (data_ptr && data_len)
-        segment_cnt = 1;
+    if (data_ptr && data_len) {
+        iovcnt = 1;
+        iov.iov_base = data_ptr;
+        iov.iov_len = data_len;
+    }
 
     return sock_sendv(connection, header_ptr, header_len,
-                      (char **) &data_ptr, (int *) &data_len,
-                      segment_cnt, context, flags);
+                      &iov, iovcnt,
+                      context, flags);
 }
 
 
 static int sock_sendv(cci_connection_t *connection, 
                           void *header_ptr, uint32_t header_len, 
-                          char **data_ptrs, int *data_lens,
-                          uint8_t segment_cnt, void *context, int flags)
+                          struct iovec *data, uint8_t iovcnt,
+                          void *context, int flags)
 {
     int i, ret, is_reliable = 0, data_len = 0;
-    char *func = segment_cnt < 2 ? "send" : "sendv";
+    char *func = iovcnt < 2 ? "send" : "sendv";
     cci_endpoint_t *endpoint = connection->endpoint;
     cci__ep_t *ep;
     cci__dev_t *dev;
@@ -2220,13 +2224,8 @@ static int sock_sendv(cci_connection_t *connection,
         return CCI_ENODEV;
     }
 
-    for (i = 0; i < segment_cnt; i++) {
-        if (!data_ptrs[i] && data_lens[i]) {
-            debug(CCI_DB_FUNC, "exiting %s", func);
-            return CCI_EINVAL;
-        }
-        data_len += data_lens[i];
-    }
+    for (i = 0; i < iovcnt; i++)
+        data_len += data[i].iov_len;
 
     if (header_len + data_len > connection->max_send_size) {
         debug(CCI_DB_FUNC, "exiting %s", func);
@@ -2307,12 +2306,10 @@ static int sock_sendv(cci_connection_t *connection,
         ptr += header_len;
         tx->len += header_len;
     }
-    for (i = 0; i < segment_cnt; i++) {
-        if (data_lens[i]) {
-            memcpy(ptr, data_ptrs[i], data_lens[i]);
-            ptr += data_lens[i];
-            tx->len += data_lens[i];
-        }
+    for (i = 0; i < iovcnt; i++) {
+        memcpy(ptr, data[i].iov_base, data[i].iov_len);
+        ptr += data[i].iov_len;
+        tx->len += data[i].iov_len;
     }
 
     /* if unreliable, try to send */

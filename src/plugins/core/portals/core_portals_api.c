@@ -167,9 +167,8 @@ static int portals_send(             cci_connection_t     *connection,
 static int portals_sendv(            cci_connection_t     *connection, 
                                      void                 *header_ptr,
                                      uint32_t             header_len, 
-                                     char                 **data_ptrs,
-                                     int                  *data_lens,
-                                     uint8_t              segment_cnt,
+                                     struct iovec         *data,
+                                     uint8_t              iovcnt,
                                      void                 *context,
                                      int                  flags );
 static int portals_rma_register(     cci_endpoint_t       *endpoint,
@@ -1872,29 +1871,33 @@ static int portals_return_event(cci_endpoint_t *endpoint,
 }
 
 
-/* Portals assumes reliability (retransmission) so we do not ahve to.
+/* Portals assumes reliability (retransmission) so we do not have to.
  * A put generates up to four events on the initiator:
  *   send_start, send_end, ack, and unlink.
  *
- * For unreliable connections, we always buffer and completion is when
- * we return. We ignore send_start and disable ack. We need send_end
- * but only to return the tx to idle_txs (no CCI event).
+ * We always buffer (we ignore CCI_FLAG_NO_COPY) to avoid having to
+ * re-bind the TX buffer.
  *
- * For reliable connections, we buffer unless CCI_FLAG_NO_COPY is set.
- * We disable send_start and send_end and we request an ack, which will
- * trigger our CCI event.
+ * For unreliable connections, we ignore send_start and disable ack. We need
+ * send_end to generate the CCI_EVENT_SEND or, if CCI_FLAG_SILENT is set,
+ * to return it to idle_txs.
+ *
+ * For reliable connections, we disable send_start, ignore send_end, and we
+ * request an ack, which will trigger our CCI event.
  */
-static int portals_send(
+static int portals_sendv(
     cci_connection_t       *connection, 
     void                   *header_ptr,
     uint32_t               header_len, 
-    void                   *data_ptr,
-    uint32_t               data_len, 
+    struct iovec           *data,
+    uint8_t                iovcnt,
     void                   *context,
     int                    flags ) {
 
+    int                    i            = 0;
     int                    ret          = CCI_SUCCESS;
     int                    is_reliable  = 0;
+    uint32_t               data_len     = 0;
     cci_endpoint_t         *endpoint    = connection->endpoint;
     cci__conn_t            *conn        = NULL;
     cci__ep_t              *ep          = NULL;
@@ -1913,10 +1916,8 @@ static int portals_send(
         return CCI_ENODEV;
     }
 
-    if (!data_ptr && data_len) {
-        CCI_EXIT;
-        return CCI_EINVAL;
-    }
+    for (i = 0; i < iovcnt; i++)
+        data_len += (uint32_t) data[i].iov_len;
 
     if (header_len + data_len > connection->max_send_size) {
         CCI_EXIT;
@@ -1977,8 +1978,14 @@ static int portals_send(
     /* always copy into tx's attached buffer */
     if (header_len)
         memcpy(tx->buffer, header_ptr, header_len);
-    if (data_len)
-        memcpy(tx->buffer + header_len, data_ptr, data_len);
+    if (data_len) {
+        uint32_t offset = header_len;
+
+        for (i = 0; i < iovcnt; i++) {
+            memcpy(tx->buffer + offset, data[i].iov_base, data[i].iov_len);
+            offset += data[i].iov_len;
+        }
+    }
 
     ret = PtlPutRegion(tx->mdh,                 /* Handle to MD */
                        0,                       /* local offset */
@@ -2021,23 +2028,33 @@ static int portals_send(
     return ret;
 }
 
+static int portals_send(
+    cci_connection_t       *connection, 
+    void                   *header_ptr,
+    uint32_t               header_len, 
+    void                   *data_ptr,
+    uint32_t               data_len, 
+    void                   *context,
+    int                    flags ) {
 
-// Todo
-static int portals_sendv(
-     cci_connection_t      *connection, 
-     void                  *header_ptr,
-     uint32_t              header_len, 
-     char                  **data_ptrs,
-     int                   *data_lens,
-     uint8_t               segment_cnt,
-     void                  *context,
-     int                   flags ) {
+    int ret = CCI_SUCCESS;
+    uint8_t iovcnt = 0;
+    struct iovec iov = { NULL, 0 };
 
     CCI_ENTER;
-    CCI_EXIT;
 
-    return CCI_ERR_NOT_IMPLEMENTED;
+    if (data_ptr && data_len > 0) {
+        iovcnt = 1;
+        iov.iov_base = data_ptr;
+        iov.iov_len = data_len;
+    }
+
+    ret = portals_sendv(connection, header_ptr, header_len,
+                               &iov, iovcnt, context, flags);
+    CCI_EXIT;
+    return ret;
 }
+
 
 
 /* We do not know if this buffer will be the source or sink,

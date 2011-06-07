@@ -54,6 +54,9 @@
 #ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
 #endif
+#ifdef HAVE_SYS_UIO_H
+#include <sys/uio.h>
+#endif
 
 /* ================================================================== */
 /*                                                                    */
@@ -1505,8 +1508,8 @@ CCI_DECLSPEC int cci_send(cci_connection_t *connection,
  */
 CCI_DECLSPEC int cci_sendv(cci_connection_t *connection, 
                            void *header_ptr, uint32_t header_len, 
-                           char **data_ptrs, int *data_lens,
-                           uint8_t segment_cnt, void *context, int flags);
+                           struct iovec *data, uint8_t iovcnt,
+                           void *context, int flags);
 
 
 /* RMA Area operations */

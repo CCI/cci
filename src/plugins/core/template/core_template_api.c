@@ -58,8 +58,8 @@ static int template_send(cci_connection_t *connection,
                          void *context, int flags);
 static int template_sendv(cci_connection_t *connection, 
                           void *header_ptr, uint32_t header_len, 
-                          char **data_ptrs, int *data_lens,
-                          uint8_t segment_cnt, void *context, int flags);
+                          struct iovec *data, uint8_t iovcnt,
+                          void *context, int flags);
 static int template_rma_register(cci_endpoint_t *endpoint,
                                  cci_connection_t *connection,
                                  void *start, uint64_t length,
@@ -288,8 +288,8 @@ static int template_send(cci_connection_t *connection,
 
 static int template_sendv(cci_connection_t *connection, 
                           void *header_ptr, uint32_t header_len, 
-                          char **data_ptrs, int *data_lens,
-                          uint8_t segment_cnt, void *context, int flags)
+                          struct iovec *data, uint8_t iovcnt,
+                          void *context, int flags)
 {
     printf("In template_sendv\n");
     return CCI_ERR_NOT_IMPLEMENTED;
