@@ -74,7 +74,7 @@ AC_DEFUN([CCI_SETUP_CORE],[
     CPPFLAGS="$CPPFLAGS -I$CCI_top_srcdir/src -I$CCI_top_srcdir/src/libltdl"
 
     # Look for some header files
-    AC_CHECK_HEADERS([errno.h stdint.h sys/types.h sys/time.h])
+    AC_CHECK_HEADERS(errno.h stdint.h sys/types.h sys/time.h sys/uio.h)
 
     # We need to set a path for header, etc files depending on whether
     # we're standalone or embedded. this is taken care of by CCI_EMBEDDED.
