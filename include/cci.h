@@ -562,9 +562,10 @@ CCI_DECLSPEC int cci_create_endpoint(cci_device_t *device,
    \return Each driver may have additional error codes.
 
    Successful completion of this function makes all data structures
-   and state associated with the endpoint stale.  All open connections
-   are closed immediately -- it is exactly as if cci_disconnect() was
-   invoked on every open connection on this endpoint.
+   and state associated with the endpoint (including the OS handle)
+   stale.  All open connections are closed immediately -- it is exactly
+   as if cci_disconnect() was invoked on every open connection on this
+   endpoint.
 
   \ingroup endpoints
  */
@@ -633,6 +634,7 @@ typedef enum cci_conn_attribute {
 /*! 
   Connection request. 
   
+  \anchor conn_req
   \ingroup connection
 */
 typedef struct cci_conn_req {
@@ -1024,8 +1026,6 @@ typedef enum cci_opt_name {
 } cci_opt_name_t;
 
 /*! 
-  JMS Fill me in
-
   Set an endpoint or connection option value.
 
   \param[in] handle Endpoint or connection handle.
@@ -1049,8 +1049,6 @@ CCI_DECLSPEC int cci_set_opt(cci_opt_handle_t *handle, cci_opt_level_t level,
                              cci_opt_name_t name, const void* val, int len);
 
 /*!
-  JMS Fill me in
-
   Get an endpoint or connection option value.
 
   \param[in] handle Endpoint or connection handle.
@@ -1164,8 +1162,6 @@ typedef struct cci_event_recv {
 
 /*! Other event
 
-  JMS Fill me in
-
   Other event.
 
   A completion struct to handle non-send and non-receive events.
@@ -1198,10 +1194,10 @@ typedef struct cci_event_other {
 } cci_event_other_t;
 
 
-/*! JMS Fill me in
+/*!
   Event types.
 
-  There are three board categories of events: send, receive, and other.
+  There are three broard categories of events: send, receive, and other.
   The other class includes connect success, rejected, and timeout as well
   as a generic endpoint device failure.
 
@@ -1490,7 +1486,31 @@ CCI_DECLSPEC int cci_send(cci_connection_t *connection,
 #define CCI_FLAG_WRITE      (1 << 5)    /* for RMA only */
 #define CCI_FLAG_FENCE      (1 << 6)    /* for RMA only */
 
-/*! JMS Fill me in
+/*!
+
+  Send a short vectored (gather) message.
+
+  Like cci_send(), cci_sendv() sends a short message bound by
+  cci_connection::max_send_size. Instead of a single data buffer,
+  cci_sendv() allows the application to gather an array of iovcnt
+  buffers pointed to by struct iovec *data.
+
+  \param[in] connection	Connection (destination/reliability).
+  \param[in] header_ptr	Pointer to local header segment.
+  \param[in] header_len	Length of local header segment (limited to 32 bytes).
+  \param[in] data	    Array of local data buffers.
+  \param[in] iovcnt	    Count of local data array.
+  \param[in] context	Cookie to identify the completion through a Send event 
+			            when non-blocking.
+  \param[in] flags      Optional flags: \ref CCI_FLAG_BLOCKING,
+                        \ref CCI_FLAG_NO_COPY, \ref CCI_FLAG_SILENT.
+                        See cci_send().
+
+  \return CCI_SUCCESS   The message has been queued to send.
+  \return CCI_EINVAL    Connection is NULL.
+  \return CCI_EINVAL    header_ptr is NULL and header_len is > 0.
+  \return CCI_EINVAL    data is NULL and iovcnt is > 0.
+  \return Each driver may have additional error codes.
 
   \ingroup communications
 
@@ -1568,8 +1588,6 @@ typedef struct cci_sg {
 
   This is just like cci_rma_register(), but it is to be used in the
   kernel only.
-
-  JMS Fill me in
 
   \ingroup communications
  */
