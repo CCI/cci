@@ -2495,10 +2495,24 @@ static int portals_rma(cci_connection_t *connection,
         }
     }
 
-    /* TODO handle flags & BLOCKING */
+    if (flags & CCI_FLAG_BLOCKING) {
+        cci__evt_t *e, *evt = NULL;
+        do {
+            pthread_mutex_lock(&ep->lock);
+            TAILQ_FOREACH(e, &ep->evts, entry) {
+                if (rma_op == e->priv) {
+                    evt = e;
+                    TAILQ_REMOVE(&ep->evts, evt, entry);
+                    ret = evt->event.info.send.status;
+                }
+            }
+            pthread_mutex_unlock(&ep->lock);
+        } while (evt == NULL);
+    }
 
 out:
-    if (ret != CCI_SUCCESS) {
+    if (ret != CCI_SUCCESS ||
+        flags & CCI_FLAG_BLOCKING) {
         pthread_mutex_lock(&ep->lock);
         TAILQ_REMOVE(&local->rma_ops, rma_op, hentry);
         TAILQ_REMOVE(&pconn->rmas, rma_op, rmas);
