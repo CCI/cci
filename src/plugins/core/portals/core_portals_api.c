@@ -1371,14 +1371,88 @@ out_with_crq:
 }
 
 
-// Todo
-static int portals_reject(
-    cci_conn_req_t         *conn_req ) {
+static int portals_reject(cci_conn_req_t *conn_req)
+{
+    int             ret     = CCI_SUCCESS;
+    cci__lep_t      *lep    = NULL;
+    cci__dev_t      *dev    = NULL;
+    cci__crq_t      *crq    = NULL;
+    portals_lep_t   *plep   = NULL;
+    portals_dev_t   *pdev   = NULL;
+    portals_crq_t   *pcrq   = NULL;
+    uint64_t        bits    = 0ULL;
+    ptl_md_t        md;
+    ptl_handle_md_t mdh;
 
     CCI_ENTER;
-    CCI_EXIT;
 
-    return CCI_ERR_NOT_IMPLEMENTED;
+    if(!pglobals) {
+        CCI_EXIT;
+        return CCI_ENODEV;
+    }
+
+    crq = container_of(conn_req, cci__crq_t, conn_req);
+    pcrq = crq->priv;
+    lep = crq->lep;
+    plep = lep->priv;
+    dev = lep->dev;
+    pdev = dev->priv;
+
+    bits = ((ptl_match_bits_t) pcrq->client_id) << PORTALS_EP_SHIFT;
+    bits |= ((ptl_match_bits_t) PORTALS_MSG_OOB_CONN_REPLY) << 2;
+    bits |= (ptl_match_bits_t) PORTALS_MSG_OOB;
+
+    memset(&md, 0, sizeof(md));
+    md.threshold = 1;
+    md.eq_handle = PTL_EQ_NONE;
+    md.options = PTL_MD_OP_PUT;
+
+    ret = PtlMDBind(pdev->niHandle, md, PTL_UNLINK, &mdh);
+    if (ret != PTL_OK) {
+        switch (ret) {
+            case PTL_NO_INIT:
+            case PTL_NI_INVALID:
+                ret = CCI_ENODEV;
+                break;
+            case PTL_NO_SPACE:
+                ret = CCI_ENOMEM;
+                break;
+            default:
+                ret = CCI_ERROR;
+                break;
+        }
+        goto cleanup;
+    }
+
+    ret = PtlPut(mdh,
+                 PTL_NOACK_REQ,
+                 pcrq->idp,
+                 pdev->table_index,
+                 0,
+                 bits,
+                 0,
+                 (uintptr_t) pcrq->client_conn);
+    if (ret != PTL_OK) {
+        switch (ret) {
+            case PTL_NO_INIT:
+                ret = CCI_ENODEV;
+                break;
+            case PTL_PROCESS_INVALID:
+                ret = CCI_EADDRNOTAVAIL;
+                break;
+            default:
+                ret = CCI_ERROR;
+                break;
+        }
+    }
+
+cleanup:
+    pthread_mutex_lock(&lep->lock);
+    TAILQ_INSERT_HEAD(&lep->crqs, crq, entry);
+    pthread_mutex_lock(&lep->lock);
+
+    CCI_EXIT;
+    return ret;
 }
 
 
