@@ -2837,10 +2837,20 @@ again:
         case PORTALS_MSG_OOB:
         case PORTALS_MSG_SEND:
             debug(CCI_DB_MSG, "%s: send_end for SEND", __func__);
-            /* queue on idle_txs */
-            pthread_mutex_lock(&ep->lock);
-            TAILQ_INSERT_HEAD(&pep->idle_txs, tx, dentry);
-            pthread_mutex_unlock(&ep->lock);
+            if (tx->flags & CCI_FLAG_SILENT ||
+                tx->flags & CCI_FLAG_BLOCKING) {
+                /* queue on idle_txs */
+                pthread_mutex_lock(&ep->lock);
+                TAILQ_INSERT_HEAD(&pep->idle_txs, tx, dentry);
+                pthread_mutex_unlock(&ep->lock);
+            } else {
+                /* generate CCI_EVENT_SEND */
+                tx->evt.event.info.send.status = 
+                    event.ni_fail_type == PTL_NI_OK ? CCI_SUCCESS : CCI_ERROR;
+                pthread_mutex_lock(&ep->lock);
+                TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
+                pthread_mutex_unlock(&ep->lock);
+            }
             break;
         default:
             debug(CCI_DB_INFO, "we missed disabling a portals send_end for "
@@ -2971,6 +2981,8 @@ again:
                 TAILQ_INSERT_HEAD(&pep->idle_txs, tx, dentry);
                 pthread_mutex_unlock(&ep->lock);
             } else {
+                tx->evt.event.info.send.status =
+                    event.ni_fail_type == PTL_NI_OK ? CCI_SUCCESS : CCI_ERROR;
                 pthread_mutex_lock(&ep->lock);
                 TAILQ_INSERT_HEAD(&ep->evts, &tx->evt, entry);
                 pthread_mutex_unlock(&ep->lock);
@@ -2993,7 +3005,9 @@ again:
             }
 
             if (!rma_op) {
-                /* FIXME do what now? */
+                debug(CCI_DB_WARN, "%s: unable to find rma_op for RMA WRITE "
+                                   "completion", __func__);
+                break;
             }
 
             if (rma_op->header_len) {
@@ -3014,6 +3028,8 @@ again:
                     free(rma_op);
                 } else {
                     /* we are done, issue completion */
+                    rma_op->evt.event.info.send.status =
+                        event.ni_fail_type == PTL_NI_OK ? CCI_SUCCESS : CCI_ERROR;
                     pthread_mutex_lock(&ep->lock);
                     TAILQ_INSERT_HEAD(&ep->evts, &rma_op->evt, entry);
                     pthread_mutex_unlock(&ep->lock);
