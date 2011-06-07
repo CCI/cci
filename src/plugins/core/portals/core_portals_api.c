@@ -1835,7 +1835,7 @@ static int portals_get_event(cci_endpoint_t *endpoint,
 static int portals_return_event(cci_endpoint_t *endpoint, 
                                 cci_event_t *event )
 {
-    int iRC;
+    int                 iRC     = CCI_SUCCESS;
     cci__ep_t           *ep     = NULL;
     portals_ep_t        *pep    = NULL;
     cci__evt_t          *evt    = NULL;
@@ -1935,11 +1935,29 @@ static int portals_return_event(cci_endpoint_t *endpoint,
                                 &am->meh,
                                 &am->mdh);
             if (iRC != PTL_OK) {
-                //FIXME
-                debug(CCI_DB_WARN, "PtlMEMDAttach() returned %s", ptl_err_str[iRC]);
-                abort();
+                debug(CCI_DB_WARN, "%s: PtlMEMDAttach() returned %s",
+                                   __func__, ptl_err_str[iRC]);
+                switch (iRC) {
+                    case PTL_NO_INIT:
+                    case PTL_NI_INVALID:
+                    case PTL_PT_INDEX_INVALID:
+                        iRC = CCI_ENODEV;
+                        break;
+                    case PTL_NO_SPACE:
+                        iRC = CCI_ENOMEM;
+                        break;
+                    case PTL_MD_INVALID:
+                    case PTL_MD_ILLEGAL:
+                    default:
+                        iRC = CCI_ERROR;
+                        break;
+                    case PTL_PROCESS_INVALID:
+                        iRC = CCI_EADDRNOTAVAIL;
+                        break;
+                }
+            } else {
+                am->active = 1;
             }
-            am->active = 1;
         }
         pthread_mutex_unlock(&ep->lock);
         break;
@@ -1951,7 +1969,7 @@ static int portals_return_event(cci_endpoint_t *endpoint,
 
     CCI_EXIT;
 
-    return CCI_SUCCESS;
+    return iRC;
 }
 
 
