@@ -624,7 +624,7 @@ portals_put_ep_id(portals_dev_t *pdev, uint32_t id)
 }
 
 /* Caller must be holding ep->lock */
-static void
+static int
 portals_free_tx(cci__ep_t *ep)
 {
     portals_tx_t    *tx;
@@ -632,7 +632,7 @@ portals_free_tx(cci__ep_t *ep)
 
     tx = TAILQ_FIRST(&pep->idle_txs);
     if (!tx)
-        return;
+        return 0;
 
     TAILQ_REMOVE(&pep->txs, tx, tentry);
     TAILQ_REMOVE(&pep->idle_txs, tx, dentry);
@@ -641,14 +641,14 @@ portals_free_tx(cci__ep_t *ep)
         free(tx->buffer);
     free(tx);
 
-    return;
+    return 1;
 }
 
 /* Caller must be holding ep->lock */
 static int
 portals_add_tx(cci__ep_t *ep)
 {
-    int             ret     = 0;
+    int             ret     = 1;
     ptl_md_t        md;
     portals_ep_t    *pep    = ep->priv;
     portals_tx_t    *tx;
@@ -656,14 +656,14 @@ portals_add_tx(cci__ep_t *ep)
 
     tx = calloc(1, sizeof(*tx));
     if(!tx) {
-        ret = CCI_ENOMEM;
+        ret = 0;
         goto out;
     }
     tx->evt.event.type = CCI_EVENT_SEND;
     tx->evt.ep = ep;
     tx->buffer = calloc(1, ep->buffer_len);
     if(!tx->buffer) {
-        ret = CCI_ENOMEM;
+        ret = 0;
         goto out;
     }
     tx->len = 0;
@@ -679,13 +679,20 @@ portals_add_tx(cci__ep_t *ep)
 
     ret = PtlMDBind(pdev->niHandle, md, PTL_RETAIN, &tx->mdh);
     if (ret) {
-        ret = CCI_ERROR;
+        ret = 0;
         goto out;
     }
 
     TAILQ_INSERT_TAIL(&pep->txs, tx, tentry);
     TAILQ_INSERT_TAIL(&pep->idle_txs, tx, dentry);
 out:
+    if (!ret) {
+        if (tx) {
+            if (tx->buffer)
+                free(tx->buffer);
+            free(tx);
+        }
+    }
     return ret;
 }
 
@@ -791,8 +798,10 @@ static int portals_create_endpoint(
 
     for( i=0; i<ep->tx_buf_cnt; i++ ) {
         iRC = portals_add_tx(ep);
-        if (iRC != CCI_SUCCESS)
+        if (iRC != 1) {
+            iRC = CCI_ENOMEM;
             goto out;
+        }
     }
 
     /* all non-RMA messages place the endpoint ID in the upper 32 bits */
@@ -1718,6 +1727,14 @@ static int portals_disconnect(cci_connection_t *connection)
     return CCI_SUCCESS;
 }
 
+/* Caller must be holding ep->lock
+ *
+ * When reducing the number of txs, we try to free
+ * (current - new_count) txs. If the txs are in use and 
+ * not enough are in the idle txs list, we will report
+ * success. In this case, we will set the ep->tx_buf_cnt
+ * to the number left.
+ */
 static int
 portals_set_ep_tx_buf_cnt(cci__ep_t *ep, uint32_t new_count)
 {
@@ -1736,27 +1753,21 @@ portals_set_ep_tx_buf_cnt(cci__ep_t *ep, uint32_t new_count)
 
     if (new_count < current) {
         /* reduce txs */
-
         for (i = 0; i < (current - new_count); i++)
-            portals_free_tx(ep);
+            ep->tx_buf_cnt -= portals_free_tx(ep);
     } else {
         /* add txs */
-
-        for (i = 0; i < (new_count - current); i++) {
-            ret = portals_add_tx(ep);
-            if (ret) {
-                /* free new txs and return error */
-                do {
-                    portals_free_tx(ep);
-                } while (i-- > 0);
-
-                goto out;
-            }
-        }
+        for (i = 0; i < (new_count - current); i++)
+            ep->tx_buf_cnt += portals_add_tx(ep);
     }
-    ep->tx_buf_cnt = new_count;
+    return ret;
+}
 
-out:
+static int
+portals_set_ep_rx_buf_cnt(cci__ep_t *ep, uint32_t new_count)
+{
+    int         ret     = CCI_SUCCESS;
+
     return ret;
 }
 
@@ -1795,8 +1806,16 @@ static int portals_set_opt(cci_opt_handle_t *handle,
         ret = CCI_ERR_NOT_IMPLEMENTED; /* not supported */
         break;
     case CCI_OPT_ENDPT_RECV_BUF_COUNT:
-        ret = CCI_ERR_NOT_IMPLEMENTED;
+    {
+        uint32_t new_count;
+
+        assert(len == sizeof(new_count));
+        memcpy(&new_count, val, len);
+        pthread_mutex_lock(&ep->lock);
+        ret = portals_set_ep_rx_buf_cnt(ep, new_count);
+        pthread_mutex_unlock(&ep->lock);
         break;
+    }
     case CCI_OPT_ENDPT_SEND_BUF_COUNT:
     {
         uint32_t new_count;
