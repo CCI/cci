@@ -386,23 +386,23 @@ static int portals_init(
         pdev->max_md_iovecs=niLimit.max_md_iovecs;
         pdev->max_me_list=niLimit.max_me_list;
         pdev->max_getput_md=niLimit.max_getput_md;
-        debug( CCI_DB_INFO, "My portals ID is: (%10d, %5d).\n",
+        debug( CCI_DB_INFO, "My portals ID is: port://%u,%hu",
                  (pdev->idp).nid, (pdev->idp).pid );
-        debug( CCI_DB_INFO, "My portals limits are: max_mes=%d\n",
+        debug( CCI_DB_INFO, "My portals limits are: max_mes=%d",
                  pdev->max_mes );
-        debug( CCI_DB_INFO, "                       max_mds=%d\n",
+        debug( CCI_DB_INFO, "                       max_mds=%d",
                  pdev->max_mds );
-        debug( CCI_DB_INFO, "                       max_eqs=%d\n",
+        debug( CCI_DB_INFO, "                       max_eqs=%d",
                  pdev->max_eqs );
-        debug( CCI_DB_INFO, "                       max_ac_index=%d\n",
+        debug( CCI_DB_INFO, "                       max_ac_index=%d",
                  pdev->max_ac_index );
-        debug( CCI_DB_INFO, "                       max_pt_index=%d\n",
+        debug( CCI_DB_INFO, "                       max_pt_index=%d",
                  pdev->max_pt_index );
-        debug( CCI_DB_INFO, "                       max_md_iovecs=%d\n",
+        debug( CCI_DB_INFO, "                       max_md_iovecs=%d",
                  pdev->max_md_iovecs );
-        debug( CCI_DB_INFO, "                       max_me_list=%d\n",
+        debug( CCI_DB_INFO, "                       max_me_list=%d",
                  pdev->max_me_list );
-        debug( CCI_DB_INFO, "                       max_getput_md=%d\n",
+        debug( CCI_DB_INFO, "                       max_getput_md=%d",
                  pdev->max_getput_md );
 
         pdev->ep_ids = calloc(PORTALS_NUM_BLOCKS, sizeof(*pdev->ep_ids));
@@ -425,7 +425,7 @@ static int portals_init(
                const char *table = *arg + 9;
     
                pdev->table_index= atoi(table);
-               debug( CCI_DB_INFO, "found portals index=%d\n",
+               debug( CCI_DB_INFO, "found portals index=%d",
                         pdev->table_index );
             } else if (0 == strncmp("mtu=", *arg, 4)) {
                 const char *mss_str = *arg + 4;
@@ -524,13 +524,13 @@ static int portals_get_devices(
     }
 
     *devices=pglobals->devices;
-    debug( CCI_DB_INFO, "There are %d devices.\n", pglobals->count );
+    debug( CCI_DB_INFO, "There are %d devices.", pglobals->count );
 
     device=**devices;
     dev=container_of( device, cci__dev_t, device );
     pdev=dev->priv;
 
-    debug( CCI_DB_INFO, "Got portals ID of: (%10d, %5d).\n",
+    debug( CCI_DB_INFO, "Got portals ID of: port://%u,%hu",
              pdev->idp.nid, pdev->idp.pid );
 
     CCI_EXIT;
@@ -1098,7 +1098,7 @@ static int portals_bind(
                     iRC = CCI_ENOMEM;
                     break;
                 default:                     /* Undocumented error */
-                    debug( CCI_DB_WARN, "Failed with iRC=%d\n", iRC );
+                    debug( CCI_DB_WARN, "Failed with iRC=%d", iRC );
                     iRC = CCI_ERROR;
             }
             goto out;
@@ -1107,7 +1107,7 @@ static int portals_bind(
 
     TAILQ_INIT(&lep->passive);
 
-    debug(CCI_DB_INFO, "%s: port://%u,%hu bound on port %u\n", __func__,
+    debug(CCI_DB_INFO, "%s: port://%u,%hu bound on port %u", __func__,
                        pdev->idp.nid, pdev->idp.pid, svc->port);
 
     /* create OS handle */
@@ -2117,7 +2117,7 @@ static int portals_sendv(
     }
     debug(CCI_DB_MSG,
              "%s: (%d,%d) table %d: posted:"
-             " ret=%s len=%d\n", __func__, pconn->idp.nid, pconn->idp.pid,
+             " ret=%s len=%d", __func__, pconn->idp.nid, pconn->idp.pid,
                                  pdev->table_index, ptl_err_str[ret], tx->len );
     /*
      * If blocking, only wait if reliable. Unreliable only needs local
