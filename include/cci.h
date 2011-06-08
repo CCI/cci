@@ -1269,7 +1269,7 @@ typedef struct cci_event {
 /*                  */
 /********************/
 
-/*! JMS Fill me in 
+/*!
 
   \todo From Patrick: This function is for windows. The default way to
    do Object synchronization in Windows is to have the kernel
@@ -1495,6 +1495,8 @@ CCI_DECLSPEC int cci_send(cci_connection_t *connection,
   cci_sendv() allows the application to gather an array of iovcnt
   buffers pointed to by struct iovec *data.
 
+  The size of the iovec array is limited to 255 elements.
+
   \param[in] connection	Connection (destination/reliability).
   \param[in] header_ptr	Pointer to local header segment.
   \param[in] header_len	Length of local header segment (limited to 32 bytes).
@@ -1514,17 +1516,6 @@ CCI_DECLSPEC int cci_send(cci_connection_t *connection,
 
   \ingroup communications
 
-  \todo When someone implements: is the array of data_ptrs/data_lens
-        good?  Or should we use some kind of iovec?  (keep in mind
-        that iovec is not standard POSIX)
-
-  \todo JMS The passed data_ptrs/data_lens have to be buffered, just
-        like the header.  The rationale is safety of scope,
-        consistency, and ease of use.  The assumption is that the
-        header and data_ptrs/data_lens are bounded and relatively
-        small.  Max header length is already an endpoint GET opt -- do
-        we need another GET opt for the max length of the
-        data_ptrs/data_lens arrays?  I think so.
  */
 CCI_DECLSPEC int cci_sendv(cci_connection_t *connection, 
                            void *header_ptr, uint32_t header_len, 
