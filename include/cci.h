@@ -1037,6 +1037,7 @@ typedef enum cci_opt_name {
   \return CCI_SUCCESS   Value successfully set.
   \return CCI_EINVAL    Handle or val is NULL or len is 0.
   \return CCI_EINVAL    Level/name mismatch.
+  \return CCI_EINVAL    Trying to set a get-only option.
   \return CCI_ERR_NOT_IMPLEMENTED   Not supported by this driver.
   \return Each driver may have additional error codes.
 
