@@ -9,6 +9,7 @@ TESTS = \
         init	\
 	server	\
 	client	\
+	pingpong_rma	\
 	pingpong
 
 check_PROGRAMS = $(TESTS)
