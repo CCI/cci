@@ -649,6 +649,7 @@ static int
 portals_add_tx(cci__ep_t *ep)
 {
     int             ret     = 1;
+    int             imd;
     ptl_md_t        md;
     portals_ep_t    *pep    = ep->priv;
     portals_tx_t    *tx;
@@ -677,8 +678,8 @@ portals_add_tx(cci__ep_t *ep)
     md.options |= PTL_MD_EVENT_START_DISABLE;
     md.user_ptr = tx;
 
-    ret = PtlMDBind(pdev->niHandle, md, PTL_RETAIN, &tx->mdh);
-    if (ret) {
+    imd = PtlMDBind(pdev->niHandle, md, PTL_RETAIN, &tx->mdh);
+    if (imd) {                               /* PtlMDBind failed */
         ret = 0;
         goto out;
     }
