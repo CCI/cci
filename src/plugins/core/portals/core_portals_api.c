@@ -1389,7 +1389,7 @@ static int portals_accept(
 
     pthread_mutex_lock(&lep->lock);
     TAILQ_INSERT_HEAD(&lep->crqs, crq, entry);
-    pthread_mutex_lock(&lep->lock);
+    pthread_mutex_unlock(&lep->lock);
 
     *connection = &conn->connection;
 
