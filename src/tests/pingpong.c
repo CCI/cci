@@ -318,7 +318,7 @@ do_server()
         poll_events();
 
     /* clean up */
-    ret = cci_unbind(service, NULL);
+    ret = cci_unbind(service, devices[0]);
     check_return("cci_unbind", ret, 0);
 
     return;
