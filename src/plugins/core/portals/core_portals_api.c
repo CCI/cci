@@ -386,7 +386,7 @@ static int portals_init(
         pdev->max_md_iovecs=niLimit.max_md_iovecs;
         pdev->max_me_list=niLimit.max_me_list;
         pdev->max_getput_md=niLimit.max_getput_md;
-        debug( CCI_DB_INFO, "My portals ID is: port://%u,%hu",
+        debug( CCI_DB_ALL, "My portals ID is: port://%u,%hu",
                  (pdev->idp).nid, (pdev->idp).pid );
         debug( CCI_DB_INFO, "My portals limits are: max_mes=%d",
                  pdev->max_mes );
@@ -623,14 +623,27 @@ portals_put_ep_id(portals_dev_t *pdev, uint32_t id)
     return;
 }
 
-/* Caller must be holding ep->lock */
+/* Free a tx.
+ *
+ * \param[in] pep   Portals endpoint
+ * \param[in] force If force, selct from all txs
+ *                  otherwise, only select from idle txs
+ *
+ * Only use force if closeing the endpoint and we do not
+ * casre if the application is holding an event (tx).
+ *
+ * Caller must be holding ep->lock.
+ */
 static int
-portals_free_tx(cci__ep_t *ep)
+portals_free_tx(portals_ep_t *pep, int force)
 {
     portals_tx_t    *tx;
-    portals_ep_t    *pep    = ep->priv;
 
-    tx = TAILQ_FIRST(&pep->idle_txs);
+    if (force)
+        tx = TAILQ_FIRST(&pep->txs);
+    else
+        tx = TAILQ_FIRST(&pep->idle_txs);
+
     if (!tx)
         return 0;
 
@@ -649,7 +662,6 @@ static int
 portals_add_tx(cci__ep_t *ep)
 {
     int             ret     = 1;
-    int             imd;
     ptl_md_t        md;
     portals_ep_t    *pep    = ep->priv;
     portals_tx_t    *tx;
@@ -678,11 +690,12 @@ portals_add_tx(cci__ep_t *ep)
     md.options |= PTL_MD_EVENT_START_DISABLE;
     md.user_ptr = tx;
 
-    imd = PtlMDBind(pdev->niHandle, md, PTL_RETAIN, &tx->mdh);
-    if (imd) {                               /* PtlMDBind failed */
+    ret = PtlMDBind(pdev->niHandle, md, PTL_RETAIN, &tx->mdh);
+    if (ret) {                               /* PtlMDBind failed */
         ret = 0;
         goto out;
     }
+    ret = 1;
 
     TAILQ_INSERT_TAIL(&pep->txs, tx, tentry);
     TAILQ_INSERT_TAIL(&pep->idle_txs, tx, dentry);
@@ -694,6 +707,170 @@ out:
             free(tx);
         }
     }
+    return ret;
+}
+
+/* Caller must be holding ep->lock */
+static int
+portals_add_rx(cci__ep_t *ep)
+{
+    int             ret     = 1;
+    portals_ep_t    *pep    = ep->priv;
+    portals_rx_t    *rx;
+
+    rx = calloc(1, sizeof(*rx));
+    if(!rx) {
+        ret = 0;
+        goto out;
+    }
+
+    rx->evt.event.type = CCI_EVENT_RECV;
+    rx->evt.ep = ep;
+    TAILQ_INSERT_TAIL(&pep->rxs, rx, gentry);
+    TAILQ_INSERT_TAIL(&pep->idle_rxs, rx, entry);
+
+out:
+    return ret;
+}
+
+/* Free a rx.
+ *
+ * \param[in] pep    Portals endpoint
+ * \param[in] force If force, selct from all rxs
+ *                  otherwise, only select from idle rxs
+ *
+ * Only use force if closeing the endpoint and we do not
+ * casre if the application is holding an event (rx).
+ *
+ * Caller must be holding ep->lock.
+ */
+static int
+portals_free_rx(portals_ep_t *pep, int force)
+{
+    portals_rx_t    *rx;
+
+    if (force)
+        rx = TAILQ_FIRST(&pep->rxs);
+    else
+        rx = TAILQ_FIRST(&pep->idle_rxs);
+
+    if (!rx)
+        return 0;
+
+    TAILQ_REMOVE(&pep->rxs, rx, gentry);
+    TAILQ_REMOVE(&pep->idle_rxs, rx, entry);
+
+    free(rx);
+    return 1;
+}
+
+static int
+portals_post_am_buffer(cci__ep_t *ep, portals_am_buffer_t *am)
+{
+    int                 ret     = CCI_SUCCESS;
+    cci__dev_t          *dev    = ep->dev;
+    portals_ep_t        *pep    = ep->priv;
+    portals_dev_t       *pdev   = dev->priv;
+    ptl_md_t            md;
+    ptl_process_id_t    pid_any = PORTALS_WILDCARD;
+    ptl_match_bits_t    bits    = 0ULL;
+    ptl_match_bits_t    ignore  = 0ULL;
+
+    CCI_ENTER;
+
+    /*  Create the memory descriptor. */
+    md.start = am->buffer;
+    md.length = am->length;
+    md.max_size = ep->buffer_len;
+    md.user_ptr = am;
+    md.threshold = PTL_MD_THRESH_INF;
+    md.eq_handle = pep->eqh;
+    md.options  = PTL_MD_OP_PUT;
+    md.options |= PTL_MD_TRUNCATE;
+    md.options |= PTL_MD_EVENT_START_DISABLE;
+    md.options |= PTL_MD_MAX_SIZE;
+
+    /* all non-RMA messages place the endpoint ID in the upper 32 bits */
+    bits = ((ptl_match_bits_t) pep->id) << PORTALS_EP_SHIFT;
+
+    /* and ignore the lower 32 bits */
+    ignore = ~(bits);
+
+    ret = PtlMEMDAttach(pdev->niHandle,
+                        pdev->table_index,
+                        pid_any,
+                        bits,
+                        ignore,
+                        PTL_RETAIN,
+                        PTL_INS_AFTER,
+                        md,
+                        PTL_RETAIN,
+                        &(am->meh),
+                        &(am->mdh));
+    if( ret != PTL_OK ) {
+        switch(ret) {
+
+            case PTL_NO_INIT:           /* Portals library issue */
+            case PTL_NI_INVALID:        /* Bad NI Handle */
+            case PTL_PT_INDEX_INVALID:  /* Bad table index */
+            case PTL_PROCESS_INVALID:
+                 ret = CCI_ENODEV;;
+
+            case PTL_NO_SPACE:     /* Well, well, well */
+                 ret = CCI_ENOMEM;;
+
+            case PTL_SEGV:         /* This one should not happen */
+                 ret = CCI_EINVAL;;
+
+            default:               /* Undocumented portals error */
+                 ret = CCI_ERROR;
+        }
+    } else {
+        ret = CCI_SUCCESS;
+        am->state = PORTALS_AM_ACTIVE;
+    }
+
+    CCI_EXIT;
+    return ret;
+}
+
+static int
+portals_create_am_buffer(cci__ep_t *ep, uint64_t length)
+{
+    int                 ret     = CCI_SUCCESS;
+    portals_ep_t        *pep    = ep->priv;
+    portals_am_buffer_t *am     = NULL;
+
+    CCI_ENTER;
+
+    am = calloc(1, sizeof(*am));
+    if (!am) {
+        ret = CCI_ENOMEM;
+        goto out;
+    }
+
+    am->buffer = calloc(1, length);
+    if (!am->buffer) {
+        ret = CCI_ENOMEM;
+        goto out;
+    }
+
+    am->length = length;
+    am->pep = pep;
+
+    ret = portals_post_am_buffer(ep, am);
+    if (ret == 0)
+        TAILQ_INSERT_TAIL(&pep->ams, am, entry);
+
+out:
+    if (ret) {
+        if (am) {
+            if (am->buffer)
+                free(am->buffer);
+            free(am);
+        }
+    }
+    CCI_EXIT;
     return ret;
 }
 
@@ -709,12 +886,7 @@ static int portals_create_endpoint(
     cci__ep_t              *ep=NULL;
     portals_ep_t           *pep=NULL;
     portals_dev_t          *pdev;
-    ptl_handle_ni_t        niHandle;
-    ptl_process_id_t       pid_any=PORTALS_WILDCARD;
-    ptl_match_bits_t       bits = 0ULL;
-    ptl_match_bits_t       ignore = 0ULL;
     uint32_t               am_length;
-    ptl_md_t               md;
 
     CCI_ENTER;
 
@@ -731,7 +903,6 @@ static int portals_create_endpoint(
         goto out;
     }
     pdev=dev->priv;
-    niHandle=pdev->niHandle;
 
     ep=container_of(*endpoint, cci__ep_t, endpoint);
     ep->priv=calloc(1, sizeof(*pep));
@@ -745,7 +916,7 @@ static int portals_create_endpoint(
     ep->max_hdr_size=PORTALS_EP_MAX_HDR_SIZE;
     ep->rx_buf_cnt=PORTALS_EP_RX_CNT;
     ep->tx_buf_cnt=PORTALS_EP_TX_CNT;
-    ep->buffer_len=PORTALS_EP_BUF_LEN;
+    ep->buffer_len=dev->device.max_send_size;
     ep->tx_timeout=0;
 
     pep=ep->priv;
@@ -754,6 +925,8 @@ static int portals_create_endpoint(
     TAILQ_INIT(&pep->idle_txs);
     TAILQ_INIT(&pep->rxs);
     TAILQ_INIT(&pep->idle_rxs);
+    TAILQ_INIT(&pep->ams);
+    TAILQ_INIT(&pep->orphan_ams);
     TAILQ_INIT(&pep->conns);
     TAILQ_INIT(&pep->handles);
     TAILQ_INIT(&pep->rma_ops);
@@ -790,13 +963,6 @@ static int portals_create_endpoint(
         goto out;
     }
 
-    /*  Create the memory descriptor. */
-    md.threshold=PTL_MD_THRESH_INF;
-    md.eq_handle=pep->eqh;
-    md.options  =PTL_MD_OP_PUT;
-    md.options |=PTL_MD_TRUNCATE;
-    md.options |=PTL_MD_EVENT_START_DISABLE;
-
     for( i=0; i<ep->tx_buf_cnt; i++ ) {
         iRC = portals_add_tx(ep);
         if (iRC != 1) {
@@ -805,85 +971,20 @@ static int portals_create_endpoint(
         }
     }
 
-    /* all non-RMA messages place the endpoint ID in the upper 32 bits */
-    bits = ((ptl_match_bits_t) pep->id) << PORTALS_EP_SHIFT;
-
-    /* and ignore the lower 32 bits */
-    ignore = (((ptl_match_bits_t) 1) << PORTALS_EP_SHIFT) - 1;
-
-    md.max_size= dev->device.max_send_size;
-    md.options |=PTL_MD_MAX_SIZE;
-
-/*  Creating receive buffers/MDs/MEs. */
-    am_length = pdev->max_mds * dev->device.max_send_size / 2;
+    /* Creating receive buffers/MDs/MEs. */
+    am_length = ep->rx_buf_cnt * ep->buffer_len / 2;
     for (i = 0; i < 2; i++) {
-        int j;
-
-        pep->am[i].buffer = calloc(1, am_length);
-        if (!pep->am[i].buffer) {
-            iRC = CCI_ENOMEM;
+        iRC = portals_create_am_buffer(ep, am_length);
+        if (iRC)
             goto out;
-        }
-
-        /* touch every page */
-        for (j = 0; j < am_length; j += 4096)
-            *((char *)pep->am[i].buffer + j) = 1;
-
-        pep->am[i].length = am_length;
-        pep->am[i].pep = pep;
-        md.start=    pep->am[i].buffer;
-        md.length=   pep->am[i].length;
-        md.user_ptr =&pep->am[i];
-        iRC = PtlMEMDAttach(pdev->niHandle,
-                            pdev->table_index,
-                            pid_any,
-                            bits,
-                            ignore,
-                            PTL_RETAIN,
-                            PTL_INS_AFTER,
-                            md,
-                            PTL_RETAIN,
-                            &(pep->am[i].meh),
-                            &(pep->am[i].mdh));
-        if( iRC!=PTL_OK ) {
-
-            pep->eqh = PTL_EQ_NONE;
-            switch(iRC) {
-
-                case PTL_NO_INIT:           /* Portals library issue */
-                case PTL_NI_INVALID:        /* Bad NI Handle */
-                case PTL_PT_INDEX_INVALID:  /* Bad table index */
-                case PTL_PROCESS_INVALID:
-                     iRC = CCI_ENODEV;;
-
-                case PTL_NO_SPACE:     /* Well, well, well */
-                     iRC = CCI_ENOMEM;;
-
-                case PTL_SEGV:         /* This one should not happen */
-                     iRC = CCI_EINVAL;;
-
-                default:               /* Undocumented portals error */
-                     iRC = CCI_ERROR;
-            }
-            goto out;
-        }
-        pep->am[i].active = 1;
     }
 
     for( i=0; i<ep->rx_buf_cnt; i++ ) {
-
-        portals_rx_t       *rx;
-
-        rx=calloc( 1, sizeof(*rx) );
-        if(!rx) {
-
-            iRC=CCI_ENOMEM;
+        iRC = portals_add_rx(ep);
+        if (iRC != 1) {
+            iRC = CCI_ENOMEM;
             goto out;
         }
-        rx->evt.event.type=CCI_EVENT_RECV;
-        rx->evt.ep=ep;
-        TAILQ_INSERT_TAIL( &pep->rxs, rx, gentry );
-        TAILQ_INSERT_TAIL( &pep->idle_rxs, rx, entry );
     }
 
     CCI_EXIT;
@@ -901,22 +1002,33 @@ out:
         if (pep->eqh != PTL_EQ_NONE)
             PtlEQFree(pep->eqh);
 
-        if (pep->am[0].buffer)
-            free(pep->am[0].buffer);
-        if (pep->am[1].buffer)
-            free(pep->am[1].buffer);
+        while (!TAILQ_EMPTY(&pep->ams)) {
+            portals_am_buffer_t *am = TAILQ_FIRST(&pep->ams);
+            TAILQ_REMOVE(&pep->ams, am, entry);
+            if (am->buffer) {
+                if (am->state == PORTALS_AM_ACTIVE)
+                    PtlMEUnlink(am->meh);
+                free(am->buffer);
+            }
+            free(am);
+        }
+
+        while (!TAILQ_EMPTY(&pep->orphan_ams)) {
+            portals_am_buffer_t *am = TAILQ_FIRST(&pep->orphan_ams);
+            TAILQ_REMOVE(&pep->orphan_ams, am, entry);
+            if (am->buffer) {
+                if (am->meh != 0)
+                    PtlMEUnlink(am->meh);
+                free(am->buffer);
+            }
+            free(am);
+        }
 
         while(!TAILQ_EMPTY(&pep->txs))
-            portals_free_tx(ep);
+            portals_free_tx(pep, 1);
 
-        while(!TAILQ_EMPTY(&pep->rxs)) {
-
-            portals_rx_t   *rx;
-
-            rx=TAILQ_FIRST(&pep->rxs);
-            TAILQ_REMOVE( &pep->rxs, rx, gentry );
-            free(rx);
-        }
+        while(!TAILQ_EMPTY(&pep->rxs))
+            portals_free_rx(pep, 1);
 
         free(pep);
     }
@@ -962,10 +1074,27 @@ static int portals_destroy_endpoint(cci_endpoint_t *endpoint)
         if (pep->eqh != PTL_EQ_NONE)
             PtlEQFree(pep->eqh);
 
-        if (pep->am[0].buffer)
-            free(pep->am[0].buffer);
-        if (pep->am[1].buffer)
-            free(pep->am[1].buffer);
+        while (!TAILQ_EMPTY(&pep->ams)) {
+            portals_am_buffer_t *am = TAILQ_FIRST(&pep->ams);
+            TAILQ_REMOVE(&pep->ams, am, entry);
+            if (am->buffer) {
+                if (am->state == PORTALS_AM_ACTIVE)
+                    PtlMEUnlink(am->meh);
+                free(am->buffer);
+            }
+            free(am);
+        }
+
+        while (!TAILQ_EMPTY(&pep->orphan_ams)) {
+            portals_am_buffer_t *am = TAILQ_FIRST(&pep->orphan_ams);
+            TAILQ_REMOVE(&pep->orphan_ams, am, entry);
+            if (am->buffer) {
+                if (am->meh != 0)
+                    PtlMEUnlink(am->meh);
+                free(am->buffer);
+            }
+            free(am);
+        }
 
         while(!TAILQ_EMPTY(&pep->conns)) {
             cci__conn_t     *conn;
@@ -978,30 +1107,17 @@ static int portals_destroy_endpoint(cci_endpoint_t *endpoint)
             free(conn);
         }
 
-        while(!TAILQ_EMPTY(&pep->txs)) {
-            portals_tx_t   *tx;
+        while(!TAILQ_EMPTY(&pep->txs))
+            portals_free_tx(pep, 1);
 
-            tx=TAILQ_FIRST(&pep->txs);
-            TAILQ_REMOVE(&pep->txs, tx, tentry);
-            if(tx->buffer)
-                free(tx->buffer);
-            free(tx);
-        }
-
-        while(!TAILQ_EMPTY(&pep->rxs)) {
-            portals_rx_t   *rx;
-
-            rx=TAILQ_FIRST(&pep->rxs);
-            TAILQ_REMOVE(&pep->rxs, rx, gentry);
-            free(rx);
-        }
+        while(!TAILQ_EMPTY(&pep->rxs))
+            portals_free_rx(pep, 1);
 
         free(pep);
     }
     pthread_mutex_unlock(&ep->lock);
     pthread_mutex_unlock(&dev->lock);
 
-    debug(CCI_DB_WARN, "%s: leaving", __func__);
     CCI_EXIT;
     return CCI_SUCCESS;
 }
@@ -1407,7 +1523,7 @@ out_with_conn:
 out_with_crq:
     pthread_mutex_lock(&lep->lock);
     TAILQ_INSERT_HEAD(&lep->crqs, crq, entry);
-    pthread_mutex_lock(&lep->lock);
+    pthread_mutex_unlock(&lep->lock);
 
     CCI_EXIT;
     return ret;
@@ -1734,14 +1850,14 @@ static int portals_disconnect(cci_connection_t *connection)
  * (current - new_count) txs. If the txs are in use and 
  * not enough are in the idle txs list, we will report
  * success. In this case, we will set the ep->tx_buf_cnt
- * to the number left.
+ * to the number left which might be higher than new_count.
  */
 static int
 portals_set_ep_tx_buf_cnt(cci__ep_t *ep, uint32_t new_count)
 {
-    int         i;
-    int         ret     = CCI_SUCCESS;
-    uint32_t    current = ep->tx_buf_cnt;
+    int             i;
+    uint32_t        current = ep->tx_buf_cnt;
+    portals_ep_t    *pep    = ep->priv;
 
     if (ep->closing)
         return CCI_SUCCESS;
@@ -1755,20 +1871,131 @@ portals_set_ep_tx_buf_cnt(cci__ep_t *ep, uint32_t new_count)
     if (new_count < current) {
         /* reduce txs */
         for (i = 0; i < (current - new_count); i++)
-            ep->tx_buf_cnt -= portals_free_tx(ep);
+            ep->tx_buf_cnt -= portals_free_tx(pep, 0);
     } else {
         /* add txs */
         for (i = 0; i < (new_count - current); i++)
             ep->tx_buf_cnt += portals_add_tx(ep);
     }
-    return ret;
+    return CCI_SUCCESS;
 }
 
+/* Caller must be holding ep->lock */
+static int
+portals_orphan_am_buffer(cci__ep_t *ep, portals_am_buffer_t *am)
+{
+    int             ret     = PTL_OK;
+    portals_ep_t    *pep    = ep->priv;
+
+    CCI_ENTER;
+
+    assert(am->state != PORTALS_AM_DONE);
+
+    /* remove from AM list */
+    TAILQ_REMOVE(&pep->ams, am, entry);
+
+    /* if ACTIVE, unlink */
+    if (am->state == PORTALS_AM_ACTIVE) {
+        ret = PtlMEUnlink(am->meh);
+        if (ret == PTL_OK)
+            am->meh = 0;
+    } else {
+        am->meh = 0;
+    }
+    /* we no longer need the mdh */
+    am->mdh = 0;
+
+    /* set state to DONE */
+    am->state = PORTALS_AM_DONE;
+
+    /* if refcnt == 0 and unlinked, free it */
+    if (am->refcnt == 0) {
+        if (am->meh == 0) {
+            free(am->buffer);
+            free(am);
+            goto out;
+        }
+    }
+
+    /* add to orphan AM list */
+    TAILQ_INSERT_TAIL(&pep->orphan_ams, am, entry);
+
+out:
+    CCI_EXIT;
+    return CCI_SUCCESS;
+}
+
+/* Caller must be holding ep->lock
+ *
+ * Before changing the number of rxs, we first create
+ * two new AM buffers. If we can't, we return error.
+ * If we can, we then try to free the existing AM
+ * buffers. If they are busy (refcnt != 0) or unlinking
+ * fails, we will orphan them. In this case, the memory
+ * used will be temporarily the size of the old buffers
+ * plus the size of the new buffers. Once the events for
+ * the old buffers are returned, we will free the old
+ * buffers.
+ *
+ * When reducing the number of rxs, we try to free
+ * (current - new_count) rxs. If the rxs are in use and 
+ * not enough are in the idle rxs list, we will report
+ * success. In this case, we will set the ep->rx_buf_cnt
+ * to the number left which might be higher than new_count.
+ */
 static int
 portals_set_ep_rx_buf_cnt(cci__ep_t *ep, uint32_t new_count)
 {
-    int         ret     = CCI_SUCCESS;
+    int             ret     = CCI_SUCCESS;
+    int             i;
+    uint32_t        current = ep->rx_buf_cnt;
+    uint64_t        length  = (uint64_t) new_count * (uint64_t) ep->buffer_len;
+    portals_ep_t    *pep    = ep->priv;
 
+    CCI_ENTER;
+
+    if (ep->closing) {
+        ret = CCI_SUCCESS;
+        goto out;
+    }
+
+    if (new_count == 0) {
+        ret = CCI_EINVAL;
+        goto out;
+    }
+
+    if (new_count == current) {
+        ret = CCI_SUCCESS;
+        goto out;
+    }
+
+    /* create new AM buffers */
+    length /= 2;
+    for (i = 0; i < 2; i++) {
+        ret = portals_create_am_buffer(ep, length);
+        if (ret)
+            goto out;
+    }
+    /* free or orphan the old buffers */
+    for (i = 0; i < 2; i++) {
+        portals_am_buffer_t *am = TAILQ_FIRST(&pep->ams);
+        if (am)
+            portals_orphan_am_buffer(ep, am);
+    }
+
+    /* adjust rxs */
+    if (new_count < current) {
+        /* reduce rxs */
+        for (i = 0; i < (current - new_count); i++)
+            ep->rx_buf_cnt -= portals_free_rx(pep, 0);
+    } else {
+        /* add rxs */
+        for (i = 0; i < (new_count - current); i++)
+            ep->rx_buf_cnt += portals_add_rx(ep);
+    }
+
+out:
+    CCI_EXIT;
     return ret;
 }
 
@@ -1810,7 +2037,10 @@ static int portals_set_opt(cci_opt_handle_t *handle,
     {
         uint32_t new_count;
 
-        assert(len == sizeof(new_count));
+        if (len != sizeof(new_count)) {
+            ret = CCI_EINVAL;
+            break;
+        }
         memcpy(&new_count, val, len);
         pthread_mutex_lock(&ep->lock);
         ret = portals_set_ep_rx_buf_cnt(ep, new_count);
@@ -1821,7 +2051,10 @@ static int portals_set_opt(cci_opt_handle_t *handle,
     {
         uint32_t new_count;
 
-        assert(len == sizeof(new_count));
+        if (len != sizeof(new_count)) {
+            ret = CCI_EINVAL;
+            break;
+        }
         memcpy(&new_count, val, len);
         pthread_mutex_lock(&ep->lock);
         ret = portals_set_ep_tx_buf_cnt(ep, new_count);
@@ -2037,10 +2270,6 @@ static int portals_return_event(cci_endpoint_t *endpoint,
     case CCI_EVENT_CONNECT_REJECTED:
     case CCI_EVENT_RECV:
     {
-        uint64_t            bits, ignore;
-        cci__dev_t          *dev = ep->dev;
-        portals_dev_t       *pdev = dev->priv;
-        ptl_process_id_t    pid_any=PORTALS_WILDCARD;
         portals_am_buffer_t *am;
 
         rx = container_of(evt, portals_rx_t, evt);
@@ -2049,59 +2278,11 @@ static int portals_return_event(cci_endpoint_t *endpoint,
         pthread_mutex_lock(&ep->lock);
         TAILQ_INSERT_HEAD(&pep->idle_rxs, rx, entry);
         am->refcnt--;
-        if (am->refcnt == 0 && !am->active) {
-            ptl_md_t    md;
-
-            /* all non-RMA messages place the endpoint ID in the upper 32 bits */
-            bits = ((ptl_match_bits_t) pep->id) << PORTALS_EP_SHIFT;
-
-            /* and ignore the lower 32 bits */
-            ignore = (((ptl_match_bits_t) 1) << PORTALS_EP_SHIFT) - 1;
-
-            md.start=    am->buffer;
-            md.length=   am->length;
-            md.user_ptr =am;
-            md.max_size= dev->device.max_send_size;
-            md.threshold=PTL_MD_THRESH_INF;
-            md.eq_handle=pep->eqh;
-            md.options  =PTL_MD_OP_PUT;
-            md.options |=PTL_MD_TRUNCATE;
-            md.options |=PTL_MD_MAX_SIZE;
-            md.options |=PTL_MD_EVENT_START_DISABLE;
-            iRC = PtlMEMDAttach(pdev->niHandle,
-                                pdev->table_index,
-                                pid_any,
-                                bits,
-                                ignore,
-                                PTL_RETAIN,
-                                PTL_INS_AFTER,
-                                md,
-                                PTL_RETAIN,
-                                &am->meh,
-                                &am->mdh);
-            if (iRC != PTL_OK) {
-                debug(CCI_DB_WARN, "%s: PtlMEMDAttach() returned %s",
-                                   __func__, ptl_err_str[iRC]);
-                switch (iRC) {
-                    case PTL_NO_INIT:
-                    case PTL_NI_INVALID:
-                    case PTL_PT_INDEX_INVALID:
-                        iRC = CCI_ENODEV;
-                        break;
-                    case PTL_NO_SPACE:
-                        iRC = CCI_ENOMEM;
-                        break;
-                    case PTL_MD_INVALID:
-                    case PTL_MD_ILLEGAL:
-                    default:
-                        iRC = CCI_ERROR;
-                        break;
-                    case PTL_PROCESS_INVALID:
-                        iRC = CCI_EADDRNOTAVAIL;
-                        break;
-                }
-            } else {
-                am->active = 1;
+        if (am->refcnt == 0 && am->state == PORTALS_AM_INACTIVE) {
+            iRC = portals_post_am_buffer(ep, am);
+            if (iRC) {
+                debug(CCI_DB_WARN, "%s: post_am_buffer() returned %s",
+                                   __func__, cci_strerror(iRC));
             }
         }
         pthread_mutex_unlock(&ep->lock);
@@ -2788,10 +2969,17 @@ static void portals_handle_conn_reply(cci__ep_t *ep, ptl_event_t pevent)
 
     /* do we need to unlink this buffer? */
     if (am->length - (pevent.offset + pevent.mlength) < dev->device.max_send_size) {
+        int active = 0;
+        portals_am_buffer_t *a;
+
         PtlMEUnlink(am->meh);
-        am->active = 0;
+        am->state = PORTALS_AM_INACTIVE;
         debug((CCI_DB_INFO|CCI_DB_CONN), "%s: unlinking active message buffer", __func__);
-        if (pep->am[0].active == 0 && pep->am[1].active == 0)
+        TAILQ_FOREACH(a, &pep->ams, entry) {
+            if (a->state == PORTALS_AM_ACTIVE)
+                active++;
+        }
+        if (!active)
             debug(CCI_DB_WARN, "both active message buffers inactive");
     }
 
@@ -2862,10 +3050,17 @@ static void portals_handle_active_msg(cci__ep_t *ep, ptl_event_t pevent)
 
     /* do we need to unlink this buffer? */
     if (am->length - (pevent.offset + pevent.mlength) < dev->device.max_send_size) {
+        int active = 0;
+        portals_am_buffer_t *a;
+
         PtlMEUnlink(am->meh);
-        am->active = 0;
+        am->state = PORTALS_AM_INACTIVE;
         debug((CCI_DB_INFO|CCI_DB_MSG), "%s: unlinking active message buffer", __func__);
-        if (pep->am[0].active == 0 && pep->am[1].active == 0)
+        TAILQ_FOREACH(a, &pep->ams, entry) {
+            if (a->state == PORTALS_AM_ACTIVE)
+                active++;
+        }
+        if (!active)
             debug(CCI_DB_WARN, "both active message buffers inactive");
     }
 

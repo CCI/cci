@@ -271,14 +271,21 @@ typedef struct portals_tx {
     TAILQ_ENTRY(portals_tx) tentry;     /* Hangs on ep->txs */
 }   portals_tx_t;
 
+typedef enum portals_am_state {
+    PORTALS_AM_DONE     = -1,   /* no longer needed, free after refcnt == 0 */
+    PORTALS_AM_INACTIVE =  0,   /* in use, but unlinked */
+    PORTALS_AM_ACTIVE   =  1    /* in use and linked */
+} portals_am_state_t;
+
 typedef struct portals_am_buffer {
     void                   *buffer;          /* large buffer for incoming msgs */
     uint32_t               length;           /* max_recv_buffer_count * mss / 2 */
-    int                    active;           /* whether able to recv or not */
+    portals_am_state_t     state;
     uint32_t               refcnt;           /* how many fragments held by app */
     struct portals_ep      *pep;             /* owning Portals endpoint */
     ptl_handle_me_t        meh;              /* ME handle */
     ptl_handle_md_t        mdh;              /* MD handle */
+    TAILQ_ENTRY(portals_am_buffer) entry;    /* Hang on pep->ams */
 } portals_am_buffer_t;
 
 typedef struct portals_rx {
@@ -384,12 +391,13 @@ typedef struct portals_rma_op {
 typedef struct portals_ep {
     uint32_t                        id;         /* id for endpoint multiplexing */
     ptl_handle_eq_t                 eqh;        /* eventq handle */
-    portals_am_buffer_t             am[2];      /* each holds 1/2 of active msg buffer */
     int                             in_use;     /* token to serialize get_event */
     TAILQ_HEAD(p_txs, portals_tx)   txs;        /* List of all txs */
     TAILQ_HEAD(p_txsi, portals_tx)  idle_txs;   /* List of idle txs */
     TAILQ_HEAD(p_rxs, portals_rx)   rxs;        /* List of all rxs */
     TAILQ_HEAD(p_rxsi, portals_rx)  idle_rxs;   /* List of all rxs */
+    TAILQ_HEAD(p_ams, portals_am_buffer) ams;   /* List of AM buffers */ 
+    TAILQ_HEAD(p_oams, portals_am_buffer) orphan_ams;   /* List of DONE AM buffers */ 
     TAILQ_HEAD(p_conns, portals_conn) conns;    /* List of all conns for cleanup */
     TAILQ_HEAD(p_handles, portals_rma_handle) handles; /* List of all registered RMA regions */
     TAILQ_HEAD(s_ops, portals_rma_op) rma_ops;
