@@ -7,15 +7,19 @@
 #define CCI_CORE_MX_H
 
 #include "cci/config.h"
+#include "myriexpress.h"
+#include "mx_extensions.h"
 
 BEGIN_C_DECLS
 
+#define MX_KEY              (0x636369)  /* "cci" */
 #define MX_MSS              (1024)
 
 #define MX_EP_MAX_HDR_SIZE  (32)
 #define MX_EP_BUF_LEN       (MX_MSS)
 #define MX_EP_RX_CNT        (1024)      /* max rx messages */
 #define MX_EP_TX_CNT        (128)       /* max tx messages */
+#define MX_EP_TX_TIMEOUT_MS (20 * 1000) /* 20 seconds */
 
 /* Limit of 4 message types to ensure that we only use 2 bits for msg type */
 typedef enum mx_msg_type {
@@ -167,8 +171,8 @@ typedef struct mx_tx {
     mx_msg_type_t       msg_type;   /* message type */
     mx_msg_oob_type_t   oob_type;   /* if MX_MSG_OOB above, set oob type here */
     int                 flags;      /* (CCI_FLAG_[BLOCKING|SILENT|NO_COPY]) */
-    void                *buffer;    /* active msg buffer */
-    uint16_t            len;        /* length of buffer */
+    //void                *buffer;    /* active msg buffer */
+    //uint16_t            len;        /* length of buffer */
     TAILQ_ENTRY(mx_tx)  dentry;     /* Hangs on ep->idle_txs  dev->queued */
                                     /*   dev->pending */
     TAILQ_ENTRY(mx_tx)  tentry;     /* Hangs on ep->txs */
@@ -195,6 +199,7 @@ typedef struct mx_globals {
 extern mx_globals_t *pglobals;
 
 typedef struct mx_ep {
+    mx_endpoint_t                   ep;
     uint32_t                        id;         /* id for endpoint multiplexing */
     int                             in_use;     /* token to serialize get_event */
     TAILQ_HEAD(p_txs, mx_tx)        txs;        /* List of all txs */

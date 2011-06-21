@@ -6,6 +6,7 @@
 #include "cci/config.h"
 
 #include <stdio.h>
+#include <assert.h>
 
 #include "cci.h"
 #include "plugins/core/core.h"
@@ -17,8 +18,8 @@ mx_globals_t *mglobals = NULL;
 /*
  * Local functions
  */
-static int mx_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps);
-static const char *mx_strerror(enum cci_status status);
+static int mx__init(uint32_t abi_ver, uint32_t flags, uint32_t *caps);
+static const char *mx__strerror(enum cci_status status);
 static int mx_get_devices(cci_device_t const ***devices);
 static int mx_free_devices(cci_device_t const **devices);
 static int mx_create_endpoint(cci_device_t *device,
@@ -35,13 +36,13 @@ static int mx_accept(cci_conn_req_t *conn_req,
                            cci_endpoint_t *endpoint,
                            cci_connection_t **connection);
 static int mx_reject(cci_conn_req_t *conn_req);
-static int mx_connect(cci_endpoint_t *endpoint, char *server_uri,
+static int mx__connect(cci_endpoint_t *endpoint, char *server_uri,
                             uint32_t port,
                             void *data_ptr, uint32_t data_len,
                             cci_conn_attribute_t attribute,
                             void *context, int flags,
                             struct timeval *timeout);
-static int mx_disconnect(cci_connection_t *connection);
+static int mx__disconnect(cci_connection_t *connection);
 static int mx_set_opt(cci_opt_handle_t *handle,
                             cci_opt_level_t level,
                             cci_opt_name_t name, const void* val, int len);
@@ -106,8 +107,8 @@ cci_plugin_core_t cci_core_mx_plugin = {
     },
 
     /* API function pointers */
-    mx_init,
-    mx_strerror,
+    mx__init,
+    mx__strerror,
     mx_get_devices,
     mx_free_devices,
     mx_create_endpoint,
@@ -117,8 +118,8 @@ cci_plugin_core_t cci_core_mx_plugin = {
     mx_get_conn_req,
     mx_accept,
     mx_reject,
-    mx_connect,
-    mx_disconnect,
+    mx__connect,
+    mx__disconnect,
     mx_set_opt,
     mx_get_opt,
     mx_arm_os_handle,
@@ -133,7 +134,7 @@ cci_plugin_core_t cci_core_mx_plugin = {
 };
 
 
-static int mx_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
+static int mx__init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 {
     int             ret;
     int             init    = 0;
@@ -243,7 +244,7 @@ out:
 }
 
 
-static const char *mx_strerror(enum cci_status status)
+static const char *mx__strerror(enum cci_status status)
 {
     CCI_ENTER;
 
@@ -270,6 +271,8 @@ static int mx_get_devices(cci_device_t const ***devices)
 
 static int mx_free_devices(cci_device_t const **devices)
 {
+    cci__dev_t  *dev;
+
     CCI_ENTER;
 
     pthread_mutex_lock(&globals->lock);
@@ -288,21 +291,257 @@ static int mx_free_devices(cci_device_t const **devices)
     return CCI_SUCCESS;
 }
 
+/* Caller must be holding ep->lock */
+static int
+mx_add_tx(cci__ep_t *ep)
+{
+    int         ret     = 1;
+    mx_ep_t     *mep    = ep->priv;
+    mx_tx_t     *tx;
+
+    tx = calloc(1, sizeof(*tx));
+    if(!tx) {
+        ret = 0;
+        goto out;
+    }
+    tx->evt.event.type = CCI_EVENT_SEND;
+    tx->evt.ep = ep;
+
+    ret = 1;
+    TAILQ_INSERT_TAIL(&mep->txs, tx, tentry);
+    TAILQ_INSERT_TAIL(&mep->idle_txs, tx, dentry);
+
+out:
+    return ret;
+}
+
+/* Caller must be holding ep->lock */
+static int
+mx_add_rx(cci__ep_t *ep)
+{
+    int         ret     = 1;
+    mx_ep_t     *mep    = ep->priv;
+    mx_rx_t     *rx;
+
+    rx = calloc(1, sizeof(*rx));
+    if(!rx) {
+        ret = 0;
+        goto out;
+    }
+
+    rx->buffer = calloc(1, MX_MSS);
+    if (!rx->buffer) {
+        free(rx);
+        ret = 0;
+        goto out;
+    }
+
+    rx->evt.event.type = CCI_EVENT_RECV;
+    rx->evt.ep = ep;
+    TAILQ_INSERT_TAIL(&mep->rxs, rx, gentry);
+    TAILQ_INSERT_TAIL(&mep->idle_rxs, rx, entry);
+out:
+    return ret;
+}
+
+/* Free a tx.
+ *
+ * \param[in] mep   Portals endpoint
+ * \param[in] force If force, selct from all txs
+ *                  otherwise, only select from idle txs
+ *
+ * Only use force if closeing the endpoint and we do not
+ * casre if the application is holding an event (tx).
+ *
+ * Caller must be holding ep->lock.
+ */
+static int
+mx_free_tx(mx_ep_t *mep, int force)
+{
+    mx_tx_t    *tx;
+
+    if (force)
+        tx = TAILQ_FIRST(&mep->txs);
+    else
+        tx = TAILQ_FIRST(&mep->idle_txs);
+
+    if (!tx)
+        return 0;
+
+    TAILQ_REMOVE(&mep->txs, tx, tentry);
+    TAILQ_REMOVE(&mep->idle_txs, tx, dentry);
+    free(tx);
+
+    return 1;
+}
+
+/* Free a rx.
+ *
+ * \param[in] mep    Portals endpoint
+ * \param[in] force If force, selct from all rxs
+ *                  otherwise, only select from idle rxs
+ *
+ * Only use force if closeing the endpoint and we do not
+ * casre if the application is holding an event (rx).
+ *
+ * Caller must be holding ep->lock.
+ */
+static int
+mx_free_rx(mx_ep_t *mep, int force)
+{
+    mx_rx_t    *rx;
+
+    if (force)
+        rx = TAILQ_FIRST(&mep->rxs);
+    else
+        rx = TAILQ_FIRST(&mep->idle_rxs);
+
+    if (!rx)
+        return 0;
+
+    TAILQ_REMOVE(&mep->rxs, rx, gentry);
+    TAILQ_REMOVE(&mep->idle_rxs, rx, entry);
+    if (rx->buffer)
+        free(rx->buffer);
+    free(rx);
+    return 1;
+}
+
 
 static int mx_create_endpoint(cci_device_t *device,
                                     int flags,
                                     cci_endpoint_t **endpoint,
                                     cci_os_handle_t *fd)
 {
-    printf("In mx_create_endpoint\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+    int i, ret;
+    cci__dev_t *dev = NULL;
+    cci__ep_t *ep = NULL;
+    mx_ep_t *mep = NULL;
+    mx_dev_t *mdev;
+
+
+    CCI_ENTER;
+
+    if (!mglobals) {
+        CCI_EXIT;
+        return CCI_ENODEV;
+    }
+
+    dev = container_of(device, cci__dev_t, device);
+    if (0 != strcmp("mx", dev->driver)) {
+        ret = CCI_EINVAL;
+        goto out;
+    }
+    mdev = dev->priv;
+
+    ep = container_of(*endpoint, cci__ep_t, endpoint);
+    ep->priv = calloc(1, sizeof(*mep));
+    if (!ep->priv) {
+        ret = CCI_ENOMEM;
+        goto out;
+    }
+    mep = ep->priv;
+
+    (*endpoint)->max_recv_buffer_count = MX_EP_RX_CNT;
+    ep->max_hdr_size = MX_EP_MAX_HDR_SIZE;
+    ep->rx_buf_cnt = MX_EP_RX_CNT;
+    ep->tx_buf_cnt = MX_EP_TX_CNT;
+    ep->buffer_len = dev->device.max_send_size;
+    ep->tx_timeout = MX_EP_TX_TIMEOUT_MS * 1000;
+
+    TAILQ_INIT(&mep->txs);
+    TAILQ_INIT(&mep->idle_txs);
+    TAILQ_INIT(&mep->rxs);
+    TAILQ_INIT(&mep->idle_rxs);
+    TAILQ_INIT(&mep->conns);
+
+    ret = mx_open_endpoint(mdev->board, MX_ANY_ENDPOINT, MX_KEY, NULL, 0, &mep->ep);
+    if (ret) {
+        debug(CCI_DB_DRVR, "open_endpoint() returned %s", mx_strerror(ret));
+        ret = CCI_ERROR;
+        goto out;
+    }
+
+    for (i = 0; i < ep->tx_buf_cnt; i++) {
+        ret = mx_add_tx(ep);
+        if (ret != 1) {
+            ret = CCI_ENOMEM;
+            goto out;
+        }
+    }
+
+    for (i = 0; i < ep->rx_buf_cnt; i++) {
+        ret = mx_add_rx(ep);
+        if (ret != 1) {
+            ret = CCI_ENOMEM;
+            goto out;
+        }
+    }
+
+    CCI_EXIT;
+out:
+    if (ret) {
+        if (mep) {
+            if (mep->ep)
+                mx_close_endpoint(mep->ep);
+
+            while(!TAILQ_EMPTY(&mep->txs))
+                mx_free_tx(mep, 1);
+
+            while(!TAILQ_EMPTY(&mep->rxs))
+                mx_free_rx(mep, 1);
+
+            free(mep);
+            ep->priv = NULL;
+        }
+    }
+    return ret;
 }
 
 
 static int mx_destroy_endpoint(cci_endpoint_t *endpoint)
 {
-    printf("In mx_destroy_endpoint\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+    cci__ep_t   *ep     = NULL;
+    cci__dev_t  *dev    = NULL;
+    mx_ep_t     *mep    = NULL;
+    mx_dev_t    *mdev   = NULL;
+
+    CCI_ENTER;
+
+    if(!mglobals) {
+        CCI_EXIT;
+        return CCI_ENODEV;
+    }
+
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    dev = ep->dev;
+    mep = ep->priv;
+    mdev = dev->priv;
+
+    pthread_mutex_lock(&dev->lock);
+    pthread_mutex_lock(&ep->lock);
+
+    ep->priv = NULL;
+
+    if (mep) {
+        if (mep->ep)
+            mx_close_endpoint(mep->ep);
+
+        while(!TAILQ_EMPTY(&mep->txs))
+            mx_free_tx(mep, 1);
+
+        while(!TAILQ_EMPTY(&mep->rxs))
+            mx_free_rx(mep, 1);
+
+        free(mep);
+        ep->priv = NULL;
+    }
+
+    pthread_mutex_unlock(&ep->lock);
+    pthread_mutex_unlock(&dev->lock);
+
+    CCI_EXIT;
+    return CCI_SUCCESS;
 }
 
 
@@ -345,7 +584,7 @@ static int mx_reject(cci_conn_req_t *conn_req)
 }
 
 
-static int mx_connect(cci_endpoint_t *endpoint, char *server_uri,
+static int mx__connect(cci_endpoint_t *endpoint, char *server_uri,
                             uint32_t port,
                             void *data_ptr, uint32_t data_len,
                             cci_conn_attribute_t attribute,
@@ -357,7 +596,7 @@ static int mx_connect(cci_endpoint_t *endpoint, char *server_uri,
 }
 
 
-static int mx_disconnect(cci_connection_t *connection)
+static int mx__disconnect(cci_connection_t *connection)
 {
     printf("In mx_disconnect\n");
     return CCI_ERR_NOT_IMPLEMENTED;

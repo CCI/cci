@@ -26,8 +26,8 @@ AC_DEFUN([PLUGINS_cci_core_mx_CONFIG],[
                              [include/myriexpress.h],
                              [libmyriexpress*],
                              [myriexpress.h],
-                             [-lmyriexpress],
-                             [mx_init],
+                             [myriexpress],
+                             [mx_finalize],
                              [],
                              [$1],
                              [$2])
