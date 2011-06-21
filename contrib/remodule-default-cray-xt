@@ -3,8 +3,6 @@
 
 # Start with GNU.
   module load   modules
-  module unload xt-libsci
-  module unload atp
   module load   torque
   module load   moab
   module load   portals
@@ -12,6 +10,8 @@
   module load   lustre-cray_ss_s
   module load   lustre-utils
   module load   PrgEnv-gnu
+  module unload xt-libsci
+  module unload atp
 
 # Get access to more current releases of autotools.
   module load   autoconf automake libtool git
