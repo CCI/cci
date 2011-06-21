@@ -1,17 +1,24 @@
-  module unload PrgEnv-pgi
-  module unload PrgEnv-gnu
-  module unload PrgEnv-cray
-  module unload PrgEnv-intel
+  module purge
+  module use -a /opt/cray/ss/modulefiles
 
 # Start with GNU.
-  module load PrgEnv-gnu
+  module load   modules
+  module unload xt-libsci
+  module unload atp
+  module load   torque
+  module load   moab
+  module load   portals
+  module load   lustre-cray_ss_s/1.8.6
+  module load   lustre-cray_ss_s
+  module load   lustre-utils
+  module load   PrgEnv-gnu
 
 # Get access to more current releases of autotools.
-  module load autoconf automake libtool git
+  module load   autoconf automake libtool git
 
 # At least for now, we will avoid Cray Programming Environment
 # interfaces, so we need to set CPPFLAGS and LDFLAGS.
-  setenv CFLAGS		"-g -pthread"
+  setenv CFLAGS		"-g -O0 -pthread"
   setenv CPPFLAGS	-I/opt/cray/portals/default/include
   setenv LDFLAGS	"-L/opt/cray/portals/default/lib64 -lportals"
   setenv CCI_CONFIG	../../contrib/ornl-portals.ini
