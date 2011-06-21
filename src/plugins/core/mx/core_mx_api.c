@@ -134,7 +134,8 @@ cci_plugin_core_t cci_core_mx_plugin = {
 };
 
 
-static int mx__init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
+static int
+mx__init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 {
     int             ret;
     int             init    = 0;
@@ -253,7 +254,8 @@ static const char *mx__strerror(enum cci_status status)
 }
 
 
-static int mx_get_devices(cci_device_t const ***devices)
+static int
+mx_get_devices(cci_device_t const ***devices)
 {
     CCI_ENTER;
 
@@ -269,7 +271,8 @@ static int mx_get_devices(cci_device_t const ***devices)
 }
 
 
-static int mx_free_devices(cci_device_t const **devices)
+static int
+mx_free_devices(cci_device_t const **devices)
 {
     cci__dev_t  *dev;
 
@@ -408,10 +411,11 @@ mx_free_rx(mx_ep_t *mep, int force)
 }
 
 
-static int mx_create_endpoint(cci_device_t *device,
-                                    int flags,
-                                    cci_endpoint_t **endpoint,
-                                    cci_os_handle_t *fd)
+static int
+mx_create_endpoint(cci_device_t *device,
+                   int flags,
+                   cci_endpoint_t **endpoint,
+                   cci_os_handle_t *fd)
 {
     int i, ret;
     cci__dev_t *dev = NULL;
@@ -499,7 +503,8 @@ out:
 }
 
 
-static int mx_destroy_endpoint(cci_endpoint_t *endpoint)
+static int
+mx_destroy_endpoint(cci_endpoint_t *endpoint)
 {
     cci__ep_t   *ep     = NULL;
     cci__dev_t  *dev    = NULL;
@@ -545,8 +550,9 @@ static int mx_destroy_endpoint(cci_endpoint_t *endpoint)
 }
 
 
-static int mx_bind(cci_device_t *device, int backlog, uint32_t *port,
-                         cci_service_t **service, cci_os_handle_t *fd)
+static int
+mx_bind(cci_device_t *device, int backlog, uint32_t *port,
+        cci_service_t **service, cci_os_handle_t *fd)
 {
     int             ret;
     cci__dev_t      *dev;
@@ -631,7 +637,8 @@ out:
 }
 
 
-static int mx_unbind(cci_service_t *service, cci_device_t *device)
+static int
+mx_unbind(cci_service_t *service, cci_device_t *device)
 {
     CCI_ENTER;
 
@@ -641,8 +648,9 @@ static int mx_unbind(cci_service_t *service, cci_device_t *device)
 
 
 /* currently never called */
-static int mx_get_conn_req(cci_service_t *service,
-                                 cci_conn_req_t **conn_req)
+static int
+mx_get_conn_req(cci_service_t *service,
+                cci_conn_req_t **conn_req)
 {
     CCI_ENTER;
 
@@ -651,9 +659,10 @@ static int mx_get_conn_req(cci_service_t *service,
 }
 
 
-static int mx_accept(cci_conn_req_t *conn_req,
-                           cci_endpoint_t *endpoint,
-                           cci_connection_t **connection)
+static int
+mx_accept(cci_conn_req_t *conn_req,
+          cci_endpoint_t *endpoint,
+          cci_connection_t **connection)
 {
     int             ret;
     cci__ep_t       *ep     = NULL;
@@ -751,7 +760,7 @@ static int mx_accept(cci_conn_req_t *conn_req,
     mxseg.segment_ptr = &accept;
     mxseg.segment_length = sizeof(accept);
 
-    ret = mx_isend(mep->ep, &mxseg, 1, mconn->epa, bits, conn, &mxreq);
+    ret = mx_isend(mep->ep, &mxseg, 1, mconn->epa, bits, tx, &mxreq);
     if (ret) {
         ret = CCI_ERROR;
         goto out_with_conn;
@@ -777,7 +786,236 @@ out_with_crq:
 }
 
 
-static int mx_reject(cci_conn_req_t *conn_req)
+static int
+mx_reject(cci_conn_req_t *conn_req)
+{
+    CCI_ENTER;
+
+    CCI_EXIT;
+    return CCI_ERR_NOT_IMPLEMENTED;
+}
+
+/* valid MX uris:
+ * mx://hostname
+ * mx://hostname:board
+ * mx://hostname:board:ep_id
+ */
+static int
+mx_parse_uri(char *uri,
+             char **mx_hostname, /* hostname or hostname:board_index */
+             uint32_t *board,   /* board index */
+             uint32_t *ep_id)
+{
+    int  ret        = CCI_SUCCESS;
+    char *hostname  = NULL;
+    char *colon     = NULL;
+    char *rcolon    = NULL;
+
+    CCI_ENTER;
+
+    if (!strncmp("mx://", uri, 4)) {
+        hostname = strdup(&uri[4]);
+        if (!hostname)
+            return CCI_ENOMEM;
+    } else {
+        CCI_EXIT;
+        return CCI_EINVAL;
+    }
+
+    colon = strchr(hostname, ':');
+    rcolon = strrchr(hostname, ':');
+    if (colon && rcolon && colon == rcolon) {
+        /* mx://hostname:board */
+        *ep_id = 0;
+
+        rcolon++;
+        if (*rcolon == '\0') {
+            /* mx://hostname: */
+            ret = CCI_EINVAL;
+            goto out;
+        }
+        *board = strtoul(rcolon, NULL, 0);
+    } else if (colon && rcolon && colon != rcolon) {
+        /* mx://hostname:board:ep_id */
+        *rcolon = '\0';
+        rcolon++;
+        if (rcolon == NULL) {
+            ret = CCI_EINVAL;
+            goto out;
+        }
+        *ep_id = strtoul(rcolon, NULL, 0);
+        colon++;
+        if (colon == NULL) {
+            /* mx://hostname::ep_id */
+            ret = CCI_EINVAL;
+            goto out;
+        }
+        *board = strtoul(colon, NULL, 0);
+    } else if (colon) {
+        /* mx://hostname:board */
+        colon++;
+        if (*colon == '\0') {
+            /* mx://hostname: */
+            ret = CCI_EINVAL;
+            goto out;
+        }
+        *board = strtoul(colon, NULL, 0);
+        *ep_id = 0;
+    } else {
+        /* mx:hostname */
+        *board = 0;
+        *ep_id = 0;
+    }
+
+out:
+    CCI_EXIT;
+    return ret;
+}
+
+static int
+mx__connect(cci_endpoint_t *endpoint,
+            char *server_uri,
+            uint32_t port,
+            void *data_ptr,
+            uint32_t data_len,
+            cci_conn_attribute_t attribute,
+            void *context,
+            int flags,
+            struct timeval *timeout)
+{
+    int                 ret;
+    cci__ep_t           *ep     = NULL;
+    cci__dev_t          *dev    = NULL;
+    cci__conn_t         *conn   = NULL;
+    mx_ep_t             *mep    = NULL;
+    mx_dev_t            *mdev   = NULL;
+    cci_connection_t    *connection = NULL;
+    mx_conn_t           *mconn  = NULL;
+    mx_tx_t             *tx     = NULL;
+    cci__evt_t          *evt    = NULL;
+    cci_event_t         *event  = NULL;
+    cci_event_other_t   *other  = NULL;
+    char                *hostname;
+    uint64_t            nic_id  = 0ULL;
+    uint32_t            board   = 0;
+    uint32_t            ep_id   = 0;
+    mx_endpoint_addr_t  epa;
+    mx_conn_request_t   conn_request;
+    uint64_t            bits    = 0ULL;
+    mx_segment_t        mxseg[2];
+    int                 count   = 1;
+    mx_request_t        mxreq;
+
+    CCI_ENTER;
+
+    if (!mglobals) {
+        CCI_EXIT;
+        return CCI_ENODEV;
+    }
+
+    /* allocate a new connection */
+    conn = calloc(1, sizeof(*conn));
+    if (!conn) {
+        CCI_EXIT;
+        return CCI_ENOMEM;
+    }
+
+    conn->priv = calloc(1, sizeof(*mconn));
+    if(!conn->priv) {
+        ret = CCI_ENOMEM;
+        goto out;
+    }
+    mconn = conn->priv;
+    mconn->conn = conn;
+
+    /* conn->tx_timeout=0  by default */
+    connection = &conn->connection;
+    connection->attribute = attribute;
+    connection->endpoint = endpoint;
+
+    /* get our endpoint and device */
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    mep = ep->priv;
+    dev = ep->dev;
+    mdev = dev->priv;
+
+    connection->max_send_size=dev->device.max_send_size;
+
+    /* lookup epa */
+    ret = mx_parse_uri(server_uri, &hostname, &board, &ep_id);
+    ret = mx_hostname_to_nic_id(server_uri, &nic_id);
+    mconn->epa = epa;
+
+    /* get a tx */
+    pthread_mutex_lock(&ep->lock);
+    if(!TAILQ_EMPTY(&mep->idle_txs)) {
+        tx = TAILQ_FIRST(&mep->idle_txs);
+        TAILQ_REMOVE(&mep->idle_txs, tx, dentry);
+    }
+    pthread_mutex_unlock(&ep->lock);
+
+    if(!tx) {
+        ret = CCI_ENOBUFS;
+        goto out;
+    }
+
+    /* prep the tx */
+    tx->msg_type=MX_MSG_OOB;
+    tx->oob_type=MX_MSG_OOB_CONN_REQUEST;
+    mconn->tx = tx; /* we need its event for the accept|reject */
+
+    evt=&tx->evt;
+    evt->ep=ep;
+    evt->conn=conn;
+    event=&evt->event;
+    event->type=CCI_EVENT_CONNECT_SUCCESS; /* for now */
+
+    other=&event->info.other;
+    other->context=context;
+    other->u.connect.connection=connection;
+
+    /* pack the bits */
+    bits = ((uint64_t) port) << MX_EP_SHIFT;
+    bits |= ((uint64_t) (data_len & 0xFFFF)) << 16;
+    bits |= ((uint64_t) attribute) << 8;
+    bits |= ((uint64_t) MX_MSG_OOB_CONN_REQUEST) << 2;
+    bits |= (uint64_t) MX_MSG_OOB;
+
+    /* pack the payload */
+    conn_request.max_recv_buffer_count = endpoint->max_recv_buffer_count;
+    conn_request.client_ep_id = mep->id;
+
+    mxseg[0].segment_ptr = &conn_request;
+    mxseg[0].segment_length = sizeof(conn_request);
+    if (data_len) {
+        mxseg[1].segment_ptr = data_ptr;
+        mxseg[1].segment_length = data_len;
+        count = 2;
+    }
+
+    ret = mx_isend(mep->ep, mxseg, count, mconn->epa, bits, tx, &mxreq);
+    if (ret)
+        ret = CCI_ERROR;
+
+out:
+    CCI_EXIT;
+
+    if (ret) {
+        if (conn) {
+            if (conn->uri)
+                free((char *)conn->uri);
+            if (conn->priv)
+                free(conn->priv);
+            free(conn);
+        }
+    }
+
+    return ret;
+}
+
+
+static int
+mx__disconnect(cci_connection_t *connection)
 {
     CCI_ENTER;
 
@@ -786,146 +1024,134 @@ static int mx_reject(cci_conn_req_t *conn_req)
 }
 
 
-static int mx__connect(cci_endpoint_t *endpoint, char *server_uri,
-                            uint32_t port,
-                            void *data_ptr, uint32_t data_len,
-                            cci_conn_attribute_t attribute,
-                            void *context, int flags,
-                            struct timeval *timeout)
+static int
+mx_set_opt(cci_opt_handle_t *handle,
+           cci_opt_level_t level,
+           cci_opt_name_t name, const void* val, int len)
 {
     CCI_ENTER;
 
-    CCI_EXIT;
+	CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
-static int mx__disconnect(cci_connection_t *connection)
+static int
+mx_get_opt(cci_opt_handle_t *handle,
+           cci_opt_level_t level,
+           cci_opt_name_t name, void** val, int *len)
 {
     CCI_ENTER;
 
-    CCI_EXIT;
+	CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
-static int mx_set_opt(cci_opt_handle_t *handle,
-                            cci_opt_level_t level,
-                            cci_opt_name_t name, const void* val, int len)
+static int
+mx_arm_os_handle(cci_endpoint_t *endpoint, int flags)
 {
     CCI_ENTER;
 
-	CCI_EXIT
-;    return CCI_ERR_NOT_IMPLEMENTED;
+	CCI_EXIT;
+    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
-static int mx_get_opt(cci_opt_handle_t *handle,
-                            cci_opt_level_t level,
-                            cci_opt_name_t name, void** val, int *len)
+static int
+mx_get_event(cci_endpoint_t *endpoint,
+             cci_event_t ** const event,
+             uint32_t flags)
 {
     CCI_ENTER;
 
-	CCI_EXIT
-;    return CCI_ERR_NOT_IMPLEMENTED;
+	CCI_EXIT;
+    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
-static int mx_arm_os_handle(cci_endpoint_t *endpoint, int flags)
+static int
+mx_return_event(cci_endpoint_t *endpoint,
+                cci_event_t *event)
 {
     CCI_ENTER;
 
-	CCI_EXIT
-;    return CCI_ERR_NOT_IMPLEMENTED;
+	CCI_EXIT;
+    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
-static int mx_get_event(cci_endpoint_t *endpoint,
-                              cci_event_t ** const event,
-                              uint32_t flags)
+static int
+mx_send(cci_connection_t *connection,
+        void *header_ptr, uint32_t header_len,
+        void *data_ptr, uint32_t data_len,
+        void *context, int flags)
 {
     CCI_ENTER;
 
-	CCI_EXIT
-;    return CCI_ERR_NOT_IMPLEMENTED;
+	CCI_EXIT;
+    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
-static int mx_return_event(cci_endpoint_t *endpoint,
-                                 cci_event_t *event)
+static int
+mx_sendv(cci_connection_t *connection,
+         void *header_ptr, uint32_t header_len,
+         struct iovec *data, uint8_t iovcnt,
+         void *context, int flags)
 {
     CCI_ENTER;
 
-	CCI_EXIT
-;    return CCI_ERR_NOT_IMPLEMENTED;
+	CCI_EXIT;
+    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
-static int mx_send(cci_connection_t *connection,
-                         void *header_ptr, uint32_t header_len,
-                         void *data_ptr, uint32_t data_len,
-                         void *context, int flags)
+static int
+mx_rma_register(cci_endpoint_t *endpoint,
+                cci_connection_t *connection,
+                void *start, uint64_t length,
+                uint64_t *rma_handle)
 {
     CCI_ENTER;
 
-	CCI_EXIT
-;    return CCI_ERR_NOT_IMPLEMENTED;
+	CCI_EXIT;
+    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
-static int mx_sendv(cci_connection_t *connection,
-                          void *header_ptr, uint32_t header_len,
-                          struct iovec *data, uint8_t iovcnt,
-                          void *context, int flags)
+static int
+mx_rma_register_phys(cci_endpoint_t *endpoint,
+                     cci_connection_t *connection,
+                     cci_sg_t *sg_list, uint32_t sg_cnt,
+                     uint64_t *rma_handle)
 {
     CCI_ENTER;
 
-	CCI_EXIT
-;    return CCI_ERR_NOT_IMPLEMENTED;
+	CCI_EXIT;
+    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
-static int mx_rma_register(cci_endpoint_t *endpoint,
-                           cci_connection_t *connection,
-                           void *start, uint64_t length,
-                           uint64_t *rma_handle)
+static int
+mx_rma_deregister(uint64_t rma_handle)
 {
     CCI_ENTER;
 
-	CCI_EXIT
-;    return CCI_ERR_NOT_IMPLEMENTED;
+	CCI_EXIT;
+    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
-static int mx_rma_register_phys(cci_endpoint_t *endpoint,
-                                cci_connection_t *connection,
-                                cci_sg_t *sg_list, uint32_t sg_cnt,
-                                uint64_t *rma_handle)
+static int
+mx_rma(cci_connection_t *connection,
+       void *header_ptr, uint32_t header_len,
+       uint64_t local_handle, uint64_t local_offset,
+       uint64_t remote_handle, uint64_t remote_offset,
+       uint64_t data_len, void *context, int flags)
 {
     CCI_ENTER;
 
-	CCI_EXIT
-;    return CCI_ERR_NOT_IMPLEMENTED;
-}
-
-
-static int mx_rma_deregister(uint64_t rma_handle)
-{
-    CCI_ENTER;
-
-	CCI_EXIT
-;    return CCI_ERR_NOT_IMPLEMENTED;
-}
-
-
-static int mx_rma(cci_connection_t *connection,
-                        void *header_ptr, uint32_t header_len,
-                        uint64_t local_handle, uint64_t local_offset,
-                        uint64_t remote_handle, uint64_t remote_offset,
-                        uint64_t data_len, void *context, int flags)
-{
-    CCI_ENTER;
-
-	CCI_EXIT
-;    return CCI_ERR_NOT_IMPLEMENTED;
+	CCI_EXIT;
+    return CCI_ERR_NOT_IMPLEMENTED;
 }

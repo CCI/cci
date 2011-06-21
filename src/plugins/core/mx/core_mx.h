@@ -22,6 +22,27 @@ BEGIN_C_DECLS
 #define MX_EP_TX_TIMEOUT_MS (20 * 1000) /* 20 seconds */
 #define MX_EP_SHIFT         (32)
 
+/* Valid URI include:
+ *
+ * mx://foo.bar.com     # MX hostname
+ */
+
+/* Valid URI arguments:
+ *
+ * :0                	# board index
+ * :0:4                 # board index followed by endpoint ID
+ */
+
+/* A MX device needs the following items in the config file:
+ *
+ * driver = mx        	# must be lowercase
+ *
+ * A MX device may have these items:
+ *
+ * listen_ep_id = 9  	# endpoint to listen on
+ */
+
+
 /* Limit of 4 message types to ensure that we only use 2 bits for msg type */
 typedef enum mx_msg_type {
     MX_MSG_SEND,
