@@ -640,6 +640,7 @@ static int mx_unbind(cci_service_t *service, cci_device_t *device)
 }
 
 
+/* currently never called */
 static int mx_get_conn_req(cci_service_t *service,
                                  cci_conn_req_t **conn_req)
 {
@@ -654,10 +655,125 @@ static int mx_accept(cci_conn_req_t *conn_req,
                            cci_endpoint_t *endpoint,
                            cci_connection_t **connection)
 {
+    int             ret;
+    cci__ep_t       *ep     = NULL;
+    cci__dev_t      *dev    = NULL;
+    cci__conn_t     *conn   = NULL;
+    cci__crq_t      *crq    = NULL;
+    cci__lep_t      *lep    = NULL;
+    mx_ep_t         *mep    = NULL;
+    mx_dev_t        *mdev   = NULL;
+    mx_crq_t        *mcrq   = NULL;
+    mx_conn_t       *mconn  = NULL;
+    mx_conn_accept_t accept;
+    mx_tx_t         *tx     = NULL;
+    uint64_t        bits    = 0ULL;
+    mx_segment_t    mxseg;
+    mx_request_t    mxreq;
+
     CCI_ENTER;
 
+    if (!mglobals) {
+        CCI_EXIT;
+        return CCI_ENODEV;
+    }
+
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    mep = ep->priv;
+    crq = container_of(conn_req, cci__crq_t, conn_req);
+    mcrq = crq->priv;
+    dev = ep->dev;
+    mdev = dev->priv;
+    lep = crq->lep;
+
+    conn = calloc(1, sizeof(*conn));
+    if (!conn) {
+        CCI_EXIT;
+        ret = CCI_ENOMEM;
+        goto out_with_crq;
+    }
+
+    conn->tx_timeout = ep->tx_timeout;
+    conn->priv = calloc(1, sizeof(*mconn));
+    if (!conn->priv) {
+        ret = CCI_ENOMEM;
+        goto out_with_conn;
+    }
+    mconn = conn->priv;
+    mconn->conn = conn;
+
+    /* prepare accept msg */
+
+    accept.max_recv_buffer_count = mcrq->max_recv_buffer_count;
+    accept.server_conn_upper = (uint32_t)((uintptr_t)conn >> 32);
+    accept.server_conn_lower = (uint32_t)((uintptr_t)conn & 0xFFFFFFFF);
+
+    /* setup connection */
+
+    conn->connection.attribute = crq->conn_req.attribute;
+    conn->connection.endpoint = endpoint;
+    conn->connection.max_send_size = dev->device.max_send_size;
+
+    mconn->epa = mcrq->epa;
+    mconn->peer_conn = mcrq->client_conn;
+    mconn->peer_ep_id = mcrq->client_id;
+    mconn->max_tx_cnt = mcrq->max_recv_buffer_count;
+
+    pthread_mutex_lock(&ep->lock);
+    TAILQ_INSERT_TAIL(&mep->conns, mconn, entry);
+    pthread_mutex_unlock(&ep->lock);
+
+    /* get a tx */
+    pthread_mutex_lock(&ep->lock);
+    if(!TAILQ_EMPTY(&mep->idle_txs)) {
+        tx = TAILQ_FIRST(&mep->idle_txs);
+        TAILQ_REMOVE(&mep->idle_txs, tx, dentry);
+    }
+    pthread_mutex_unlock(&ep->lock);
+
+    if(!tx) {
+        ret = CCI_ENOBUFS;
+        goto out_with_conn;
+    }
+
+    /* prep the tx */
+    tx->msg_type = MX_MSG_OOB;
+    tx->oob_type = MX_MSG_OOB_CONN_REPLY;
+
+    tx->evt.ep = ep;
+    tx->evt.conn = conn;
+    tx->evt.event.type = CCI_EVENT_SEND;
+
+    bits = ((uint64_t) mconn->peer_ep_id) << MX_EP_SHIFT;
+    bits |= ((uint64_t) MX_MSG_OOB_CONN_REPLY) << 2;
+    bits |= (uint64_t) MX_MSG_OOB;
+
+    mxseg.segment_ptr = &accept;
+    mxseg.segment_length = sizeof(accept);
+
+    ret = mx_isend(mep->ep, &mxseg, 1, mconn->epa, bits, conn, &mxreq);
+    if (ret) {
+        ret = CCI_ERROR;
+        goto out_with_conn;
+    }
+
+    pthread_mutex_lock(&lep->lock);
+    TAILQ_INSERT_HEAD(&lep->crqs, crq, entry);
+    pthread_mutex_unlock(&lep->lock);
+
+    *connection = &conn->connection;
+
     CCI_EXIT;
-    return CCI_ERR_NOT_IMPLEMENTED;
+    return CCI_SUCCESS;
+
+out_with_conn:
+    free(conn);
+out_with_crq:
+    pthread_mutex_lock(&lep->lock);
+    TAILQ_INSERT_HEAD(&lep->crqs, crq, entry);
+    pthread_mutex_unlock(&lep->lock);
+
+    return ret;
 }
 
 

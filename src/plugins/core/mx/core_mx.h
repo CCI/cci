@@ -20,6 +20,7 @@ BEGIN_C_DECLS
 #define MX_EP_RX_CNT        (1024)      /* max rx messages */
 #define MX_EP_TX_CNT        (128)       /* max tx messages */
 #define MX_EP_TX_TIMEOUT_MS (20 * 1000) /* 20 seconds */
+#define MX_EP_SHIFT         (32)
 
 /* Limit of 4 message types to ensure that we only use 2 bits for msg type */
 typedef enum mx_msg_type {
@@ -114,7 +115,6 @@ typedef enum mx_msg_oob_type {
  */
 
 typedef struct mx_conn_request {
-    uint32_t max_send_size;         /* mss that the client supports */
     uint32_t max_recv_buffer_count; /* max recvs the client can handle */
     uint32_t client_ep_id;          /* client's endpoint id */
 } mx_conn_request_t;
@@ -133,8 +133,6 @@ typedef struct mx_conn_request {
    Payload:
     <------------- 32b ------------>
    +--------------------------------+
-   |          max_send_size         |
-   +--------------------------------+
    |      max_recv_buffer_count     |
    +--------------------------------+
    |     server conn opaque upper   |
@@ -145,7 +143,6 @@ typedef struct mx_conn_request {
  */
 
 typedef struct mx_conn_accept {
-    uint32_t server_ep_id;
     uint32_t max_recv_buffer_count; /* max recvs the server can handle */
     uint32_t server_conn_upper;     /* upper 32 bits of server conn opaque */
     uint32_t server_conn_lower;     /* lower 32 bits of server conn opaque */
