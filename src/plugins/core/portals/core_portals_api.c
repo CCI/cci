@@ -854,6 +854,8 @@ portals_create_am_buffer(cci__ep_t *ep, uint64_t length)
         ret = CCI_ENOMEM;
         goto out;
     }
+    debug( CCI_DB_MEM, "Created AM buffer=%lx length=%lx",
+           am->buffer, length );
 
     am->length = length;
     am->pep = pep;
@@ -1080,7 +1082,9 @@ static int portals_destroy_endpoint(cci_endpoint_t *endpoint)
             if (am->buffer) {
                 if (am->state == PORTALS_AM_ACTIVE)
                     PtlMEUnlink(am->meh);
+                debug( CCI_DB_MEM, "Free AM buffer=%lx", am->buffer );
                 free(am->buffer);
+                am->buffer=NULL;
             }
             free(am);
         }
@@ -2552,6 +2556,7 @@ static int portals_rma_register(
 
     handle = calloc(1, sizeof(*handle));
     if (!handle) {
+        debug( CCI_DB_WARN, "No memory for handle" );
         CCI_EXIT;
         return CCI_ENOMEM;
     }
@@ -2597,6 +2602,7 @@ static int portals_rma_register(
                  break;
 
             case PTL_NO_SPACE:     /* Well, well, well */
+                 debug( CCI_DB_WARN, "No memory for ME/MD" );
                  iRC = CCI_ENOMEM;;
                  break;
 
@@ -2605,6 +2611,7 @@ static int portals_rma_register(
                  break;
 
             default:               /* Undocumented portals error */
+                 debug( CCI_DB_WARN, "portals=%d", iRC );
                  iRC = CCI_ERROR;
         }
         free(handle);
@@ -2640,6 +2647,7 @@ static int portals_rma_register_phys(
 
 static int portals_rma_deregister(uint64_t rma_handle)
 {
+    int                     iRC;
     int                     ret     = CCI_EINVAL;
     portals_rma_handle_t    *handle = (portals_rma_handle_t *) rma_handle;
     cci__ep_t               *ep     = NULL;
@@ -2662,10 +2670,18 @@ static int portals_rma_deregister(uint64_t rma_handle)
         if (h == handle) {
             ret = CCI_SUCCESS;
             handle->refcnt--;
+            iRC=PtlMEUnlink( handle->meh );
+            if( iRC!=PTL_OK )                /* Portals error! */
+                debug( CCI_DB_WARN, "Could not unlink meh" );
             if (handle->refcnt == 0) {
                 TAILQ_REMOVE(&pep->handles, handle, entry);
                 memset(handle, 0, sizeof(*handle));
                 free(handle);
+            } else {                         /* Memory leak warning */
+                ret = CCI_ERR_RMA_OP;
+                debug( CCI_DB_MEM,
+                       "Did not deallocate handle  refcnt=%d",
+                       handle->refcnt );
             }
             break;
         }
@@ -3266,7 +3282,14 @@ again:
                 TAILQ_REMOVE(&handle->rma_ops, ro, hentry);
                 rma_op = ro;
                 break;
-            }
+            } else
+            debug( CCI_DB_WARN,
+                   "match=%lx..%lx  length=%ld..%ld  offset=%ld..%ld",
+                   event.match_bits,
+                   (ro->remote_handle | PORTALS_MSG_RMA_READ),
+                   event.rlength, ro->data_len,
+                   event.offset, ro->remote_offset );
+           
         }
         if (!rma_op) {
             /* FIXME do what now? */
