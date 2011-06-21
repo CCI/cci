@@ -210,6 +210,7 @@ typedef struct mx_ep {
 } mx_ep_t;
 
 typedef struct mx_lep {
+    mx_endpoint_t       ep;
     cci_os_handle_t     fd;         /* OS handle for poll */
 } mx_lep_t;
 

@@ -300,7 +300,7 @@ mx_add_tx(cci__ep_t *ep)
     mx_tx_t     *tx;
 
     tx = calloc(1, sizeof(*tx));
-    if(!tx) {
+    if (!tx) {
         ret = 0;
         goto out;
     }
@@ -324,7 +324,7 @@ mx_add_rx(cci__ep_t *ep)
     mx_rx_t     *rx;
 
     rx = calloc(1, sizeof(*rx));
-    if(!rx) {
+    if (!rx) {
         ret = 0;
         goto out;
     }
@@ -508,7 +508,7 @@ static int mx_destroy_endpoint(cci_endpoint_t *endpoint)
 
     CCI_ENTER;
 
-    if(!mglobals) {
+    if (!mglobals) {
         CCI_EXIT;
         return CCI_ENODEV;
     }
@@ -548,14 +548,94 @@ static int mx_destroy_endpoint(cci_endpoint_t *endpoint)
 static int mx_bind(cci_device_t *device, int backlog, uint32_t *port,
                          cci_service_t **service, cci_os_handle_t *fd)
 {
-    printf("In mx_bind\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+    int             ret;
+    cci__dev_t      *dev;
+    cci__svc_t      *svc;
+    cci__lep_t      *lep;
+    cci__crq_t      *crq;
+    mx_dev_t        *mdev;
+    mx_lep_t        *mlep;
+    mx_crq_t        *mcrq;
+
+    CCI_ENTER;
+
+    if (!mglobals) {
+        CCI_EXIT;
+        return CCI_ENODEV;
+    }
+
+    dev = container_of(device, cci__dev_t, device);
+    if (strcmp("mx", dev->driver)) {
+        ret = CCI_EINVAL;
+        goto out;
+    }
+    mdev = dev->priv;
+
+    svc = container_of(*service, cci__svc_t, service);
+    TAILQ_FOREACH(lep, &svc->leps, sentry) {
+        if (lep->dev == dev)
+            break;
+    }
+
+    /* allocate mx listening endpoint */
+    if (!(mlep = calloc(1, sizeof(*mlep)))) {
+        CCI_EXIT;
+        return CCI_ENOMEM;
+    }
+
+    ret = mx_open_endpoint(mdev->board, *port, MX_KEY, NULL, 0, &mlep->ep);
+    if (ret) {
+        debug(CCI_DB_DRVR, "open_endpoint() returned %s", mx_strerror(ret));
+        ret = CCI_ERROR;
+        goto out;
+    }
+
+    /* alloc portal for each cci__crq_t */
+    TAILQ_FOREACH(crq, &lep->crqs, entry) {
+        if(!(crq->priv = calloc(1, sizeof(*mcrq)))) {
+            ret = CCI_ENOMEM;
+            goto out;
+        }
+        mcrq = crq->priv;
+        mcrq->buffer = calloc(1, 1024);
+        if (!mcrq->buffer) {
+            ret = CCI_ENOMEM;
+            goto out;
+        }
+    }
+
+    lep->priv = mlep;
+
+out:
+    CCI_EXIT;
+    if (ret) {
+        TAILQ_FOREACH(crq, &lep->crqs, entry) {
+            if (crq->priv) {
+                if (crq->priv) {
+                    mcrq = crq->priv;
+                    if (mcrq->buffer)
+                        free(mcrq->buffer);
+                    free(mcrq);
+                    crq->priv = NULL;
+                }
+            }
+        }
+
+        if (mlep) {
+            if (mlep->ep)
+                mx_close_endpoint(mlep->ep);
+            free(mlep);
+        }
+    }
+    return CCI_SUCCESS;
 }
 
 
 static int mx_unbind(cci_service_t *service, cci_device_t *device)
 {
-    printf("In mx_unbind\n");
+    CCI_ENTER;
+
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -563,7 +643,9 @@ static int mx_unbind(cci_service_t *service, cci_device_t *device)
 static int mx_get_conn_req(cci_service_t *service,
                                  cci_conn_req_t **conn_req)
 {
-    printf("In mx_get_conn_req\n");
+    CCI_ENTER;
+
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -572,14 +654,18 @@ static int mx_accept(cci_conn_req_t *conn_req,
                            cci_endpoint_t *endpoint,
                            cci_connection_t **connection)
 {
-    printf("In mx_accept\n");
+    CCI_ENTER;
+
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
 static int mx_reject(cci_conn_req_t *conn_req)
 {
-    printf("In mx_reject\n");
+    CCI_ENTER;
+
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -591,14 +677,18 @@ static int mx__connect(cci_endpoint_t *endpoint, char *server_uri,
                             void *context, int flags,
                             struct timeval *timeout)
 {
-    printf("In mx_connect\n");
+    CCI_ENTER;
+
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
 static int mx__disconnect(cci_connection_t *connection)
 {
-    printf("In mx_disconnect\n");
+    CCI_ENTER;
+
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -607,8 +697,10 @@ static int mx_set_opt(cci_opt_handle_t *handle,
                             cci_opt_level_t level,
                             cci_opt_name_t name, const void* val, int len)
 {
-    printf("In mx_set_opt\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+    CCI_ENTER;
+
+	CCI_EXIT
+;    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
@@ -616,15 +708,19 @@ static int mx_get_opt(cci_opt_handle_t *handle,
                             cci_opt_level_t level,
                             cci_opt_name_t name, void** val, int *len)
 {
-    printf("In mx_get_opt\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+    CCI_ENTER;
+
+	CCI_EXIT
+;    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
 static int mx_arm_os_handle(cci_endpoint_t *endpoint, int flags)
 {
-    printf("In mx_arm_os_handle\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+    CCI_ENTER;
+
+	CCI_EXIT
+;    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
@@ -632,16 +728,20 @@ static int mx_get_event(cci_endpoint_t *endpoint,
                               cci_event_t ** const event,
                               uint32_t flags)
 {
-    printf("In mx_get_event\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+    CCI_ENTER;
+
+	CCI_EXIT
+;    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
 static int mx_return_event(cci_endpoint_t *endpoint,
                                  cci_event_t *event)
 {
-    printf("In mx_return_event\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+    CCI_ENTER;
+
+	CCI_EXIT
+;    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
@@ -650,8 +750,10 @@ static int mx_send(cci_connection_t *connection,
                          void *data_ptr, uint32_t data_len,
                          void *context, int flags)
 {
-    printf("In mx_send\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+    CCI_ENTER;
+
+	CCI_EXIT
+;    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
@@ -660,8 +762,10 @@ static int mx_sendv(cci_connection_t *connection,
                           struct iovec *data, uint8_t iovcnt,
                           void *context, int flags)
 {
-    printf("In mx_sendv\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+    CCI_ENTER;
+
+	CCI_EXIT
+;    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
@@ -670,8 +774,10 @@ static int mx_rma_register(cci_endpoint_t *endpoint,
                            void *start, uint64_t length,
                            uint64_t *rma_handle)
 {
-    printf("In mx_rma_register\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+    CCI_ENTER;
+
+	CCI_EXIT
+;    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
@@ -680,15 +786,19 @@ static int mx_rma_register_phys(cci_endpoint_t *endpoint,
                                 cci_sg_t *sg_list, uint32_t sg_cnt,
                                 uint64_t *rma_handle)
 {
-    printf("In mx_rma_register_phys\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+    CCI_ENTER;
+
+	CCI_EXIT
+;    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
 static int mx_rma_deregister(uint64_t rma_handle)
 {
-    printf("In mx_rma_deregister\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+    CCI_ENTER;
+
+	CCI_EXIT
+;    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
@@ -698,6 +808,8 @@ static int mx_rma(cci_connection_t *connection,
                         uint64_t remote_handle, uint64_t remote_offset,
                         uint64_t data_len, void *context, int flags)
 {
-    printf("In mx_rma\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+    CCI_ENTER;
+
+	CCI_EXIT
+;    return CCI_ERR_NOT_IMPLEMENTED;
 }
