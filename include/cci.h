@@ -240,6 +240,9 @@ typedef enum cci_status {
   /*! Address not available */
   CCI_EADDRNOTAVAIL = EADDRNOTAVAIL,
 
+  /*! Host not reachable */
+  CCI_EHOSTUNREACH = EHOSTUNREACH,
+
   /* ...more here, inspired from errno.h... */
   
 } cci_status_t;
