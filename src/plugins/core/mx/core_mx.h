@@ -262,6 +262,7 @@ typedef struct mx_conn {
     cci__conn_t             *conn;          /* Owning conn */
     mx_conn_status_t        status;         /* Status */
     mx_endpoint_addr_t      epa;            /* Peer's (NID, PID) */
+    int                     need_connect;   /* need to call connect to epa? */
     uint64_t                peer_conn;      /* Peer's conn addr */
     uint32_t                peer_ep_id;     /* Peer's endpoint ID */
     uint32_t                max_tx_cnt;     /* Max sends in flight */
