@@ -15,6 +15,8 @@
 volatile int mx_shut_down = 0;
 mx_globals_t *mglobals = NULL;
 
+mx_endpoint_addr_t NULL_EPA;
+
 /*
  * Local functions
  */
@@ -410,6 +412,191 @@ mx_free_rx(mx_ep_t *mep, int force)
     return 1;
 }
 
+static void
+mx_handle_conn_reply(cci__ep_t *ep,
+                     mx_endpoint_addr_t source,
+                     uint64_t match,
+                     uint32_t length,
+                     void *data)
+{
+    mx_ep_t             *mep    = ep->priv;
+    mx_rx_t             *rx     = NULL;
+    cci__conn_t         *conn   = NULL;
+    mx_conn_t           *mconn  = NULL;
+    mx_conn_accept_t    *accept = data;
+
+    CCI_ENTER;
+
+    if (length != sizeof(*accept)) {
+        debug(CCI_DB_CONN, "%s: recv'd runt of length %d", __func__, length);
+        goto out;
+    }
+
+    pthread_mutex_lock(&ep->lock);
+    if (!TAILQ_EMPTY(&mep->idle_rxs)) {
+        rx = TAILQ_FIRST(&mep->idle_rxs);
+        TAILQ_REMOVE(&mep->idle_rxs, rx, entry);
+    }
+    pthread_mutex_unlock(&ep->lock);
+
+    if (!rx) {
+        debug((CCI_DB_WARN|CCI_DB_CONN), "no rx available for incoming conn_reply");
+        goto out;
+    }
+
+    conn = (cci__conn_t *)(uintptr_t)
+           (((uint64_t)accept->client_conn_upper) << 32 |
+             (uint64_t)accept->client_conn_lower);
+    mconn = conn->priv;
+    mconn->peer_conn = ((uint64_t)accept->server_conn_upper) << 32;
+    mconn->peer_conn |= (uint64_t)accept->server_conn_lower;
+
+    if (mconn->peer_conn != 0ULL) {
+        /* accept */
+        rx->evt.event.type = CCI_EVENT_CONNECT_SUCCESS;
+        rx->evt.event.info.other.u.connect.connection = &conn->connection;
+        pthread_mutex_lock(&ep->lock);
+        TAILQ_INSERT_TAIL(&mep->conns, mconn, entry);
+        pthread_mutex_unlock(&ep->lock);
+    } else {
+        /* reject */
+        free(mconn);
+        if (conn->uri)
+            free((void *)conn->uri);
+        free(conn);
+        rx->evt.event.type = CCI_EVENT_CONNECT_REJECTED;
+    }
+    pthread_mutex_lock(&ep->lock);
+    TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
+    pthread_mutex_unlock(&ep->lock);
+out:
+    CCI_EXIT;
+    return;
+}
+
+static void
+mx_handle_active_msg(cci__ep_t *ep,
+                     mx_endpoint_addr_t source,
+                     uint64_t match,
+                     uint32_t length,
+                     void *data)
+{
+    mx_ep_t     *mep    = ep->priv;
+    mx_rx_t     *rx     = NULL;
+    cci__conn_t *conn   = NULL;
+
+    CCI_ENTER;
+
+    if (length < 8) {
+        debug(CCI_DB_DRVR, "%s: recv'd runt w/length %d", __func__, length);
+        goto out;
+    }
+
+    conn = (cci__conn_t *) data;
+    if (!conn) {
+        debug(CCI_DB_DRVR, "%s: no conn", __func__);
+        goto out;
+    }
+
+    /* get a rx */
+    pthread_mutex_lock(&ep->lock);
+    if(!TAILQ_EMPTY(&mep->idle_rxs)) {
+        rx = TAILQ_FIRST(&mep->idle_rxs);
+        TAILQ_REMOVE(&mep->idle_rxs, rx, entry);
+    }
+    pthread_mutex_unlock(&ep->lock);
+
+    if(!rx) {
+        debug(CCI_DB_DRVR, "%s: no rxs available", __func__);
+        goto out;
+    }
+
+    rx->evt.event.info.recv.connection = &conn->connection;
+
+    if (length > 8) {
+        memcpy(rx->buffer, data + 8, length - 8);
+        rx->evt.event.type = CCI_EVENT_RECV;
+        *((uint32_t *)&rx->evt.event.info.recv.header_len) =
+            (uint32_t) ((match >> 27) & 0x1F);
+        *((uint32_t *)&rx->evt.event.info.recv.data_len) =
+            (uint32_t) ((match >> 11) & 0xFFFF);
+        if (rx->evt.event.info.recv.header_len)
+            *((void **)&rx->evt.event.info.recv.header_ptr) = rx->buffer;
+        else
+            *((void **)&rx->evt.event.info.recv.header_ptr) = NULL;
+        if (rx->evt.event.info.recv.data_len)
+            *((void **)&rx->evt.event.info.recv.data_ptr) = rx->buffer +
+                rx->evt.event.info.recv.header_len;
+        else
+            *((void **)&rx->evt.event.info.recv.data_ptr) = NULL;
+    } else {
+        *((uint32_t *)&rx->evt.event.info.recv.header_len) = 0;
+        *((uint32_t *)&rx->evt.event.info.recv.data_len) = 0;
+        *((void **)&rx->evt.event.info.recv.header_ptr) = NULL;
+        *((void **)&rx->evt.event.info.recv.data_ptr) = NULL;
+    }
+
+    pthread_mutex_lock(&ep->lock);
+    TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
+    pthread_mutex_unlock(&ep->lock);
+
+out:
+    CCI_EXIT;
+    return;
+}
+
+static mx_unexp_handler_action_t
+mx_unex_lep(void *context,
+            mx_endpoint_addr_t source,
+            uint64_t match_value,
+            uint32_t length,
+            void *data_if_available)
+{
+    cci__lep_t      *lep     = context;
+
+    CCI_ENTER;
+
+
+out:
+    CCI_EXIT;
+    return MX_RECV_FINISHED;
+}
+
+static mx_unexp_handler_action_t
+mx_unex_ep(void *context,
+           mx_endpoint_addr_t source,
+           uint64_t match_value,
+           uint32_t length,
+           void *data_if_available)
+{
+    cci__ep_t       *ep     = context;
+    mx_msg_type_t   type    = match_value & 0x3;
+
+    CCI_ENTER;
+
+    switch (type) {
+    case MX_MSG_SEND:
+        mx_handle_active_msg(ep, source, match_value, length, data_if_available);
+        break;
+    case MX_MSG_OOB:
+    {
+        mx_msg_oob_type_t otype = ((match_value >> 2) & 0x3);
+        switch (otype) {
+        case MX_MSG_OOB_CONN_REPLY:
+            mx_handle_conn_reply(ep, source, match_value, length, data_if_available);
+            break;
+        default:
+            debug(CCI_DB_INFO, "missed oob type %d", otype);
+            break;
+        }
+        break;
+    }
+    default:
+        break;
+    }
+    CCI_EXIT;
+    return MX_RECV_FINISHED;
+}
 
 static int
 mx_create_endpoint(cci_device_t *device,
@@ -462,6 +649,15 @@ mx_create_endpoint(cci_device_t *device,
     ret = mx_open_endpoint(mdev->board, MX_ANY_ENDPOINT, MX_KEY, NULL, 0, &mep->ep);
     if (ret) {
         debug(CCI_DB_DRVR, "open_endpoint() returned %s", mx_strerror(ret));
+        ret = CCI_ERROR;
+        goto out;
+    }
+
+    ret = mx_register_unexp_handler(mep->ep,
+                                    (mx_unexp_handler_t) mx_unex_ep,
+                                    &ep);
+    if (ret) {
+        debug(CCI_DB_DRVR, "register_unexp_handler() returned %s", mx_strerror(ret));
         ret = CCI_ERROR;
         goto out;
     }
@@ -596,6 +792,15 @@ mx_bind(cci_device_t *device, int backlog, uint32_t *port,
         goto out;
     }
 
+    ret = mx_register_unexp_handler(mlep->ep,
+                                    (mx_unexp_handler_t) mx_unex_lep,
+                                    &lep);
+    if (ret) {
+        debug(CCI_DB_DRVR, "register_unexp_handler() returned %s", mx_strerror(ret));
+        ret = CCI_ERROR;
+        goto out;
+    }
+
     /* alloc portal for each cci__crq_t */
     TAILQ_FOREACH(crq, &lep->crqs, entry) {
         if(!(crq->priv = calloc(1, sizeof(*mcrq)))) {
@@ -714,8 +919,10 @@ mx_accept(cci_conn_req_t *conn_req,
     /* prepare accept msg */
 
     accept.max_recv_buffer_count = mcrq->max_recv_buffer_count;
+    accept.client_conn_upper = (uint32_t)(mconn->peer_conn >> 32);
+    accept.client_conn_lower = (uint32_t)(mconn->peer_conn);
     accept.server_conn_upper = (uint32_t)((uintptr_t)conn >> 32);
-    accept.server_conn_lower = (uint32_t)((uintptr_t)conn & 0xFFFFFFFF);
+    accept.server_conn_lower = (uint32_t)((uintptr_t)conn);
 
     /* setup connection */
 
@@ -868,6 +1075,11 @@ mx_parse_uri(char *uri,
     }
 
 out:
+    if (ret)
+        free(hostname);
+    else
+        *mx_hostname = hostname;
+
     CCI_EXIT;
     return ret;
 }
@@ -899,7 +1111,6 @@ mx__connect(cci_endpoint_t *endpoint,
     uint64_t            nic_id  = 0ULL;
     uint32_t            board   = 0;
     uint32_t            ep_id   = 0;
-    mx_endpoint_addr_t  epa;
     mx_conn_request_t   conn_request;
     uint64_t            bits    = 0ULL;
     mx_segment_t        mxseg[2];
@@ -943,8 +1154,13 @@ mx__connect(cci_endpoint_t *endpoint,
 
     /* lookup epa */
     ret = mx_parse_uri(server_uri, &hostname, &board, &ep_id);
-    ret = mx_hostname_to_nic_id(server_uri, &nic_id);
-    mconn->epa = epa;
+    ret = mx_hostname_to_nic_id(hostname, &nic_id);
+    ret = mx_connect(mep->ep, nic_id, ep_id, MX_KEY, 10*1000, &mconn->epa);
+    if (ret) {
+        debug(CCI_DB_DRVR, "mx_connect() returned %s", mx_strerror(ret));
+        ret = CCI_ERROR;
+        goto out;
+    }
 
     /* get a tx */
     pthread_mutex_lock(&ep->lock);
@@ -984,6 +1200,8 @@ mx__connect(cci_endpoint_t *endpoint,
     /* pack the payload */
     conn_request.max_recv_buffer_count = endpoint->max_recv_buffer_count;
     conn_request.client_ep_id = mep->id;
+    conn_request.client_conn_upper = (uint32_t) (((uintptr_t)conn) >> 32);
+    conn_request.client_conn_lower = (uint32_t) ((uintptr_t)conn);
 
     mxseg[0].segment_ptr = &conn_request;
     mxseg[0].segment_length = sizeof(conn_request);
@@ -994,8 +1212,11 @@ mx__connect(cci_endpoint_t *endpoint,
     }
 
     ret = mx_isend(mep->ep, mxseg, count, mconn->epa, bits, tx, &mxreq);
-    if (ret)
+    if (ret) {
+        debug(CCI_DB_DRVR, "mx_isend() returned %s", mx_strerror(ret));
         ret = CCI_ERROR;
+        goto out;
+    }
 
 out:
     CCI_EXIT;
@@ -1004,8 +1225,11 @@ out:
         if (conn) {
             if (conn->uri)
                 free((char *)conn->uri);
-            if (conn->priv)
-                free(conn->priv);
+            if (mconn) {
+                if (memcmp(&mconn->epa, &NULL_EPA, sizeof(NULL_EPA)) == 0)
+                    mx_disconnect(mep->ep, mconn->epa);
+                free(mconn);
+            }
             free(conn);
         }
     }
@@ -1031,7 +1255,7 @@ mx_set_opt(cci_opt_handle_t *handle,
 {
     CCI_ENTER;
 
-	CCI_EXIT;
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1043,7 +1267,7 @@ mx_get_opt(cci_opt_handle_t *handle,
 {
     CCI_ENTER;
 
-	CCI_EXIT;
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1053,20 +1277,173 @@ mx_arm_os_handle(cci_endpoint_t *endpoint, int flags)
 {
     CCI_ENTER;
 
-	CCI_EXIT;
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
+static void
+mx_get_event_ep(cci__ep_t *ep)
+{
+    int             ret         = CCI_SUCCESS;
+    int             have_token  = 0;
+    mx_ep_t         *mep        = ep->priv;
+    uint32_t        result;
+    mx_status_t     status;
+    mx_tx_t         *tx;
+
+    CCI_ENTER;
+
+    pthread_mutex_lock(&ep->lock);
+    if (ep->closing) {
+        pthread_mutex_unlock(&ep->lock);
+        return;
+    }
+    if (mep->in_use == 0) {
+        mep->in_use = 1;
+        have_token = 1;
+    }
+    pthread_mutex_unlock(&ep->lock);
+
+    if (!have_token) {
+        CCI_EXIT;
+        return;
+    }
+
+    ret = mx_test_any(mep->ep, 0ULL, 0ULL, &status, &result);
+    if (ret) {
+        debug(CCI_DB_DRVR, "mx_test_any() returned %s", mx_strerror(ret));
+        goto out;
+    }
+    if (!result)
+        goto out;
+
+    /* we have a send completion, queue it */
+    tx = status.context;
+
+    switch (tx->msg_type) {
+        case MX_MSG_OOB:
+        case MX_MSG_SEND:
+            debug(CCI_DB_MSG, "%s: send completion", __func__);
+            if (tx->flags & CCI_FLAG_SILENT ||
+                tx->flags & CCI_FLAG_BLOCKING) {
+                /* queue on idle_txs */
+                pthread_mutex_lock(&ep->lock);
+                TAILQ_INSERT_HEAD(&mep->idle_txs, tx, dentry);
+                pthread_mutex_unlock(&ep->lock);
+            } else {
+                /* generate CCI_EVENT_SEND */
+                tx->evt.event.info.send.status =
+                    status.code == MX_STATUS_SUCCESS ? CCI_SUCCESS : CCI_ERROR;
+                pthread_mutex_lock(&ep->lock);
+                TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
+                pthread_mutex_unlock(&ep->lock);
+            }
+            break;
+        default:
+            debug(CCI_DB_INFO, "%s: unknown msg type of %d", __func__, tx->msg_type);
+            break;
+    }
+
+out:
+    pthread_mutex_lock(&ep->lock);
+    mep->in_use = 0;
+    pthread_mutex_unlock(&ep->lock);
+
+    CCI_EXIT;
+    return;
+}
 
 static int
 mx_get_event(cci_endpoint_t *endpoint,
              cci_event_t ** const event,
              uint32_t flags)
 {
+    int             ret     = CCI_SUCCESS;
+    cci__ep_t       *ep;
+    cci__evt_t      *ev     = NULL, *e;
+    cci__dev_t      *dev;
+    cci_event_t     *tmp;
+    mx_ep_t         *mep;
+
     CCI_ENTER;
 
-	CCI_EXIT;
-    return CCI_ERR_NOT_IMPLEMENTED;
+    if (!mglobals) {
+        CCI_EXIT;
+        return CCI_ENODEV;
+    }
+
+    ep = container_of(endpoint, cci__ep_t, endpoint);
+    mep = ep->priv;
+    dev = ep->dev;
+
+    mx_get_event_ep(ep);
+
+    pthread_mutex_lock(&ep->lock);
+    if (TAILQ_EMPTY(&ep->evts)) {
+        pthread_mutex_unlock(&ep->lock);
+        *event = NULL;
+        CCI_EXIT;
+        return CCI_EAGAIN;
+    }
+
+    if (!flags) {
+        /* give the user the first event */
+        TAILQ_FOREACH(e, &ep->evts, entry) {
+            if (e->event.type == CCI_EVENT_SEND) {
+                /* NOTE: if it is blocking, skip it since mx_send()
+                 * is waiting on it
+                 */
+                mx_tx_t *tx = container_of(e, mx_tx_t, evt);
+                if (tx->flags & CCI_FLAG_BLOCKING) {
+                    continue;
+                } else {
+                    ev = e;
+                    break;
+                }
+            } else {
+                ev = e;
+                break;
+            }
+        }
+    } else {
+        TAILQ_FOREACH(e, &ep->evts, entry) {
+            tmp = &e->event;
+
+            if (flags & CCI_PE_SEND_EVENT &&
+                tmp->type == CCI_EVENT_SEND) {
+                mx_tx_t *tx = container_of(e, mx_tx_t, evt);
+                if (tx->flags & CCI_FLAG_BLOCKING) {
+                    continue;
+                } else {
+                    ev = e;
+                    break;
+                }
+            } else if (flags & CCI_PE_RECV_EVENT &&
+                       tmp->type == CCI_EVENT_RECV) {
+                ev = e;
+                break;
+            } else if (flags & CCI_PE_OTHER_EVENT &&
+                       !(tmp->type == CCI_EVENT_SEND ||
+                         tmp->type == CCI_EVENT_RECV)) {
+                ev = e;
+                break;
+            }
+        }
+    }
+
+    if (ev)
+        TAILQ_REMOVE(&ep->evts, ev, entry);
+    else
+        ret = CCI_EAGAIN;
+
+    pthread_mutex_unlock(&ep->lock);
+
+    /* TODO drain fd so that they can block again */
+
+    *event = &ev->event;
+
+    CCI_EXIT;
+    return ret;
 }
 
 
@@ -1076,7 +1453,7 @@ mx_return_event(cci_endpoint_t *endpoint,
 {
     CCI_ENTER;
 
-	CCI_EXIT;
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1089,7 +1466,7 @@ mx_send(cci_connection_t *connection,
 {
     CCI_ENTER;
 
-	CCI_EXIT;
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1102,7 +1479,7 @@ mx_sendv(cci_connection_t *connection,
 {
     CCI_ENTER;
 
-	CCI_EXIT;
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1115,7 +1492,7 @@ mx_rma_register(cci_endpoint_t *endpoint,
 {
     CCI_ENTER;
 
-	CCI_EXIT;
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1128,7 +1505,7 @@ mx_rma_register_phys(cci_endpoint_t *endpoint,
 {
     CCI_ENTER;
 
-	CCI_EXIT;
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1138,7 +1515,7 @@ mx_rma_deregister(uint64_t rma_handle)
 {
     CCI_ENTER;
 
-	CCI_EXIT;
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
@@ -1152,6 +1529,6 @@ mx_rma(cci_connection_t *connection,
 {
     CCI_ENTER;
 
-	CCI_EXIT;
+    CCI_EXIT;
     return CCI_ERR_NOT_IMPLEMENTED;
 }

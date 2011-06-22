@@ -29,17 +29,17 @@ BEGIN_C_DECLS
 
 /* Valid URI arguments:
  *
- * :0                	# board index
+ * :0			# board index
  * :0:4                 # board index followed by endpoint ID
  */
 
 /* A MX device needs the following items in the config file:
  *
- * driver = mx        	# must be lowercase
+ * driver = mx		# must be lowercase
  *
  * A MX device may have these items:
  *
- * listen_ep_id = 9  	# endpoint to listen on
+ * listen_ep_id = 9	# endpoint to listen on
  */
 
 
@@ -123,8 +123,6 @@ typedef enum mx_msg_oob_type {
    +-------------------------------+---------------+--------+----+--+--+
    where T is MX_MSG_OOB and O is MX_MSG_OOB_CONN_REQUEST
 
-   hdr_data is the client's conn opaque handle
-
    Payload:
     <------------- 32b ------------>
    +--------------------------------+
@@ -132,12 +130,18 @@ typedef enum mx_msg_oob_type {
    +--------------------------------+
    |      client's endpoint id      |
    +--------------------------------+
+   |     client conn opaque upper   |
+   +--------------------------------+
+   |     client conn opaque lower   |
+   +--------------------------------+
 
  */
 
 typedef struct mx_conn_request {
     uint32_t max_recv_buffer_count; /* max recvs the client can handle */
     uint32_t client_ep_id;          /* client's endpoint id */
+    uint32_t client_conn_upper;     /* upper 32 bits of client conn opaque */
+    uint32_t client_conn_lower;     /* lower 32 bits of client conn opaque */
 } mx_conn_request_t;
 
 /* connection reply (accept):
@@ -149,12 +153,14 @@ typedef struct mx_conn_request {
    +-------------------------------+----------------------------+--+--+
    where T is MX_MSG_OOB and O is MX_MSG_OOB_CONN_REPLY
 
-   hdr_data is the client's conn opaque handle
-
    Payload:
     <------------- 32b ------------>
    +--------------------------------+
    |      max_recv_buffer_count     |
+   +--------------------------------+
+   |     client conn opaque upper   |
+   +--------------------------------+
+   |     client conn opaque lower   |
    +--------------------------------+
    |     server conn opaque upper   |
    +--------------------------------+
@@ -165,6 +171,8 @@ typedef struct mx_conn_request {
 
 typedef struct mx_conn_accept {
     uint32_t max_recv_buffer_count; /* max recvs the server can handle */
+    uint32_t client_conn_upper;     /* upper 32 bits of client conn opaque */
+    uint32_t client_conn_lower;     /* lower 32 bits of client conn opaque */
     uint32_t server_conn_upper;     /* upper 32 bits of server conn opaque */
     uint32_t server_conn_lower;     /* lower 32 bits of server conn opaque */
 } mx_conn_accept_t;
