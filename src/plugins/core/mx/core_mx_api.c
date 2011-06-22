@@ -545,6 +545,61 @@ out:
     return;
 }
 
+static void
+mx_handle_conn_request(cci__lep_t *lep,
+                       mx_endpoint_addr_t source,
+                       uint64_t match,
+                       uint32_t length,
+                       void *data)
+{
+    cci__crq_t          *crq    = NULL;
+    cci__svc_t          *svc    = NULL;
+    mx_crq_t            *mcrq   = NULL;
+    mx_conn_request_t   *cr     = data;
+
+    CCI_ENTER;
+
+    if (length < sizeof(*cr)) {
+        debug(CCI_DB_CONN, "%s: received runt", __func__);
+        goto out;
+    }
+
+    /* get a crq */
+    pthread_mutex_lock(&lep->lock);
+    if(!TAILQ_EMPTY(&lep->crqs)) {
+        crq = TAILQ_FIRST(&lep->crqs);
+        TAILQ_REMOVE(&lep->crqs, crq, entry);
+    }
+    pthread_mutex_unlock(&lep->lock);
+
+    if(!crq) {
+        debug(CCI_DB_CONN, "%s: no crqs", __func__);
+        goto out;
+    }
+
+    memcpy(&mcrq->buffer, data, length);
+
+    *((cci_device_t ***) &(crq->conn_req.devices)) = (cci_device_t **) mglobals->devices;
+    crq->conn_req.devices_cnt = mglobals->count;
+    crq->conn_req.data_len = (uint32_t) (match >> 16) & 0xFFFF;
+    crq->conn_req.data_ptr = mcrq->buffer + sizeof(*cr);
+    crq->conn_req.attribute = (uint32_t) (match >> 8) & 0xFF;
+
+    mcrq->epa = source;
+    mcrq->max_recv_buffer_count = cr->max_recv_buffer_count;
+    mcrq->client_id = cr->client_ep_id;
+    mcrq->client_conn = ((uint64_t) cr->client_conn_upper) << 32;
+    mcrq->client_conn |= (uint64_t) cr->client_conn_lower;
+
+    pthread_mutex_lock(&svc->lock);
+    TAILQ_INSERT_TAIL(&svc->crqs, crq, entry);
+    pthread_mutex_unlock(&svc->lock);
+
+out:
+    CCI_EXIT;
+    return;
+}
+
 static mx_unexp_handler_action_t
 mx_unex_lep(void *context,
             mx_endpoint_addr_t source,
@@ -552,10 +607,25 @@ mx_unex_lep(void *context,
             uint32_t length,
             void *data_if_available)
 {
-    cci__lep_t      *lep     = context;
+    cci__lep_t          *lep    = context;
+    mx_msg_type_t       type    = match_value & 0x3;
+    mx_msg_oob_type_t   oob     = (match_value >> 2) & 0x3;
 
     CCI_ENTER;
 
+    if (type != MX_MSG_OOB) {
+        debug((CCI_DB_CONN|CCI_DB_INFO), "%s: ignoring msg type %d", __func__, type);
+        goto out;
+    }
+
+    switch (oob) {
+    case MX_MSG_OOB_CONN_REQUEST:
+        mx_handle_conn_request(lep, source, match_value, length, data_if_available);
+        break;
+    default:
+        debug((CCI_DB_CONN|CCI_DB_INFO), "%s: ignoring oob msg type %d", __func__, oob);
+        break;
+    }
 
 out:
     CCI_EXIT;
