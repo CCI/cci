@@ -17,6 +17,15 @@ mx_globals_t *mglobals = NULL;
 
 mx_endpoint_addr_t NULL_EPA;
 
+#define CCI_MX_USE_THREADS 1
+#if CCI_MX_USE_THREADS
+#define LOCK(lock) pthread_mutex_lock(lock)
+#define UNLOCK(lock) pthread_mutex_unlock(lock)
+#else
+#define LOCK(lock)
+#define UNLOCK(lock)
+#endif
+
 /*
  * Local functions
  */
@@ -420,20 +429,35 @@ mx_handle_conn_reply(cci__ep_t *ep,
                      uint32_t length,
                      void *data)
 {
+    int                 reject  = 0;
     mx_ep_t             *mep    = ep->priv;
     mx_rx_t             *rx     = NULL;
     cci__conn_t         *conn   = NULL;
     mx_conn_t           *mconn  = NULL;
-    mx_conn_accept_t    accept;
+    mx_conn_t           *tmp    = NULL;
+    mx_conn_hs_t        hs;
 
     CCI_ENTER;
 
-    if (length != sizeof(accept)) {
-        debug(CCI_DB_CONN, "%s: recv'd runt of length %d", __func__, length);
+    pthread_mutex_lock(&ep->lock);
+    TAILQ_FOREACH(tmp, &mep->conns, entry) {
+        if (tmp->id == (uint32_t) (match >> 32)) {
+            mconn = tmp;
+            conn = mconn->conn;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&ep->lock);
+
+    if (!conn) {
+        debug(CCI_DB_DRVR, "%s: no conn", __func__);
         goto out;
     }
 
-    memcpy(&accept, data, length);
+    if (length)
+        memcpy(&hs, data, length);
+    else
+        reject = 1;
 
     pthread_mutex_lock(&ep->lock);
     if (!TAILQ_EMPTY(&mep->idle_rxs)) {
@@ -447,22 +471,13 @@ mx_handle_conn_reply(cci__ep_t *ep,
         goto out;
     }
 
-    conn = (cci__conn_t *)(uintptr_t)
-           (((uint64_t)accept.client_conn_upper) << 32 |
-             (uint64_t)accept.client_conn_lower);
-    mconn = conn->priv;
-    mconn->peer_conn = ((uint64_t)accept.server_conn_upper) << 32;
-    mconn->peer_conn |= (uint64_t)accept.server_conn_lower;
-    mconn->epa = source;
-    mconn->need_connect = 1;
-
-    if (mconn->peer_conn != 0ULL) {
+    if (length) {
         /* accept */
+        mconn->epa = source;
+        mconn->need_connect = 1;
+        mconn->peer_id = hs.peer_id;
         rx->evt.event.type = CCI_EVENT_CONNECT_SUCCESS;
         rx->evt.event.info.other.u.connect.connection = &conn->connection;
-        pthread_mutex_lock(&ep->lock);
-        TAILQ_INSERT_TAIL(&mep->conns, mconn, entry);
-        pthread_mutex_unlock(&ep->lock);
     } else {
         /* reject */
         free(mconn);
@@ -489,27 +504,31 @@ mx_handle_active_msg(cci__ep_t *ep,
     mx_ep_t     *mep    = ep->priv;
     mx_rx_t     *rx     = NULL;
     cci__conn_t *conn   = NULL;
+    mx_conn_t   *mconn  = NULL;
+    mx_conn_t   *tmp    = NULL;
 
     CCI_ENTER;
 
-    if (length < 8) {
-        debug(CCI_DB_DRVR, "%s: recv'd runt w/length %d", __func__, length);
-        goto out;
+    LOCK(&ep->lock);
+    /* find the conn */
+    TAILQ_FOREACH(tmp, &mep->conns, entry) {
+        if (tmp->id == (uint32_t) (match >> 32)) {
+            mconn = tmp;
+            conn = mconn->conn;
+            break;
+        }
     }
-
-    conn = (cci__conn_t *) data;
-    if (!conn) {
-        debug(CCI_DB_DRVR, "%s: no conn", __func__);
-        goto out;
-    }
-
     /* get a rx */
-    pthread_mutex_lock(&ep->lock);
     if(!TAILQ_EMPTY(&mep->idle_rxs)) {
         rx = TAILQ_FIRST(&mep->idle_rxs);
         TAILQ_REMOVE(&mep->idle_rxs, rx, entry);
     }
-    pthread_mutex_unlock(&ep->lock);
+    UNLOCK(&ep->lock);
+
+    if (!conn) {
+        debug(CCI_DB_DRVR, "%s: no conn", __func__);
+        goto out;
+    }
 
     if(!rx) {
         debug(CCI_DB_DRVR, "%s: no rxs available", __func__);
@@ -518,8 +537,8 @@ mx_handle_active_msg(cci__ep_t *ep,
 
     rx->evt.event.info.recv.connection = &conn->connection;
 
-    if (length > 8) {
-        memcpy(rx->buffer, data + 8, length - 8);
+    if (length) {
+        memcpy(rx->buffer, data, length);
         rx->evt.event.type = CCI_EVENT_RECV;
         *((uint32_t *)&rx->evt.event.info.recv.header_len) =
             (uint32_t) ((match >> 27) & 0x1F);
@@ -541,9 +560,9 @@ mx_handle_active_msg(cci__ep_t *ep,
         *((void **)&rx->evt.event.info.recv.data_ptr) = NULL;
     }
 
-    pthread_mutex_lock(&ep->lock);
+    LOCK(&ep->lock);
     TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
-    pthread_mutex_unlock(&ep->lock);
+    UNLOCK(&ep->lock);
 
 out:
     CCI_EXIT;
@@ -560,7 +579,7 @@ mx_handle_conn_request(cci__lep_t *lep,
     cci__crq_t          *crq    = NULL;
     cci__svc_t          *svc    = lep->svc;
     mx_crq_t            *mcrq   = NULL;
-    mx_conn_request_t   *cr     = data;
+    mx_conn_hs_t        *cr     = data;
 
     CCI_ENTER;
 
@@ -593,9 +612,7 @@ mx_handle_conn_request(cci__lep_t *lep,
 
     mcrq->epa = source;
     mcrq->max_recv_buffer_count = cr->max_recv_buffer_count;
-    mcrq->client_id = cr->client_ep_id;
-    mcrq->client_conn = ((uint64_t) cr->client_conn_upper) << 32;
-    mcrq->client_conn |= (uint64_t) cr->client_conn_lower;
+    mcrq->peer_id = cr->peer_id;
 
     pthread_mutex_lock(&svc->lock);
     TAILQ_INSERT_TAIL(&svc->crqs, crq, entry);
@@ -966,7 +983,7 @@ mx_accept(cci_conn_req_t *conn_req,
     mx_dev_t        *mdev   = NULL;
     mx_crq_t        *mcrq   = NULL;
     mx_conn_t       *mconn  = NULL;
-    mx_conn_accept_t accept;
+    mx_conn_hs_t    hs;
     mx_tx_t         *tx     = NULL;
     uint64_t        bits    = 0ULL;
     mx_segment_t    mxseg;
@@ -1004,15 +1021,11 @@ mx_accept(cci_conn_req_t *conn_req,
     }
     mconn = conn->priv;
     mconn->conn = conn;
-    mconn->peer_conn = mcrq->client_conn ;
 
     /* prepare accept msg */
 
-    accept.max_recv_buffer_count = mcrq->max_recv_buffer_count;
-    accept.client_conn_upper = (uint32_t)(mconn->peer_conn >> 32);
-    accept.client_conn_lower = (uint32_t)(mconn->peer_conn);
-    accept.server_conn_upper = (uint32_t)((uintptr_t)conn >> 32);
-    accept.server_conn_lower = (uint32_t)((uintptr_t)conn);
+    hs.max_recv_buffer_count = mcrq->max_recv_buffer_count;
+    hs.peer_id = mconn->id;
 
     /* setup connection */
 
@@ -1021,8 +1034,7 @@ mx_accept(cci_conn_req_t *conn_req,
     conn->connection.max_send_size = dev->device.max_send_size;
 
     mconn->epa = mcrq->epa;
-    mconn->peer_conn = mcrq->client_conn;
-    mconn->peer_ep_id = mcrq->client_id;
+    mconn->peer_id = mcrq->peer_id;
     mconn->max_tx_cnt = mcrq->max_recv_buffer_count;
 
     pthread_mutex_lock(&ep->lock);
@@ -1050,12 +1062,12 @@ mx_accept(cci_conn_req_t *conn_req,
     tx->evt.conn = conn;
     tx->evt.event.type = CCI_EVENT_SEND;
 
-    bits = ((uint64_t) mconn->peer_ep_id) << MX_EP_SHIFT;
+    bits = ((uint64_t) mconn->peer_id) << MX_CONN_SHIFT;
     bits |= ((uint64_t) MX_MSG_OOB_CONN_REPLY) << 2;
     bits |= (uint64_t) MX_MSG_OOB;
 
-    mxseg.segment_ptr = &accept;
-    mxseg.segment_length = sizeof(accept);
+    mxseg.segment_ptr = &hs;
+    mxseg.segment_length = sizeof(hs);
 
     mx_decompose_endpoint_addr(mconn->epa, &nic_id, &ep_id);
     ret = mx_connect(mep->ep, nic_id, ep_id, MX_KEY, 10*1000, &mconn->epa);
@@ -1209,7 +1221,7 @@ mx__connect(cci_endpoint_t *endpoint,
     uint64_t            nic_id  = 0ULL;
     uint32_t            board   = 0;
     uint32_t            ep_id   = 0;
-    mx_conn_request_t   conn_request;
+    mx_conn_hs_t        hs;
     uint64_t            bits    = 0ULL;
     mx_segment_t        mxseg[2];
     int                 count   = 1;
@@ -1288,32 +1300,33 @@ mx__connect(cci_endpoint_t *endpoint,
     evt->ep=ep;
     evt->conn=conn;
     event=&evt->event;
-    event->type=CCI_EVENT_CONNECT_SUCCESS; /* for now */
+    event->type=CCI_EVENT_SEND; /* for now */
 
     other=&event->info.other;
     other->context=context;
     other->u.connect.connection=connection;
 
     /* pack the bits */
-    bits = ((uint64_t) port) << MX_EP_SHIFT;
-    bits |= ((uint64_t) (data_len & 0xFFFF)) << 16;
+    bits = ((uint64_t) (data_len & 0xFFFF)) << 16;
     bits |= ((uint64_t) attribute) << 8;
     bits |= ((uint64_t) MX_MSG_OOB_CONN_REQUEST) << 2;
     bits |= (uint64_t) MX_MSG_OOB;
 
     /* pack the payload */
-    conn_request.max_recv_buffer_count = endpoint->max_recv_buffer_count;
-    conn_request.client_ep_id = mep->id;
-    conn_request.client_conn_upper = (uint32_t) (((uintptr_t)conn) >> 32);
-    conn_request.client_conn_lower = (uint32_t) ((uintptr_t)conn);
+    hs.max_recv_buffer_count = endpoint->max_recv_buffer_count;
+    hs.peer_id = mconn->id;
 
-    mxseg[0].segment_ptr = &conn_request;
-    mxseg[0].segment_length = sizeof(conn_request);
+    mxseg[0].segment_ptr = &hs;
+    mxseg[0].segment_length = sizeof(hs);
     if (data_len) {
         mxseg[1].segment_ptr = data_ptr;
         mxseg[1].segment_length = data_len;
         count = 2;
     }
+
+    pthread_mutex_lock(&ep->lock);
+    TAILQ_INSERT_TAIL(&mep->conns, mconn, entry);
+    pthread_mutex_unlock(&ep->lock);
 
     ret = mx_isend(mep->ep, mxseg, count, mconn->epa, bits, tx, &mxreq);
     if (ret) {
@@ -1397,16 +1410,16 @@ mx_get_event_ep(cci__ep_t *ep)
 
     CCI_ENTER;
 
-    pthread_mutex_lock(&ep->lock);
+    LOCK(&ep->lock);
     if (ep->closing) {
-        pthread_mutex_unlock(&ep->lock);
+        UNLOCK(&ep->lock);
         return;
     }
     if (mep->in_use == 0) {
         mep->in_use = 1;
         have_token = 1;
     }
-    pthread_mutex_unlock(&ep->lock);
+    UNLOCK(&ep->lock);
 
     if (!have_token) {
         CCI_EXIT;
@@ -1431,27 +1444,34 @@ mx_get_event_ep(cci__ep_t *ep)
             if (tx->flags & CCI_FLAG_SILENT ||
                 tx->flags & CCI_FLAG_BLOCKING) {
                 /* queue on idle_txs */
-                pthread_mutex_lock(&ep->lock);
+                LOCK(&ep->lock);
                 TAILQ_INSERT_HEAD(&mep->idle_txs, tx, dentry);
-                pthread_mutex_unlock(&ep->lock);
+                mep->in_use = 0;
+                UNLOCK(&ep->lock);
+                CCI_EXIT;
+                return; /* avoid retaking lock */
             } else {
                 /* generate CCI_EVENT_SEND */
                 tx->evt.event.info.send.status =
                     status.code == MX_STATUS_SUCCESS ? CCI_SUCCESS : CCI_ERROR;
-                pthread_mutex_lock(&ep->lock);
+                LOCK(&ep->lock);
                 TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
-                pthread_mutex_unlock(&ep->lock);
+                mep->in_use = 0;
+                UNLOCK(&ep->lock);
+                CCI_EXIT;
+                return; /* avoid retaking lock */
             }
             break;
         default:
             debug(CCI_DB_INFO, "%s: unknown msg type of %d", __func__, tx->msg_type);
             break;
     }
+    return;
 
 out:
-    pthread_mutex_lock(&ep->lock);
+    LOCK(&ep->lock);
     mep->in_use = 0;
-    pthread_mutex_unlock(&ep->lock);
+    UNLOCK(&ep->lock);
 
     CCI_EXIT;
     return;
@@ -1482,9 +1502,9 @@ mx_get_event(cci_endpoint_t *endpoint,
 
     mx_get_event_ep(ep);
 
-    pthread_mutex_lock(&ep->lock);
+    LOCK(&ep->lock);
     if (TAILQ_EMPTY(&ep->evts)) {
-        pthread_mutex_unlock(&ep->lock);
+        UNLOCK(&ep->lock);
         *event = NULL;
         CCI_EXIT;
         return CCI_EAGAIN;
@@ -1540,7 +1560,7 @@ mx_get_event(cci_endpoint_t *endpoint,
     else
         ret = CCI_EAGAIN;
 
-    pthread_mutex_unlock(&ep->lock);
+    UNLOCK(&ep->lock);
 
     /* TODO drain fd so that they can block again */
 
@@ -1584,18 +1604,18 @@ mx_return_event(cci_endpoint_t *endpoint,
     switch (event->type) {
     case CCI_EVENT_SEND:
         tx = container_of(evt, mx_tx_t, evt);
-        pthread_mutex_lock(&ep->lock);
+        LOCK(&ep->lock);
         /* insert at head to keep it in cache */
         TAILQ_INSERT_HEAD(&mep->idle_txs, tx, dentry);
-        pthread_mutex_unlock(&ep->lock);
+        UNLOCK(&ep->lock);
         break;
     case CCI_EVENT_CONNECT_SUCCESS:
     case CCI_EVENT_CONNECT_REJECTED:
     case CCI_EVENT_RECV:
         rx = container_of(evt, mx_rx_t, evt);
-        pthread_mutex_lock(&ep->lock);
+        LOCK(&ep->lock);
         TAILQ_INSERT_HEAD(&mep->idle_rxs, rx, entry);
-        pthread_mutex_unlock(&ep->lock);
+        UNLOCK(&ep->lock);
         break;
     default:
         /* TODO */
@@ -1614,7 +1634,7 @@ mx_send(cci_connection_t *connection,
         void *context, int flags)
 {
     int             ret         = CCI_SUCCESS;
-    int             count       = 1;
+    int             count       = 0;
     cci_endpoint_t  *endpoint   = connection->endpoint;
     cci__ep_t       *ep         = NULL;
     cci__dev_t      *dev        = NULL;
@@ -1643,22 +1663,24 @@ mx_send(cci_connection_t *connection,
     conn = container_of(connection, cci__conn_t, connection);
     mconn = conn->priv;
 
-    ret = mx_decompose_endpoint_addr(mconn->epa, &nic_id, &ep_id);
-    ret = mx_connect(mep->ep, nic_id, ep_id, MX_KEY, 10*1000, &mconn->epa);
-    if (ret == MX_SUCCESS) {
-        mconn->need_connect = 0;
-    } else {
-        ret = CCI_EHOSTUNREACH;
-        goto out;
+    if (mconn->need_connect) {
+        ret = mx_decompose_endpoint_addr(mconn->epa, &nic_id, &ep_id);
+        ret = mx_connect(mep->ep, nic_id, ep_id, MX_KEY, 10*1000, &mconn->epa);
+        if (ret == MX_SUCCESS) {
+            mconn->need_connect = 0;
+        } else {
+            ret = CCI_EHOSTUNREACH;
+            goto out;
+        }
     }
 
     /* get a tx */
-    pthread_mutex_lock(&ep->lock);
+    LOCK(&ep->lock);
     if(!TAILQ_EMPTY(&mep->idle_txs)) {
         tx = TAILQ_FIRST(&mep->idle_txs);
         TAILQ_REMOVE(&mep->idle_txs, tx, dentry);
     }
-    pthread_mutex_unlock(&ep->lock);
+    UNLOCK(&ep->lock);
 
     if(!tx) {
         ret = CCI_ENOBUFS;
@@ -1678,13 +1700,10 @@ mx_send(cci_connection_t *connection,
     tx->evt.event.info.send.status = CCI_SUCCESS; /* for now */
 
     /* pack match bits */
-    bits = ((uint64_t) mconn->peer_ep_id) << MX_EP_SHIFT;
+    bits = ((uint64_t) mconn->peer_id) << MX_CONN_SHIFT;
     bits |= ((uint64_t) header_len) << 27;
     bits |= ((uint64_t) data_len) << 11;
     bits |= (uint64_t) MX_MSG_SEND;
-
-    seg[0].segment_ptr = &mconn->peer_conn;
-    seg[0].segment_length = sizeof(mconn->peer_conn);
 
     if (header_len) {
         seg[count].segment_ptr = header_ptr;

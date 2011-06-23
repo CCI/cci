@@ -20,7 +20,7 @@ BEGIN_C_DECLS
 #define MX_EP_RX_CNT        (1024)      /* max rx messages */
 #define MX_EP_TX_CNT        (128)       /* max tx messages */
 #define MX_EP_TX_TIMEOUT_MS (20 * 1000) /* 20 seconds */
-#define MX_EP_SHIFT         (32)
+#define MX_CONN_SHIFT       (32)
 
 /* Valid URI include:
  *
@@ -95,20 +95,18 @@ mx_parse_match_bits(uint64_t match_bits, mx_msg_type_t *type, uint64_t *a)
     <---------------------------- 64 bits --------------------------->
     <----------- 32b -------------->  5b  <---- 16b ----> <- 8b -> 1 2b
    +--------------------------------+----+---------------+--------+-+--+
-   |      receiver endpoint id      |hlen|   data len    | reservd|R|T |
+   |           peer_id              |hlen|   data len    | reservd|R|T |
    +--------------------------------+----+---------------+--------+-+--+
    where T is MX_MSG_SEND
 
    R is 0 for UU and 1 for RO/RU
 
-   hdr_data is the receiver's conn opaque handle
-
  */
 
 typedef enum mx_msg_oob_type {
-    MX_MSG_OOB_CONN_REQUEST = 0x1,
-    MX_MSG_OOB_CONN_REPLY = 0x2,
-    MX_MSG_KEEPALIVE = 0x3
+    MX_MSG_OOB_CONN_REQUEST,
+    MX_MSG_OOB_CONN_REPLY,
+    MX_MSG_KEEPALIVE,
 } mx_msg_oob_type_t;
 
 /* OOB msg payload is a minimum of one uint32_t with the OOB msg type */
@@ -119,7 +117,7 @@ typedef enum mx_msg_oob_type {
     <--------------------------- 62 bits -------------------------> 2b
     <------------ 32b ------------> <---- 16b ----> <- 8b -> <4b> 2b 2b
    +-------------------------------+---------------+--------+----+--+--+
-   |      server endpoint id       |      len      |  attr  |rsv |O |T |
+   |           reserved            |      len      |  attr  |rsv |O |T |
    +-------------------------------+---------------+--------+----+--+--+
    where T is MX_MSG_OOB and O is MX_MSG_OOB_CONN_REQUEST
 
@@ -128,28 +126,22 @@ typedef enum mx_msg_oob_type {
    +--------------------------------+
    |      max_recv_buffer_count     |
    +--------------------------------+
-   |      client's endpoint id      |
-   +--------------------------------+
-   |     client conn opaque upper   |
-   +--------------------------------+
-   |     client conn opaque lower   |
+   |             peer id            |
    +--------------------------------+
 
  */
 
-typedef struct mx_conn_request {
+typedef struct mx_conn_handshake {
     uint32_t max_recv_buffer_count; /* max recvs the client can handle */
-    uint32_t client_ep_id;          /* client's endpoint id */
-    uint32_t client_conn_upper;     /* upper 32 bits of client conn opaque */
-    uint32_t client_conn_lower;     /* lower 32 bits of client conn opaque */
-} mx_conn_request_t;
+    uint32_t peer_id;               /* use this id when contacting me */
+} mx_conn_hs_t;
 
 /* connection reply (accept):
 
    Matchbits:
     <--------------------------- 62 bits ----------------------> 2b 2b
    +-------------------------------+----------------------------+--+--+
-   |      client endpoint id       |           reserved         |O |T |
+   |        client peer id         |           reserved         |O |T |
    +-------------------------------+----------------------------+--+--+
    where T is MX_MSG_OOB and O is MX_MSG_OOB_CONN_REPLY
 
@@ -158,35 +150,19 @@ typedef struct mx_conn_request {
    +--------------------------------+
    |      max_recv_buffer_count     |
    +--------------------------------+
-   |     client conn opaque upper   |
-   +--------------------------------+
-   |     client conn opaque lower   |
-   +--------------------------------+
-   |     server conn opaque upper   |
-   +--------------------------------+
-   |     server conn opaque lower   |
+   |             peer id            |
    +--------------------------------+
 
  */
-
-typedef struct mx_conn_accept {
-    uint32_t max_recv_buffer_count; /* max recvs the server can handle */
-    uint32_t client_conn_upper;     /* upper 32 bits of client conn opaque */
-    uint32_t client_conn_lower;     /* lower 32 bits of client conn opaque */
-    uint32_t server_conn_upper;     /* upper 32 bits of server conn opaque */
-    uint32_t server_conn_lower;     /* lower 32 bits of server conn opaque */
-} mx_conn_accept_t;
 
 /* connection reply (reject):
 
    Matchbits:
     <--------------------------- 62 bits ----------------------> 2b 2b
    +-------------------------------+------------------------------+--+
-   |      client endpoint id       |           reserved         |O |T |
+   |        client peer id         |           reserved         |O |T |
    +-------------------------------+----------------------------+--+--+
    where T is MX_MSG_OOB and O is MX_MSG_OOB_CONN_REPLY
-
-   hdr_data is the client's conn opaque handle
 
    NO Payload
 
@@ -226,7 +202,6 @@ extern mx_globals_t *pglobals;
 
 typedef struct mx_ep {
     mx_endpoint_t                   ep;
-    uint32_t                        id;         /* id for endpoint multiplexing */
     int                             in_use;     /* token to serialize get_event */
     TAILQ_HEAD(p_txs, mx_tx)        txs;        /* List of all txs */
     TAILQ_HEAD(p_txsi, mx_tx)       idle_txs;   /* List of idle txs */
@@ -243,9 +218,8 @@ typedef struct mx_lep {
 typedef struct mx_crq {
     void                   *buffer;     /* Buffer for optional payload */
     mx_endpoint_addr_t     epa;         /* Client's endpoint addr */
-    uint32_t               client_id;   /* Client's ep id */
+    uint32_t               peer_id;     /* Client's conn id */
     uint32_t               max_recv_buffer_count;
-    uint64_t               client_conn; /* Client's conn addr */
 } mx_crq_t;
 
 /* Connection info */
@@ -263,8 +237,8 @@ typedef struct mx_conn {
     mx_conn_status_t        status;         /* Status */
     mx_endpoint_addr_t      epa;            /* Peer's (NID, PID) */
     int                     need_connect;   /* need to call connect to epa? */
-    uint64_t                peer_conn;      /* Peer's conn addr */
-    uint32_t                peer_ep_id;     /* Peer's endpoint ID */
+    uint32_t                id;             /* ID we assigned to peer */
+    uint32_t                peer_id;        /* ID peer assigned to us */
     uint32_t                max_tx_cnt;     /* Max sends in flight */
     mx_tx_t                 *tx;            /* for conn request */
     TAILQ_ENTRY(mx_conn) entry;             /* Hangs on pep->conns */
