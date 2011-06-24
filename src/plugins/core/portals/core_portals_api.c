@@ -2739,20 +2739,12 @@ static int portals_rma(cci_connection_t *connection,
         return CCI_EINVAL;
     }
 
-    pthread_mutex_lock(&ep->lock);
-    TAILQ_FOREACH(h, &pep->handles, entry) {
-        if (h == local) {
-            local->refcnt++;
-            break;
-        }
-    }
-    pthread_mutex_unlock(&ep->lock);
-
-    if (h != local) {
+    if (local->ep != ep) {
         debug(CCI_DB_INFO, "%s: invalid endpoint for this RMA handle", __func__);
         CCI_EXIT;
         return CCI_EINVAL;
     }
+    local->refcnt++;
 
     rma_op = calloc(1, sizeof(*rma_op));
     if (!rma_op) {
@@ -2839,6 +2831,7 @@ static int portals_rma(cci_connection_t *connection,
     if (flags & CCI_FLAG_BLOCKING) {
         cci__evt_t *e, *evt = NULL;
         do {
+            /* check event queue for completion */
             pthread_mutex_lock(&ep->lock);
             TAILQ_FOREACH(e, &ep->evts, entry) {
                 if (rma_op == e->priv) {
@@ -2848,6 +2841,9 @@ static int portals_rma(cci_connection_t *connection,
                 }
             }
             pthread_mutex_unlock(&ep->lock);
+
+            /* if header, send completion message and block */
+            /* TODO */
         } while (evt == NULL);
     }
 
