@@ -1529,11 +1529,11 @@ static int sock_set_opt(cci_opt_handle_t *handle,
                             cci_opt_level_t level, 
                             cci_opt_name_t name, const void* val, int len)
 {
-    int             ret = CCI_SUCCESS;
-    cci__ep_t       *ep;
-    cci__conn_t     *conn;
-    sock_ep_t       *sep;
-    sock_conn_t     *sconn;
+    int             ret     = CCI_SUCCESS;
+    cci__ep_t       *ep     = NULL;
+    cci__conn_t     *conn   = NULL;
+    sock_ep_t       *sep    = NULL;
+    sock_conn_t     *sconn  = NULL;
 
     CCI_ENTER;
 
@@ -3721,7 +3721,7 @@ sock_recvfrom_lep(cci__lep_t *lep)
     char            *ptr    = buffer;
     cci__crq_t      *crq    = NULL;
     cci__svc_t      *svc    = NULL;
-    sock_crq_t      *scrq;
+    sock_crq_t      *scrq   = NULL;
     struct sockaddr_in sin;
     socklen_t       sin_len = sizeof(sin);
     sock_lep_t      *slep   = NULL;

@@ -887,7 +887,7 @@ static int portals_create_endpoint(
     cci__dev_t             *dev=NULL;
     cci__ep_t              *ep=NULL;
     portals_ep_t           *pep=NULL;
-    portals_dev_t          *pdev;
+    portals_dev_t          *pdev=NULL;
     uint32_t               am_length;
 
     CCI_ENTER;
@@ -2707,7 +2707,6 @@ static int portals_rma(cci_connection_t *connection,
     portals_dev_t           *pdev   = NULL;
     portals_conn_t          *pconn  = NULL;
     portals_rma_handle_t    *local  = (portals_rma_handle_t *)((uintptr_t)local_handle);
-    portals_rma_handle_t    *h      = NULL;
     portals_rma_op_t        *rma_op = NULL;
 
     CCI_ENTER;

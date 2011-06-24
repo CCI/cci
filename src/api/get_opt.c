@@ -20,9 +20,9 @@
 int cci_get_opt(cci_opt_handle_t *handle, cci_opt_level_t level, 
                 cci_opt_name_t name, void** val, int *len)
 {
-    int             ret = CCI_SUCCESS;
-    cci__ep_t       *ep;
-    cci__conn_t     *conn;
+    int             ret     = CCI_SUCCESS;
+    cci__ep_t       *ep     = NULL;
+    cci__conn_t     *conn   = NULL;
 
     if (NULL == handle ||
         NULL == val ||
