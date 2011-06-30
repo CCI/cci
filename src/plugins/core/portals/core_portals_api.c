@@ -497,14 +497,15 @@ out_with_init:
 }
 
 
-// Todo
 static const char *portals_strerror(
     enum cci_status        status ) {
+    const char             *cp;
 
     CCI_ENTER;
+    cp=ptl_err_str[status];
     CCI_EXIT;
 
-    return NULL;
+    return cp;
 }
 
 
