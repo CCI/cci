@@ -320,6 +320,9 @@ static int portals_init(
     if( iRC!=PTL_OK ) {
 
         switch(iRC) {
+            case PTL_IFACE_DUP:    /* Usually PMI is loaded */
+                 iRC=PTL_OK;
+                 goto false_alarm;
             case PTL_NO_INIT:      /* Usually dup PtlNIInit() call */
             case PTL_IFACE_INVALID:/* Bad interface options */
                  iRC = CCI_ENODEV;
@@ -332,10 +335,13 @@ static int portals_init(
                  iRC =  CCI_ENOMEM;
                  break;
             default:               /* Undocumented portals error */
+                 debug( CCI_DB_WARN, "NI: %s", portals_strerror(iRC) );
                  iRC = CCI_ERROR;
         }
         goto out_with_init;
     }
+
+    false_alarm:
 
 /*
  * Start searching global configuration for portals devices.
@@ -1051,6 +1057,7 @@ static int portals_destroy_endpoint(cci_endpoint_t *endpoint)
     cci__dev_t      *dev    = NULL;
     portals_ep_t    *pep    = NULL;
     portals_dev_t   *pdev   = NULL;
+    int             iRC;
 
     CCI_ENTER;
 
@@ -1082,7 +1089,7 @@ static int portals_destroy_endpoint(cci_endpoint_t *endpoint)
             TAILQ_REMOVE(&pep->ams, am, entry);
             if (am->buffer) {
                 if (am->state == PORTALS_AM_ACTIVE)
-                    PtlMEUnlink(am->meh);
+                    iRC=PtlMEUnlink(am->meh);
                 debug( CCI_DB_MEM, "Free AM buffer=%lx", am->buffer );
                 free(am->buffer);
                 am->buffer=NULL;
@@ -3063,9 +3070,10 @@ static void portals_handle_active_msg(cci__ep_t *ep, ptl_event_t pevent)
     /* do we need to unlink this buffer? */
     if (am->length - (pevent.offset + pevent.mlength) < dev->device.max_send_size) {
         int active = 0;
+        int iRC;
         portals_am_buffer_t *a;
 
-        PtlMEUnlink(am->meh);
+        iRC=PtlMEUnlink(am->meh);
         am->state = PORTALS_AM_INACTIVE;
         debug((CCI_DB_INFO|CCI_DB_MSG), "%s: unlinking active message buffer", __func__);
         TAILQ_FOREACH(a, &pep->ams, entry) {
