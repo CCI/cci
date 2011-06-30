@@ -20,7 +20,7 @@
 #include "cci.h"
 
 #define DFLT_PORT   54321
-#define ITERS       (128 * 1024)
+#define ITERS       (512 * 1024)
 #define WARMUP      (1024)
 #define MAX_RMA_SIZE    (4 * 1024 * 1024)
 
@@ -199,9 +199,8 @@ do_client()
         max = opts.max_rma_size;
     }
 
-    buffer = calloc(1, max);
-    if (!buffer)
-        check_return("calloc", CCI_ENOMEM, 1);
+    ret = posix_memalign((void **)&buffer, 4096, max);
+    check_return("memalign buffer", ret, 1);
 
     if (opts.method != AM) {
         ret = cci_rma_register(endpoint, connection, buffer,
@@ -222,6 +221,8 @@ do_client()
 
 	/* begin communication with server */
     for (current_size = min; current_size <= max; ) {
+        double lat = 0.0;
+        double bw = 0.0;
 
         if (opts.method == AM)
             ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, opts.flags);
@@ -243,13 +244,12 @@ do_client()
         gettimeofday(&end, NULL);
 
         if (opts.method == AM)
-            printf("%4d\t%6.2lf us\t\t%6.2lf Mb/s\n",
-                   current_size, usecs(start, end) / (double) iters / 2.0,
-                   (double) iters * (double) current_size * 8.0 / usecs(start, end) / 2.0);
+            lat = usecs(start, end) / (double) iters / 2.0;
         else
-            printf("%8d\t%8.2lf us\t\t%8.2lf Mb/s\n",
-                   current_size, usecs(start, end) / (double) iters,
-                   (double) iters * (double) current_size * 8.0 / usecs(start, end));
+            lat = usecs(start, end) / (double) iters;
+
+        bw = (double) current_size / lat;
+        printf("%8d\t%8.2lf us\t\t%8.2lf MB/s\n", current_size, lat, bw);
 
         count = 0;
 
@@ -296,12 +296,11 @@ do_server()
             check_return("cci_accept", ret, 1);
 
             if (opts.method == AM)
-                buffer = calloc(1, connection->max_send_size);
+                ret = posix_memalign((void **)&buffer, 4096, connection->max_send_size);
             else
-                buffer = calloc(1, opts.max_rma_size);
+                ret = posix_memalign((void **)&buffer, 4096, opts.max_rma_size);
 
-            if (!buffer)
-                check_return("calloc", CCI_ENOMEM, 1);
+            check_return("memalign buffer", ret, 1);
 
             if (opts.method != AM) {
                 ret = cci_rma_register(endpoint, connection, buffer,
