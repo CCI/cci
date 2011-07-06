@@ -12,7 +12,7 @@
 AC_INIT([cci], 
         [m4_normalize(esyscmd([config/cci_get_version.sh VERSION --base]))],
         [http://www.google.com/], [cci])
-AC_PREREQ([2.64])
+AC_PREREQ([2.68])
 AC_CONFIG_AUX_DIR([./config])
 # Note that this directory must *exactly* match what was specified via
 # -I in ACLOCAL_AMFLAGS in the top-level Makefile.am.
@@ -23,7 +23,7 @@ CCI_CONFIGURE_SETUP
 cci_show_title "Configuring CCI distribution tarball"
 
 # Init automake
-AM_INIT_AUTOMAKE([1.10 dist-bzip2 subdir-objects foreign tar-ustar -Wall -Werror])
+AM_INIT_AUTOMAKE([1.11 dist-bzip2 subdir-objects foreign tar-ustar -Wall -Werror])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
 # Libtool2 is needed
