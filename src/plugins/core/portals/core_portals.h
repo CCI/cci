@@ -283,6 +283,7 @@ typedef struct portals_am_buffer {
     portals_am_state_t     state;
     uint32_t               refcnt;           /* how many fragments held by app */
     struct portals_ep      *pep;             /* owning Portals endpoint */
+    ptl_md_t               md;               /* MD */
     ptl_handle_me_t        meh;              /* ME handle */
     ptl_handle_md_t        mdh;              /* MD handle */
     TAILQ_ENTRY(portals_am_buffer) entry;    /* Hang on pep->ams */
