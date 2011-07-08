@@ -15,12 +15,12 @@
 
 int cci_core_template_post_load(cci_plugin_t *me)
 {
-    printf("In template post_load\n");
+    debug( CCI_DB_DRVR, "In template post_load");
     return CCI_SUCCESS;
 }
 
 int cci_core_template_pre_unload(cci_plugin_t *me)
 {
-    printf("In template pre_unload\n");
+    debug( CCI_DB_DRVR, "In template pre_unload");
     return CCI_SUCCESS;
 }

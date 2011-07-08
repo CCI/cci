@@ -67,7 +67,7 @@ cci__get_debug_env(void)
         } else if (0 == strncmp(debug, "all", 3)) {
             mask |= CCI_DB_ALL;
         } else {
-            fprintf(stderr, "unknown debug level \"%s\"\n", debug);
+            debug( CCI_DB_WARN, "unknown debug level \"%s\"", debug);
         }
         debug = next;
     } while (debug);
@@ -223,12 +223,13 @@ int cci__parse_config(const char *path)
                 }
                 if (driver == 1) {
                     cci__add_dev(dev);
-                    fprintf(stderr, "adding device [%s] (%d)\n", d->name, i);
+                    debug( CCI_DB_DRVR, "adding device [%s] (%d)", d->name, i);
                     i++;
                 } else {
                     /* device does not have a driver, free it */
-                    fprintf(stderr, "device [%s] does not have a driver. Freeing it.\n",
-                            d->name);
+                    debug( CCI_DB_WARN,
+                           "device [%s] does not have a driver. Freeing it.",
+                           d->name);
                     cci__free_dev(dev);
                 }
                 d = NULL;
@@ -236,12 +237,12 @@ int cci__parse_config(const char *path)
             }
 
             if (i == CCI_MAX_DEVICES) {
-                fprintf(stderr, "too many devices in CCI_CONFIG file\n");
+                debug( CCI_DB_WARN, "too many devices in CCI_CONFIG file");
                 break;
             }
 
             if ((uintptr_t) close < (uintptr_t) open + 2) {
-                fprintf(stderr, "invalid device name \"%s\".\n", buffer);
+                debug( CCI_DB_WARN, "invalid device name \"%s\".", buffer);
                 continue;
             }
 
@@ -249,7 +250,7 @@ int cci__parse_config(const char *path)
 
             dev = calloc(1, sizeof(*dev));
             if (!dev) {
-                fprintf(stderr, "calloc failed for device %s\n", open);
+                debug( CCI_DB_WARN, "calloc failed for device %s", open);
                 return cci__free_devs();
             }
             dev->priority = 50; /* default */
@@ -261,7 +262,8 @@ int cci__parse_config(const char *path)
             d = &dev->device;
             d->conf_argv = calloc(CCI_MAX_ARGS + 1, sizeof(char *));
             if (!d->conf_argv) {
-                fprintf(stderr, "calloc failed for device %s conf_argv\n", open);
+                debug( CCI_DB_WARN, "calloc failed for device %s conf_argv",
+                       open);
                 cci__free_dev(dev);
                 return cci__free_devs();
             }
@@ -319,8 +321,9 @@ int cci__parse_config(const char *path)
                         }
                         driver++;
                     } else {
-                        fprintf(stderr, "device [%s] has more than one driver. Freeing it.\n",
-                                d->name);
+                        debug( CCI_DB_WARN,
+                               "device [%s] has more than one driver. Freeing it.",
+                               d->name);
                         cci__free_dev(dev);
                         d = NULL;
                         dev = NULL;
@@ -330,22 +333,24 @@ int cci__parse_config(const char *path)
 
                     priority = (int) strtol(value, NULL, 0);
                     if (priority < 0 || priority > 100) {
-                        fprintf(stderr, "device [%s] has illegal value of %d. Ignoring it.\n",
-                                d->name, priority);
+                        debug( CCI_DB_WARN,
+                               "device [%s] has illegal value of %d. Ignoring it.",
+                               d->name, priority);
                         continue;
                     }
                     dev->priority = priority;
                 } else if (0 == strcmp(key, "default")) {
                     if (is_default != 0) {
-                        fprintf(stderr, "device [%s] has default set and device [%s] already set it. Ignoring it.\n", d->name, default_name);
+                        debug( CCI_DB_WARN,
+                        "device [%s] has default set and device [%s] already set it. Ignoring it.",
+                        d->name, default_name);
                     }
                     dev->is_default = 1;
                     is_default = i;
                     default_name = (char *) d->name;
                 }
             } else {
-                fprintf(stderr, "too many args for device [%s]\n",
-                                d->name);
+                debug( CCI_DB_WARN, "too many args for device [%s]", d->name);
             }
         }
     }
@@ -356,12 +361,12 @@ int cci__parse_config(const char *path)
         }
         if (driver == 1) {
             cci__add_dev(dev);
-            fprintf(stderr, "adding device [%s] (%d)\n", d->name, i);
+            debug( CCI_DB_DRVR, "adding device [%s] (%d)", d->name, i);
             i++;
         } else {
             /* device does not have a driver, free it */
-            fprintf(stderr, "device [%s] does not have a driver. Freeing it.\n",
-                    d->name);
+            debug( CCI_DB_WARN,
+                   "device [%s] does not have a driver. Freeing it.", d->name);
             cci__free_dev(dev);
         }
         d = NULL;
@@ -382,7 +387,7 @@ int cci__parse_config(const char *path)
 
     i = 0;
     TAILQ_FOREACH(dev, &globals->devs, entry) {
-        fprintf(stderr, "%d: %s\n", i, dev->device.name);
+        debug( CCI_DB_DRVR, "%d: %s", i, dev->device.name);
         globals->devices[i++] = &dev->device;
     }
 
@@ -393,11 +398,11 @@ int cci__parse_config(const char *path)
         for (i = 0, d = globals->devices[0]; d != NULL; i++, d = globals->devices[i]) {
             int j;
 
-            fprintf(stderr, "[%s]\n", d->name);
+            debug( CCI_DB_DRVR, "[%s]", d->name);
             for (j = 0, conf = d->conf_argv[j];
                  conf != NULL;
                  j++, conf = d->conf_argv[j]) {
-                    fprintf(stderr, "\t%s\n", conf);
+                    debug( CCI_DB_DRVR, "\t%s", conf);
             }
         }
     }
@@ -413,8 +418,8 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
     cci__get_debug_env();
 
     if (abi_ver != CCI_ABI_VERSION) {
-        debug(CCI_DB_INFO, "got ABI version %d, but expected %d\n",
-              abi_ver, CCI_ABI_VERSION);
+        debug( CCI_DB_INFO, "got ABI version %d, but expected %d",
+               abi_ver, CCI_ABI_VERSION);
         return CCI_EINVAL;
     }
 
@@ -453,14 +458,13 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 
         str = getenv("CCI_CONFIG");
         if (!str || str[0] == '\0') {
-            debug(CCI_DB_WARN, "unable to find CCI_CONFIG environment "
-                            "variable.\n");
+            debug( CCI_DB_WARN, "unable to find CCI_CONFIG environment variable.");
             return CCI_ERR_NOT_FOUND;
         }
 
         ret = cci__parse_config(str);
         if (ret) {
-            debug(CCI_DB_ERR, "unable to parse CCI_CONFIG file %s\n", str);
+            debug( CCI_DB_ERR, "unable to parse CCI_CONFIG file %s", str);
             return CCI_ERROR;
         }
 

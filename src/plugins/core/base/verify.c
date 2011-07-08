@@ -40,7 +40,8 @@ int cci_plugins_core_verify(cci_plugin_t *plugin)
         NULL == p->rma_register_phys ||
         NULL == p->rma_deregister ||
         NULL == p->rma) {
-        fprintf(stderr, "Core plugin \"%s\" is missing one or more required functions -- ignored\n",
+        debug( CCI_DB_WARN,
+               "Core plugin \"%s\" lacks one or more required functions -- ignored",
                 p->base.plugin_name);
         return CCI_ERROR;
     }
