@@ -565,10 +565,12 @@ static int portals_free_devices(cci_device_t const **devices )
     pthread_mutex_lock(&globals->lock);
     TAILQ_FOREACH(dev, &globals->devs, entry) {
         portals_dev_t *pdev = dev->priv;
-        PtlNIFini(pdev->niHandle);
-        if (pdev->ep_ids)
-            free(pdev->ep_ids);
-        free(dev->priv);
+        if(pdev) {                           // Only for portals device
+            PtlNIFini(pdev->niHandle);
+            if (pdev->ep_ids)
+                free(pdev->ep_ids);
+            free(dev->priv);
+        }
     }
     pthread_mutex_unlock(&globals->lock);
     PtlFini();
