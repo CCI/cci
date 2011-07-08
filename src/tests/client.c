@@ -71,20 +71,20 @@ int main(int argc, char *argv[])
 
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
     if (ret) {
-        fprintf(stderr, "cci_init() returned %d\n", ret);
+        fprintf(stderr, "cci_init() failed with %s\n", cci_strerror(ret));
         exit(EXIT_FAILURE);
     }
 
 	ret = cci_get_devices((const cci_device_t *** const)&devices);
     if (ret) {
-        fprintf(stderr, "cci_get_devices() returned %d\n", ret);
+        fprintf(stderr, "cci_get_devices() failed with %s\n", cci_strerror(ret));
         exit(EXIT_FAILURE);
     }
 
 	/* create an endpoint */
 	ret = cci_create_endpoint(NULL, 0, &endpoint, &fd);
     if (ret) {
-        fprintf(stderr, "cci_create_endpoint() returned %d\n", ret);
+        fprintf(stderr, "cci_create_endpoint() failed with %s\n", cci_strerror(ret));
         exit(EXIT_FAILURE);
     }
 
@@ -93,14 +93,14 @@ int main(int argc, char *argv[])
     cci_set_opt(&handle, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_SEND_TIMEOUT,
                 (void *) &timeout, (int) sizeof(timeout));
     if (ret) {
-        fprintf(stderr, "cci_set_opt() returned %d\n", ret);
+        fprintf(stderr, "cci_set_opt() failed with %s\n", cci_strerror(ret));
         exit(EXIT_FAILURE);
     }
 
 	/* initiate connect */
 	ret = cci_connect(endpoint, server_uri, 54321, server_uri, strlen(server_uri), CCI_CONN_ATTR_UU, NULL, 0, NULL);
     if (ret) {
-        fprintf(stderr, "cci_connect() returned %d\n", ret);
+        fprintf(stderr, "cci_connect() failed with %s\n", cci_strerror(ret));
         exit(EXIT_FAILURE);
     }
 
@@ -125,7 +125,7 @@ int main(int argc, char *argv[])
         ret = cci_send(connection, hdr, (uint32_t) strlen(hdr),
                        data, (uint32_t) strlen(data), (void *)(uintptr_t) i, 0);
         if (ret)
-            fprintf(stderr, "send %d returned %d\n", i, ret);
+            fprintf(stderr, "send %d failed with %s\n", i, cci_strerror(ret));
 
         poll_events(endpoint, &connection, &done);
         usleep(1000);
@@ -135,17 +135,17 @@ int main(int argc, char *argv[])
 	/* clean up */
 	ret = cci_disconnect(connection);
     if (ret) {
-        fprintf(stderr, "cci_disconnect() returned %d\n", ret);
+        fprintf(stderr, "cci_disconnect() failed with %s\n", cci_strerror(ret));
         exit(EXIT_FAILURE);
     }
 	ret = cci_destroy_endpoint(endpoint);
     if (ret) {
-        fprintf(stderr, "cci_destroy_endpoint() returned %d\n", ret);
+        fprintf(stderr, "cci_destroy_endpoint() failed with %s\n", cci_strerror(ret));
         exit(EXIT_FAILURE);
     }
 	ret = cci_free_devices((const cci_device_t ** const)devices);
     if (ret) {
-        fprintf(stderr, "cci_free_devices() returned %d\n", ret);
+        fprintf(stderr, "cci_free_devices() failed with %s\n", cci_strerror(ret));
         exit(EXIT_FAILURE);
     }
 
