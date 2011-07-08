@@ -18,10 +18,10 @@
 
 # At least for now, we will avoid Cray Programming Environment
 # interfaces, so we need to set CPPFLAGS and LDFLAGS.
-  setenv CFLAGS		"-g -O3 -pthread"
-# setenv CPPFLAGS	"-I/opt/cray/portals/default/include"
-# setenv LD_PORTALS     "-L/opt/cray/portals/default/lib64 -lportals"
-# setenv LD_ALPS        "-L/usr/lib/alps -lalpslli -lalpsutil"
-# setenv LD_PMI         "-L/opt/cray/pmi/default/lib64 -lpmi"
-# setenv LDFLAGS	"${LD_PORTALS} ${LD_ALPS} ${LD_PMI}"
-  setenv CCI_CONFIG	../../contrib/ornl-portals.ini
+  setenv CF_PMI         `pkg-config --cflags cray-pmi`
+  setenv CF_UGNI        `pkg-config --cflags cray-ugni`
+  setenv CFLAGS		"-g -O3 -pthread ${CF_PMI} ${CF_UGNI}"
+  setenv LD_PMI         `pkg-config --libs   cray-pmi`
+  setenv LD_UGNI        `pkg-config --libs   cray-ugni`
+  setenv LDFLAGS	"${LD_PMI} ${LD_UGNI}"
+  setenv CCI_CONFIG	../../contrib/ornl-gni.ini
