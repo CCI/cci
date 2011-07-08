@@ -780,24 +780,11 @@ portals_post_am_buffer(cci__ep_t *ep, portals_am_buffer_t *am)
     cci__dev_t          *dev    = ep->dev;
     portals_ep_t        *pep    = ep->priv;
     portals_dev_t       *pdev   = dev->priv;
-    ptl_md_t            md;
     ptl_process_id_t    pid_any = PORTALS_WILDCARD;
     ptl_match_bits_t    bits    = 0ULL;
     ptl_match_bits_t    ignore  = 0ULL;
 
     CCI_ENTER;
-
-    /*  Create the memory descriptor. */
-    md.start = am->buffer;
-    md.length = am->length;
-    md.max_size = ep->buffer_len;
-    md.user_ptr = am;
-    md.threshold = PTL_MD_THRESH_INF;
-    md.eq_handle = pep->eqh;
-    md.options  = PTL_MD_OP_PUT;
-    md.options |= PTL_MD_TRUNCATE;
-    md.options |= PTL_MD_EVENT_START_DISABLE;
-    md.options |= PTL_MD_MAX_SIZE;
 
     /* all non-RMA messages place the endpoint ID in the upper 32 bits */
     bits = ((ptl_match_bits_t) pep->id) << PORTALS_EP_SHIFT;
@@ -810,10 +797,10 @@ portals_post_am_buffer(cci__ep_t *ep, portals_am_buffer_t *am)
                         pid_any,
                         bits,
                         ignore,
-                        PTL_RETAIN,
+                        PTL_UNLINK,
                         PTL_INS_AFTER,
-                        md,
-                        PTL_RETAIN,
+                        am->md,
+                        PTL_UNLINK,
                         &(am->meh),
                         &(am->mdh));
     if( ret != PTL_OK ) {
@@ -832,6 +819,7 @@ portals_post_am_buffer(cci__ep_t *ep, portals_am_buffer_t *am)
                  ret = CCI_EINVAL;;
 
             default:               /* Undocumented portals error */
+                 debug(CCI_DB_WARN, "PtlMEMDAttach() returned %s", ptl_err_str[ret]);
                  ret = CCI_ERROR;
         }
     } else {
@@ -863,11 +851,23 @@ portals_create_am_buffer(cci__ep_t *ep, uint64_t length)
         ret = CCI_ENOMEM;
         goto out;
     }
-    debug( CCI_DB_MEM, "Created AM buffer=%lx length=%lx",
-           am->buffer, length );
+    debug( CCI_DB_MEM, "Created AM buffer=%p length=%zx",
+           am->buffer, (size_t) length );
 
     am->length = length;
     am->pep = pep;
+
+    /*  Create the memory descriptor. */
+    am->md.start = am->buffer;
+    am->md.length = am->length;
+    am->md.max_size = ep->buffer_len;
+    am->md.user_ptr = am;
+    am->md.threshold = PTL_MD_THRESH_INF;
+    am->md.eq_handle = pep->eqh;
+    am->md.options  = PTL_MD_OP_PUT;
+    am->md.options |= PTL_MD_TRUNCATE;
+    am->md.options |= PTL_MD_EVENT_START_DISABLE;
+    am->md.options |= PTL_MD_MAX_SIZE;
 
     ret = portals_post_am_buffer(ep, am);
     if (ret == 0)
@@ -950,7 +950,7 @@ static int portals_create_endpoint(
 
     /* create event queue for endpoint */
     iRC=PtlEQAlloc( pdev->niHandle,
-                    PORTALS_EP_RX_CNT + PORTALS_EP_TX_CNT,
+                    (PORTALS_EP_RX_CNT + PORTALS_EP_TX_CNT) * 4,
                     PTL_EQ_HANDLER_NONE,
                     &(pep->eqh) );
     if( iRC!=PTL_OK ) {
@@ -3091,10 +3091,8 @@ static void portals_handle_active_msg(cci__ep_t *ep, ptl_event_t pevent)
     /* do we need to unlink this buffer? */
     if (am->length - (pevent.offset + pevent.mlength) < dev->device.max_send_size) {
         int active = 0;
-        int iRC;
         portals_am_buffer_t *a;
 
-        iRC=PtlMEUnlink(am->meh);
         am->state = PORTALS_AM_INACTIVE;
         debug((CCI_DB_INFO|CCI_DB_MSG), "%s: unlinking active message buffer", __func__);
         TAILQ_FOREACH(a, &pep->ams, entry) {
@@ -3163,7 +3161,6 @@ static void portals_handle_active_msg(cci__ep_t *ep, ptl_event_t pevent)
 static void portals_get_event_ep(cci__ep_t *ep)
 {
     int             ret     = CCI_SUCCESS;
-    int             count   = 0;
     int             have_token   = 0;
     portals_ep_t    *pep    = ep->priv;
     ptl_event_t     event;
@@ -3186,12 +3183,13 @@ static void portals_get_event_ep(cci__ep_t *ep)
         return;
     }
 
-again:
+    if (pep->eqh == PTL_EQ_NONE)
+        debug(CCI_DB_WARN, "%s: endpoint has no event queue", __func__);
+
     ret = PtlEQGet(pep->eqh, &event);
     if (!(ret == PTL_OK || ret == PTL_EQ_DROPPED)) {
         goto out;
     }
-    count++;
 
     if (ret == PTL_EQ_DROPPED)
         debug(CCI_DB_WARN, "portals dropped one or more events");
@@ -3444,7 +3442,6 @@ again:
         debug(CCI_DB_INFO, "unexpected portals event %d", event.type);
         break;
     }
-    if (count < 4) goto again;
 
 out:
     pthread_mutex_lock(&ep->lock);
@@ -3468,7 +3465,7 @@ static void portals_get_event_lep(cci__lep_t *lep)
     }
 
     if (ret == PTL_EQ_DROPPED)
-        debug(CCI_DB_INFO, "portals dropped one or more events");
+        debug(CCI_DB_INFO, "%s: portals dropped one or more events", __func__);
 
     switch (event.type) {
     case PTL_EVENT_PUT_END:
