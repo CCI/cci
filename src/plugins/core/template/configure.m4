@@ -13,24 +13,25 @@
 #
 #     PLUGINS_cci_<type>_<your_plugin_name>_CONFIG
 #
-# PLUGINS_cci_core_mx_CONFIG([action-if-can-compile], 
-#                            [action-if-cant-compile])
+# PLUGINS_cci_core_template_CONFIG([action-if-can-compile], 
+#                                  [action-if-cant-compile])
 # ------------------------------------------------
-AC_DEFUN([PLUGINS_cci_core_mx_CONFIG],[
+AC_DEFUN([PLUGINS_cci_core_template_CONFIG],[
 
     # Sadly, m4 does not allow comments in between each parameter, so
     # they can'tbe documented inline.  :-( See a lengthy comment at
     # the top of config/cci_setup_plugin_package.m4 for a description
     # of what this macro does and what each of the parameters are.
     CCI_SETUP_PLUGIN_PACKAGE([core],
-                             [mx],
-                             [mx],
-                             [include/myriexpress.h],
-                             [libmyriexpress*],
-                             [myriexpress.h],
-                             [-lmyriexpress],
-                             [mx_init],
+                             [template],
+                             [template],
+                             [include/template.h],
+                             [libtemplate*],
+                             [template.h],
+                             [-ltemplate],
+                             [template_function],
                              [],
                              [$1],
                              [$2])
 ])dnl
+# This template is designed to evade compile.

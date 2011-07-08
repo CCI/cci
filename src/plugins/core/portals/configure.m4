@@ -14,7 +14,7 @@
 #     PLUGINS_cci_<type>_<your_plugin_name>_CONFIG
 #
 # PLUGINS_cci_core_portals_CONFIG([action-if-can-compile], 
-#                            [action-if-cant-compile])
+#                                 [action-if-cant-compile])
 # ------------------------------------------------
 AC_DEFUN([PLUGINS_cci_core_portals_CONFIG],[
 
@@ -22,7 +22,9 @@ AC_DEFUN([PLUGINS_cci_core_portals_CONFIG],[
     # they can'tbe documented inline.  :-( See a lengthy comment at
     # the top of config/cci_setup_plugin_package.m4 for a description
     # of what this macro does and what each of the parameters are.
-    CCI_SETUP_PLUGIN_PACKAGE([core], [portals], [portals],
+    CCI_SETUP_PLUGIN_PACKAGE([core],
+                             [portals],
+                             [portals],
                              [include/portals/portals3.h],
                              [libportals*],
                              [portals/portals3.h],
