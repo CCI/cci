@@ -1083,16 +1083,22 @@ static int portals_destroy_endpoint(cci_endpoint_t *endpoint)
         if (pep->id)
             portals_put_ep_id(pdev, pep->id);
 
-        if (pep->eqh != PTL_EQ_NONE)
-            PtlEQFree(pep->eqh);
+        if (pep->eqh != PTL_EQ_NONE) {
+            iRC = PtlEQFree(pep->eqh);
+            if (iRC != PTL_OK)
+                debug(CCI_DB_DRVR, "PtlEQFree() returned %s", ptl_err_str[iRC]);
+        }
 
         while (!TAILQ_EMPTY(&pep->ams)) {
             portals_am_buffer_t *am = TAILQ_FIRST(&pep->ams);
             TAILQ_REMOVE(&pep->ams, am, entry);
             if (am->buffer) {
-                if (am->state == PORTALS_AM_ACTIVE)
-                    iRC=PtlMEUnlink(am->meh);
-                debug( CCI_DB_MEM, "Free AM buffer=%lx", am->buffer );
+                if (am->state == PORTALS_AM_ACTIVE) {
+                    iRC = PtlMEUnlink(am->meh);
+                    if (iRC != PTL_OK)
+                        debug(CCI_DB_DRVR, "PtlMEUnlink() returned %s", ptl_err_str[iRC]);
+                }
+                debug( CCI_DB_MEM, "Free AM buffer=%p", am->buffer );
                 free(am->buffer);
                 am->buffer=NULL;
             }
@@ -1103,8 +1109,11 @@ static int portals_destroy_endpoint(cci_endpoint_t *endpoint)
             portals_am_buffer_t *am = TAILQ_FIRST(&pep->orphan_ams);
             TAILQ_REMOVE(&pep->orphan_ams, am, entry);
             if (am->buffer) {
-                if (am->meh != 0)
-                    PtlMEUnlink(am->meh);
+                if (am->meh != 0) {
+                    iRC = PtlMEUnlink(am->meh);
+                    if (iRC != PTL_OK)
+                        debug(CCI_DB_DRVR, "PtlMEUnlink() returned %s", ptl_err_str[iRC]);
+                }
                 free(am->buffer);
             }
             free(am);
@@ -1579,6 +1588,7 @@ static int portals_reject(cci_conn_req_t *conn_req)
     md.threshold = 1;
     md.eq_handle = PTL_EQ_NONE;
     md.options = PTL_MD_OP_PUT;
+    md.options |= PTL_MD_EVENT_START_DISABLE;
 
     ret = PtlMDBind(pdev->niHandle, md, PTL_UNLINK, &mdh);
     if (ret != PTL_OK) {
@@ -3360,6 +3370,9 @@ static void portals_get_event_ep(cci__ep_t *ep)
                           msg_type == PORTALS_MSG_SEND ? "SEND" :
                           msg_type == PORTALS_MSG_RMA_WRITE ?
                           "RMA WRITE" : "RMA_READ");
+        if (event.ni_fail_type != PTL_NI_OK)
+            debug(CCI_DB_WARN, "%s: send failed with ni_fail_type %d",
+                  __func__, event.ni_fail_type);
 
         switch (msg_type) {
         case PORTALS_MSG_SEND:
