@@ -2431,6 +2431,22 @@ static int portals_sendv(
         }
     }
 
+#ifdef    PORTALS_8B_OOB
+    if( header_len + data_len < 9 ) {          /* Send up to 8B OOB */
+        ptl_hdr_data_t *hdr_data=(ptl_hdr_data_t *)tx->buffer;
+
+        ret = PtlPutRegion(tx->mdh,            /* Handle to MD */
+                       0,                      /* local offset */
+                       0,                      /* length */
+                       ack,                    /* ACK disposition */
+                       pconn->idp,             /* target port */
+                       pdev->table_index,      /* table entry to use */
+                       0,                      /* access entry to use */
+                       bits,                   /* match bits */
+                       0,                      /* remote offset */
+                       *hdr_data );            /* hdr_data */
+    } else
+#endif // PORTALS_8B_OOB
     ret = PtlPutRegion(tx->mdh,                 /* Handle to MD */
                        0,                       /* local offset */
                        header_len + data_len,   /* length */
@@ -3061,6 +3077,9 @@ static void portals_handle_conn_reply(cci__ep_t *ep, ptl_event_t pevent)
 
 static void portals_handle_active_msg(cci__ep_t *ep, ptl_event_t pevent)
 {
+#ifdef    PORTALS_8B_OOB
+    int             len;
+#endif // PORTALS_8B_OOB
     portals_ep_t    *pep    = ep->priv;
     portals_rx_t    *rx     = NULL;
     cci__evt_t      *evt    = NULL;
@@ -3121,6 +3140,12 @@ static void portals_handle_active_msg(cci__ep_t *ep, ptl_event_t pevent)
           evt->event.info.recv.header_ptr,
           evt->event.info.recv.data_len,
           evt->event.info.recv.data_ptr);
+
+#ifdef    PORTALS_8B_OOB
+    len=evt->event.info.recv.header_len + evt->event.info.recv.data_len;
+    if( len < 9 )                               /* Receive to 8B OOB */
+        memcpy(pevent.md.start + pevent.offset, &pevent.hdr_data, len);
+#endif // PORTALS_8B_OOB
 
     /* queue event on endpoint's completed event queue */
 
