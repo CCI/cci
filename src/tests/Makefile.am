@@ -10,6 +10,7 @@ TESTS = \
 	server	\
 	client	\
 	pingpong_rma	\
-	pingpong
+	pingpong	\
+	stream
 
 check_PROGRAMS = $(TESTS)

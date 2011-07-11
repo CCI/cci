@@ -20,10 +20,16 @@
 
 #include "cci.h"
 
+#define MPI_DEBUG 0
+
+#if MPI_DEBUG
+#include "mpi.h"
+#endif
+
 #define DFLT_PORT   54321
 #define ITERS       100000
 #define TIMEOUT     30  /* seconds */
-#define MAX_PENDING 128
+#define MAX_PENDING 16
 
 /* Globals */
 int connect_done = 0, done = 0;
@@ -45,8 +51,13 @@ cci_connection_t *connection = NULL;
 cci_conn_attribute_t attr = CCI_CONN_ATTR_UU;
 struct timeval start, end;
 
+#if 1
+#define LOCK
+#define UNLOCK
+#else
 #define LOCK   pthread_mutex_lock(&lock);
 #define UNLOCK pthread_mutex_unlock(&lock);
+#endif
 
 void
 print_usage()
@@ -77,7 +88,6 @@ poll_events(void)
     int ret;
     cci_event_t *event;
 
-again:
     LOCK;
     if (!running) {
         UNLOCK;
@@ -96,7 +106,7 @@ again:
                 if (running) {
                     UNLOCK;
                     ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
-                    if (ret && 0) {
+                    if (ret && 1) {
                         fprintf(stderr, "%s: send returned %s\n", __func__, cci_strerror(ret));
                     } else
                         send++;
@@ -117,7 +127,7 @@ again:
                     if (event->info.recv.data_len > current_size ||
                         event->info.recv.header_len == 3) {
                         gettimeofday(&end, NULL);
-                        printf("%5d\t\t%6d\t\t%6.2lf Mb/s\n",
+                        printf("recv: %5d\t\t%6d\t\t%6.2lf Mb/s\n",
                                current_size, recv,
                                (double) recv * (double) current_size * 8.0 /
                                     usecs(start, end));
@@ -150,7 +160,6 @@ again:
             fprintf(stderr, "ignoring event type %d\n", event->type);
         }
         cci_return_event(endpoint, event);
-        goto again;
     }
     return;
 }
@@ -168,10 +177,12 @@ do_client()
 {
     int ret;
 
+    sleep(3);
+
 	/* initiate connect */
 	ret = cci_connect(endpoint, server_uri, port, NULL, 0, attr, NULL, 0, NULL);
     if (ret) {
-        fprintf(stderr, "cci_connect() returned %d\n", ret);
+        fprintf(stderr, "cci_connect() returned %s\n", cci_strerror(ret));
         return;
     }
 
@@ -227,7 +238,7 @@ do_client()
 
         gettimeofday(&end, NULL);
 
-        printf("%5d\t\t%6d\t\t%6.2lf Mb/s\n",
+        printf("sent: %5d\t\t%6d\t\t%6.2lf Mb/s\n",
                current_size, send,
                (double) send * (double) current_size * 8.0 /
                     usecs(start, end));
@@ -236,6 +247,9 @@ do_client()
             current_size++;
         else
             current_size *= 2;
+
+        cci_send(connection, "reset", 5, &current_size, sizeof(current_size), NULL, 0);
+        sleep(1);
     }
     cci_send(connection, "bye", 3, NULL, 0, NULL, 0);
 
@@ -345,6 +359,10 @@ int main(int argc, char *argv[])
         fprintf(stderr, "cci_create_endpoint() failed with %s\n", cci_strerror(ret));
         exit(EXIT_FAILURE);
     }
+
+#if MPI_DEBUG
+    MPI_Init(&argc, &argv);
+#endif
 
     if (is_server)
         do_server();
