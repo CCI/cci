@@ -53,11 +53,9 @@ static int template_get_event(cci_endpoint_t *endpoint,
 static int template_return_event(cci_endpoint_t *endpoint, 
                                  cci_event_t *event);
 static int template_send(cci_connection_t *connection, 
-                         void *header_ptr, uint32_t header_len, 
-                         void *data_ptr, uint32_t data_len, 
+                         void *ptr, uint32_t len, 
                          void *context, int flags);
 static int template_sendv(cci_connection_t *connection, 
-                          void *header_ptr, uint32_t header_len, 
                           struct iovec *data, uint8_t iovcnt,
                           void *context, int flags);
 static int template_rma_register(cci_endpoint_t *endpoint,
@@ -70,7 +68,7 @@ static int template_rma_register_phys(cci_endpoint_t *endpoint,
                                       uint64_t *rma_handle);
 static int template_rma_deregister(uint64_t rma_handle);
 static int template_rma(cci_connection_t *connection, 
-                        void *header_ptr, uint32_t header_len, 
+                        void *am_ptr, uint32_t am_len, 
                         uint64_t local_handle, uint64_t local_offset, 
                         uint64_t remote_handle, uint64_t remote_offset,
                         uint64_t data_len, void *context, int flags);
@@ -276,9 +274,8 @@ static int template_return_event(cci_endpoint_t *endpoint,
 }
 
 
-static int template_send(cci_connection_t *connection, 
-                         void *header_ptr, uint32_t header_len, 
-                         void *data_ptr, uint32_t data_len, 
+static int template_send(cci_connection_t *connection,
+                         void *ptr, uint32_t len,
                          void *context, int flags)
 {
     printf("In template_send\n");
@@ -286,8 +283,7 @@ static int template_send(cci_connection_t *connection,
 }
 
 
-static int template_sendv(cci_connection_t *connection, 
-                          void *header_ptr, uint32_t header_len, 
+static int template_sendv(cci_connection_t *connection,
                           struct iovec *data, uint8_t iovcnt,
                           void *context, int flags)
 {

@@ -68,11 +68,9 @@ typedef int (*cci_get_event_fn_t)(cci_endpoint_t *endpoint,
 typedef int (*cci_return_event_fn_t)(cci_endpoint_t *endpoint, 
                                      cci_event_t *event);
 typedef int (*cci_send_fn_t)(cci_connection_t *connection, 
-                             void *header_ptr, uint32_t header_len, 
-                             void *data_ptr, uint32_t data_len, 
+                             void *ptr, uint32_t len, 
                              void *context, int flags);
 typedef int (*cci_sendv_fn_t)(cci_connection_t *connection, 
-                              void *header_ptr, uint32_t header_len, 
                               struct iovec *data, uint8_t iovcnt,
                               void *context, int flags);
 typedef int (*cci_rma_register_fn_t)(cci_endpoint_t *endpoint,
@@ -85,7 +83,7 @@ typedef int (*cci_rma_register_phys_fn_t)(cci_endpoint_t *endpoint,
                                           uint64_t *rma_handle);
 typedef int (*cci_rma_deregister_fn_t)(uint64_t rma_handle);
 typedef int (*cci_rma_fn_t)(cci_connection_t *connection, 
-                            void *header_ptr, uint32_t header_len, 
+                            void *am_ptr, uint32_t am_len, 
                             uint64_t local_handle, uint64_t local_offset, 
                             uint64_t remote_handle, uint64_t remote_offset,
                             uint64_t data_len, void *context, int flags);

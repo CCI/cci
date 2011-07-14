@@ -73,11 +73,9 @@ static int sock_get_event(cci_endpoint_t *endpoint,
 static int sock_return_event(cci_endpoint_t *endpoint, 
                                  cci_event_t *event);
 static int sock_send(cci_connection_t *connection, 
-                         void *header_ptr, uint32_t header_len, 
-                         void *data_ptr, uint32_t data_len, 
+                         void *ptr, uint32_t len, 
                          void *context, int flags);
 static int sock_sendv(cci_connection_t *connection, 
-                          void *header_ptr, uint32_t header_len, 
                           struct iovec *data, uint8_t iovcnt,
                           void *context, int flags);
 static int sock_rma_register(cci_endpoint_t *endpoint,
@@ -483,7 +481,6 @@ static int sock_create_endpoint(cci_device_t *device,
     }
 
     (*endpoint)->max_recv_buffer_count = SOCK_EP_RX_CNT;
-    ep->max_hdr_size = SOCK_EP_MAX_HDR_SIZE;
     ep->rx_buf_cnt = SOCK_EP_RX_CNT;
     ep->tx_buf_cnt = SOCK_EP_TX_CNT;
     ep->buffer_len = dev->device.max_send_size + SOCK_MAX_HDRS;
@@ -1551,9 +1548,6 @@ static int sock_set_opt(cci_opt_handle_t *handle,
     }
 
     switch (name) {
-    case CCI_OPT_ENDPT_MAX_HEADER_SIZE:
-        ret = CCI_EINVAL;   /* not settable */
-        break;
     case CCI_OPT_ENDPT_SEND_TIMEOUT:
         assert(len == sizeof(ep->tx_timeout));
         memcpy(&ep->tx_timeout, val, len);
@@ -2177,27 +2171,23 @@ sock_progress_sends(cci__dev_t *dev)
 }
 
 static int sock_send(cci_connection_t *connection, 
-                         void *header_ptr, uint32_t header_len, 
-                         void *data_ptr, uint32_t data_len, 
+                         void *ptr, uint32_t len, 
                          void *context, int flags)
 {
     uint8_t iovcnt = 0;
     struct iovec iov = { NULL, 0 };
 
-    if (data_ptr && data_len) {
+    if (ptr && len) {
         iovcnt = 1;
-        iov.iov_base = data_ptr;
-        iov.iov_len = data_len;
+        iov.iov_base = ptr;
+        iov.iov_len = len;
     }
 
-    return sock_sendv(connection, header_ptr, header_len,
-                      &iov, iovcnt,
-                      context, flags);
+    return sock_sendv(connection, &iov, iovcnt, context, flags);
 }
 
 
 static int sock_sendv(cci_connection_t *connection, 
-                          void *header_ptr, uint32_t header_len, 
                           struct iovec *data, uint8_t iovcnt,
                           void *context, int flags)
 {
@@ -2226,11 +2216,6 @@ static int sock_sendv(cci_connection_t *connection,
 
     for (i = 0; i < iovcnt; i++)
         data_len += data[i].iov_len;
-
-    if (header_len + data_len > connection->max_send_size) {
-        debug(CCI_DB_FUNC, "exiting %s", func);
-        return CCI_EMSGSIZE;
-    }
 
     ep = container_of(endpoint, cci__ep_t, endpoint);
     sep = ep->priv;
@@ -2278,7 +2263,7 @@ static int sock_sendv(cci_connection_t *connection,
 
     /* pack buffer */
     hdr = (sock_header_t *) tx->buffer;
-    sock_pack_send(hdr, header_len, data_len, sconn->peer_id);
+    sock_pack_send(hdr, data_len, sconn->peer_id);
     tx->len = sizeof(*hdr);
 
     /* if reliable, add seq and ack */
@@ -2296,16 +2281,11 @@ static int sock_sendv(cci_connection_t *connection,
     }
     ptr = tx->buffer + tx->len;
 
-    /* copy user header and data to buffer
+    /* copy user data to buffer
      * NOTE: ignore CCI_FLAG_NO_COPY because we need to
              send the entire packet in one shot. We could
              use sendmsg() with an iovec. */
 
-    if (header_len) {
-        memcpy(ptr, header_ptr, header_len);
-        ptr += header_len;
-        tx->len += header_len;
-    }
     for (i = 0; i < iovcnt; i++) {
         memcpy(ptr, data[i].iov_base, data[i].iov_len);
         ptr += data[i].iov_len;
@@ -2487,7 +2467,7 @@ static int sock_rma_deregister(uint64_t rma_handle)
 
 
 static int sock_rma(cci_connection_t *connection, 
-                    void *header_ptr, uint32_t header_len, 
+                    void *am_ptr, uint32_t am_len, 
                     uint64_t local_handle, uint64_t local_offset, 
                     uint64_t remote_handle, uint64_t remote_offset,
                     uint64_t data_len, void *context, int flags)
@@ -2564,11 +2544,13 @@ static int sock_rma(cci_connection_t *connection,
     rma_op->status = CCI_SUCCESS; /* for now */
     rma_op->context = context;
     rma_op->flags = flags;
-    rma_op->header_len = (uint8_t) header_len;
+    rma_op->am_len = (uint16_t) am_len;
     rma_op->tx = NULL;
 
-    if (header_len)
-        memcpy(rma_op->header, header_ptr, rma_op->header_len);
+    if (am_len)
+        rma_op->am_ptr = am_ptr;
+    else
+        rma_op->am_ptr = NULL;
 
     if (flags & CCI_FLAG_WRITE) {
         int         i, cnt, err = 0;
@@ -2775,8 +2757,7 @@ sock_handle_seq(sock_conn_t *sconn, uint32_t seq)
 static void
 sock_handle_active_message(sock_conn_t *sconn,
                            sock_rx_t *rx,
-                           uint8_t header_len,
-                           uint16_t data_len,
+                           uint16_t len,
                            uint32_t id)
 {
     cci__evt_t *evt;
@@ -2806,19 +2787,16 @@ sock_handle_active_message(sock_conn_t *sconn,
     event->type = CCI_EVENT_RECV;
 
     recv = &(event->info.recv);
-    *((uint32_t *) &recv->header_len) = header_len;
-    *((uint32_t *) &recv->data_len) = data_len;
-    *((void **) &recv->header_ptr) = (void *) &hdr->data;
+    *((uint32_t *) &recv->len) = len;
+    *((void **) &recv->ptr) = (void *) &hdr->data;
     recv->connection = &conn->connection;
 
     /* if a reliable connection, handle the ack */
 
     if (cci_conn_is_reliable(conn)) {
         sock_header_r_t *hdr_r = (sock_header_r_t *) rx->buffer;
-        *((void **) &recv->header_ptr) = (void *) &hdr_r->data;
+        *((void **) &recv->ptr) = (void *) &hdr_r->data;
     }
-
-    *((void **) &recv->data_ptr) = recv->header_ptr + header_len;
 
     /* queue event on endpoint's completed event queue */
 
@@ -3077,7 +3055,7 @@ sock_handle_ack(sock_conn_t *sconn,
                 continue;
             } else if (rma_op->completed == rma_op->num_msgs) {
                 /* send remote completion? */
-                if (rma_op->header_len) {
+                if (rma_op->am_len) {
                     sock_header_r_t *hdr_r = tx->buffer;
 
                     rma_op->tx = tx;
@@ -3085,7 +3063,7 @@ sock_handle_ack(sock_conn_t *sconn,
                     tx->flags = rma_op->flags | CCI_FLAG_SILENT;
                     tx->state = SOCK_TX_QUEUED;
                     /* payload size for now */
-                    tx->len = (uint16_t) rma_op->header_len;
+                    tx->len = (uint16_t) rma_op->am_len;
                     tx->send_count = 0;
                     tx->last_attempt_us = 0ULL;
                     tx->timeout_us = 0ULL;
@@ -3097,9 +3075,9 @@ sock_handle_ack(sock_conn_t *sconn,
                     tx->evt.event.info.send.context = rma_op->context;
                     tx->evt.conn = conn;
                     tx->evt.ep = ep;
-                    sock_pack_send(&hdr_r->header, tx->len, 0, sconn->peer_id);
+                    sock_pack_send(&hdr_r->header, tx->len, sconn->peer_id);
                     sock_pack_seq_ts(&hdr_r->seq_ts, tx->seq, 0);
-                    memcpy(&hdr_r->data, rma_op->header, tx->len);
+                    memcpy(&hdr_r->data, rma_op->am_ptr, tx->len);
                     tx->len += sizeof(*hdr_r);
                     TAILQ_INSERT_TAIL(&queued, tx, dentry);
                     continue;
@@ -3671,7 +3649,7 @@ sock_recvfrom_ep(cci__ep_t *ep)
     case SOCK_MSG_DISCONNECT:
         break;
     case SOCK_MSG_SEND:
-        sock_handle_active_message(sconn, rx, a, b, id);
+        sock_handle_active_message(sconn, rx, b, id);
         break;
     case SOCK_MSG_KEEPALIVE:
         break;

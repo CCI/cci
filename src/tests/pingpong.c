@@ -116,25 +116,25 @@ poll_events(void)
                 ready = 1;
                 if (opts.method != AM) {
                     /* get server_rma_handle */
-                    opts = *((options_t *)event->info.recv.header_ptr);
+                    opts = *((options_t *)event->info.recv.ptr);
                     fprintf(stderr, "server RMA handle is 0x%"PRIx64"\n",
                                     opts.server_rma_handle);
                 }
             } else {
                 if (is_server) {
-                    if (event->info.recv.data_len > current_size) {
-                        current_size = event->info.recv.data_len;
-                    } else if (event->info.recv.header_len == 3) {
+                    if (event->info.recv.len > current_size) {
+                        current_size = event->info.recv.len;
+                    } else if (event->info.recv.len == 3) {
                         done = 1;
                         return;
                     }
                 } else {
-                    if (event->info.recv.data_len == current_size)
+                    if (event->info.recv.len == current_size)
                         count++;
                 }
                 if (is_server ||
                     count < warmup + iters) {
-                    ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, opts.flags);
+                    ret = cci_send(connection, buffer, current_size, NULL, opts.flags);
                     if (ret)
                         fprintf(stderr, "%s: send returned %s\n", __func__, cci_strerror(ret));
                 }
@@ -225,7 +225,7 @@ do_client()
         double bw = 0.0;
 
         if (opts.method == AM)
-            ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, opts.flags);
+            ret = cci_send(connection, buffer, current_size, NULL, opts.flags);
         else
             ret = cci_rma(connection, NULL, 0,
                           local_rma_handle, 0,
@@ -267,7 +267,7 @@ do_client()
                 warmup = 2;
         }
     }
-    ret = cci_send(connection, "bye", 3, NULL, 0, NULL, opts.flags);
+    ret = cci_send(connection, "bye", 3, NULL, opts.flags);
     check_return("cci_send", ret, 0);
 
     return;
@@ -308,7 +308,7 @@ do_server()
                 check_return("cci_rma_register", ret, 1);
                 fprintf(stderr, "server_rma_handle is 0x%"PRIx64"\n", opts.server_rma_handle);
             }
-            ret = cci_send(connection, &opts, sizeof(opts), NULL, 0, NULL, 0);
+            ret = cci_send(connection, &opts, sizeof(opts), NULL, 0);
             check_return("cci_send", ret, 1);
         }
     }

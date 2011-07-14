@@ -158,15 +158,11 @@ static int portals_get_event(        cci_endpoint_t       *endpoint,
 static int portals_return_event(     cci_endpoint_t       *endpoint, 
                                      cci_event_t          *event );
 static int portals_send(             cci_connection_t     *connection, 
-                                     void                 *header_ptr,
-                                     uint32_t             header_len, 
-                                     void                 *data_ptr,
-                                     uint32_t             data_len, 
+                                     void                 *ptr,
+                                     uint32_t             len, 
                                      void                 *context,
                                      int                  flags );
 static int portals_sendv(            cci_connection_t     *connection, 
-                                     void                 *header_ptr,
-                                     uint32_t             header_len, 
                                      struct iovec         *data,
                                      uint8_t              iovcnt,
                                      void                 *context,
@@ -182,11 +178,11 @@ static int portals_rma_register_phys(cci_endpoint_t       *endpoint,
                                      uint32_t             sg_cnt, 
                                      uint64_t             *rma_handle );
 static int portals_rma_deregister(   uint64_t             rma_handle );
-static int portals_rma(              cci_connection_t     *connection, 
-                                     void                 *header_ptr,
-                                     uint32_t             header_len, 
+static int portals_rma(              cci_connection_t     *connection,
+                                     void                 *am_ptr,
+                                     uint32_t             am_len,
                                      uint64_t             local_handle,
-                                     uint64_t             local_offset, 
+                                     uint64_t             local_offset,
                                      uint64_t             remote_handle,
                                      uint64_t             remote_offset,
                                      uint64_t             data_len,
@@ -924,7 +920,6 @@ static int portals_create_endpoint(
     }
 
     (*endpoint)->max_recv_buffer_count=PORTALS_EP_RX_CNT;
-    ep->max_hdr_size=PORTALS_EP_MAX_HDR_SIZE;
     ep->rx_buf_cnt=PORTALS_EP_RX_CNT;
     ep->tx_buf_cnt=PORTALS_EP_TX_CNT;
     ep->buffer_len=dev->device.max_send_size;
@@ -2051,9 +2046,6 @@ static int portals_set_opt(cci_opt_handle_t *handle,
     }
 
     switch (name) {
-    case CCI_OPT_ENDPT_MAX_HEADER_SIZE:
-        ret = CCI_EINVAL;   /* not settable */
-        break;
     case CCI_OPT_ENDPT_SEND_TIMEOUT:
         ret = CCI_ERR_NOT_IMPLEMENTED; /* not supported */
         break;
@@ -2114,7 +2106,7 @@ static int portals_get_opt(
     CCI_ENTER;
     CCI_EXIT;
 
-    return CCI_ERR_NOT_IMPLEMENTED;
+    return CCI_EINVAL;
 }
 
 
@@ -2340,9 +2332,7 @@ static int portals_return_event(cci_endpoint_t *endpoint,
  * will trigger our CCI event.
  */
 static int portals_sendv(
-    cci_connection_t       *connection, 
-    void                   *header_ptr,
-    uint32_t               header_len, 
+    cci_connection_t       *connection,
     struct iovec           *data,
     uint8_t                iovcnt,
     void                   *context,
@@ -2373,7 +2363,7 @@ static int portals_sendv(
     for (i = 0; i < iovcnt; i++)
         data_len += (uint32_t) data[i].iov_len;
 
-    if (header_len + data_len > connection->max_send_size) {
+    if (data_len > connection->max_send_size) {
         CCI_EXIT;
         return CCI_EMSGSIZE;
     }
@@ -2415,7 +2405,6 @@ static int portals_sendv(
 
     /* pack match bits */
     bits = ((ptl_match_bits_t) pconn->peer_ep_id) << PORTALS_EP_SHIFT;
-    bits |= ((ptl_match_bits_t) header_len) << 27;
     bits |= ((ptl_match_bits_t) data_len) << 11;
     bits |= (ptl_match_bits_t) PORTALS_MSG_SEND;
 
@@ -2430,10 +2419,8 @@ static int portals_sendv(
     }
 
     /* always copy into tx's attached buffer */
-    if (header_len)
-        memcpy(tx->buffer, header_ptr, header_len);
     if (data_len) {
-        uint32_t offset = header_len;
+        uint32_t offset = 0;
 
         for (i = 0; i < iovcnt; i++) {
             memcpy(tx->buffer + offset, data[i].iov_base, data[i].iov_len);
@@ -2442,7 +2429,7 @@ static int portals_sendv(
     }
 
 #ifdef    PORTALS_8B_OOB
-    if( header_len + data_len < 9 ) {          /* Send up to 8B OOB */
+    if( data_len < 9 ) {                       /* Send up to 8B OOB */
         ptl_hdr_data_t *hdr_data=(ptl_hdr_data_t *)tx->buffer;
 
         ret = PtlPutRegion(tx->mdh,            /* Handle to MD */
@@ -2459,7 +2446,7 @@ static int portals_sendv(
 #endif // PORTALS_8B_OOB
     ret = PtlPutRegion(tx->mdh,                 /* Handle to MD */
                        0,                       /* local offset */
-                       header_len + data_len,   /* length */
+                       data_len,                /* length */
                        ack,                     /* ACK disposition */
                        pconn->idp,              /* target port */
                        pdev->table_index,       /* table entry to use */
@@ -2526,11 +2513,9 @@ out:
 }
 
 static int portals_send(
-    cci_connection_t       *connection, 
-    void                   *header_ptr,
-    uint32_t               header_len, 
-    void                   *data_ptr,
-    uint32_t               data_len, 
+    cci_connection_t       *connection,
+    void                   *ptr,
+    uint32_t               len,
     void                   *context,
     int                    flags ) {
 
@@ -2540,14 +2525,13 @@ static int portals_send(
 
     CCI_ENTER;
 
-    if (data_ptr && data_len > 0) {
+    if (ptr && len > 0) {
         iovcnt = 1;
-        iov.iov_base = data_ptr;
-        iov.iov_len = data_len;
+        iov.iov_base = ptr;
+        iov.iov_len = len;
     }
 
-    ret = portals_sendv(connection, header_ptr, header_len,
-                               &iov, iovcnt, context, flags);
+    ret = portals_sendv(connection, &iov, iovcnt, context, flags);
     CCI_EXIT;
     return ret;
 }
@@ -2729,9 +2713,9 @@ static int portals_rma_deregister(uint64_t rma_handle)
 }
 
 
-static int portals_rma(cci_connection_t *connection, 
-                       void *header_ptr, uint32_t header_len, 
-                       uint64_t local_handle, uint64_t local_offset, 
+static int portals_rma(cci_connection_t *connection,
+                       void *am_ptr, uint32_t am_len,
+                       uint64_t local_handle, uint64_t local_offset,
                        uint64_t remote_handle, uint64_t remote_offset,
                        uint64_t data_len, void *context, int flags)
 {
@@ -2750,12 +2734,6 @@ static int portals_rma(cci_connection_t *connection,
     if (!pglobals) {
         CCI_EXIT;
         return CCI_ENODEV;
-    }
-
-    if (header_len > 32) {
-        debug(CCI_DB_MSG, "%s: header_len %d > 32", __func__, header_len);
-        CCI_EXIT;
-        return CCI_EINVAL;
     }
 
     conn = container_of(connection, cci__conn_t, connection);
@@ -2802,7 +2780,7 @@ static int portals_rma(cci_connection_t *connection,
     rma_op->status = CCI_SUCCESS; /* for now */
     rma_op->context = context;
     rma_op->flags = flags;
-    rma_op->header_len = (uint8_t) header_len;
+    rma_op->am_len = (uint16_t) am_len;
     rma_op->tx = NULL;
 
     rma_op->evt.event.type = CCI_EVENT_SEND;
@@ -2813,8 +2791,10 @@ static int portals_rma(cci_connection_t *connection,
     rma_op->evt.conn = conn;
     rma_op->evt.priv = rma_op;
 
-    if (header_len)
-        memcpy(rma_op->header, header_ptr, header_len);
+    if (am_len)
+        rma_op->am_ptr = am_ptr;
+    else
+        rma_op->am_ptr = NULL;
 
     pthread_mutex_lock(&ep->lock);
     TAILQ_INSERT_TAIL(&local->rma_ops, rma_op, hentry);
@@ -3131,28 +3111,21 @@ static void portals_handle_active_msg(cci__ep_t *ep, ptl_event_t pevent)
     evt = &rx->evt;
     evt->event.type = CCI_EVENT_RECV;
 
-    *((uint32_t *)&evt->event.info.recv.header_len) =
-        (uint32_t) ((pevent.match_bits >> 27) & 0x1F);
-    *((uint32_t *)&evt->event.info.recv.data_len) =
+    *((uint32_t *)&evt->event.info.recv.len) =
         (uint32_t) ((pevent.match_bits >> 11) & 0xFFFF);
-    if (evt->event.info.recv.header_len)
-        *((void **)&evt->event.info.recv.header_ptr) = pevent.md.start + pevent.offset;
+    if (evt->event.info.recv.len)
+        *((void **)&evt->event.info.recv.ptr) =
+            pevent.md.start + pevent.offset;
     else
-        *((void **)&evt->event.info.recv.header_ptr) = NULL;
-    if (evt->event.info.recv.data_len)
-        *((void **)&evt->event.info.recv.data_ptr) =
-            pevent.md.start + pevent.offset + evt->event.info.recv.header_len;
-    else
-        *((void **)&evt->event.info.recv.data_ptr) = NULL;
+        *((void **)&evt->event.info.recv.ptr) = NULL;
 
-    debug(CCI_DB_MSG, "%s: recv'd hdr len=%d ptr=%p data len=%d ptr=%p",
-          __func__, evt->event.info.recv.header_len,
-          evt->event.info.recv.header_ptr,
-          evt->event.info.recv.data_len,
-          evt->event.info.recv.data_ptr);
+    debug(CCI_DB_MSG, "%s: recv'd len=%d ptr=%p",
+          __func__,
+          evt->event.info.recv.len,
+          evt->event.info.recv.ptr);
 
 #ifdef    PORTALS_8B_OOB
-    len=evt->event.info.recv.header_len + evt->event.info.recv.data_len;
+    len=evt->event.info.recv.len;
     if( len < 9 )                               /* Receive to 8B OOB */
         memcpy(pevent.md.start + pevent.offset, &pevent.hdr_data, len);
 #endif // PORTALS_8B_OOB
@@ -3323,18 +3296,18 @@ static void portals_get_event_ep(cci__ep_t *ep)
                 break;
             } else
             debug( CCI_DB_WARN,
-                   "match=%lx..%lx  length=%ld..%ld  offset=%ld..%ld",
-                   event.match_bits,
-                   (ro->remote_handle | PORTALS_MSG_RMA_READ),
-                   event.rlength, ro->data_len,
-                   event.offset, ro->remote_offset );
-           
+                   "match=%"PRIx64"..%"PRIx64"  length=%"PRIu64"..%"PRIu64"  offset=%"PRIu64"..%"PRIu64"",
+                   (uint64_t) event.match_bits,
+                   (uint64_t) (ro->remote_handle | PORTALS_MSG_RMA_READ),
+                   (uint64_t) event.rlength, (uint64_t) ro->data_len,
+                   (uint64_t) event.offset, (uint64_t) ro->remote_offset );
+
         }
         if (!rma_op) {
             /* FIXME do what now? */
         }
 
-        if (rma_op->header_len) {
+        if (rma_op->am_len) {
             /* send remote completion msg */
             /* TODO */
         } else {
@@ -3415,7 +3388,7 @@ static void portals_get_event_ep(cci__ep_t *ep)
                 break;
             }
 
-            if (rma_op->header_len) {
+            if (rma_op->am_len) {
                 /* send remote completion msg */
                 /* TODO */
             } else {

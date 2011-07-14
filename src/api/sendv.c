@@ -18,14 +18,12 @@
 
 
 int cci_sendv(cci_connection_t *connection, 
-              void *header_ptr, uint32_t header_len, 
               struct iovec *data, uint8_t iovcnt,
               void *context, int flags)
 {
     int i = 0;
 
     if (NULL == connection ||
-        (NULL == header_ptr && header_len > 0) ||
         (NULL == data && iovcnt > 0)) {
         return CCI_EINVAL;
     }
@@ -48,6 +46,5 @@ int cci_sendv(cci_connection_t *connection,
         }
     }
 
-    return cci_core->sendv(connection, header_ptr, header_len, 
-                           data, iovcnt, context, flags);
+    return cci_core->sendv(connection, data, iovcnt, context, flags);
 }
