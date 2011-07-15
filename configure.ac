@@ -91,8 +91,27 @@ AH_BOTTOM([
 #endif /* CCI_CONFIGURE_H */
 ])
 
-# Setup C compiler
+# Extract compiler from Cray Programming Environment
+AS_IF([test "$PE_ENV" = "PGI"],
+      AC_SUBST([CC],["pgcc"])
+      [cflags="-fast -Msmartalloc -Mnobuiltin"])
+AS_IF([test "$PE_ENV" = "GNU"],
+      AC_SUBST([CC],["gcc"])
+      [cflags="-O3 -pthread -fno-builtin -Wall -Werror"])
+AS_IF([test "$PE_ENV" = "INTEL"],
+      AC_SUBST([CC],["icc"])
+      [cflags="-O3 -pthread -fno-builtin -Wall -Werror"])
 
+# Cray compiler is not ready yet; needs libtool support
+#AS_IF([test "$PE_ENV" = "CRAY"],
+#      AC_SUBST([CC],["craycc"])
+#      [cflags="-O3 -h msglevel_1"])
+
+# Set Default CFLAGS when none specified.
+AS_IF([test x"$CFLAGS" = x],
+      [CFLAGS="$cflags"])
+
+# Setup C compiler
 CFLAGS_save="$CFLAGS"
 AC_PROG_CC
 AM_PROG_CC_C_O
@@ -107,6 +126,27 @@ AS_IF([test "$cci_debug" = "1"],
 
 # Setup the cci core
 CCI_SETUP_CORE([], [], [AC_MSG_ERROR([Cannot continue])], [1])
+
+# Check if PMI is needed (for Cray builds)
+AC_ARG_WITH([pmi],
+    AS_HELP_STRING([--with-pmi=DIR],
+                   [Build w/support for Cray Process Manager Interface]),
+    [], [with_pmi=no])
+AS_IF([test "x$with_pmi" != xno],
+      [AC_SUBST([pmi_CPPFLAGS], ["-I$with_pmi/include"])
+       AC_SUBST([pmi_LDFLAGS], ["-L$with_pmi/lib64"])
+       AC_SUBST([pmi_LIBS], ["-lpmi"])
+       AC_DEFINE([HAVE_PMI], [1], [Define if you have PMI])])
+
+# Check if ALPS is needed (for Cray builds)
+AC_ARG_WITH([alps],
+    AS_HELP_STRING([--with-alps],
+                   [Install support for ALPS]),
+    [], [with_alps=no])
+AS_IF([test "x$with_alps" != xno],
+      [AC_SUBST([alps_LDFLAGS], ["-L/usr/lib/alps"])
+       AC_SUBST([alps_LIBS], ["-lalpslli -lalpsutil"])
+       AC_DEFINE([HAVE_ALPS], [1], [Define if you have ALPS])])
 
 # Default to shared library yet
 AM_ENABLE_SHARED

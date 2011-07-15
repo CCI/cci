@@ -198,7 +198,7 @@ typedef struct cci__evt {
 typedef enum cci__lep_state {
     CCI_LEP_CLOSING = -1,
     CCI_LEP_INIT,
-    CCI_LEP_READY,
+    CCI_LEP_READY
 } cci__lep_state_t;
 
 /*! CCI private listening endpoint (created when device is bound to service) */

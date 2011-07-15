@@ -13,12 +13,14 @@
 
 int cci_core_gni_post_load(       cci_plugin_t *         me ) {
 
+    assert(me);
     debug( CCI_DB_DRVR, "In gni post_load");
     return CCI_SUCCESS;
 }
 
 int cci_core_gni_pre_unload(      cci_plugin_t *         me ) {
 
+    assert(me);
     debug( CCI_DB_DRVR, "In gni pre_unload");
     return CCI_SUCCESS;
 }

@@ -238,7 +238,7 @@ typedef enum cci_status {
   CCI_ENOMSG = ENOMSG,
 
   /*! Address not available */
-  CCI_EADDRNOTAVAIL = EADDRNOTAVAIL,
+  CCI_EADDRNOTAVAIL = EADDRNOTAVAIL
 
   /* ...more here, inspired from errno.h... */
   

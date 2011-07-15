@@ -19,6 +19,7 @@
 #include "plugins/base/public.h"
 #include "plugins/core/core.h"
 #include "plugins/core/base/public.h"
+#include "cci-api.h"
 
 int cci__debug = CCI_DB_DFLT;
 cci__globals_t *globals = NULL;
@@ -418,7 +419,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
     cci__get_debug_env();
 
     if (abi_ver != CCI_ABI_VERSION) {
-        debug( CCI_DB_INFO, "got ABI version %d, but expected %d",
+        debug( CCI_DB_INFO, "got ABI version %u, but expected %d",
                abi_ver, CCI_ABI_VERSION);
         return CCI_EINVAL;
     }

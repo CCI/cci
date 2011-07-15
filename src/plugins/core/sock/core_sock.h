@@ -195,7 +195,7 @@ sock_parse_header(sock_header_t *header,
 {
     uint32_t hl = ntohl(header->type);
 
-    *type = SOCK_TYPE(hl);
+    *type = (enum sock_msg_type)SOCK_TYPE(hl);
     *a = SOCK_A(hl);
     *b = SOCK_B(hl);
     *c = ntohl(header->c);
@@ -502,6 +502,7 @@ sock_parse_ack(sock_header_r_t *header_r, sock_msg_type_t type,
     int i;
     uint32_t    *p  = (uint32_t *)&header_r->data;
 
+    assert(type);
     assert(ack != NULL);
     for (i = 0; i < count; i++)
         ack[i] = (uint32_t) ntohl(p[i]);

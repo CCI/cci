@@ -9,6 +9,14 @@
  *
  */
 
+#if defined(__INTEL_COMPILER)
+#pragma warning(disable:593)
+#pragma warning(disable:869)
+#pragma warning(disable:981)
+#pragma warning(disable:1338)
+#pragma warning(disable:2259)
+#endif //   __INTEL_COMPILER
+
 #include "cci/config.h"
 
 #include <stdio.h>
@@ -96,6 +104,7 @@ static int sock_rma(cci_connection_t *connection,
                         uint64_t data_len, void *context, int flags);
 
 
+static uint8_t sock_ip_hash(in_addr_t ip, uint16_t port);
 static void sock_progress_sends(cci__dev_t *dev);
 static void *sock_progress_thread(void *arg);
 static void *sock_recv_thread(void *arg);
@@ -318,14 +327,14 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 out:
     if (devices) {
         cci_device_t const *device;
-        cci__dev_t *dev;
+        cci__dev_t *my_dev;
 
         for (device = devices[0];
              device != NULL;
              device++) {
-            dev = container_of(device, cci__dev_t, device);
-            if (dev->priv)
-                free(dev->priv);
+            my_dev = container_of(device, cci__dev_t, device);
+            if (my_dev->priv)
+                free(my_dev->priv);
         }
         free(devices);
     }
@@ -938,7 +947,7 @@ sock_get_new_seq(void)
  * disperses large blocks of addresses as well as large ranges of ports on the
  * same address.
  */
-uint8_t sock_ip_hash(in_addr_t ip, uint16_t port)
+static uint8_t sock_ip_hash(in_addr_t ip, uint16_t port)
 {
     port ^= (ip & 0x0000FFFF);
     port ^= (ip & 0xFFFF0000) >> 16;
@@ -1018,7 +1027,7 @@ static int sock_accept(cci_conn_req_t *conn_req,
     sock_parse_header(&hdr_r->header, &type, &a, &b, &unused);
     sock_parse_seq_ts(&hdr_r->seq_ts, &peer_seq, &peer_ts);
 
-    conn->connection.attribute = a;
+    conn->connection.attribute = (enum cci_conn_attribute)a;
     conn->connection.endpoint = endpoint;
     conn->connection.max_send_size = dev->device.max_send_size;
 
@@ -1165,7 +1174,7 @@ static int sock_reject(cci_conn_req_t *conn_req)
     ret = sock_sendto(slep->sock, buffer, sizeof(*hdr_r), scrq->sin);
     if (ret != (int) sizeof(*hdr_r)) {
         debug((CCI_DB_CONN|CCI_DB_MSG), "unable to send reject to %s with"
-              "%s", name, cci_strerror(ret));
+              "%s", name, cci_strerror((enum cci_status)ret));
     }
 
     /* TODO when progressing, walk passive list and resend as needed */
@@ -1290,7 +1299,6 @@ sock_find_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id, sock_ms
     default:
         return sock_find_open_conn(sep, ip, port, id);
     }
-    return NULL;
 }
 
 static int sock_connect(cci_endpoint_t *endpoint, char *server_uri, 
@@ -1573,7 +1581,7 @@ static int sock_set_opt(cci_opt_handle_t *handle,
         memcpy(&conn->tx_timeout, val, len);
         break;
     default:
-        debug(CCI_DB_INFO, "unknown option %d", name);
+        debug(CCI_DB_INFO, "unknown option %u", name);
         ret = CCI_EINVAL;
     }
 
@@ -1945,11 +1953,11 @@ sock_progress_pending(cci__dev_t *dev)
         tx->last_attempt_us = now;
         tx->send_count++;
 
-        debug(CCI_DB_MSG, "re-sending %s msg seq %u count %d",
+        debug(CCI_DB_MSG, "re-sending %s msg seq %u count %u",
               sock_msg_type(tx->msg_type), tx->seq, tx->send_count);
         ret = sock_sendto(sep->sock, tx->buffer, tx->len, sconn->sin);
         if (ret != tx->len) {
-            debug((CCI_DB_MSG|CCI_DB_INFO), "sendto() failed with %s\n", cci_strerror(errno));
+            debug((CCI_DB_MSG|CCI_DB_INFO), "sendto() failed with %s\n", cci_strerror((enum cci_status)errno));
             continue;
         }
     }
@@ -3078,7 +3086,7 @@ sock_handle_ack(sock_conn_t *sconn,
             } else if (rma_op->completed == rma_op->num_msgs) {
                 /* send remote completion? */
                 if (rma_op->header_len) {
-                    sock_header_r_t *hdr_r = tx->buffer;
+                    sock_header_r_t *my_hdr_r = tx->buffer;
 
                     rma_op->tx = tx;
                     tx->msg_type = SOCK_MSG_SEND;
@@ -3097,10 +3105,10 @@ sock_handle_ack(sock_conn_t *sconn,
                     tx->evt.event.info.send.context = rma_op->context;
                     tx->evt.conn = conn;
                     tx->evt.ep = ep;
-                    sock_pack_send(&hdr_r->header, tx->len, 0, sconn->peer_id);
-                    sock_pack_seq_ts(&hdr_r->seq_ts, tx->seq, 0);
-                    memcpy(&hdr_r->data, rma_op->header, tx->len);
-                    tx->len += sizeof(*hdr_r);
+                    sock_pack_send(&my_hdr_r->header, tx->len, 0, sconn->peer_id);
+                    sock_pack_seq_ts(&my_hdr_r->seq_ts, tx->seq, 0);
+                    memcpy(&my_hdr_r->data, rma_op->header, tx->len);
+                    tx->len += sizeof(*my_hdr_r);
                     TAILQ_INSERT_TAIL(&queued, tx, dentry);
                     continue;
                 } else {
@@ -3138,10 +3146,10 @@ sock_handle_ack(sock_conn_t *sconn,
     pthread_mutex_lock(&dev->lock);
     pthread_mutex_lock(&ep->lock);
     while (!TAILQ_EMPTY(&queued)) {
-        sock_tx_t *tx;
-        tx = TAILQ_FIRST(&queued);
-        TAILQ_REMOVE(&queued, tx, dentry);
-        TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
+        sock_tx_t *my_tx;
+        my_tx = TAILQ_FIRST(&queued);
+        TAILQ_REMOVE(&queued, my_tx, dentry);
+        TAILQ_INSERT_TAIL(&sdev->queued, my_tx, dentry);
     }
     pthread_mutex_unlock(&ep->lock);
     pthread_mutex_unlock(&dev->lock);
@@ -3216,7 +3224,7 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
             ret = sock_sendto(sep->sock, &hdr, len, sin);
             if (ret != len) {
                 debug((CCI_DB_CONN|CCI_DB_MSG), "ep %d failed to send conn_ack with %s",
-                      sep->sock, cci_strerror(ret));
+                      sep->sock, cci_strerror((enum cci_status)ret));
             }
             pthread_mutex_lock(&ep->lock);
             TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
@@ -3293,7 +3301,7 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
         /* setup the generic event for the application */
 
         event = (cci_event_t *) &evt->event;
-        event->type = reply; /* CCI_EVENT_CONNECT_[SUCCESS|REJECTED] */
+        event->type = (enum cci_event_type)reply; /* CCI_EVENT_CONNECT_[SUCCESS|REJECTED] */
         event->info.other.context = tx->evt.event.info.send.context;
 
         i = sock_ip_hash(sin.sin_addr.s_addr, 0);
@@ -3338,7 +3346,7 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
             ret = sock_sendto(sep->sock, &hdr, len, sin);
             if (ret != len) {
                 debug((CCI_DB_CONN|CCI_DB_MSG), "ep %d failed to send conn_ack with %s",
-                      sep->sock, cci_strerror(ret));
+                      sep->sock, cci_strerror((enum cci_status)ret));
             }
         }
         /* add rx->evt to ep->evts */
@@ -3690,7 +3698,7 @@ sock_recvfrom_ep(cci__ep_t *ep)
     case SOCK_MSG_RMA_READ_REPLY:
         break;
     default:
-        debug(CCI_DB_MSG, "unknown active message with type %d\n", type);
+        debug(CCI_DB_MSG, "unknown active message with type %u\n", (enum sock_msg_type)type);
     }
 
 out:
@@ -3806,7 +3814,7 @@ sock_recvfrom_lep(cci__lep_t *lep)
         crq->conn_req.devices_cnt = sglobals->count;
         crq->conn_req.data_len = b;
         crq->conn_req.data_ptr = (((sock_header_r_t *)scrq->buffer)->data);
-        crq->conn_req.attribute = a;
+        crq->conn_req.attribute = (enum cci_conn_attribute)a;
         *((struct sockaddr_in *) &scrq->sin) = sin;
     
         debug(CCI_DB_CONN, "recv'd conn_req from %s", name);
@@ -3989,6 +3997,7 @@ static void *sock_progress_thread(void *arg)
 {
     struct timeval tv = { 0, SOCK_PROG_TIME_US };
 
+    assert(arg);
     pthread_mutex_lock(&globals->lock);
     while (!sock_shut_down) {
         cci__dev_t *dev;
@@ -4009,21 +4018,21 @@ static void *sock_progress_thread(void *arg)
     pthread_mutex_unlock(&globals->lock);
 
     pthread_exit(NULL);
+    return(NULL);                            /* make pgcc happy */
 }
 
 static void *sock_recv_thread(void *arg)
 {
     int         i       = 0;
-    int         found   = 0;
     int         ret     = 0;
     static int      start   = 0;
     struct timeval  tv      = { 0, 1000 };
     int         nfds    = 0;
     fd_set      fds;
 
+    assert(arg);
     pthread_mutex_lock(&globals->lock);
     while (!sock_shut_down) {
-        found = 0;
         nfds = sglobals->nfds;
         FD_ZERO(&fds);
         for (i = 0; i < nfds; i++) {
@@ -4069,4 +4078,5 @@ relock:
     pthread_mutex_unlock(&globals->lock);
 
     pthread_exit(NULL);
+    return(NULL);                            /* make pgcc happy */
 }
