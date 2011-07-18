@@ -41,6 +41,9 @@ cci_endpoint_t *endpoint = NULL;
 cci_connection_t *connection = NULL;
 cci_conn_attribute_t attr = CCI_CONN_ATTR_UU;
 uint64_t local_rma_handle = 0ULL;
+int remote_completion = 0;
+void *rmt_comp_msg = NULL;
+uint32_t rmt_comp_len = 0;
 
 typedef struct options {
     uint64_t    server_rma_handle;
@@ -59,7 +62,7 @@ void
 print_usage()
 {
     fprintf(stderr, "usage: %s -h <server_uri> [-p <port>] [-s] [-c <type>] [-n] "
-                    "[-w] [-r] [-m <max_rma_size>\n", name);
+                    "[[-w | -r] [-m <max_rma_size> [-C]]]\n", name);
     fprintf(stderr, "where:\n");
     fprintf(stderr, "\t-h\tServer's URI\n");
     fprintf(stderr, "\t-p\tPort of the server's connection service (default %d)\n", DFLT_PORT);
@@ -68,7 +71,8 @@ print_usage()
     fprintf(stderr, "\t-n\tSet CCI_FLAG_NO_COPY ito avoid copying\n");
     fprintf(stderr, "\t-w\tUse RMA WRITE instead of active messages\n");
     fprintf(stderr, "\t-r\tUse RMA READ instead of active messages\n");
-    fprintf(stderr, "\t-m\tTest RMA messages up to max_rma_size\n\n");
+    fprintf(stderr, "\t-m\tTest RMA messages up to max_rma_size\n");
+    fprintf(stderr, "\t-C\tSend RMA remote completion message\n\n");
     fprintf(stderr, "Example:\n");
     fprintf(stderr, "server$ %s -h ip://foo -p 2211 -s\n", name);
     fprintf(stderr, "client$ %s -h ip://foo -p 2211\n", name);
@@ -101,7 +105,7 @@ poll_events(void)
                 if (!is_server && event->info.send.context == (void*)1) {
                     count++;
                     if (count < warmup + iters) {
-                        ret = cci_rma(connection, NULL, 0,
+                        ret = cci_rma(connection, rmt_comp_msg, rmt_comp_len,
                                       local_rma_handle, 0,
                                       opts.server_rma_handle, 0,
                                       current_size, (void*)1, opts.flags);
@@ -114,13 +118,13 @@ poll_events(void)
         {
             if (!ready) {
                 ready = 1;
-                if (opts.method != AM) {
+                if (opts.method != AM && !is_server) {
                     /* get server_rma_handle */
                     opts = *((options_t *)event->info.recv.header_ptr);
                     fprintf(stderr, "server RMA handle is 0x%"PRIx64"\n",
                                     opts.server_rma_handle);
                 }
-            } else {
+            } else if (opts.method == AM) {
                 if (is_server) {
                     if (event->info.recv.data_len > current_size) {
                         current_size = event->info.recv.data_len;
@@ -136,7 +140,8 @@ poll_events(void)
                     count < warmup + iters) {
                     ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, opts.flags);
                     if (ret)
-                        fprintf(stderr, "%s: send returned %s\n", __func__, cci_strerror(ret));
+                        fprintf(stderr, "%s: %s: send returned %s\n", __func__,
+                                is_server ? "server" : "client", cci_strerror(ret));
                 }
             }
             break;
@@ -174,6 +179,10 @@ do_client()
     uint32_t min = 0, max;
     struct timeval start, end;
     char *func;
+    char header[32];
+
+    /* let server start */
+    sleep(3);
 
 	/* initiate connect */
 	ret = cci_connect(endpoint, server_uri, port, &opts, sizeof(opts), attr, NULL, 0, NULL);
@@ -214,6 +223,13 @@ do_client()
             opts.flags |= CCI_FLAG_READ;
     }
 
+    if (remote_completion) {
+        memset(header, 0, 32);
+        snprintf(header, 32, "Completed 0x%"PRIX64"", opts.server_rma_handle);
+        rmt_comp_msg = header;
+        rmt_comp_len = sizeof(rmt_comp_msg);
+    }
+
     if (opts.method == AM)
         printf("Bytes\tLatency (one-way)\tThroughput\n");
     else
@@ -227,7 +243,7 @@ do_client()
         if (opts.method == AM)
             ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, opts.flags);
         else
-            ret = cci_rma(connection, NULL, 0,
+            ret = cci_rma(connection, rmt_comp_msg, rmt_comp_len,
                           local_rma_handle, 0,
                           opts.server_rma_handle, 0,
                           current_size, (void*)1, opts.flags);
@@ -331,7 +347,7 @@ int main(int argc, char *argv[])
 
     name = argv[0];
 
-    while ((c = getopt(argc, argv, "h:p:sc:nwrm:")) != -1) {
+    while ((c = getopt(argc, argv, "h:p:sc:nwrm:C")) != -1) {
         switch (c) {
         case 'h':
             server_uri = strdup(optarg);
@@ -365,6 +381,9 @@ int main(int argc, char *argv[])
             break;
         case 'm':
             opts.max_rma_size = strtoul(optarg, NULL, 0);
+            break;
+        case 'C':
+            remote_completion = 1;
             break;
         default:
             print_usage();
