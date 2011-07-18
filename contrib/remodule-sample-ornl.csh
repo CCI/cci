@@ -1,21 +1,23 @@
+# Discover if Gemini network is loaded into the kernel.
+  setenv gemini `/bin/lsmod   | /usr/bin/grep -c kgni_gem`
   module       purge
-  if ( -f /etc/xthostname ) then
-	module use -a       /opt/cray/ss/modulefiles
-  else
+  if ( $gemini > 0 ) then
 	module use -a       /ccs/sw/gni/modulefiles
+  else
+	module use -a       /opt/cray/ss/modulefiles
   endif
 
   module       load         modules
   module       load         torque
   module       load         moab
-  if ( -f /etc/xthostname ) then
-	module load         portals
-	module load         lustre-cray_ss_s/1.8.6
-	module load         lustre-cray_ss_s
-  else
+  if ( $gemini > 0 ) then
 	module load         gni-headers
 	module load         ugni
 	module load         lustre-cray_gem_s
+  else
+	module load         portals
+	module load         lustre-cray_ss_s/1.8.6
+	module load         lustre-cray_ss_s
   endif
   module       load         lustre-utils
   module       load         PrgEnv-$1
