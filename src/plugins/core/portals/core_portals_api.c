@@ -4,6 +4,14 @@
  * $COPYRIGHT$
  */
 
+#if defined(__INTEL_COMPILER)
+#pragma warning(disable:593)
+#pragma warning(disable:869)
+#pragma warning(disable:981)
+#pragma warning(disable:1338)
+#pragma warning(disable:2259)
+#endif //   __INTEL_COMPILER
+
 #include "cci/config.h"
 #include <stdio.h>
 #include <string.h>
@@ -98,10 +106,6 @@ do {                                                        \
 #endif /* ENABLE_PORTALS_SAMPLING == 1 */
 /******* end cycle counting sampling code ****/
 
-
-
-extern const char *ptl_err_str[];
-extern const char *ptl_event_str[];
 
 /*
  * Local functions
@@ -198,11 +202,6 @@ static inline void portals_progress_dev(
                                      cci__dev_t *dev);
 static void portals_get_event_ep(cci__ep_t *ep);
 static void portals_get_event_lep(cci__lep_t *lep);
-
-portals_msg_type_t portals_msg_type (portals_msg_type_t     type ) {
-
-    return type;
-}
 
 
 /*
@@ -335,7 +334,7 @@ static int portals_init(
                  iRC =  CCI_ENOMEM;
                  break;
             default:               /* Undocumented portals error */
-                 debug( CCI_DB_WARN, "NI: %s", portals_strerror(iRC) );
+                 debug( CCI_DB_WARN, "NI: %s", portals_strerror((enum cci_status)iRC) );
                  iRC = CCI_ERROR;
         }
         goto out_with_init;
@@ -1497,7 +1496,7 @@ static int portals_accept(
     tx->evt.event.type=CCI_EVENT_SEND;
     memcpy(tx->buffer, &accept, ac_len);
 
-    debug(CCI_DB_CONN, "%s: to %d,%d client_id=%d peer_conn=%llx",
+    debug(CCI_DB_CONN, "%s: to %u,%hu client_id=%u peer_conn=%llx",
           __func__, pconn->idp.nid, pconn->idp.pid, pconn->peer_ep_id,
           (unsigned long long) pconn->peer_conn);
     ret = PtlPutRegion(tx->mdh,           /* Handle to MD */
@@ -1789,7 +1788,7 @@ static int portals_connect(
     if (data_len)
         memcpy(tx->buffer + cr_len, data_ptr, data_len);
 
-    debug(CCI_DB_CONN, "%s: to %d,%d port %d client_id=%d conn=%p",
+    debug(CCI_DB_CONN, "%s: to %u,%hu port %u client_id=%u conn=%p",
           __func__, pconn->idp.nid, pconn->idp.pid, port, pep->id, conn);
     iRC = PtlPutRegion(tx->mdh,           /* Handle to MD */
                        0,                 /* offset */
@@ -2093,7 +2092,7 @@ static int portals_set_opt(cci_opt_handle_t *handle,
         ret = CCI_ERR_NOT_IMPLEMENTED; /* not supported */
         break;
     default:
-        debug(CCI_DB_INFO, "unknown option %d", name);
+        debug(CCI_DB_INFO, "unknown option %u", (enum cci_opt_name)name);
         ret = CCI_EINVAL;
     }
 
@@ -2306,7 +2305,7 @@ static int portals_return_event(cci_endpoint_t *endpoint,
             iRC = portals_post_am_buffer(ep, am);
             if (iRC) {
                 debug(CCI_DB_WARN, "%s: post_am_buffer() returned %s",
-                                   __func__, cci_strerror(iRC));
+                                   __func__, cci_strerror((enum cci_status)iRC));
             }
         }
         pthread_mutex_unlock(&ep->lock);
@@ -2482,7 +2481,7 @@ static int portals_sendv(
         goto out;
     }
     debug(CCI_DB_MSG,
-             "%s: (%d,%d) table %d: posted:"
+             "%s: (%u,%hu) table %d: posted:"
              " ret=%s len=%d", __func__, pconn->idp.nid, pconn->idp.pid,
                                  pdev->table_index, ptl_err_str[ret], tx->len );
     /*
@@ -2716,7 +2715,7 @@ static int portals_rma_deregister(uint64_t rma_handle)
             } else {                         /* Memory leak warning */
                 ret = CCI_ERR_RMA_OP;
                 debug( CCI_DB_MEM,
-                       "Did not deallocate handle  refcnt=%d",
+                       "Did not deallocate handle  refcnt=%u",
                        handle->refcnt );
             }
             break;
@@ -2753,7 +2752,7 @@ static int portals_rma(cci_connection_t *connection,
     }
 
     if (header_len > 32) {
-        debug(CCI_DB_MSG, "%s: header_len %d > 32", __func__, header_len);
+        debug(CCI_DB_MSG, "%s: header_len %u > 32", __func__, header_len);
         CCI_EXIT;
         return CCI_EINVAL;
     }
@@ -2958,6 +2957,7 @@ static void *portals_progress_thread(
         usleep(PORTALS_PROG_TIME_US);
     }
     pthread_exit(NULL);
+    return(NULL);                            /* make pgcc happy */
 }
 
 
@@ -2974,7 +2974,7 @@ static void portals_handle_conn_request(cci__lep_t *lep, ptl_event_t event)
     crq->conn_req.devices_cnt = pglobals->count;
     crq->conn_req.data_len = (event.match_bits >> 16) & 0xFFFF;
     crq->conn_req.data_ptr = pcrq->buffer + 12;
-    crq->conn_req.attribute = (event.match_bits >> 8) & 0xFF;
+    crq->conn_req.attribute = (enum cci_conn_attribute)((event.match_bits >> 8) & 0xFF);
 
     pcrq->idp = event.initiator;
     pcrq->mss = cr->max_send_size;
@@ -2982,7 +2982,7 @@ static void portals_handle_conn_request(cci__lep_t *lep, ptl_event_t event)
     pcrq->client_id = cr->client_ep_id;
     pcrq->client_conn = event.hdr_data;
 
-    debug(CCI_DB_CONN, "%s: from %d,%d client_id=%d client_conn=0x%llx",
+    debug(CCI_DB_CONN, "%s: from %u,%hu client_id=%u client_conn=0x%llx",
           __func__, pcrq->idp.nid, pcrq->idp.pid, pcrq->client_id,
           (unsigned long long) pcrq->client_conn);
 
@@ -3145,7 +3145,7 @@ static void portals_handle_active_msg(cci__ep_t *ep, ptl_event_t pevent)
     else
         *((void **)&evt->event.info.recv.data_ptr) = NULL;
 
-    debug(CCI_DB_MSG, "%s: recv'd hdr len=%d ptr=%p data len=%d ptr=%p",
+    debug(CCI_DB_MSG, "%s: recv'd hdr len=%u ptr=%p data len=%u ptr=%p",
           __func__, evt->event.info.recv.header_len,
           evt->event.info.recv.header_ptr,
           evt->event.info.recv.data_len,
@@ -3211,7 +3211,7 @@ static void portals_get_event_ep(cci__ep_t *ep)
         break;
     case PTL_EVENT_SEND_END:
     {
-        portals_msg_type_t msg_type = event.match_bits & 0x3;
+        portals_msg_type_t msg_type = (enum portals_msg_type)(event.match_bits & 0x3);
         int is_reliable = (int) (event.match_bits & 0x4);
         portals_tx_t *tx = (void *)event.md.user_ptr;
 
@@ -3249,7 +3249,7 @@ static void portals_get_event_ep(cci__ep_t *ep)
             break;
         default:
             debug(CCI_DB_INFO, "we missed disabling a portals send_end for "
-                  "msg_type %d", tx->msg_type);
+                  "msg_type %u", (enum portals_msg_type)(tx->msg_type));
             break;
         }
         
@@ -3278,14 +3278,14 @@ static void portals_get_event_ep(cci__ep_t *ep)
         case PORTALS_MSG_OOB:
           {
             /* incoming OOB msg */
-            portals_msg_oob_type_t oob_type = (uint32_t)((event.match_bits >> 2) & 0x3);
+            portals_msg_oob_type_t oob_type = (enum portals_msg_oob_type)((event.match_bits >> 2) & 0x3);
 
             switch (oob_type) {
                 case PORTALS_MSG_OOB_CONN_REPLY:
                 portals_handle_conn_reply(ep, event);
                 break;
             default:
-                debug(CCI_DB_INFO, "missed oob type %d", oob_type);
+                debug(CCI_DB_INFO, "missed oob type %u", (enum portals_msg_oob_type)oob_type);
                 break;
             }
             break;
@@ -3323,11 +3323,11 @@ static void portals_get_event_ep(cci__ep_t *ep)
                 break;
             } else
             debug( CCI_DB_WARN,
-                   "match=%lx..%lx  length=%ld..%ld  offset=%ld..%ld",
-                   event.match_bits,
-                   (ro->remote_handle | PORTALS_MSG_RMA_READ),
-                   event.rlength, ro->data_len,
-                   event.offset, ro->remote_offset );
+                   "match=%zx..%zx  length=%zu..%zu  offset=%zd..%zd",
+                   (size_t)event.match_bits,
+                   (size_t)(ro->remote_handle | PORTALS_MSG_RMA_READ),
+                   (size_t)event.rlength, (size_t)ro->data_len,
+                   (off_t)event.offset, (off_t)ro->remote_offset );
            
         }
         if (!rma_op) {
@@ -3371,7 +3371,7 @@ static void portals_get_event_ep(cci__ep_t *ep)
                           msg_type == PORTALS_MSG_RMA_WRITE ?
                           "RMA WRITE" : "RMA_READ");
         if (event.ni_fail_type != PTL_NI_OK)
-            debug(CCI_DB_WARN, "%s: send failed with ni_fail_type %d",
+            debug(CCI_DB_WARN, "%s: send failed with ni_fail_type %u",
                   __func__, event.ni_fail_type);
 
         switch (msg_type) {
@@ -3443,7 +3443,7 @@ static void portals_get_event_ep(cci__ep_t *ep)
             break;
         default:
             debug(CCI_DB_INFO, "we missed disabling a portals ack for "
-                  "msg_type %d", tx->msg_type);
+                  "msg_type %u", (enum portals_msg_type)tx->msg_type);
             break;
         }
         break;
@@ -3452,7 +3452,7 @@ static void portals_get_event_ep(cci__ep_t *ep)
         debug(CCI_DB_WARN, "unlink event");
         break;
     default:
-        debug(CCI_DB_INFO, "unexpected portals event %d", event.type);
+        debug(CCI_DB_INFO, "unexpected portals event %u", (enum cci_event_type)event.type);
         break;
     }
 
@@ -3491,18 +3491,18 @@ static void portals_get_event_lep(cci__lep_t *lep)
 
         switch (type) {
         default:
-            debug(CCI_DB_WARN, "ignoring incoming %d msg on listening endpoint", type);
+            debug(CCI_DB_WARN, "ignoring incoming %u msg on listening endpoint", (enum portals_msg_type)type);
             break;
         case PORTALS_MSG_OOB:
             {
-                portals_msg_oob_type_t oob_type = (a & 0xF) >> 2;
+                portals_msg_oob_type_t oob_type = (enum portals_msg_oob_type)((a & 0xF) >> 2);
 
                 switch (oob_type) {
                     case PORTALS_MSG_OOB_CONN_REQUEST:
                         portals_handle_conn_request(lep, event);
                         break;
                     default:
-                        debug(CCI_DB_INFO, "ignoring incoming oob %d msg", oob_type);
+                        debug(CCI_DB_INFO, "ignoring incoming oob %u msg", (enum portals_msg_oob_type)oob_type);
                         break;
                 }
             }
@@ -3514,7 +3514,7 @@ static void portals_get_event_lep(cci__lep_t *lep)
         /* reject completed */
         break;
     default:
-        debug(CCI_DB_INFO, "unexpected portals event %d", event.type);
+        debug(CCI_DB_INFO, "unexpected portals event %u", (enum cci_event_type)event.type);
         break;
     }
     /* TODO unlink md and relink? */

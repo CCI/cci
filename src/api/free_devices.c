@@ -15,8 +15,7 @@
 
 #include "cci.h"
 #include "plugins/core/core.h"
-
-extern void cci__free_dev(cci__dev_t *dev);
+#include "cci-api.h"
 
 int cci_free_devices(cci_device_t const **devices)
 {
@@ -68,9 +67,9 @@ int cci_free_devices(cci_device_t const **devices)
 
     pthread_mutex_lock(&globals->lock);
     while (!TAILQ_EMPTY(&globals->devs)) {
-        cci__dev_t *dev = TAILQ_FIRST(&globals->devs);
-        TAILQ_REMOVE(&globals->devs, dev, entry);
-        cci__free_dev(dev);
+        cci__dev_t *mydev = TAILQ_FIRST(&globals->devs);
+        TAILQ_REMOVE(&globals->devs, mydev, entry);
+        cci__free_dev(mydev);
     }
     pthread_mutex_unlock(&globals->lock);
 

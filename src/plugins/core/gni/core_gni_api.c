@@ -4,6 +4,14 @@
  */
 
 
+#if defined(__INTEL_COMPILER)
+#pragma warning(disable:593)
+#pragma warning(disable:869)
+#pragma warning(disable:981)
+#pragma warning(disable:1338)
+#pragma warning(disable:2259)
+#endif //   __INTEL_COMPILER
+
 #include <stdio.h>
 #include "cci/config.h"
 #include "cci.h"

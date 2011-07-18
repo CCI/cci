@@ -11,6 +11,9 @@
 #include <portals/portals3.h>
 #include "cci/config.h"
 
+extern const char *ptl_err_str[];
+extern const char *ptl_event_str[];
+
 BEGIN_C_DECLS
 
 #define PORTALS_DEFAULT_MSS       (8192)     /* 8 KB */
@@ -124,7 +127,7 @@ static inline void portals_parse_match_bits(
     portals_msg_type_t     *type,
     uint64_t               *a ) {
 
-    *type=PORTALS_TYPE(match_bits);
+    *type=(enum portals_msg_type)PORTALS_TYPE(match_bits);
     *a=PORTALS_A(match_bits);
 }
 

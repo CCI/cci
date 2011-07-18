@@ -55,6 +55,8 @@ static int save_filename(const char *filename, lt_ptr data)
 {
     int i;
 
+    if(data)                                 /* Intel disallows dummy */
+        debug(CCI_DB_WARN, "%s: Warning: data=%p is not used", __func__, data );
     /* If the filename is already in the list, just return */
     for (i = 0; NULL != cci_plugins_filename_cache && 
              NULL != cci_plugins_filename_cache[i]; ++i) {

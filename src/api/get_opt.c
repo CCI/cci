@@ -110,7 +110,8 @@ int cci_get_opt(cci_opt_handle_t *handle, cci_opt_level_t level,
         break;
     }
     default:
-        debug(CCI_DB_INFO, "unknown option %d", name);
+        debug(CCI_DB_INFO, "unknown option %u",
+             (enum cci_opt_name)name);
         ret = CCI_EINVAL;
     }
 
