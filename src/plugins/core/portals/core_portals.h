@@ -272,6 +272,7 @@ typedef struct portals_tx {
     TAILQ_ENTRY(portals_tx) dentry;     /* Hangs on ep->idle_txs  dev->queued */
                                         /*   dev->pending */
     TAILQ_ENTRY(portals_tx) tentry;     /* Hangs on ep->txs */
+    struct portals_rma_op   *rma_op;    /* owning RMA if remote completion msg */
 }   portals_tx_t;
 
 typedef enum portals_am_state {

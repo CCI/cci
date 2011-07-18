@@ -1729,6 +1729,7 @@ static int portals_connect(
     connection->attribute=attribute;
     connection->endpoint=endpoint;
 
+    memset(&idp, 0, sizeof(idp)); /* satisfy -Wall -Werror */
     iRC=portals_getaddrinfo( server_uri, &idp );
     if(iRC)
         goto out;
@@ -2338,14 +2339,15 @@ static int portals_return_event(cci_endpoint_t *endpoint,
  * For reliable connections, we ignore send_end, and we request an ack, which
  * will trigger our CCI event.
  */
-static int portals_sendv(
-    cci_connection_t       *connection, 
+static int portals_send_common(
+    cci_connection_t       *connection,
     void                   *header_ptr,
-    uint32_t               header_len, 
+    uint32_t               header_len,
     struct iovec           *data,
     uint8_t                iovcnt,
     void                   *context,
-    int                    flags ) {
+    int                    flags,
+    portals_rma_op_t       *rma_op ) {
 
     int                    i            = 0;
     int                    ret          = CCI_SUCCESS;
@@ -2403,6 +2405,7 @@ static int portals_sendv(
     /* tx bookkeeping */
     tx->msg_type = PORTALS_MSG_SEND;
     tx->flags = flags;
+    tx->rma_op = NULL; /* only set if RMA completion msg */
 
     /* setup generic CCI event */
     tx->evt.conn = conn;
@@ -2524,12 +2527,41 @@ out:
     return ret;
 }
 
-static int portals_send(
-    cci_connection_t       *connection, 
+static int portals_sendv(
+    cci_connection_t       *connection,
     void                   *header_ptr,
-    uint32_t               header_len, 
+    uint32_t               header_len,
+    struct iovec           *data,
+    uint8_t                iovcnt,
+    void                   *context,
+    int                    flags ) {
+
+    int         i, ret;
+    uint32_t    data_len    = 0;
+
+    CCI_ENTER;
+
+    for (i = 0; i < iovcnt; i++)
+        data_len += (uint32_t) data[i].iov_len;
+
+    if (header_len + data_len > connection->max_send_size) {
+        CCI_EXIT;
+        return CCI_EMSGSIZE;
+    }
+
+    ret = portals_send_common(connection, header_ptr, header_len,
+                              data, iovcnt, context, flags, NULL);
+
+    CCI_EXIT;
+    return ret;
+}
+
+static int portals_send(
+    cci_connection_t       *connection,
+    void                   *header_ptr,
+    uint32_t               header_len,
     void                   *data_ptr,
-    uint32_t               data_len, 
+    uint32_t               data_len,
     void                   *context,
     int                    flags ) {
 
@@ -2545,8 +2577,8 @@ static int portals_send(
         iov.iov_len = data_len;
     }
 
-    ret = portals_sendv(connection, header_ptr, header_len,
-                               &iov, iovcnt, context, flags);
+    ret = portals_send_common(connection, header_ptr, header_len,
+                              &iov, iovcnt, context, flags, NULL);
     CCI_EXIT;
     return ret;
 }
@@ -2728,9 +2760,9 @@ static int portals_rma_deregister(uint64_t rma_handle)
 }
 
 
-static int portals_rma(cci_connection_t *connection, 
-                       void *header_ptr, uint32_t header_len, 
-                       uint64_t local_handle, uint64_t local_offset, 
+static int portals_rma(cci_connection_t *connection,
+                       void *header_ptr, uint32_t header_len,
+                       uint64_t local_handle, uint64_t local_offset,
                        uint64_t remote_handle, uint64_t remote_offset,
                        uint64_t data_len, void *context, int flags)
 {
@@ -3168,6 +3200,34 @@ static void portals_handle_active_msg(cci__ep_t *ep, ptl_event_t pevent)
     return;
 }
 
+static void
+portals_complete_rma(portals_rma_op_t *rma_op, portals_rma_handle_t *local, ptl_event_t event)
+{
+    cci__ep_t       *ep     = local->ep;
+    portals_ep_t    *pep    = ep->priv;
+
+    if (rma_op->flags & CCI_FLAG_SILENT) {
+        portals_conn_t *pconn = rma_op->evt.conn->priv;
+
+        /* we are done, cleanup */
+        pthread_mutex_lock(&ep->lock);
+        local->refcnt--;
+        /* FIXME check for refcnt == 0 */
+        TAILQ_REMOVE(&pep->rma_ops, rma_op, entry);
+        TAILQ_REMOVE(&pconn->rmas, rma_op, rmas);
+        pthread_mutex_unlock(&ep->lock);
+        free(rma_op);
+    } else {
+        /* we are done, issue completion */
+        rma_op->evt.event.info.send.status =
+            event.ni_fail_type == PTL_NI_OK ? CCI_SUCCESS : CCI_ERROR;
+        pthread_mutex_lock(&ep->lock);
+        TAILQ_INSERT_HEAD(&ep->evts, &rma_op->evt, entry);
+        pthread_mutex_unlock(&ep->lock);
+    }
+    return;
+}
+
 static void portals_get_event_ep(cci__ep_t *ep)
 {
     int             ret     = CCI_SUCCESS;
@@ -3304,7 +3364,7 @@ static void portals_get_event_ep(cci__ep_t *ep)
     {
         portals_msg_type_t msg_type = (portals_msg_type_t) (event.match_bits & 0x3);
         //portals_tx_t *tx = NULL;
-        portals_rma_handle_t *handle = NULL;
+        portals_rma_handle_t *handle = NULL, *local = NULL;
         portals_rma_op_t *rma_op = NULL, *ro = NULL, *tmp = NULL;
 
         assert(msg_type == PORTALS_MSG_RMA_READ);
@@ -3328,34 +3388,23 @@ static void portals_get_event_ep(cci__ep_t *ep)
                    (size_t)(ro->remote_handle | PORTALS_MSG_RMA_READ),
                    (size_t)event.rlength, (size_t)ro->data_len,
                    (off_t)event.offset, (off_t)ro->remote_offset );
-           
+
         }
         if (!rma_op) {
             /* FIXME do what now? */
         }
 
+        local = (void *)rma_op->local_handle;
+
         if (rma_op->header_len) {
             /* send remote completion msg */
-            /* TODO */
+            ret = portals_send_common(&local->conn->connection,
+                                      rma_op->header, rma_op->header_len,
+                                      NULL, 0, rma_op->context,
+                                      rma_op->flags, rma_op);
+            /* FIXME do what if failed? */
         } else {
-            if (rma_op->flags & CCI_FLAG_SILENT) {
-                portals_conn_t *pconn = rma_op->evt.conn->priv;
-                portals_rma_handle_t *local = (void *)rma_op->local_handle;
-
-                /* we are done, cleanup */
-                pthread_mutex_lock(&ep->lock);
-                local->refcnt--;
-                /* FIXME check for refcnt == 0 */
-                TAILQ_REMOVE(&pep->rma_ops, rma_op, entry);
-                TAILQ_REMOVE(&pconn->rmas, rma_op, rmas);
-                pthread_mutex_unlock(&ep->lock);
-                free(rma_op);
-            } else {
-                /* we are done, issue completion */
-                pthread_mutex_lock(&ep->lock);
-                TAILQ_INSERT_HEAD(&ep->evts, &rma_op->evt, entry);
-                pthread_mutex_unlock(&ep->lock);
-            }
+            portals_complete_rma(rma_op, local, event);
         }
         break;
     }
@@ -3379,9 +3428,10 @@ static void portals_get_event_ep(cci__ep_t *ep)
             /* a reliable msg completed, generate CCI event */
 
             tx = event.md.user_ptr;
+            rma_op = tx->rma_op;
 
             /* queue on ep->evts unless SILENT */
-            if (tx->flags & CCI_FLAG_SILENT) {
+            if (tx->flags & CCI_FLAG_SILENT || rma_op) {
                 pthread_mutex_lock(&ep->lock);
                 TAILQ_INSERT_HEAD(&pep->idle_txs, tx, dentry);
                 pthread_mutex_unlock(&ep->lock);
@@ -3392,8 +3442,15 @@ static void portals_get_event_ep(cci__ep_t *ep)
                 TAILQ_INSERT_HEAD(&ep->evts, &tx->evt, entry);
                 pthread_mutex_unlock(&ep->lock);
             }
+            if (rma_op) {
+                portals_rma_handle_t *local = (void *)rma_op->local_handle;
+                portals_complete_rma(rma_op, local, event);
+            }
             break;
         case PORTALS_MSG_RMA_WRITE:
+        {
+            portals_rma_handle_t *local = NULL;
+
             handle = event.md.user_ptr;
             TAILQ_FOREACH_SAFE(ro, &handle->rma_ops, hentry, tmp) {
                 portals_conn_t *pconn = ro->evt.conn->priv;
@@ -3403,7 +3460,9 @@ static void portals_get_event_ep(cci__ep_t *ep)
                     event.rlength == ro->data_len &&
                     event.offset == ro->remote_offset) {
 
+                    /* FIXME need lock? */
                     TAILQ_REMOVE(&handle->rma_ops, ro, hentry);
+                    /* FIXME need unlock? */
                     rma_op = ro;
                     break;
                 }
@@ -3415,32 +3474,20 @@ static void portals_get_event_ep(cci__ep_t *ep)
                 break;
             }
 
+            local = (void *)rma_op->local_handle;
+
             if (rma_op->header_len) {
                 /* send remote completion msg */
-                /* TODO */
+                ret = portals_send_common(&local->conn->connection,
+                                          rma_op->header, rma_op->header_len,
+                                          NULL, 0, rma_op->context,
+                                          rma_op->flags, rma_op);
+                /* FIXME do what if failed? */
             } else {
-                if (rma_op->flags & CCI_FLAG_SILENT) {
-                    portals_conn_t *pconn = rma_op->evt.conn->priv;
-                    portals_rma_handle_t *local = (void *)rma_op->local_handle;
-
-                    /* we are done, cleanup */
-                    pthread_mutex_lock(&ep->lock);
-                    local->refcnt--;
-                    /* FIXME check for refcnt == 0 */
-                    TAILQ_REMOVE(&pep->rma_ops, rma_op, entry);
-                    TAILQ_REMOVE(&pconn->rmas, rma_op, rmas);
-                    pthread_mutex_unlock(&ep->lock);
-                    free(rma_op);
-                } else {
-                    /* we are done, issue completion */
-                    rma_op->evt.event.info.send.status =
-                        event.ni_fail_type == PTL_NI_OK ? CCI_SUCCESS : CCI_ERROR;
-                    pthread_mutex_lock(&ep->lock);
-                    TAILQ_INSERT_HEAD(&ep->evts, &rma_op->evt, entry);
-                    pthread_mutex_unlock(&ep->lock);
-                }
+                portals_complete_rma(rma_op, local, event);
             }
             break;
+        }
         default:
             debug(CCI_DB_INFO, "we missed disabling a portals ack for "
                   "msg_type %u", (enum portals_msg_type)tx->msg_type);
