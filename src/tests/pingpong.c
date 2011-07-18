@@ -179,7 +179,7 @@ do_client()
     uint32_t min = 0, max;
     struct timeval start, end;
     char *func;
-    char header[32];
+    char *header = "Done";
 
     /* let server start */
     sleep(3);
@@ -224,10 +224,8 @@ do_client()
     }
 
     if (remote_completion) {
-        memset(header, 0, 32);
-        snprintf(header, 32, "Completed 0x%"PRIX64"", opts.server_rma_handle);
         rmt_comp_msg = header;
-        rmt_comp_len = sizeof(rmt_comp_msg);
+        rmt_comp_len = 4;
     }
 
     if (opts.method == AM)
