@@ -367,9 +367,6 @@ typedef struct portals_rma_op {
 
     uint64_t data_len;
 
-    /*! RMA id for ordering in case of fence */
-    uint32_t id;
-
     /*! Number of messages completed */
     uint32_t completed;
 
@@ -445,8 +442,6 @@ typedef struct portals_conn {
     uint32_t                mss;            /* max_segment_size for this conn */
     portals_tx_t            *tx;            /* for conn request */
     TAILQ_ENTRY(portals_conn) entry;        /* Hangs on pep->conns */
-    uint32_t                rma_id;
-    TAILQ_HEAD(s_rmas, portals_rma_op) rmas;
 }   portals_conn_t;
 
 int cci_core_portals_post_load(cci_plugin_t *me);

@@ -1438,8 +1438,6 @@ static int portals_accept(
     pconn = conn->priv;
     pconn->conn = conn;
 
-    TAILQ_INIT(&pconn->rmas);
-
     /* prepare accept msg */
 
     accept.server_ep_id = pep->id;
@@ -1721,8 +1719,6 @@ static int portals_connect(
 
     pconn=conn->priv;
     pconn->conn=conn;
-
-    TAILQ_INIT(&pconn->rmas);
 
     /* conn->tx_timeout=0  by default */
     connection=&conn->connection;
@@ -2279,7 +2275,6 @@ static int portals_return_event(cci_endpoint_t *endpoint,
             local->refcnt--;
             /* FIXME check for refcnt == 0 */
             TAILQ_REMOVE(&pep->rma_ops, rma_op, entry);
-            TAILQ_REMOVE(&pconn->rmas, rma_op, rmas);
             pthread_mutex_unlock(&ep->lock);
             free(rma_op);
         } else {
@@ -2828,7 +2823,6 @@ static int portals_rma(cci_connection_t *connection,
     rma_op->local_offset = local_offset;
     rma_op->remote_handle = remote_handle;
     rma_op->remote_offset = remote_offset;
-    rma_op->id = ++(pconn->rma_id);
     rma_op->completed = 0;
     rma_op->status = CCI_SUCCESS; /* for now */
     rma_op->context = context;
@@ -2849,7 +2843,6 @@ static int portals_rma(cci_connection_t *connection,
 
     pthread_mutex_lock(&ep->lock);
     TAILQ_INSERT_TAIL(&local->rma_ops, rma_op, hentry);
-    TAILQ_INSERT_TAIL(&pconn->rmas, rma_op, rmas);
     TAILQ_INSERT_TAIL(&pep->rma_ops, rma_op, entry);
     pthread_mutex_unlock(&ep->lock);
 
@@ -2919,7 +2912,6 @@ out:
         flags & CCI_FLAG_BLOCKING) {
         pthread_mutex_lock(&ep->lock);
         TAILQ_REMOVE(&local->rma_ops, rma_op, hentry);
-        TAILQ_REMOVE(&pconn->rmas, rma_op, rmas);
         TAILQ_REMOVE(&pep->rma_ops, rma_op, entry);
         pthread_mutex_unlock(&ep->lock);
         free(rma_op);
@@ -3214,7 +3206,6 @@ portals_complete_rma(portals_rma_op_t *rma_op, portals_rma_handle_t *local, ptl_
         local->refcnt--;
         /* FIXME check for refcnt == 0 */
         TAILQ_REMOVE(&pep->rma_ops, rma_op, entry);
-        TAILQ_REMOVE(&pconn->rmas, rma_op, rmas);
         pthread_mutex_unlock(&ep->lock);
         free(rma_op);
     } else {
