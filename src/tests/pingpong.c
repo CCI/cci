@@ -61,12 +61,13 @@ options_t opts = { 0ULL, 0, 0, 0 };
 void
 print_usage()
 {
-    fprintf(stderr, "usage: %s -h <server_uri> [-p <port>] [-s] [-c <type>] [-n] "
+    fprintf(stderr, "usage: %s -h <server_uri> [-p <port>] [-s] [-i <iters>] [-c <type>] [-n] "
                     "[[-w | -r] [-m <max_rma_size> [-C]]]\n", name);
     fprintf(stderr, "where:\n");
     fprintf(stderr, "\t-h\tServer's URI\n");
     fprintf(stderr, "\t-p\tPort of the server's connection service (default %d)\n", DFLT_PORT);
     fprintf(stderr, "\t-s\tSet to run as the server\n");
+    fprintf(stderr, "\t-i\tRun this number of iterations\n");
     fprintf(stderr, "\t-c\tConnection type (UU, RU, or RO) set by client only\n");
     fprintf(stderr, "\t-n\tSet CCI_FLAG_NO_COPY ito avoid copying\n");
     fprintf(stderr, "\t-w\tUse RMA WRITE instead of active messages\n");
@@ -345,7 +346,7 @@ int main(int argc, char *argv[])
 
     name = argv[0];
 
-    while ((c = getopt(argc, argv, "h:p:sc:nwrm:C")) != -1) {
+    while ((c = getopt(argc, argv, "h:p:sc:nwrm:Ci:")) != -1) {
         switch (c) {
         case 'h':
             server_uri = strdup(optarg);
@@ -355,6 +356,9 @@ int main(int argc, char *argv[])
             break;
         case 's':
             is_server = 1;
+            break;
+        case 'i':
+            iters = strtoul(optarg, NULL, 0);
             break;
         case 'c':
             if (strncasecmp("ru", optarg, 2) == 0)
