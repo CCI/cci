@@ -1,3 +1,6 @@
+#!/bin/csh
+# This script can either be executed or source'd.
+
   if ( $# == 0  )  then
 	echo "The purpose of this script is to reduce the loaded modules to"
 	echo "the minimum necessary to build and run CCI and optionally,"
