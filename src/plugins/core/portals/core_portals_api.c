@@ -892,6 +892,7 @@ static int portals_create_endpoint(
 
     int                    i;
     int                    iRC;
+    int                    token=0;
     cci__dev_t             *dev=NULL;
     cci__ep_t              *ep=NULL;
     portals_ep_t           *pep=NULL;
@@ -941,10 +942,19 @@ static int portals_create_endpoint(
     TAILQ_INIT(&pep->handles);
     TAILQ_INIT(&pep->rma_ops);
 
-    /* get endpoint id */
-    pthread_mutex_lock(&dev->lock);
-    portals_get_ep_id(pdev, &pep->id);
-    pthread_mutex_unlock(&dev->lock);
+    /* to avoid potential races with the progress thread, set the dev
+     * as progressing until we are done. */
+    do {
+        pthread_mutex_lock(&dev->lock);
+        if( pdev->is_progressing==0) {
+            pdev->is_progressing=1;
+            token=1;
+            /* get endpoint id */
+            portals_get_ep_id(pdev, &pep->id);
+        }
+        pthread_mutex_unlock(&dev->lock);
+    } while (!token);
+
     debug(CCI_DB_CONN, "%s: id=%u", __func__, pep->id);
 
     /* create event queue for endpoint */
@@ -997,13 +1007,20 @@ static int portals_create_endpoint(
         }
     }
 
+    pthread_mutex_lock(&dev->lock);
+    pdev->is_progressing=0;
+    pthread_mutex_unlock(&dev->lock);
+
     CCI_EXIT;
     return CCI_SUCCESS;
 
 out:
     pthread_mutex_lock(&dev->lock);
+    if (token)
+        pdev->is_progressing=0;
     TAILQ_REMOVE( &dev->eps, ep, entry );
     pthread_mutex_unlock(&dev->lock);
+
     if(pep) {
 
         if (pep->id)
@@ -1059,6 +1076,7 @@ static int portals_destroy_endpoint(cci_endpoint_t *endpoint)
     portals_ep_t    *pep    = NULL;
     portals_dev_t   *pdev   = NULL;
     int             iRC;
+    int             token   = 0;
 
     CCI_ENTER;
 
@@ -1072,6 +1090,15 @@ static int portals_destroy_endpoint(cci_endpoint_t *endpoint)
     dev = ep->dev;
     pep = ep->priv;
     pdev = dev->priv;
+
+    do {
+        pthread_mutex_lock(&ep->lock);
+        if (!pep->in_use) {
+            pep->in_use = 1;
+            token = 1;
+        }
+        pthread_mutex_unlock(&ep->lock);
+    } while (!token);
 
     pthread_mutex_lock(&dev->lock);
     pthread_mutex_lock(&ep->lock);
@@ -2951,6 +2978,7 @@ static inline void portals_progress_dev(
     TAILQ_FOREACH( ep, &dev->eps, entry) {
         portals_get_event_ep(ep);
     }
+    /* FIXME this only progresses last dev, move inside above loop */
     TAILQ_FOREACH( lep, &dev->leps, dentry ) {
         lep->dev=dev;
         portals_get_event_lep(lep);
@@ -3199,8 +3227,6 @@ portals_complete_rma(portals_rma_op_t *rma_op, portals_rma_handle_t *local, ptl_
     portals_ep_t    *pep    = ep->priv;
 
     if (rma_op->flags & CCI_FLAG_SILENT) {
-        portals_conn_t *pconn = rma_op->evt.conn->priv;
-
         /* we are done, cleanup */
         pthread_mutex_lock(&ep->lock);
         local->refcnt--;
