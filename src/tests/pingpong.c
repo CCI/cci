@@ -114,6 +114,8 @@ poll_events(void)
                     }
                 }
             }
+            if (!is_server && event->info.send.context == (void *)0xdeadbeef)
+                done = 1;
             break;
         case CCI_EVENT_RECV:
         {
@@ -282,8 +284,12 @@ do_client()
                 warmup = 2;
         }
     }
-    ret = cci_send(connection, "bye", 3, NULL, 0, NULL, opts.flags);
+
+    ret = cci_send(connection, "bye", 3, NULL, 0, (void*) 0xdeadbeef, opts.flags);
     check_return("cci_send", ret, 0);
+
+    while (!done)
+        poll_events();
 
     return;
 }
