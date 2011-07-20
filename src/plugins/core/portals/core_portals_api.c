@@ -202,6 +202,7 @@ static inline void portals_progress_dev(
                                      cci__dev_t *dev);
 static void portals_get_event_ep(cci__ep_t *ep);
 static void portals_get_event_lep(cci__lep_t *lep);
+static void portals_rma_handle_decref(portals_rma_handle_t *handle);
 
 
 /*
@@ -2299,9 +2300,8 @@ static int portals_return_event(cci_endpoint_t *endpoint,
             pconn = evt->conn->priv;
 
             pthread_mutex_lock(&ep->lock);
-            local->refcnt--;
-            /* FIXME check for refcnt == 0 */
             TAILQ_REMOVE(&pep->rma_ops, rma_op, entry);
+            portals_rma_handle_decref(local);
             pthread_mutex_unlock(&ep->lock);
             free(rma_op);
         } else {
@@ -2733,10 +2733,39 @@ static int portals_rma_register_phys(
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
+/* NOTE: caller should hold ep->lock */
+static void portals_rma_handle_decref(portals_rma_handle_t *handle)
+{
+    int             ret     = 0;
+    cci__ep_t       *ep     = NULL;
+    portals_ep_t    *pep    = NULL;
+
+    ep = handle->ep;
+    pep = ep->priv;
+
+    assert(handle->refcnt >= 1);
+
+    handle->refcnt--;
+
+    if (handle->refcnt == 0) {
+        if (handle->meh != PTL_HANDLE_NONE) {
+            /* unlink buffer if needed */
+            ret = PtlMEUnlink(handle->meh);
+            if (ret != PTL_OK) {
+                debug(CCI_DB_WARN, "Could not unlink RMA from match list");
+            }
+        }
+        TAILQ_REMOVE(&pep->handles, handle, entry);
+        memset(handle, 0, sizeof(*handle));
+        free(handle);
+    }
+
+    return;
+}
+
 
 static int portals_rma_deregister(uint64_t rma_handle)
 {
-    int                     iRC;
     int                     ret     = CCI_EINVAL;
     portals_rma_handle_t    *handle = (portals_rma_handle_t *) rma_handle;
     cci__ep_t               *ep     = NULL;
@@ -2757,21 +2786,15 @@ static int portals_rma_deregister(uint64_t rma_handle)
     pthread_mutex_lock(&ep->lock);
     TAILQ_FOREACH_SAFE(h, &pep->handles, entry, tmp) {
         if (h == handle) {
-            ret = CCI_SUCCESS;
-            handle->refcnt--;
-            iRC=PtlMEUnlink( handle->meh );
-            if( iRC!=PTL_OK )                /* Portals error! */
-                debug( CCI_DB_WARN, "Could not unlink meh" );
-            if (handle->refcnt == 0) {
-                TAILQ_REMOVE(&pep->handles, handle, entry);
-                memset(handle, 0, sizeof(*handle));
-                free(handle);
-            } else {                         /* Memory leak warning */
-                ret = CCI_ERR_RMA_OP;
-                debug( CCI_DB_MEM,
-                       "Did not deallocate handle  refcnt=%u",
-                       handle->refcnt );
+            if (handle->meh != PTL_HANDLE_NONE) {
+                ret = PtlMEUnlink(handle->meh);
+                if (ret == PTL_OK)
+                    handle->meh = PTL_HANDLE_NONE;
+                else
+                    debug(CCI_DB_DRVR, "Could not unlink RMA from match list");
             }
+            portals_rma_handle_decref(handle);
+            ret = CCI_SUCCESS;
             break;
         }
     }
@@ -2788,7 +2811,7 @@ static int portals_rma(cci_connection_t *connection,
                        uint64_t remote_handle, uint64_t remote_offset,
                        uint64_t data_len, void *context, int flags)
 {
-    int                     ret     = CCI_ERR_NOT_IMPLEMENTED;
+    int                     ret     = CCI_SUCCESS;
     cci__ep_t               *ep     = NULL;
     cci__dev_t              *dev    = NULL;
     cci__conn_t             *conn   = NULL;
@@ -2833,13 +2856,20 @@ static int portals_rma(cci_connection_t *connection,
         CCI_EXIT;
         return CCI_EINVAL;
     }
+    /* if refcnt == 0, app handed us an invalid handle or is multi-threaded
+     * another thread just unregistered it. Warn them. */
+    if (local->refcnt == 0)
+        debug(CCI_DB_WARN, "%s: local handle refcnt is 0", __func__);
+
     local->refcnt++;
 
     rma_op = calloc(1, sizeof(*rma_op));
     if (!rma_op) {
         pthread_mutex_lock(&ep->lock);
         local->refcnt--;
-        /* FIXME check if refcnt == 0 and free */
+        /* if refcnt == 0, app handed us an invalid handle or is multi-threaded
+         * another thread just unregistered it. Warn them. */
+        debug(CCI_DB_WARN, "%s: local handle refcnt is 0", __func__);
         pthread_mutex_unlock(&ep->lock);
         CCI_EXIT;
         return CCI_ENOMEM;
@@ -2978,7 +3008,6 @@ static inline void portals_progress_dev(
     TAILQ_FOREACH( ep, &dev->eps, entry) {
         portals_get_event_ep(ep);
     }
-    /* FIXME this only progresses last dev, move inside above loop */
     TAILQ_FOREACH( lep, &dev->leps, dentry ) {
         lep->dev=dev;
         portals_get_event_lep(lep);
@@ -3229,9 +3258,8 @@ portals_complete_rma(portals_rma_op_t *rma_op, portals_rma_handle_t *local, ptl_
     if (rma_op->flags & CCI_FLAG_SILENT) {
         /* we are done, cleanup */
         pthread_mutex_lock(&ep->lock);
-        local->refcnt--;
-        /* FIXME check for refcnt == 0 */
         TAILQ_REMOVE(&pep->rma_ops, rma_op, entry);
+        portals_rma_handle_decref(local);
         pthread_mutex_unlock(&ep->lock);
         free(rma_op);
     } else {
