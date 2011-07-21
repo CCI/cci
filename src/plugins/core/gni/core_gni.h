@@ -115,25 +115,6 @@ typedef enum gni_msg_oob_type {
     GNI_MSG_KEEPALIVE
 }   gni_msg_oob_type_t;
 
-typedef enum gni_am_state {
-
-    GNI_AM_DONE=-1,                          // no longer needed
-    GNI_AM_INACTIVE,                         // in use, but unlinked
-    GNI_AM_ACTIVE                            // in use and linked
-} gni_am_state_t;
-
-typedef struct gni_am_buffer {
-    void *                      buffer;      // buffer for incoming msgs
-    uint32_t                    length;      // max_recv_buffer_count 
-    gni_am_state_t              state;
-    uint32_t                    refcnt;      // fragments held by app
-    struct gni_ep *             gep;         // owning GNI endpoint */
-//  ptl_md_t                    md;          // MD
-//  ptl_handle_me_t             meh;         // ME handle
-//  ptl_handle_md_t             mdh;         // MD handle
-    TAILQ_ENTRY(gni_am_buffer)  entry;       // Hangs on gep->ams
-} gni_am_buffer_t;
-
 typedef struct gni_rx {
     cci__evt_t                  evt;         // associated event
     gni_msg_type_t              msg_type;    // message type
@@ -168,14 +149,12 @@ typedef struct gni_ep {
     gni_cq_handle_t             cqhl;        // Local CQ handle
     gni_cq_handle_t             cqhd;        // Destination CQ handle
     int32_t                     in_use;      // to serialize get_event
+    void *                      txbuf;       // Large buffer for tx's
+    void *                      rxbuf;       // Large buffer for rx's
     TAILQ_HEAD(g_txs, gni_tx)   txs;         // List of all txs
     TAILQ_HEAD(g_txsi, gni_tx)  idle_txs;    // List of idle txs
     TAILQ_HEAD(g_rxs, gni_rx)   rxs;         // List of all rxs
-    TAILQ_HEAD(g_rxsi, gni_rx)  idle_rxs;    // List of all rxs
-    TAILQ_HEAD(g_ams, gni_am_buffer)
-                                ams;         // List of AM buffers
-    TAILQ_HEAD(g_oams, gni_am_buffer)
-                                orphan_ams;  // List of DONE AM buffers
+    TAILQ_HEAD(g_rxsi, gni_rx)  idle_rxs;    // List of idle rxs
     TAILQ_HEAD(g_conns, gni_conn) conns;     // List of all conns
     TAILQ_HEAD(g_handles, gni_rma_handle)
                                  handles;    // List of RMA regions

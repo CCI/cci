@@ -652,9 +652,7 @@ static int gni_add_tx(                       // Caller must hold ep->lock
     gni_dev_t *                 gdev=ep->dev->priv;
     gni_return_t                status;
 
-    debug( CCI_DB_INFO, "Rank %.8d In %s", gdev->Rank, __func__ );
     status=0;
-    i=0;
     remote_addr=0;
     tx=calloc( 1, sizeof(*tx) );
     if(!tx) {
@@ -665,24 +663,17 @@ static int gni_add_tx(                       // Caller must hold ep->lock
     tx->evt.event.type=CCI_EVENT_SEND;
     tx->evt.ep=ep;
 
-    tx->buffer=calloc( 1, ep->buffer_len );
-    if(!tx->buffer) {
-
-        debug( CCI_DB_WARN, "FAIL: %s: No buffer", __func__ );
-        ret=0;
-        goto out;
-    }
+    tx->buffer=gep->txbuf+i*ep->buffer_len;
     tx->len=0;
 
-    debug( CCI_DB_INFO, "Rank %.8d In %s", gdev->Rank, __func__ );
-//  status=GNI_EpCreate( gdev->nh, gep->cqhl, &(tx->eph) );
+    status=GNI_EpCreate( gdev->nh, gep->cqhl, &(tx->eph) );
     if( status!=GNI_RC_SUCCESS ) {
 
         debug( CCI_DB_WARN, "FAIL: %s: GNI_EpCreate returned error %s",
                __func__, gni_err_str[(enum cci_status)status] );
         goto out;
     }
-//  status=GNI_EpBind( tx->eph, remote_addr, i );
+    status=GNI_EpBind( tx->eph, remote_addr, i );
     if( status!=GNI_RC_SUCCESS ) {
 
         debug( CCI_DB_WARN, "FAIL: %s: GNI_EpBind returned error %s",
@@ -692,8 +683,6 @@ static int gni_add_tx(                       // Caller must hold ep->lock
 
     TAILQ_INSERT_TAIL( &gep->txs, tx, tentry );
     TAILQ_INSERT_TAIL( &gep->idle_txs, tx, dentry );
-    return(CCI_SUCCESS);
-
 out:
     if(!ret) {
         if(tx) {
@@ -702,6 +691,7 @@ out:
             free(tx);
         }
     }
+//  debug( CCI_DB_INFO, "Rank %.8d Leaving %s: %d", gdev->Rank, __func__, i );
     return(ret);
 }
 
@@ -717,9 +707,7 @@ static int gni_add_rx(                       // Caller must hold ep->lock
     gni_dev_t *                 gdev=ep->dev->priv;
     gni_return_t                status;
 
-    debug( CCI_DB_INFO, "Rank %.8d In %s", gdev->Rank, __func__ );
     status=0;
-    i=0;
     remote_addr=0;
     rx=calloc( 1, sizeof(*rx) );
     if(!rx) {
@@ -730,23 +718,17 @@ static int gni_add_rx(                       // Caller must hold ep->lock
     rx->evt.event.type=CCI_EVENT_RECV;
     rx->evt.ep=ep;
 
-    rx->buffer=calloc( 1, ep->buffer_len );
-    if(!rx->buffer) {
-
-        debug( CCI_DB_WARN, "FAIL: %s: No buffer", __func__ );
-        ret=0;
-        goto out;
-    }
+    rx->buffer=gep->rxbuf+i*ep->buffer_len;
     rx->len=0;
 
-//  status=GNI_EpCreate( gdev->nh, gep->cqhl, &(rx->eph) );
+    status=GNI_EpCreate( gdev->nh, gep->cqhl, &(rx->eph) );
     if( status!=GNI_RC_SUCCESS ) {
 
         debug( CCI_DB_WARN, "FAIL: %s: GNI_EpCreate returned error %s",
                __func__, gni_err_str[(enum cci_status)status] );
         goto out;
     }
-//  status=GNI_EpBind( rx->eph, remote_addr, i );
+    status=GNI_EpBind( rx->eph, remote_addr, i );
     if( status!=GNI_RC_SUCCESS ) {
 
         debug( CCI_DB_WARN, "FAIL: %s: GNI_EpBind returned error %s",
@@ -756,7 +738,6 @@ static int gni_add_rx(                       // Caller must hold ep->lock
 
     TAILQ_INSERT_TAIL(&gep->rxs, rx, gentry);
     TAILQ_INSERT_TAIL(&gep->idle_rxs, rx, entry);
-
 out:
     if(!ret) {
         if(rx) {
@@ -765,6 +746,7 @@ out:
             free(rx);
         }
     }
+//  debug( CCI_DB_INFO, "Rank %.8d Leaving %s: %d", gdev->Rank, __func__, i );
     return(ret);
 }
 
@@ -820,8 +802,6 @@ static int gni_create_endpoint(   cci_device_t *         device,
     TAILQ_INIT(&gep->idle_txs);
     TAILQ_INIT(&gep->rxs);
     TAILQ_INIT(&gep->idle_rxs);
-    TAILQ_INIT(&gep->ams);
-    TAILQ_INIT(&gep->orphan_ams);
     TAILQ_INIT(&gep->conns);
     TAILQ_INIT(&gep->handles);
     TAILQ_INIT(&gep->rma_ops);
@@ -868,7 +848,8 @@ static int gni_create_endpoint(   cci_device_t *         device,
            "Rank=%.8d %s: CqCreate: nh=0x%zx cqhd=0x%zx",
            gdev->Rank, __func__, gdev->nh, gep->cqhd );
 
-//  Create short message send buffers.
+//  Allocate tx buffer space and assign short message send buffers.
+    gep->txbuf=calloc( ep->tx_buf_cnt, ep->buffer_len );
     for( i=0; i<ep->tx_buf_cnt; i++ )
         if( (iRC=gni_add_tx( i, ep ))!=1 ) {
   
@@ -876,9 +857,10 @@ static int gni_create_endpoint(   cci_device_t *         device,
             goto out;
         }
     debug( CCI_DB_INFO, "Rank=%.8d %s: gni_add_tx: buffers=%d",
-           gdev->Rank, ep->tx_buf_cnt );
+           gdev->Rank, __func__, ep->tx_buf_cnt );
 
-//  Create short message receive buffers.
+//  Allocate rx buffer space and assign short message receive buffers.
+    gep->rxbuf=calloc( ep->rx_buf_cnt, ep->buffer_len );
     for( i=0; i<ep->rx_buf_cnt; i++ )
         if( (iRC=gni_add_rx( i, ep ))!=1 ) {
   
@@ -886,7 +868,7 @@ static int gni_create_endpoint(   cci_device_t *         device,
             goto out;
         }
     debug( CCI_DB_INFO, "Rank=%.8d %s: gni_add_rx: buffers=%d",
-           gdev->Rank, ep->rx_buf_cnt );
+           gdev->Rank, __func__, ep->rx_buf_cnt );
 
     CCI_EXIT;
     return(CCI_SUCCESS);
@@ -900,7 +882,7 @@ out:
         if(gep->id)
             gni_put_ep_id( gdev, gep->id );
 
-//      if( gep->cqhl!=### )
+        if( gep->cqhl!=0 )
             if( (status=GNI_CqDestroy(gep->cqhl))!=GNI_RC_SUCCESS ) {
 
                 debug( CCI_DB_WARN,
@@ -909,7 +891,7 @@ out:
                 return(CCI_ERROR);
             }
 
-//      if( gep->cqhd!=### )
+        if( gep->cqhd!=0 )
             if( (status=GNI_CqDestroy(gep->cqhd))!=GNI_RC_SUCCESS ) {
 
                 debug( CCI_DB_WARN,
@@ -917,34 +899,6 @@ out:
                        gni_err_str[status] );
                 return(CCI_ERROR);
             }
-
-        while( !TAILQ_EMPTY(&gep->ams) ) {
-
-            gni_am_buffer_t *   am=TAILQ_FIRST(&gep->ams);
-
-            TAILQ_REMOVE( &gep->ams, am, entry );
-            if(am->buffer) {
-
-//              if( am->state==GNI_AM_ACTIVE )
-//                  PtlMEUnlink(am->meh);
-                free(am->buffer);
-            }
-            free(am);
-        }
-
-        while( !TAILQ_EMPTY(&gep->orphan_ams) ) {
-
-            gni_am_buffer_t *   am=TAILQ_FIRST(&gep->orphan_ams);
-
-            TAILQ_REMOVE( &gep->orphan_ams, am, entry );
-            if(am->buffer) {
-
-//              if( am->meh!=0 )
-//                  PtlMEUnlink(am->meh);
-                free(am->buffer);
-            }
-            free(am);
-        }
 
 //      while( !TAILQ_EMPTY(&gep->txs) )
 //          gni_free_tx( gep, 1 );
