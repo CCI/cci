@@ -18,35 +18,19 @@ BEGIN_C_DECLS
 #define GNI_MAX_MSS           (64 * 1024)
 
 #define GNI_BLOCK_SIZE        (64)           // bytes for id storage
-#define GNI_EP_MAX_HDR_SIZE   (32)           // per spec
-#define GNI_EP_BUF_LEN        (8192)         // 8 kB for now
-#define GNI_EP_RX_CNT         (1024)         // max rx messages
-#define GNI_EP_TX_CNT         (128)          // max tx messages
-#define GNI_EQ_RX_CNT         GNI_EP_RX_CNT * 3
-#define GNI_EQ_TX_CNT         GNI_EP_TX_CNT * 4
+#define GNI_EP_MAX_HDR_SIZE   (32)           // per CCI spec
+#define GNI_EP_BUF_LEN        (64 * 1024)    // 64 kB
+#define GNI_EP_RX_CNT         (1024)         // MAX rx messages
+#define GNI_EP_TX_CNT         (128)          // MAX tx messages
 #define GNI_BLOCK_SIZE        (64)           // 64b blocks for id
 #define GNI_NUM_BLOCKS        (16384)        // number of blocks
 #define GNI_MAX_EP_ID         (GNI_BLOCK_SIZE * GNI_NUM_BLOCKS)
 #define GNI_EP_BITS           (32)
 #define GNI_EP_SHIFT          (32)
-#define GNI_PROG_TIME_US      (10000) // try progress every N microseconds
+#define GNI_PROG_TIME_US      (10000)        // progress delay micro-sec
 
 #define GNI_EP_MATCH          ((uint64_t)0)
 #define GNI_EP_IGNORE         (~((uint64_t)0))
-
-typedef struct gni_globals {
-    int                         count;       // gni devices
-    const cci_device_t **       devices;     // Array of devices
-}   gni_globals_t;
-
-typedef struct gni_dev {
-    uint8_t                     ptag;
-    uint32_t                    cookie;
-    gni_cdm_handle_t            cdm_hndl;
-    gni_nic_handle_t            nic_hndl;
-    int                         is_progressing; // Being progressed?
-    uint64_t *                  ep_ids;         // Endpoint id blocks
-}   gni_dev_t;
 
 static inline uint64_t gni_tv_to_usecs(
     struct timeval              tv ) {
@@ -92,9 +76,117 @@ static inline uint64_t gni_get_nsecs(void) {
 }
 #endif
 
+typedef struct gni_globals {
 
-int cci_core_gni_post_load(       cci_plugin_t *         me );
-int cci_core_gni_pre_unload(      cci_plugin_t *         me );
+    int32_t                     count;       // GNI devices
+    const cci_device_t **       devices;     // Array of devices
+}   gni_globals_t;
+
+typedef struct gni_dev {
+
+    uint8_t                     ptag;        // protection tag
+    uint8_t                     pad0;        // pad
+    uint16_t                    pad1;        // pad
+    uint32_t                    Rank;        // parallel job Rank
+    uint32_t                    cookie;      // system generated ID
+    uint32_t                    modes;       // Comm. domain flag(s)
+    uint32_t                    kid;         // Minor number of device
+    uint32_t                    idpe;        // pointer to PE address
+    uint32_t                    progressing; // Being progressed?
+    uint64_t *                  ep_ids;      // Endpoint id blocks
+    gni_cdm_handle_t            cdh;         // Comm. domain handle
+    gni_nic_handle_t            nh;          // NIC handle
+}   gni_dev_t;
+
+// Limit of 4 message types to ensure we only use 2 bits for msg type
+typedef enum gni_msg_type {
+
+    GNI_MSG_SEND,
+    GNI_MSG_RMA_WRITE,
+    GNI_MSG_RMA_READ,
+    GNI_MSG_OOB
+}   gni_msg_type_t;
+
+// OOB msg types
+typedef enum gni_msg_oob_type {
+
+    GNI_MSG_OOB_CONN_REQUEST,
+    GNI_MSG_OOB_CONN_REPLY,
+    GNI_MSG_KEEPALIVE
+}   gni_msg_oob_type_t;
+
+typedef enum gni_am_state {
+
+    GNI_AM_DONE=-1,                          // no longer needed
+    GNI_AM_INACTIVE,                         // in use, but unlinked
+    GNI_AM_ACTIVE                            // in use and linked
+} gni_am_state_t;
+
+typedef struct gni_am_buffer {
+    void *                      buffer;      // buffer for incoming msgs
+    uint32_t                    length;      // max_recv_buffer_count 
+    gni_am_state_t              state;
+    uint32_t                    refcnt;      // fragments held by app
+    struct gni_ep *             gep;         // owning GNI endpoint */
+//  ptl_md_t                    md;          // MD
+//  ptl_handle_me_t             meh;         // ME handle
+//  ptl_handle_md_t             mdh;         // MD handle
+    TAILQ_ENTRY(gni_am_buffer)  entry;       // Hangs on gep->ams
+} gni_am_buffer_t;
+
+typedef struct gni_rx {
+    cci__evt_t                  evt;         // associated event
+    gni_msg_type_t              msg_type;    // message type
+    gni_msg_oob_type_t          oob_type;    // oob type
+    int32_t                     flags;       // CCI flags
+    void *                      buffer;      // active msg buffer
+    uint16_t                    len;         // length of buffer
+    gni_ep_handle_t             eph;         // ep handle
+    TAILQ_ENTRY(gni_rx)         gentry;      // Hangs on ep->rxs
+    TAILQ_ENTRY(gni_rx)         entry;       // Hangs on ep->idle_rxs
+}   gni_rx_t;
+
+typedef struct gni_tx {
+
+    cci__evt_t                  evt;         // associated event
+    gni_msg_type_t              msg_type;    // message type
+    gni_msg_oob_type_t          oob_type;    // oob type
+    int32_t                     flags;       // CCI flags
+    void *                      buffer;      // active msg buffer
+    uint16_t                    len;         // length of buffer
+    gni_ep_handle_t             eph;         // ep handle
+    TAILQ_ENTRY(gni_tx)         tentry;      // Hangs on ep->txs
+    TAILQ_ENTRY(gni_tx)         dentry;      // Hangs on ep->idle_txs
+                                             //          dev->queued
+                                             //          dev->pending
+}   gni_tx_t;
+
+
+typedef struct gni_ep {
+
+    uint32_t                    id;          // id for multiplexing
+    gni_cq_handle_t             cqhl;        // Local CQ handle
+    gni_cq_handle_t             cqhd;        // Destination CQ handle
+    int32_t                     in_use;      // to serialize get_event
+    TAILQ_HEAD(g_txs, gni_tx)   txs;         // List of all txs
+    TAILQ_HEAD(g_txsi, gni_tx)  idle_txs;    // List of idle txs
+    TAILQ_HEAD(g_rxs, gni_rx)   rxs;         // List of all rxs
+    TAILQ_HEAD(g_rxsi, gni_rx)  idle_rxs;    // List of all rxs
+    TAILQ_HEAD(g_ams, gni_am_buffer)
+                                ams;         // List of AM buffers
+    TAILQ_HEAD(g_oams, gni_am_buffer)
+                                orphan_ams;  // List of DONE AM buffers
+    TAILQ_HEAD(g_conns, gni_conn) conns;     // List of all conns
+    TAILQ_HEAD(g_handles, gni_rma_handle)
+                                 handles;    // List of RMA regions
+    TAILQ_HEAD(g_ops, gni_rma_op)
+                                 rma_ops;    // List of RMA operations
+}   gni_ep_t;
+
+int cci_core_gni_post_load(
+    cci_plugin_t *              me );
+int cci_core_gni_pre_unload(
+    cci_plugin_t *              me );
 
 END_C_DECLS
 
