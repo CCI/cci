@@ -804,6 +804,8 @@ portals_post_am_buffer(cci__ep_t *ep, portals_am_buffer_t *am)
                         &(am->meh),
                         &(am->mdh));
     if( ret != PTL_OK ) {
+        am->meh = PTL_HANDLE_NONE;
+        am->mdh = PTL_HANDLE_NONE;
         switch(ret) {
 
             case PTL_NO_INIT:           /* Portals library issue */
@@ -856,6 +858,8 @@ portals_create_am_buffer(cci__ep_t *ep, uint64_t length)
 
     am->length = length;
     am->pep = pep;
+    am->meh = PTL_HANDLE_NONE;
+    am->mdh = PTL_HANDLE_NONE;
 
     /*  Create the memory descriptor. */
     am->md.start = am->buffer;
@@ -866,7 +870,6 @@ portals_create_am_buffer(cci__ep_t *ep, uint64_t length)
     am->md.eq_handle = pep->eqh;
     am->md.options  = PTL_MD_OP_PUT;
     am->md.options |= PTL_MD_TRUNCATE;
-    am->md.options |= PTL_MD_EVENT_START_DISABLE;
     am->md.options |= PTL_MD_MAX_SIZE;
 
     ret = portals_post_am_buffer(ep, am);
@@ -885,10 +888,37 @@ out:
     return ret;
 }
 
+/* Caller must be holding ep->lock */
+static void portals_free_orphan_ams(portals_ep_t *pep)
+{
+    int iRC;
+    portals_am_buffer_t *am, *tmp;
+
+    TAILQ_FOREACH_SAFE(am, &pep->orphan_ams, entry, tmp) {
+        if (am->refcnt > 0)
+            continue;
+
+        TAILQ_REMOVE(&pep->orphan_ams, am, entry);
+        if (am->buffer) {
+            while (am->meh != PTL_HANDLE_NONE) {
+                iRC = PtlMEUnlink(am->meh);
+                if (iRC == PTL_OK || iRC == PTL_ME_INVALID) {
+                    am->meh = PTL_HANDLE_NONE;
+                } else {
+                    debug(CCI_DB_DRVR, "PtlMEUnlink() returned %s", ptl_err_str[iRC]);
+                }
+            }
+            free(am->buffer);
+        }
+        free(am);
+    }
+    return;
+}
+
 static int portals_create_endpoint(
-    cci_device_t           *device, 
-    int                    flags, 
-    cci_endpoint_t         **endpoint, 
+    cci_device_t           *device,
+    int                    flags,
+    cci_endpoint_t         **endpoint,
     cci_os_handle_t        *fd) {
 
     int                    i;
@@ -1034,23 +1064,17 @@ out:
             portals_am_buffer_t *am = TAILQ_FIRST(&pep->ams);
             TAILQ_REMOVE(&pep->ams, am, entry);
             if (am->buffer) {
-                if (am->state == PORTALS_AM_ACTIVE)
-                    PtlMEUnlink(am->meh);
+                if (am->state == PORTALS_AM_ACTIVE) {
+                    iRC = PtlMEUnlink(am->meh);
+                    if (iRC != PTL_OK)
+                        debug(CCI_DB_DRVR, "PtlMEUnlink() returned %s", ptl_err_str[iRC]);
+                }
                 free(am->buffer);
             }
             free(am);
         }
 
-        while (!TAILQ_EMPTY(&pep->orphan_ams)) {
-            portals_am_buffer_t *am = TAILQ_FIRST(&pep->orphan_ams);
-            TAILQ_REMOVE(&pep->orphan_ams, am, entry);
-            if (am->buffer) {
-                if (am->meh != 0)
-                    PtlMEUnlink(am->meh);
-                free(am->buffer);
-            }
-            free(am);
-        }
+        portals_free_orphan_ams(pep);
 
         while(!TAILQ_EMPTY(&pep->txs))
             portals_free_tx(pep, 1);
@@ -1121,9 +1145,14 @@ static int portals_destroy_endpoint(cci_endpoint_t *endpoint)
             TAILQ_REMOVE(&pep->ams, am, entry);
             if (am->buffer) {
                 if (am->state == PORTALS_AM_ACTIVE) {
-                    iRC = PtlMEUnlink(am->meh);
-                    if (iRC != PTL_OK)
-                        debug(CCI_DB_DRVR, "PtlMEUnlink() returned %s", ptl_err_str[iRC]);
+                    while (am->meh != PTL_HANDLE_NONE) {
+                        iRC = PtlMEUnlink(am->meh);
+                        if (iRC == PTL_OK || iRC == PTL_ME_INVALID) {
+                            am->meh = PTL_HANDLE_NONE;
+                        } else {
+                            debug(CCI_DB_DRVR, "PtlMEUnlink() returned %s", ptl_err_str[iRC]);
+                        }
+                    }
                 }
                 debug( CCI_DB_MEM, "Free AM buffer=%p", am->buffer );
                 free(am->buffer);
@@ -1132,19 +1161,7 @@ static int portals_destroy_endpoint(cci_endpoint_t *endpoint)
             free(am);
         }
 
-        while (!TAILQ_EMPTY(&pep->orphan_ams)) {
-            portals_am_buffer_t *am = TAILQ_FIRST(&pep->orphan_ams);
-            TAILQ_REMOVE(&pep->orphan_ams, am, entry);
-            if (am->buffer) {
-                if (am->meh != 0) {
-                    iRC = PtlMEUnlink(am->meh);
-                    if (iRC != PTL_OK)
-                        debug(CCI_DB_DRVR, "PtlMEUnlink() returned %s", ptl_err_str[iRC]);
-                }
-                free(am->buffer);
-            }
-            free(am);
-        }
+        portals_free_orphan_ams(pep);
 
         while(!TAILQ_EMPTY(&pep->conns)) {
             cci__conn_t     *conn;
@@ -1176,7 +1193,7 @@ static int portals_destroy_endpoint(cci_endpoint_t *endpoint)
 static int portals_bind(
     cci_device_t           *device,
     int                    backlog,
-    uint32_t               *port, 
+    uint32_t               *port,
     cci_service_t          **service,
     cci_os_handle_t        *fd ) {
 
@@ -1944,21 +1961,24 @@ portals_orphan_am_buffer(cci__ep_t *ep, portals_am_buffer_t *am)
 
     /* if ACTIVE, unlink */
     if (am->state == PORTALS_AM_ACTIVE) {
-        ret = PtlMEUnlink(am->meh);
-        if (ret == PTL_OK)
-            am->meh = 0;
+        if (am->meh != PTL_HANDLE_NONE) {
+            ret = PtlMEUnlink(am->meh);
+            if (ret == PTL_OK || ret == PTL_ME_INVALID) {
+                am->meh = PTL_HANDLE_NONE;
+            }
+        }
     } else {
-        am->meh = 0;
+        am->meh = PTL_HANDLE_NONE;
     }
     /* we no longer need the mdh */
-    am->mdh = 0;
+    am->mdh = PTL_HANDLE_NONE;
 
     /* set state to DONE */
     am->state = PORTALS_AM_DONE;
 
     /* if refcnt == 0 and unlinked, free it */
     if (am->refcnt == 0) {
-        if (am->meh == 0) {
+        if (am->meh == PTL_HANDLE_NONE) {
             free(am->buffer);
             free(am);
             goto out;
@@ -1986,7 +2006,7 @@ out:
  * buffers.
  *
  * When reducing the number of rxs, we try to free
- * (current - new_count) rxs. If the rxs are in use and 
+ * (current - new_count) rxs. If the rxs are in use and
  * not enough are in the idle rxs list, we will report
  * success. In this case, we will set the ep->rx_buf_cnt
  * to the number left which might be higher than new_count.
@@ -2257,7 +2277,7 @@ static int portals_get_event(cci_endpoint_t *endpoint,
 }
 
 
-static int portals_return_event(cci_endpoint_t *endpoint, 
+static int portals_return_event(cci_endpoint_t *endpoint,
                                 cci_event_t *event )
 {
     int                 iRC     = CCI_SUCCESS;
@@ -2327,7 +2347,7 @@ static int portals_return_event(cci_endpoint_t *endpoint,
             iRC = portals_post_am_buffer(ep, am);
             if (iRC) {
                 debug(CCI_DB_WARN, "%s: post_am_buffer() returned %s",
-                                   __func__, cci_strerror((enum cci_status)iRC));
+                      __func__, cci_strerror((enum cci_status)iRC));
             }
         }
         pthread_mutex_unlock(&ep->lock);
@@ -2617,7 +2637,7 @@ static int portals_send(
 static int portals_rma_register(
     cci_endpoint_t         *endpoint,
     cci_connection_t       *connection,
-    void                   *start, 
+    void                   *start,
     uint64_t               length,
     uint64_t               *rma_handle ) {
 
@@ -3005,7 +3025,10 @@ static inline void portals_progress_dev(
     }
 
     TAILQ_FOREACH( ep, &dev->eps, entry) {
+        portals_ep_t *pep = ep->priv;
+
         portals_get_event_ep(ep);
+        portals_free_orphan_ams(pep);
     }
     TAILQ_FOREACH( lep, &dev->leps, dentry ) {
         lep->dev=dev;
@@ -3099,6 +3122,7 @@ static void portals_handle_conn_reply(cci__ep_t *ep, ptl_event_t pevent)
         int active = 0;
         portals_am_buffer_t *a;
 
+        /* FIXME */
         PtlMEUnlink(am->meh);
         am->state = PORTALS_AM_INACTIVE;
         debug((CCI_DB_INFO|CCI_DB_CONN), "%s: unlinking active message buffer", __func__);
@@ -3154,7 +3178,6 @@ static void portals_handle_conn_reply(cci__ep_t *ep, ptl_event_t pevent)
         debug(CCI_DB_CONN, "%s: recv'd reject", __func__);
     }
     pthread_mutex_lock(&ep->lock);
-    am->refcnt++;
     TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
     TAILQ_INSERT_HEAD(&pep->idle_txs, pconn->tx, dentry);
     pconn->tx = NULL;
@@ -3241,7 +3264,6 @@ static void portals_handle_active_msg(cci__ep_t *ep, ptl_event_t pevent)
 
     pthread_mutex_lock(&ep->lock);
     TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
-    am->refcnt++;
     pthread_mutex_unlock(&ep->lock);
 
     CCI_EXIT;
@@ -3344,7 +3366,7 @@ static void portals_get_event_ep(cci__ep_t *ep)
                 pthread_mutex_unlock(&ep->lock);
             } else {
                 /* generate CCI_EVENT_SEND */
-                tx->evt.event.info.send.status = 
+                tx->evt.event.info.send.status =
                     event.ni_fail_type == PTL_NI_OK ? CCI_SUCCESS : CCI_ERROR;
                 pthread_mutex_lock(&ep->lock);
                 TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
@@ -3356,12 +3378,30 @@ static void portals_get_event_ep(cci__ep_t *ep)
                   "msg_type %u", (enum portals_msg_type)(tx->msg_type));
             break;
         }
-        
+
         break;
     }
     case PTL_EVENT_PUT_START:
-        debug(CCI_DB_INFO, "we missed disabling a put_start");
+    {
+        portals_msg_type_t  type;
+        uint64_t            a;
+
+        portals_parse_match_bits(event.match_bits, &type, &a);
+        switch (type) {
+        case PORTALS_MSG_SEND:
+        case PORTALS_MSG_OOB:
+        {
+            portals_am_buffer_t *am = event.md.user_ptr;
+            pthread_mutex_lock(&ep->lock);
+            am->refcnt++;
+            pthread_mutex_unlock(&ep->lock);
+            break;
+        }
+        default:
+            break;
+        }
         break;
+    }
     case PTL_EVENT_PUT_END:
       {
         portals_msg_type_t  type;
