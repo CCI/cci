@@ -2127,10 +2127,9 @@ static int portals_set_opt(cci_opt_handle_t *handle,
 }
 
 
-// Todo
 static int portals_get_opt(
-    cci_opt_handle_t       *handle, 
-    cci_opt_level_t        level, 
+    cci_opt_handle_t       *handle,
+    cci_opt_level_t        level,
     cci_opt_name_t         name,
     void                   **val,
     int                    *len ) {
@@ -2138,7 +2137,7 @@ static int portals_get_opt(
     CCI_ENTER;
     CCI_EXIT;
 
-    return CCI_ERR_NOT_IMPLEMENTED;
+    return CCI_EINVAL;
 }
 
 
@@ -2154,7 +2153,7 @@ static int portals_arm_os_handle(
 }
 
 
-static int portals_get_event(cci_endpoint_t *endpoint, 
+static int portals_get_event(cci_endpoint_t *endpoint,
                              cci_event_t **const event,
                              uint32_t flags )
 {

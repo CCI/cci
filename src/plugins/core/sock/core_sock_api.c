@@ -1595,8 +1595,6 @@ static int sock_get_opt(cci_opt_handle_t *handle,
                             cci_opt_level_t level, 
                             cci_opt_name_t name, void** val, int *len)
 {
-    int             ret = CCI_SUCCESS;
-
     CCI_ENTER;
 
     if (!sglobals) {
@@ -1606,7 +1604,7 @@ static int sock_get_opt(cci_opt_handle_t *handle,
 
     CCI_EXIT;
 
-    return ret;
+    return CCI_EINVAL;
 }
 
 
