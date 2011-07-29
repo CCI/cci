@@ -3811,7 +3811,8 @@ sock_recvfrom_lep(cci__lep_t *lep)
         *((cci_device_t ***) &(crq->conn_req.devices)) = (cci_device_t **) sglobals->devices;
         crq->conn_req.devices_cnt = sglobals->count;
         crq->conn_req.data_len = b;
-        crq->conn_req.data_ptr = (((sock_header_r_t *)scrq->buffer)->data);
+        crq->conn_req.data_ptr = (((sock_header_r_t *)scrq->buffer)->data) +
+                                 (uintptr_t)sizeof(sock_handshake_t);
         crq->conn_req.attribute = (enum cci_conn_attribute)a;
         *((struct sockaddr_in *) &scrq->sin) = sin;
     
