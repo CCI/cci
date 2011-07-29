@@ -47,45 +47,45 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps);
 static const char *sock_strerror(enum cci_status status);
 static int sock_get_devices(cci_device_t const ***devices);
 static int sock_free_devices(cci_device_t const **devices);
-static int sock_create_endpoint(cci_device_t *device, 
-                                    int flags, 
-                                    cci_endpoint_t **endpoint, 
+static int sock_create_endpoint(cci_device_t *device,
+                                    int flags,
+                                    cci_endpoint_t **endpoint,
                                     cci_os_handle_t *fd);
 static int sock_destroy_endpoint(cci_endpoint_t *endpoint);
-static int sock_bind(cci_device_t *device, int backlog, uint32_t *port, 
+static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
                          cci_service_t **service, cci_os_handle_t *fd);
 static int sock_unbind(cci_service_t *service, cci_device_t *device);
-static int sock_get_conn_req(cci_service_t *service, 
+static int sock_get_conn_req(cci_service_t *service,
                                  cci_conn_req_t **conn_req);
-static int sock_accept(cci_conn_req_t *conn_req, 
-                           cci_endpoint_t *endpoint, 
+static int sock_accept(cci_conn_req_t *conn_req,
+                           cci_endpoint_t *endpoint,
                            cci_connection_t **connection);
 static int sock_reject(cci_conn_req_t *conn_req);
-static int sock_connect(cci_endpoint_t *endpoint, char *server_uri, 
+static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
                             uint32_t port,
-                            void *data_ptr, uint32_t data_len, 
+                            void *data_ptr, uint32_t data_len,
                             cci_conn_attribute_t attribute,
-                            void *context, int flags, 
+                            void *context, int flags,
                             struct timeval *timeout);
 static int sock_disconnect(cci_connection_t *connection);
-static int sock_set_opt(cci_opt_handle_t *handle, 
-                            cci_opt_level_t level, 
+static int sock_set_opt(cci_opt_handle_t *handle,
+                            cci_opt_level_t level,
                             cci_opt_name_t name, const void* val, int len);
-static int sock_get_opt(cci_opt_handle_t *handle, 
-                            cci_opt_level_t level, 
+static int sock_get_opt(cci_opt_handle_t *handle,
+                            cci_opt_level_t level,
                             cci_opt_name_t name, void** val, int *len);
 static int sock_arm_os_handle(cci_endpoint_t *endpoint, int flags);
-static int sock_get_event(cci_endpoint_t *endpoint, 
+static int sock_get_event(cci_endpoint_t *endpoint,
                               cci_event_t ** const event,
                               uint32_t flags);
-static int sock_return_event(cci_endpoint_t *endpoint, 
+static int sock_return_event(cci_endpoint_t *endpoint,
                                  cci_event_t *event);
-static int sock_send(cci_connection_t *connection, 
-                         void *header_ptr, uint32_t header_len, 
-                         void *data_ptr, uint32_t data_len, 
+static int sock_send(cci_connection_t *connection,
+                         void *header_ptr, uint32_t header_len,
+                         void *data_ptr, uint32_t data_len,
                          void *context, int flags);
-static int sock_sendv(cci_connection_t *connection, 
-                          void *header_ptr, uint32_t header_len, 
+static int sock_sendv(cci_connection_t *connection,
+                          void *header_ptr, uint32_t header_len,
                           struct iovec *data, uint8_t iovcnt,
                           void *context, int flags);
 static int sock_rma_register(cci_endpoint_t *endpoint,
@@ -94,12 +94,12 @@ static int sock_rma_register(cci_endpoint_t *endpoint,
                              uint64_t *rma_handle);
 static int sock_rma_register_phys(cci_endpoint_t *endpoint,
                                   cci_connection_t *connection,
-                                  cci_sg_t *sg_list, uint32_t sg_cnt, 
+                                  cci_sg_t *sg_list, uint32_t sg_cnt,
                                   uint64_t *rma_handle);
 static int sock_rma_deregister(uint64_t rma_handle);
-static int sock_rma(cci_connection_t *connection, 
-                        void *header_ptr, uint32_t header_len, 
-                        uint64_t local_handle, uint64_t local_offset, 
+static int sock_rma(cci_connection_t *connection,
+                        void *header_ptr, uint32_t header_len,
+                        uint64_t local_handle, uint64_t local_offset,
                         uint64_t remote_handle, uint64_t remote_offset,
                         uint64_t data_len, void *context, int flags);
 
@@ -133,7 +133,7 @@ cci_plugin_core_t cci_core_sock_plugin = {
         "sock",
         CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
         5,
-        
+
         /* Bootstrap function pointers */
         cci_core_sock_post_load,
         cci_core_sock_pre_unload,
@@ -175,7 +175,7 @@ sock_sin_to_name(struct sockaddr_in sin, char *buffer, int len)
 
 static inline const char *
 sock_msg_type(sock_msg_type_t type)
-{   
+{
     switch (type) {
     case SOCK_MSG_CONN_REQUEST:
         return "conn_request";
@@ -280,7 +280,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 
             /* parse conf_argv */
             for (arg = device->conf_argv;
-                 *arg != NULL; 
+                 *arg != NULL;
                  arg++) {
                 if (0 == strncmp("ip=", *arg, 3)) {
                     const char *ip = *arg + 3;
@@ -373,7 +373,7 @@ static int sock_get_devices(cci_device_t const ***devices)
 }
 
 
-/* NOTE the CCI layer has already unbound all devices 
+/* NOTE the CCI layer has already unbound all devices
  *      and destroyed all endpoints.
  *      All we need to do if free dev->priv
  */
@@ -458,9 +458,9 @@ sock_close_socket(cci_os_handle_t sock)
     return;
 }
 
-static int sock_create_endpoint(cci_device_t *device, 
-                                    int flags, 
-                                    cci_endpoint_t **endpoint, 
+static int sock_create_endpoint(cci_device_t *device,
+                                    int flags,
+                                    cci_endpoint_t **endpoint,
                                     cci_os_handle_t *fd)
 {
     int i, ret;
@@ -722,7 +722,7 @@ static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
  *
  * device, port, service are always set
  */
-static int sock_bind(cci_device_t *device, int backlog, uint32_t *port, 
+static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
                      cci_service_t **service, cci_os_handle_t *fd)
 {
     int ret;
@@ -885,7 +885,7 @@ static int sock_unbind(cci_service_t *service, cci_device_t *device)
 
 
 /* NOTE: currently never called */
-static int sock_get_conn_req(cci_service_t *service, 
+static int sock_get_conn_req(cci_service_t *service,
                                  cci_conn_req_t **conn_req)
 {
     CCI_ENTER;
@@ -954,8 +954,8 @@ static uint8_t sock_ip_hash(in_addr_t ip, uint16_t port)
     return (port & 0x00FF) ^ ((port & 0xFF00) >> 8);
 }
 
-static int sock_accept(cci_conn_req_t *conn_req, 
-                           cci_endpoint_t *endpoint, 
+static int sock_accept(cci_conn_req_t *conn_req,
+                           cci_endpoint_t *endpoint,
                            cci_connection_t **connection)
 {
     uint8_t         a;
@@ -1301,11 +1301,11 @@ sock_find_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id, sock_ms
     }
 }
 
-static int sock_connect(cci_endpoint_t *endpoint, char *server_uri, 
+static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
                             uint32_t port,
-                            void *data_ptr, uint32_t data_len, 
+                            void *data_ptr, uint32_t data_len,
                             cci_conn_attribute_t attribute,
-                            void *context, int flags, 
+                            void *context, int flags,
                             struct timeval *timeout)
 {
     int                 ret;
@@ -1533,8 +1533,8 @@ static int sock_disconnect(cci_connection_t *connection)
 }
 
 
-static int sock_set_opt(cci_opt_handle_t *handle, 
-                            cci_opt_level_t level, 
+static int sock_set_opt(cci_opt_handle_t *handle,
+                            cci_opt_level_t level,
                             cci_opt_name_t name, const void* val, int len)
 {
     int             ret     = CCI_SUCCESS;
@@ -1591,8 +1591,8 @@ static int sock_set_opt(cci_opt_handle_t *handle,
 }
 
 
-static int sock_get_opt(cci_opt_handle_t *handle, 
-                            cci_opt_level_t level, 
+static int sock_get_opt(cci_opt_handle_t *handle,
+                            cci_opt_level_t level,
                             cci_opt_name_t name, void** val, int *len)
 {
     CCI_ENTER;
@@ -1622,7 +1622,7 @@ static int sock_arm_os_handle(cci_endpoint_t *endpoint, int flags)
 }
 
 
-static int sock_get_event(cci_endpoint_t *endpoint, 
+static int sock_get_event(cci_endpoint_t *endpoint,
                           cci_event_t ** const event,
                           uint32_t flags)
 {
@@ -1715,7 +1715,7 @@ static int sock_get_event(cci_endpoint_t *endpoint,
 }
 
 
-static int sock_return_event(cci_endpoint_t *endpoint, 
+static int sock_return_event(cci_endpoint_t *endpoint,
                              cci_event_t *event)
 {
     cci__ep_t   *ep;
@@ -1861,7 +1861,7 @@ sock_progress_pending(cci__dev_t *dev)
 
         /* has it timed out? */
 
-        if (SOCK_U64_LT(tx->timeout_us, now)) { 
+        if (SOCK_U64_LT(tx->timeout_us, now)) {
 
             /* dequeue */
 
@@ -2036,7 +2036,7 @@ sock_progress_queued(cci__dev_t *dev)
             tx->timeout_us = now + (uint64_t) timeout;
         }
 
-        if (SOCK_U64_LT(tx->timeout_us, now)) { 
+        if (SOCK_U64_LT(tx->timeout_us, now)) {
 
             /* set status and add to completed events */
 
@@ -2103,7 +2103,7 @@ sock_progress_queued(cci__dev_t *dev)
         }
 
         /* need to send it */
-            
+
         debug(CCI_DB_MSG, "sending %s msg seq %u",
               sock_msg_type(tx->msg_type), tx->seq);
         ret = sock_sendto(sep->sock, tx->buffer, tx->len, sconn->sin);
@@ -2182,9 +2182,9 @@ sock_progress_sends(cci__dev_t *dev)
     return;
 }
 
-static int sock_send(cci_connection_t *connection, 
-                         void *header_ptr, uint32_t header_len, 
-                         void *data_ptr, uint32_t data_len, 
+static int sock_send(cci_connection_t *connection,
+                         void *header_ptr, uint32_t header_len,
+                         void *data_ptr, uint32_t data_len,
                          void *context, int flags)
 {
     uint8_t iovcnt = 0;
@@ -2202,8 +2202,8 @@ static int sock_send(cci_connection_t *connection,
 }
 
 
-static int sock_sendv(cci_connection_t *connection, 
-                          void *header_ptr, uint32_t header_len, 
+static int sock_sendv(cci_connection_t *connection,
+                          void *header_ptr, uint32_t header_len,
                           struct iovec *data, uint8_t iovcnt,
                           void *context, int flags)
 {
@@ -2370,7 +2370,7 @@ static int sock_sendv(cci_connection_t *connection,
         ret = send->status;
 
         /* FIXME race with get_event()
-         *       get_event() must ignore sends with 
+         *       get_event() must ignore sends with
          *       flags & CCI_FLAG_BLOCKING */
 
         pthread_mutex_lock(&ep->lock);
@@ -2432,9 +2432,9 @@ static int sock_rma_register(cci_endpoint_t *endpoint,
 }
 
 
-static int sock_rma_register_phys(cci_endpoint_t *endpoint, 
+static int sock_rma_register_phys(cci_endpoint_t *endpoint,
                                   cci_connection_t *connection,
-                                  cci_sg_t *sg_list, uint32_t sg_cnt, 
+                                  cci_sg_t *sg_list, uint32_t sg_cnt,
                                   uint64_t *rma_handle)
 {
     CCI_ENTER;
@@ -2492,9 +2492,9 @@ static int sock_rma_deregister(uint64_t rma_handle)
 }
 
 
-static int sock_rma(cci_connection_t *connection, 
-                    void *header_ptr, uint32_t header_len, 
-                    uint64_t local_handle, uint64_t local_offset, 
+static int sock_rma(cci_connection_t *connection,
+                    void *header_ptr, uint32_t header_len,
+                    uint64_t local_handle, uint64_t local_offset,
                     uint64_t remote_handle, uint64_t remote_offset,
                     uint64_t data_len, void *context, int flags)
 {
@@ -2583,7 +2583,7 @@ static int sock_rma(cci_connection_t *connection,
 
         cnt = rma_op->num_msgs < SOCK_RMA_DEPTH ?
               rma_op->num_msgs : SOCK_RMA_DEPTH;
-              
+
         txs = calloc(cnt, sizeof(*txs));
         if (!txs) {
             pthread_mutex_lock(&ep->lock);
@@ -2858,7 +2858,7 @@ sock_handle_ack(sock_conn_t *sconn,
     cci__conn_t     *conn   = sconn->conn;
     cci_connection_t *connection = &conn->connection;
     cci_endpoint_t  *endpoint = connection->endpoint;
-    cci__ep_t       *ep     = container_of(endpoint, cci__ep_t, endpoint); 
+    cci__ep_t       *ep     = container_of(endpoint, cci__ep_t, endpoint);
     cci__dev_t      *dev    = ep->dev;
     sock_ep_t       *sep    = ep->priv;
     sock_dev_t      *sdev   = dev->priv;
@@ -3277,7 +3277,7 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
                   "with an active conn and no matching tx", sep->sock,
                   reply == CCI_EVENT_CONNECT_SUCCESS ? "success" : "rejected",
                   from);
-            /* we can't transition to ready since we do not have the 
+            /* we can't transition to ready since we do not have the
              * context from the conn_request tx */
             assert(0);
         }
@@ -3757,7 +3757,7 @@ sock_recvfrom_lep(cci__lep_t *lep)
         scrq = crq->priv;
         ptr = scrq->buffer;
     }
-        
+
     ret = recvfrom(slep->sock, ptr, len, 0, (struct sockaddr *)&sin, &sin_len);
     if (ret < SOCK_CONN_REQ_HDR_LEN || !crq) {
         /* nothing available or partial header, return.
@@ -3815,14 +3815,14 @@ sock_recvfrom_lep(cci__lep_t *lep)
                                  (uintptr_t)sizeof(sock_handshake_t);
         crq->conn_req.attribute = (enum cci_conn_attribute)a;
         *((struct sockaddr_in *) &scrq->sin) = sin;
-    
+
         debug(CCI_DB_CONN, "recv'd conn_req from %s", name);
-    
+
         svc = lep->svc;
         pthread_mutex_lock(&svc->lock);
         TAILQ_INSERT_TAIL(&svc->crqs, crq, entry);
         pthread_mutex_unlock(&svc->lock);
-    
+
         break;
     }
     case SOCK_MSG_CONN_ACK:
