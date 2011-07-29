@@ -3996,7 +3996,7 @@ static void *sock_progress_thread(void *arg)
 {
     struct timeval tv = { 0, SOCK_PROG_TIME_US };
 
-    assert(arg);
+    assert(!arg);
     pthread_mutex_lock(&globals->lock);
     while (!sock_shut_down) {
         cci__dev_t *dev;
@@ -4029,7 +4029,7 @@ static void *sock_recv_thread(void *arg)
     int         nfds    = 0;
     fd_set      fds;
 
-    assert(arg);
+    assert(!arg);
     pthread_mutex_lock(&globals->lock);
     while (!sock_shut_down) {
         nfds = sglobals->nfds;
