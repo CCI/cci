@@ -3700,12 +3700,12 @@ sock_recvfrom_ep(cci__ep_t *ep)
     }
 
 out:
-    if (drop_msg || q_rx) {
+    if (q_rx) {
         pthread_mutex_lock(&ep->lock);
         TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
         pthread_mutex_unlock(&ep->lock);
     }
-    if (drop_msg) {
+    if (0 && drop_msg) {
         //FIXME need to send a RNR msg back to the sender
         sock_drop_msg(sep->sock);
     }
@@ -4025,7 +4025,7 @@ static void *sock_recv_thread(void *arg)
     int         i       = 0;
     int         ret     = 0;
     static int      start   = 0;
-    struct timeval  tv      = { 0, 1000 };
+    struct timeval  tv      = { 0, SOCK_PROG_TIME_US };
     int         nfds    = 0;
     fd_set      fds;
 
