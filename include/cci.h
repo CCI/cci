@@ -1369,8 +1369,6 @@ CCI_DECLSPEC int cci_return_event(cci_endpoint_t *endpoint, cci_event_t *event);
 /*!
   Send a short message.
 
-  am_max_size maximum, no order guaranteed, completion is local.
-
   A short message limited to the size of cci_connection::max_send_size,
   which may be lower than the cci_device::max_send_size.
 
@@ -1383,8 +1381,8 @@ CCI_DECLSPEC int cci_return_event(cci_endpoint_t *endpoint, cci_event_t *event);
 
 
   \param[in] connection	Connection (destination/reliability).
-  \param[in] ptr	    Pointer to local segment.
-  \param[in] len	    Length of local segment (limited to max send size).
+  \param[in] msg_ptr    Pointer to local segment.
+  \param[in] msg_len    Length of local segment (limited to max send size).
   \param[in] context	Cookie to identify the completion through a Send event
 			            when non-blocking.
   \param[in] flags      Optional flags: CCI_FLAG_BLOCKING,
@@ -1393,7 +1391,6 @@ CCI_DECLSPEC int cci_return_event(cci_endpoint_t *endpoint, cci_event_t *event);
 
   \return CCI_SUCCESS   The message has been queued to send.
   \return CCI_EINVAL    Connection is NULL.
-  \return CCI_EINVAL    ptr is NULL and len is > 0.
   \return Each driver may have additional error codes.
 
   \todo When someone implements: it would be nice to have a way for an
@@ -1445,7 +1442,7 @@ CCI_DECLSPEC int cci_return_event(cci_endpoint_t *endpoint, cci_event_t *event);
   previous SILENT sends.
 */
 CCI_DECLSPEC int cci_send(cci_connection_t *connection,
-                          void *ptr, uint32_t len,
+                          void *msg_ptr, uint32_t msg_len,
                           void *context, int flags);
 
 #define CCI_FLAG_BLOCKING   (1 << 0)
@@ -1475,7 +1472,6 @@ CCI_DECLSPEC int cci_send(cci_connection_t *connection,
 
   \return CCI_SUCCESS   The message has been queued to send.
   \return CCI_EINVAL    Connection is NULL.
-  \return CCI_EINVAL    data is NULL and iovcnt is > 0.
   \return Each driver may have additional error codes.
 
   \ingroup communications
@@ -1578,8 +1574,8 @@ CCI_DECLSPEC int cci_rma_deregister(uint64_t rma_handle);
   completion does not imply a remote completion event, merely a successful
   RMA operation.
 
-  Optionally, send a remote completion event to the target. If am_ptr
-  and am_len are provided, send a completion event to the target after
+  Optionally, send a remote completion event to the target. If msg_ptr
+  and msg_len are provided, send a completion event to the target after
   the RMA has completed. It is guaranteed to arrive after the RMA operation
   has finished.
 
@@ -1589,8 +1585,8 @@ CCI_DECLSPEC int cci_rma_deregister(uint64_t rma_handle);
   Only a local completion will be generated.
 
   \param[in] connection     Connection (destination).
-  \param[in] am_ptr         Pointer to data for the remote completion.
-  \param[in] am_len         Length of data for the remote completion.
+  \param[in] msg_ptr         Pointer to data for the remote completion.
+  \param[in] msg_len         Length of data for the remote completion.
   \param[in] local_handle   Handle of the local RMA area.
   \param[in] local_offset   Offset in the local RMA area.
   \param[in] remote_handle  Handle of the remote RMA area.
@@ -1611,7 +1607,6 @@ CCI_DECLSPEC int cci_rma_deregister(uint64_t rma_handle);
   \return CCI_SUCCESS   The RMA operation has been initiated.
   \return CCI_EINVAL    connection is NULL.
   \return CCI_EINVAL    connection is unreliable.
-  \return CCI_EINVAL    am_ptr is NULL and am_len > 0.
   \return CCI_EINVAL    data_len is 0.
   \return CCI_EINVAL    Both READ and WRITE flags are set.
   \return CCI_EINVAL    Neither the READ or WRITE flag is set.
@@ -1625,7 +1620,7 @@ CCI_DECLSPEC int cci_rma_deregister(uint64_t rma_handle);
   \note READ may not be performance efficient.
 */
 CCI_DECLSPEC int cci_rma(cci_connection_t *connection,
-                         void *am_ptr, uint32_t am_len,
+                         void *msg_ptr, uint32_t msg_len,
                          uint64_t local_handle, uint64_t local_offset,
                          uint64_t remote_handle, uint64_t remote_offset,
                          uint64_t data_len, void *context, int flags);

@@ -17,21 +17,17 @@
 #include "plugins/core/core.h"
 
 
-int cci_rma(cci_connection_t *connection, 
-            void *header_ptr, uint32_t header_len, 
-            uint64_t local_handle, uint64_t local_offset, 
+int cci_rma(cci_connection_t *connection,
+            void *header_ptr, uint32_t header_len,
+            uint64_t local_handle, uint64_t local_offset,
             uint64_t remote_handle, uint64_t remote_offset,
             uint64_t data_len, void *context, int flags)
 {
     cci__conn_t *conn = NULL;
 
-    if (NULL == connection ||
-        (NULL == header_ptr && header_len > 0) ||
-        0 == data_len) {
+    if (NULL == connection || 0 == data_len) {
         if (NULL == connection)
             debug(CCI_DB_INFO, "%s: NULL connection", __func__);
-        if (NULL == header_ptr && header_len > 0)
-            debug(CCI_DB_INFO, "%s: NULL header_ptr and non-0 header_len", __func__);
         if (data_len == 0)
             debug(CCI_DB_INFO, "%s: data_len is 0", __func__);
         return CCI_EINVAL;
