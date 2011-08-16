@@ -184,16 +184,12 @@ static int         gni_return_event(
     cci_event_t *               event );
 static int         gni_send(
     cci_connection_t *          connection,
-    void *                      header_ptr,
-    uint32_t                    header_len,
-    void *                      data_ptr,
-    uint32_t                    data_len,
+    void *                      ptr,
+    uint32_t                    len,
     void *                      context,
     int32_t                     flags );
 static int         gni_sendv(
     cci_connection_t *          connection,
-    void *                      header_ptr,
-    uint32_t                    header_len,
     struct iovec *              data,
     uint8_t                     iovcnt,
     void *                      context,
@@ -214,13 +210,13 @@ static int         gni_rma_deregister(
     uint64_t                  rma_handle );
 static int         gni_rma(
     cci_connection_t *          connection,
-    void *                      header_ptr,
-    uint32_t                    header_len,
+    void *                      msg_ptr,
+    uint32_t                    msg_len,
     uint64_t                    local_handle,
     uint64_t                    local_offset,
     uint64_t                    remote_handle,
     uint64_t                    remote_offset,
-    uint64_t                    data_len,
+    uint64_t                    len,
     void *                      context,
     int32_t                     flags );
 
@@ -1216,10 +1212,8 @@ static int gni_return_event(      cci_endpoint_t *       endpoint,
 
 
 static int gni_send(              cci_connection_t *     connection,
-                                  void *                 header_ptr,
-                                  uint32_t               header_len,
-                                  void *                 data_ptr,
-                                  uint32_t               data_len,
+                                  void *                 ptr,
+                                  uint32_t               len,
                                   void *                 context,
                                   int32_t                flags ) {
 
@@ -1243,8 +1237,6 @@ static int gni_send(              cci_connection_t *     connection,
 
 
 static int gni_sendv(             cci_connection_t *     connection,
-                                  void *                 header_ptr,
-                                  uint32_t               header_len,
                                   struct iovec *         data,
                                   uint8_t                iovcnt,
                                   void *                 context,
@@ -1341,13 +1333,13 @@ static int gni_rma_deregister(    uint64_t               rma_handle ) {
 
 
 static int gni_rma(               cci_connection_t *     connection,
-                                  void *                 header_ptr,
-                                  uint32_t               header_len,
+                                  void *                 msg_ptr,
+                                  uint32_t               msg_len,
                                   uint64_t               local_handle,
                                   uint64_t               local_offset,
                                   uint64_t               remote_handle,
                                   uint64_t               remote_offset,
-                                  uint64_t               data_len,
+                                  uint64_t               len,
                                   void *                 context,
                                   int32_t                flags ) {
 
