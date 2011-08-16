@@ -79,9 +79,6 @@ typedef struct cci__ep {
     /*! Public endpoint (max_recv_buffer_count) */
     cci_endpoint_t endpoint;
 
-    /*! Max header size for txs and RMAs */
-    uint8_t max_hdr_size;
-
     /*! Number of rx buffers */
     uint32_t rx_buf_cnt;
 

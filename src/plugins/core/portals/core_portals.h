@@ -21,7 +21,6 @@ BEGIN_C_DECLS
 #define PORTALS_MAX_MSS           (64 * 1024)
 
 #define PORTALS_BLOCK_SIZE        (64)       /* bytes for id storage */
-#define PORTALS_EP_MAX_HDR_SIZE   (32)       /* per spec */
 #define PORTALS_EP_BUF_LEN        (8192)     /* 8 kB for now */
 #define PORTALS_EP_RX_CNT         (1024)     /* max rx messages */
 #define PORTALS_EP_TX_CNT         (128)      /* max tx messages */
@@ -137,7 +136,7 @@ static inline void portals_parse_match_bits(
     <---------------------------- 64 bits --------------------------->
     <----------- 32b -------------->  5b  <---- 16b ----> <- 8b -> 1 2b
    +--------------------------------+----+---------------+--------+-+--+
-   |      receiver endpoint id      |hlen|   data len    | reservd|R|T |
+   |      receiver endpoint id      |rsvd|   data len    | reservd|R|T |
    +--------------------------------+----+---------------+--------+-+--+
    where T is PORTALS_MSG_SEND
 
@@ -382,11 +381,11 @@ typedef struct portals_rma_op {
     /*! Pointer to tx for remote completion if needed */
     portals_tx_t *tx;
 
-    /*! Application header len */
-    uint8_t header_len;
+    /*! Application completion msg len */
+    uint8_t msg_len;
 
-    /*! Application header if provided */
-    char header[32];
+    /*! Application completion msg if provided */
+    char *msg_ptr;
 } portals_rma_op_t;
 
 

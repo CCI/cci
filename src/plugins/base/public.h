@@ -27,7 +27,7 @@ typedef int (*cci_plugins_framework_verify_fn_t)(cci_plugin_t *plugin);
 /* Open all modules of a given framework and only keep the one that
    has the highest priority.  All others are closed.  Return an LT
    handle to the "best" plugin and a pointer to its plugin struct. */
-int cci_plugins_open_one(const char *framework, 
+int cci_plugins_open_one(const char *framework,
                          cci_plugins_framework_verify_fn_t verify,
                          cci_plugin_t **plugin_best, lt_dlhandle *handle_best);
 

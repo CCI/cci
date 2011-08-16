@@ -19,45 +19,43 @@ static int template_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps);
 static const char *template_strerror(enum cci_status status);
 static int template_get_devices(cci_device_t const ***devices);
 static int template_free_devices(cci_device_t const **devices);
-static int template_create_endpoint(cci_device_t *device, 
-                                    int flags, 
-                                    cci_endpoint_t **endpoint, 
+static int template_create_endpoint(cci_device_t *device,
+                                    int flags,
+                                    cci_endpoint_t **endpoint,
                                     cci_os_handle_t *fd);
 static int template_destroy_endpoint(cci_endpoint_t *endpoint);
-static int template_bind(cci_device_t *device, int backlog, uint32_t *port, 
+static int template_bind(cci_device_t *device, int backlog, uint32_t *port,
                          cci_service_t **service, cci_os_handle_t *fd);
 static int template_unbind(cci_service_t *service, cci_device_t *device);
-static int template_get_conn_req(cci_service_t *service, 
+static int template_get_conn_req(cci_service_t *service,
                                  cci_conn_req_t **conn_req);
-static int template_accept(cci_conn_req_t *conn_req, 
-                           cci_endpoint_t *endpoint, 
+static int template_accept(cci_conn_req_t *conn_req,
+                           cci_endpoint_t *endpoint,
                            cci_connection_t **connection);
 static int template_reject(cci_conn_req_t *conn_req);
-static int template_connect(cci_endpoint_t *endpoint, char *server_uri, 
+static int template_connect(cci_endpoint_t *endpoint, char *server_uri,
                             uint32_t port,
-                            void *data_ptr, uint32_t data_len, 
+                            void *data_ptr, uint32_t data_len,
                             cci_conn_attribute_t attribute,
-                            void *context, int flags, 
+                            void *context, int flags,
                             struct timeval *timeout);
 static int template_disconnect(cci_connection_t *connection);
-static int template_set_opt(cci_opt_handle_t *handle, 
-                            cci_opt_level_t level, 
+static int template_set_opt(cci_opt_handle_t *handle,
+                            cci_opt_level_t level,
                             cci_opt_name_t name, const void* val, int len);
-static int template_get_opt(cci_opt_handle_t *handle, 
-                            cci_opt_level_t level, 
+static int template_get_opt(cci_opt_handle_t *handle,
+                            cci_opt_level_t level,
                             cci_opt_name_t name, void** val, int *len);
 static int template_arm_os_handle(cci_endpoint_t *endpoint, int flags);
-static int template_get_event(cci_endpoint_t *endpoint, 
+static int template_get_event(cci_endpoint_t *endpoint,
                               cci_event_t ** const event,
                               uint32_t flags);
-static int template_return_event(cci_endpoint_t *endpoint, 
+static int template_return_event(cci_endpoint_t *endpoint,
                                  cci_event_t *event);
-static int template_send(cci_connection_t *connection, 
-                         void *header_ptr, uint32_t header_len, 
-                         void *data_ptr, uint32_t data_len, 
+static int template_send(cci_connection_t *connection,
+                         void *msg_ptr, uint32_t msg_len,
                          void *context, int flags);
-static int template_sendv(cci_connection_t *connection, 
-                          void *header_ptr, uint32_t header_len, 
+static int template_sendv(cci_connection_t *connection,
                           struct iovec *data, uint8_t iovcnt,
                           void *context, int flags);
 static int template_rma_register(cci_endpoint_t *endpoint,
@@ -66,12 +64,12 @@ static int template_rma_register(cci_endpoint_t *endpoint,
                                  uint64_t *rma_handle);
 static int template_rma_register_phys(cci_endpoint_t *endpoint,
                                       cci_connection_t *connection,
-                                      cci_sg_t *sg_list, uint32_t sg_cnt, 
+                                      cci_sg_t *sg_list, uint32_t sg_cnt,
                                       uint64_t *rma_handle);
 static int template_rma_deregister(uint64_t rma_handle);
-static int template_rma(cci_connection_t *connection, 
-                        void *header_ptr, uint32_t header_len, 
-                        uint64_t local_handle, uint64_t local_offset, 
+static int template_rma(cci_connection_t *connection,
+                        void *msg_ptr, uint32_t msg_len,
+                        uint64_t local_handle, uint64_t local_offset,
                         uint64_t remote_handle, uint64_t remote_offset,
                         uint64_t data_len, void *context, int flags);
 
@@ -97,7 +95,7 @@ cci_plugin_core_t cci_core_template_plugin = {
         "template",
         CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
         5,
-        
+
         /* Bootstrap function pointers */
         cci_core_template_post_load,
         cci_core_template_pre_unload,
@@ -159,9 +157,9 @@ static int template_free_devices(cci_device_t const **devices)
 }
 
 
-static int template_create_endpoint(cci_device_t *device, 
-                                    int flags, 
-                                    cci_endpoint_t **endpoint, 
+static int template_create_endpoint(cci_device_t *device,
+                                    int flags,
+                                    cci_endpoint_t **endpoint,
                                     cci_os_handle_t *fd)
 {
     printf("In template_create_endpoint\n");
@@ -176,7 +174,7 @@ static int template_destroy_endpoint(cci_endpoint_t *endpoint)
 }
 
 
-static int template_bind(cci_device_t *device, int backlog, uint32_t *port, 
+static int template_bind(cci_device_t *device, int backlog, uint32_t *port,
                          cci_service_t **service, cci_os_handle_t *fd)
 {
     printf("In template_bind\n");
@@ -191,7 +189,7 @@ static int template_unbind(cci_service_t *service, cci_device_t *device)
 }
 
 
-static int template_get_conn_req(cci_service_t *service, 
+static int template_get_conn_req(cci_service_t *service,
                                  cci_conn_req_t **conn_req)
 {
     printf("In template_get_conn_req\n");
@@ -199,8 +197,8 @@ static int template_get_conn_req(cci_service_t *service,
 }
 
 
-static int template_accept(cci_conn_req_t *conn_req, 
-                           cci_endpoint_t *endpoint, 
+static int template_accept(cci_conn_req_t *conn_req,
+                           cci_endpoint_t *endpoint,
                            cci_connection_t **connection)
 {
     printf("In template_accept\n");
@@ -215,11 +213,11 @@ static int template_reject(cci_conn_req_t *conn_req)
 }
 
 
-static int template_connect(cci_endpoint_t *endpoint, char *server_uri, 
+static int template_connect(cci_endpoint_t *endpoint, char *server_uri,
                             uint32_t port,
-                            void *data_ptr, uint32_t data_len, 
+                            void *data_ptr, uint32_t data_len,
                             cci_conn_attribute_t attribute,
-                            void *context, int flags, 
+                            void *context, int flags,
                             struct timeval *timeout)
 {
     printf("In template_connect\n");
@@ -234,8 +232,8 @@ static int template_disconnect(cci_connection_t *connection)
 }
 
 
-static int template_set_opt(cci_opt_handle_t *handle, 
-                            cci_opt_level_t level, 
+static int template_set_opt(cci_opt_handle_t *handle,
+                            cci_opt_level_t level,
                             cci_opt_name_t name, const void* val, int len)
 {
     printf("In template_set_opt\n");
@@ -243,8 +241,8 @@ static int template_set_opt(cci_opt_handle_t *handle,
 }
 
 
-static int template_get_opt(cci_opt_handle_t *handle, 
-                            cci_opt_level_t level, 
+static int template_get_opt(cci_opt_handle_t *handle,
+                            cci_opt_level_t level,
                             cci_opt_name_t name, void** val, int *len)
 {
     printf("In template_get_opt\n");
@@ -259,7 +257,7 @@ static int template_arm_os_handle(cci_endpoint_t *endpoint, int flags)
 }
 
 
-static int template_get_event(cci_endpoint_t *endpoint, 
+static int template_get_event(cci_endpoint_t *endpoint,
                               cci_event_t ** const event,
                               uint32_t flags)
 {
@@ -268,7 +266,7 @@ static int template_get_event(cci_endpoint_t *endpoint,
 }
 
 
-static int template_return_event(cci_endpoint_t *endpoint, 
+static int template_return_event(cci_endpoint_t *endpoint,
                                  cci_event_t *event)
 {
     printf("In template_return_event\n");
@@ -276,9 +274,8 @@ static int template_return_event(cci_endpoint_t *endpoint,
 }
 
 
-static int template_send(cci_connection_t *connection, 
-                         void *header_ptr, uint32_t header_len, 
-                         void *data_ptr, uint32_t data_len, 
+static int template_send(cci_connection_t *connection,
+                         void *msg_ptr, uint32_t msg_len,
                          void *context, int flags)
 {
     printf("In template_send\n");
@@ -286,8 +283,7 @@ static int template_send(cci_connection_t *connection,
 }
 
 
-static int template_sendv(cci_connection_t *connection, 
-                          void *header_ptr, uint32_t header_len, 
+static int template_sendv(cci_connection_t *connection,
                           struct iovec *data, uint8_t iovcnt,
                           void *context, int flags)
 {
@@ -306,9 +302,9 @@ static int template_rma_register(cci_endpoint_t *endpoint,
 }
 
 
-static int template_rma_register_phys(cci_endpoint_t *endpoint, 
+static int template_rma_register_phys(cci_endpoint_t *endpoint,
                                       cci_connection_t *connection,
-                                      cci_sg_t *sg_list, uint32_t sg_cnt, 
+                                      cci_sg_t *sg_list, uint32_t sg_cnt,
                                       uint64_t *rma_handle)
 {
     printf("In template_rma_register_phys\n");
@@ -323,9 +319,9 @@ static int template_rma_deregister(uint64_t rma_handle)
 }
 
 
-static int template_rma(cci_connection_t *connection, 
-                        void *header_ptr, uint32_t header_len, 
-                        uint64_t local_handle, uint64_t local_offset, 
+static int template_rma(cci_connection_t *connection,
+                        void *msg_ptr, uint32_t msg_len,
+                        uint64_t local_handle, uint64_t local_offset,
                         uint64_t remote_handle, uint64_t remote_offset,
                         uint64_t data_len, void *context, int flags)
 {

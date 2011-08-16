@@ -105,7 +105,7 @@ poll_events(void)
                 LOCK;
                 if (running) {
                     UNLOCK;
-                    ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
+                    ret = cci_send(connection, buffer, current_size, NULL, 0);
                     if (ret && 1) {
                         fprintf(stderr, "%s: send returned %s\n", __func__, cci_strerror(ret));
                     } else
@@ -121,21 +121,21 @@ poll_events(void)
             if (!ready) {
                 ready = 1;
             } else {
-                if (event->info.recv.data_len == current_size)
+                if (event->info.recv.len == current_size)
                     recv++;
                 if (is_server) {
-                    if (event->info.recv.data_len > current_size ||
-                        event->info.recv.header_len == 3) {
+                    if (event->info.recv.len > current_size ||
+                        event->info.recv.len == 3) {
                         gettimeofday(&end, NULL);
                         printf("recv: %5d\t\t%6d\t\t%6.2lf Mb/s\n",
                                current_size, recv,
                                (double) recv * (double) current_size * 8.0 /
                                     usecs(start, end));
-                        current_size = event->info.recv.data_len;
+                        current_size = event->info.recv.len;
                         gettimeofday(&start, NULL);
                         recv = 1;
                     }
-                    if (event->info.recv.header_len == 3) {
+                    if (event->info.recv.len == 3) {
                         done = 1;
                         return;
                     }
@@ -223,7 +223,7 @@ do_client()
         gettimeofday(&start, NULL);
 
         for (i = 0; i < MAX_PENDING; i++) {
-            ret = cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
+            ret = cci_send(connection, buffer, current_size, NULL, 0);
             if (!ret)
                 send++;
         }
@@ -248,10 +248,10 @@ do_client()
         else
             current_size *= 2;
 
-        cci_send(connection, "reset", 5, &current_size, sizeof(current_size), NULL, 0);
+        //cci_send(connection, "reset", 5, &current_size, sizeof(current_size), NULL, 0);
         sleep(1);
     }
-    cci_send(connection, "bye", 3, NULL, 0, NULL, 0);
+    cci_send(connection, "bye", 3, NULL, 0);
 
     return;
 }
@@ -285,7 +285,7 @@ do_server()
                 return;
             }
             gettimeofday(&start, NULL);
-            cci_send(connection, NULL, 0, buffer, current_size, NULL, 0);
+            cci_send(connection, buffer, current_size, NULL, 0);
             printf("Bytes\t\t# Rcvd\t\tRcvd\n");
         }
     }

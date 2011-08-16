@@ -66,7 +66,7 @@
 
 /*! \defgroup env Initialization / Environment */
 
-/*! 
+/*!
   This constant is passed in via the cci_init() function and is used
   for internal consistency checks.
 
@@ -136,14 +136,14 @@ CCI_DECLSPEC int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps);
   IF YOU ADD TO THESE ENUM CODES, ALSO EXTEND src/api/strerror.c!!
  */
 typedef enum cci_status {
-  
+
   /*! Returned from most functions when they succeed. */
   CCI_SUCCESS = 0,
 
   /* -------------------------------------------------------------
      General error status codes
      ------------------------------------------------------------- */
-  
+
   /*! Generic error */
   CCI_ERROR,
 
@@ -158,13 +158,13 @@ typedef enum cci_status {
   CCI_ERR_DISCONNECTED,
 
   /*! For a reliable send, this error code means that a receiver
-     is reachable, the connection is connected but the receiver 
-     could not receive the incoming message during the timeout 
-     period. If a receiver cannot receive an incoming message for 
-     transient reasons (most likely out of resources), it returns 
-     an Receiver-Not-Ready NACK and drops the message.  The sender 
-     keeps retrying to send the message until the timeout expires, 
-     
+     is reachable, the connection is connected but the receiver
+     could not receive the incoming message during the timeout
+     period. If a receiver cannot receive an incoming message for
+     transient reasons (most likely out of resources), it returns
+     an Receiver-Not-Ready NACK and drops the message.  The sender
+     keeps retrying to send the message until the timeout expires,
+
      If the timeout expires and the last control message received
      from the receiver was an RNR NACK, then this message is
      completed with the RNR status.  If the connection is both
@@ -181,7 +181,7 @@ typedef enum cci_status {
 
   /*! The local device is gone, not coming back */
   CCI_ERR_DEVICE_DEAD,
-  
+
   /*! Error returned from remote peer indicating that the address was
       either invalid or unable to be used for access / permissions
       reasons. */
@@ -241,12 +241,12 @@ typedef enum cci_status {
   CCI_EADDRNOTAVAIL = EADDRNOTAVAIL
 
   /* ...more here, inspired from errno.h... */
-  
+
 } cci_status_t;
 
 /*!
   Returns a string corresponding to a CCI status enum.
-   
+
   \param[in] status: A CCI status enum.
 
   \return A string when the status is valid.
@@ -267,30 +267,30 @@ CCI_DECLSPEC const char *cci_strerror(enum cci_status status);
 /*! \defgroup devices Devices */
 
 /*! \section devices Devices
-  Device types and functions.  
+  Device types and functions.
 
   \ingroup devices
-   
+
   Before launching into detail, let's first describe the CCI system
   configuration file.  On POSIX systems, it is likely a simple
   INI-style text file; on Windows systems, it may be registry entries.
   The key thing is to support trivial namespaces and key=value pairs.
 
   Here is an example text config file:
-  
+
 \verbatim
 # Comments are anything after the # symbols.
 
 # Sections in this file are denoted by [section name].  Each section
 # denotes a single CCI device.
 
-[bob0] 
+[bob0]
 # The only mandated field in each section is "driver".  It indicates
 # which CCI driver should be applied to this device.
 driver = psm
 
 # The priority field determines the ordering of devices returned by
-# cci_get_devices().  100 is the highest priority; 0 is the lowest priority.  
+# cci_get_devices().  100 is the highest priority; 0 is the lowest priority.
 # If not specified, the priority value is 50.
 priority = 10
 
@@ -345,7 +345,7 @@ mac = 01:12:23:34:45
 The config file forms the basis for the device discussion, below.
 */
 
-/*! 
+/*!
   Structure representing one CCI device. A CCI device is a [section]
   from the config file, above.
 
@@ -354,23 +354,23 @@ The config file forms the basis for the device discussion, below.
 typedef struct cci_device {
   /*! Name of the device from the config file, e.g., "bob0" */
   const char *name;
-  
+
   /*! Human readable description string (to include newlines); should
     contain debugging info, probably the network address of the
     device at a bare minimum. */
-  const char *info; 
-  
+  const char *info;
+
   /*! Array of "key=value" strings from the config file for this
     device; the last pointer in the array is NULL. */
   const char **conf_argv;
-  
+
   /*! Maximum send size supported by the device */
   uint32_t max_send_size;
-  
+
   /*! Data rate per specification: data bits per second (not the
     signaling rate). */
   uint64_t rate;
-  
+
   /*! The PCI ID of this device as reported by the OS/hardware.  All
     values will be ((uint32_t) -1) for non-PCI devices (e.g.,
     shared memory) */
@@ -379,16 +379,16 @@ typedef struct cci_device {
   } pci;
 } cci_device_t;
 
-/*! 
+/*!
   Get an array of devices.
-  
+
   Returns a NULL-terminated array of (struct cci_device *)'s that are
   "up".  The pointers can be copied, but the actual cci_device
   instances may not.  The array of devices is allocated by the CCI
   library; there may be hidden state that the application does not
   see.
 
-  \param[out] devices	Array of pointers to be filled by the function. 
+  \param[out] devices	Array of pointers to be filled by the function.
 			Previous value in the pointer will be overwritten.
 
   \return CCI_SUCCESS   The array of "up" devices is available.
@@ -399,11 +399,11 @@ typedef struct cci_device {
   include the data pointed to by the individual cci_device
   instances) should be treated as const, and must be freed with a
   corresponding call to cci_free_devices().
-  
+
   The order of devices returned corresponds to the priority fields in
   the devices.  If two devices share the same priority, their
   ordering in the return array is arbitrary.
-  
+
   If cci_get_devices() fails, the value returned in devices is
   undefined.
 
@@ -411,7 +411,7 @@ typedef struct cci_device {
 */
 CCI_DECLSPEC int cci_get_devices(cci_device_t const *** const devices);
 
-/*! 
+/*!
   Frees a NULL-terminated array of (cci_device_t*)'s that were
   previously allocated via cci_get_devices().
 
@@ -445,7 +445,7 @@ CCI_DECLSPEC int cci_free_devices(cci_device_t const **devices);
 
 /*! \defgroup endpoints Endpoints */
 
-/*! 
+/*!
   And endpoint is a set of resources associated with a single NUMA
   locality.  Buffers should be pinned by the CCI implementation to the
   NUMA locality where the thread is located who calls
@@ -476,7 +476,7 @@ typedef enum cci_endpoint_flags {
     bogus_must_have_something_here
 } cci_endpoint_flags_t;
 
-/*! Endpoint. 
+/*! Endpoint.
 
   \ingroup endpoints
 */
@@ -503,9 +503,9 @@ typedef int cci_os_handle_t;
 
   \param[in] device: A pointer to a device that was returned via
   cci_get_devices() or NULL.
-  
+
   \param[in] flags: Flags specifying behavior of this endpoint.
-  
+
   \param[out] endpoint: A handle to the endpoint that was created.
 
   \param[out] fd: Operating system handle that can be used to block for
@@ -522,33 +522,33 @@ typedef int cci_os_handle_t;
   queue).  An endpoint is associated with a device that performs the
   actual communication (see the description of cci_get_devices(),
   above).
-  
+
   The device argument can be a pointer that was returned by
   cci_get_devices() to indicate that a specific device should be used
   for this endpoint, or NULL, indicating that the system default
   device should be used.
-  
+
   If successful, cci_create_endpoint() creates an endpoint and
   returns a pointer to it in the endpoint parameter.
-  
+
   cci_create_endpoint() is a local operation (i.e., it occurs on
   local hardware).  There is no need to talk to name services, etc.
   To be clear, the intent is that this function can be invoked many
   times locally without affecting any remote resources.
-  
+
   If it is desirable to bind the CCI endpoint to a specific set of
   resources (e.g., a NUMA node), you should bind the calling thread
   before calling cci_create_endpoint().
-  
+
   Advice to users: if you want to set the send/receive buffer count
   on the endpoint, call cci_set|get_opt() after creating the
   endpoint.
 
   \ingroup endpoints
 */
-CCI_DECLSPEC int cci_create_endpoint(cci_device_t *device, 
-                                     int flags, 
-                                     cci_endpoint_t **endpoint, 
+CCI_DECLSPEC int cci_create_endpoint(cci_device_t *device,
+                                     int flags,
+                                     cci_endpoint_t **endpoint,
                                      cci_os_handle_t *fd);
 
 
@@ -579,7 +579,7 @@ CCI_DECLSPEC int cci_destroy_endpoint(cci_endpoint_t *endpoint);
 /*====================================================================*/
 
 /*! \defgroup connection Connections */
-  
+
 
 /********************/
 /*                  */
@@ -595,14 +595,14 @@ CCI_DECLSPEC int cci_destroy_endpoint(cci_endpoint_t *endpoint);
   be delivered after a specific amount of time, the connection is
   broken; there is no guarantee regarding which messages have been
   received successfully before the connection was broken.
-  
+
   Connections can be ordered or unordered, but note that ordered
   unreliable connections are forbidden.  Also, note that ordering of
   RMA operations only applies to target notification, not data
   delivery.
-  
+
   Unreliable unordered connections have no timeout.
-  
+
   Multicast is always unreliable unordered.  Multicast connections
   are always unidirectional, send *or* receive.  If an endpoint wants
   to join a multicast group to both send and receive, it needs to
@@ -631,9 +631,9 @@ typedef enum cci_conn_attribute {
 } cci_conn_attribute_t;
 
 
-/*! 
-  Connection request. 
-  
+/*!
+  Connection request.
+
   \anchor conn_req
   \ingroup connection
 */
@@ -654,7 +654,7 @@ typedef struct cci_conn_req {
 
 /*!
   Connection handle.
-  
+
   \ingroup connection
 */
 typedef struct cci_connection {
@@ -680,7 +680,7 @@ typedef struct cci_service {
 } cci_service_t;
 
 /*!
-  Bind a service to the connection manager using specific service port.  
+  Bind a service to the connection manager using specific service port.
 
   It returns a service handle and an OS-specific handle that
   can be used for blocking (e.g., via POSIX poll(), select(), or
@@ -693,11 +693,11 @@ typedef struct cci_service {
 
   \param[in] device	Device to bind to, can be NULL.
   \param[in] backlog	Incoming connection requests queue depth.
-  \param[in,out] port	Port number used by client to identify the 
+  \param[in,out] port	Port number used by client to identify the
 			service accepting connection requests.
-  \param[out] service	Handle representing the service accepting connection 
+  \param[out] service	Handle representing the service accepting connection
 			requests through the connection manager.
-  \param[out] fd	OS-specific file descriptor/handle to block on 
+  \param[out] fd	OS-specific file descriptor/handle to block on
 			incoming connection requests.
 
   \return CCI_SUCCESS	Service successfully bound on that device.
@@ -708,37 +708,37 @@ typedef struct cci_service {
   \return CCI_ENOMEM    Unable to allocate enough memory.
   \return CCI_EBUSY	    The service port is already bound on that device.
   \return Each driver may have additional error codes.
-   
-  If you use the same service port, you get the same service, even for 
-  different devices. The connection request will contain all the devices 
+
+  If you use the same service port, you get the same service, even for
+  different devices. The connection request will contain all the devices
   that are compatible for the connection.
 
   \ingroup connection
 */
-CCI_DECLSPEC int cci_bind(cci_device_t *device, int backlog, uint32_t *port, 
+CCI_DECLSPEC int cci_bind(cci_device_t *device, int backlog, uint32_t *port,
                           cci_service_t **service, cci_os_handle_t *fd);
 
-/*! 
+/*!
   Unbind a previously-bound service.
-  
+
   \param[in] service	Service that was previously returned from cci_bind().
-  \param[in] device	Specific device to unbind from the service. If 0, 
+  \param[in] device	Specific device to unbind from the service. If 0,
 			unbinds all devices bound to that service.
-  
+
   \return CCI_SUCCESS   Device has been unbound from the service.
   \return CCI_EINVAL    Service or device is NULL.
   \return CCI_ENODEV    Device is not bound on the service.
   \return Each driver may have additional error codes.
 
-  The service could become stale if there is no more device bound to that 
+  The service could become stale if there is no more device bound to that
   service. This does not affect established connections.
 
   \ingroup connection
 */
 CCI_DECLSPEC int cci_unbind(cci_service_t *service, cci_device_t *device);
 
-/*! 
-  Return the next connection request, if any.  
+/*!
+  Return the next connection request, if any.
 
   \param[in] service	Service to check for incoming requests.
   \param[out] conn_req	New connection request.
@@ -752,31 +752,31 @@ CCI_DECLSPEC int cci_unbind(cci_service_t *service, cci_device_t *device);
   available.  The application can block on the OS-specific handle
   returned by cci_bind(), if desired.
 
-  The connection request structure contains the connection information, 
+  The connection request structure contains the connection information,
   including pointer to the connection request data.
 
   \ingroup connection
 */
-CCI_DECLSPEC int cci_get_conn_req(cci_service_t *service, 
+CCI_DECLSPEC int cci_get_conn_req(cci_service_t *service,
                                   cci_conn_req_t **conn_req);
 
 
-/*! 
-  Accept a connection request and establish a connection with a specific 
+/*!
+  Accept a connection request and establish a connection with a specific
   endpoint.
 
-  \param[in] conn_req	A connection request previously returned by 
+  \param[in] conn_req	A connection request previously returned by
 			cci_get_conn_req().
-  \param[in] endpoint	The local endpoint to use for this connection. 
-			It must be bound to one of the devices specified 
+  \param[in] endpoint	The local endpoint to use for this connection.
+			It must be bound to one of the devices specified
 			in the connection request.
   \param[in,out] connection Pointer to a connection request structure.
 
   \return CCI_SUCCESS   The connection has been established.
   \return CCI_EINVAL    Conn_req, endpoint, or connection is NULL.
-  \return CCI_EINVAL    The endpoint is not bound to one of the devices 
+  \return CCI_EINVAL    The endpoint is not bound to one of the devices
 			            in the connection request.
-  \return CCI_ETIMEDOUT The incoming connection request timed out 
+  \return CCI_ETIMEDOUT The incoming connection request timed out
 			            on the client.
   \return Each driver may have additional error codes.
 
@@ -786,23 +786,23 @@ CCI_DECLSPEC int cci_get_conn_req(cci_service_t *service,
 
   \ingroup connection
 */
-CCI_DECLSPEC int cci_accept(cci_conn_req_t *conn_req, cci_endpoint_t *endpoint, 
+CCI_DECLSPEC int cci_accept(cci_conn_req_t *conn_req, cci_endpoint_t *endpoint,
                             cci_connection_t **connection);
 
-/*! 
+/*!
   Reject a connection request.
 
   \param[in] conn_req	Connection request to reject.
 
   \return CCI_SUCCESS	Connection request has been rejected.
-  \return CCI_ETIMEDOUT The incoming connection request timed out 
+  \return CCI_ETIMEDOUT The incoming connection request timed out
 			            on the client.
   \return Each driver may have additional error codes.
 
    Rejects an incoming connection request.  The connection request
    becomes stale after this function returns successfully; no further
    interaction with this connection is possible after rejecting it.
-   
+
    \ingroup connection
  */
 CCI_DECLSPEC int cci_reject(cci_conn_req_t *conn_req);
@@ -821,45 +821,45 @@ CCI_DECLSPEC int cci_reject(cci_conn_req_t *conn_req);
 /*                  */
 /********************/
 
-/*! 
+/*!
   Initiate a connection request (client side).
-  
+
   Request a connection through a connection manager on a given machine
   for a given CCI service port. The connection manager address is
   described by a Uniform Resource Identifier. The use of an URI allows
   for flexible description (IP address, hostname, etc).
-  
-  The connection request can carry limited 
-  amount of data to be passed to the server for application-specific usage 
+
+  The connection request can carry limited
+  amount of data to be passed to the server for application-specific usage
   (identification, authentication, etc).
-  
-  The connect call is always non-blocking, reliable and requires a decision 
-  by the server (accept or reject), even for an unreliable connection, except 
+
+  The connect call is always non-blocking, reliable and requires a decision
+  by the server (accept or reject), even for an unreliable connection, except
   for multicast.
-  
-  Multicast connections don't necessarily involve a discrete connection 
+
+  Multicast connections don't necessarily involve a discrete connection
   server, they may be handled by IGMP or other distributed framework.
-  
+
   Upon completion, an ...
-  
+
   \param[in] endpoint	Local endpoint to use for requested connection.
   \param[in] server_uri	Uniform Resource Identifier of the server.
-	The URI is flexible and can encode different values. Coma-separated 
+	The URI is flexible and can encode different values. Coma-separated
 	arguments can be added after a colon.
 		- IP address: "ip://172.31.194.2"
 		- Resolvable name: "ip://foo.bar.com"
 		- IB LID or GID: "ib://TBD"
 		- Blah id: "blah://crap0123"
 		- With arguments: "ip://foo.bar.com:eth1,eth3"
-  \param[in] port	    The CCI port number use to identify the service on 
+  \param[in] port	    The CCI port number use to identify the service on
 			            the server.
-  \param[in] data_ptr	Pointer to connection data to be sent in the 
+  \param[in] data_ptr	Pointer to connection data to be sent in the
 			            connection request (for authentication, etc).
-  \param[in] data_len	Length of connection data.  Implementations must 
+  \param[in] data_len	Length of connection data.  Implementations must
                         support a data_len values <= 1,024 bytes.
-  \param[in] attribute	Attributes of the requested connection (reliability, 
+  \param[in] attribute	Attributes of the requested connection (reliability,
 			            ordering, multicast, etc).
-  \param[in] context	Cookie to be used to identify the completion through 
+  \param[in] context	Cookie to be used to identify the completion through
 			            an Other event.
   \param[in] flags	    Currently unused.
   \param[in] timeout	NULL means forever.
@@ -885,13 +885,13 @@ CCI_DECLSPEC int cci_reject(cci_conn_req_t *conn_req);
   from the client.
 */
 /* QUESTION: data is cached or not ? */
-CCI_DECLSPEC int cci_connect(cci_endpoint_t *endpoint, char *server_uri, 
+CCI_DECLSPEC int cci_connect(cci_endpoint_t *endpoint, char *server_uri,
                              uint32_t port,
-                             void *data_ptr, uint32_t data_len, 
+                             void *data_ptr, uint32_t data_len,
                              cci_conn_attribute_t attribute,
                              void *context, int flags, struct timeval *timeout);
 
-/*! 
+/*!
   This constant is the maximum value of data_len passed to cci_connect().
 
   \ingroup connection
@@ -899,10 +899,10 @@ CCI_DECLSPEC int cci_connect(cci_endpoint_t *endpoint, char *server_uri,
 #define CCI_CONN_REQ_LEN    (1024)  /* see below */
 
 /*!
-  Tear down an existing connection. 
+  Tear down an existing connection.
 
-  Operation is local, remote side is not notified. From that point, 
-  both local and remote side will get a DISCONNECTED communication error 
+  Operation is local, remote side is not notified. From that point,
+  both local and remote side will get a DISCONNECTED communication error
   if sends are initiated on  this connection.
 
   \param[in] connection	Connection to sever.
@@ -930,7 +930,7 @@ CCI_DECLSPEC int cci_disconnect(cci_connection_t *connection);
 
 /*! \defgroup opts Endpoint / Connection Options */
 
-/*! 
+/*!
   Handle defining the scope of an option
 
   \ingroup opts
@@ -960,28 +960,19 @@ typedef enum cci_opt_level {
   \ingroup opts
 */
 typedef enum cci_opt_name {
-  /*! \anchor CCI_OPT_ENDPT_MAX_HEADER_SIZE
-
-      Max header size (in bytes) on the endpoint, for both sends and
-      RMA operations.
-
-      cci_get_opt() only.
-  */
-  CCI_OPT_ENDPT_MAX_HEADER_SIZE,
-
   /*! Default send timeout for all new connections.
 
       cci_get_opt() and cci_set_opt().
   */
   CCI_OPT_ENDPT_SEND_TIMEOUT,
-  
+
   /*! How many receiver buffers on the endpoint.  It is the max
       number of messages the CCI layer can receive without dropping.
 
       cci_get_opt() and cci_set_opt().
   */
   CCI_OPT_ENDPT_RECV_BUF_COUNT,
-  
+
   /*! How many send buffers on the endpoint.  It is the max number of
       pending messages the CCI layer can buffer before failing or
       blocking (depending on reliability mode).
@@ -989,17 +980,17 @@ typedef enum cci_opt_name {
       cci_get_opt() and cci_set_opt().
   */
   CCI_OPT_ENDPT_SEND_BUF_COUNT,
-  
+
   /*! The "keepalive" timeout is to prevent a client from connecting
       to a server and then the client disappears without the server
       noticing.  If the server never sends anything on the connection,
       it'll never realize that the client is gone, but the connection
       is still consuming resources.  But note that keepalive timers
       apply to both clients and servers.
-     
+
       The keepalive timeout is expressed in microseconds.  If the
       keepalive timeout value is set:
-     
+
       - If no traffic at all is received on a connection within the
       keepalive timeout, the CCI_EVENT_KEEPALIVE_TIMEOUT event is
       raised on that connection.
@@ -1007,7 +998,7 @@ typedef enum cci_opt_name {
       - The CCI implementation will automatically send control
       hearbeats across an inactive (but still alive) connection to
       reset the peer's keepalive timer before it times out.
-     
+
       If a keepalive event is raised, the keepalive timeout is set to
       0 (i.e., it must be "re-armed" before it will timeout again),
       but the connection is *not* disconnected.  Recovery decisions
@@ -1017,7 +1008,7 @@ typedef enum cci_opt_name {
       cci_get_opt() and cci_set_opt().
   */
   CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT,
-  
+
   /*! Reliable send timeout in microseconds.
 
       cci_get_opt() and cci_set_opt().
@@ -1025,7 +1016,7 @@ typedef enum cci_opt_name {
   CCI_OPT_CONN_SEND_TIMEOUT
 } cci_opt_name_t;
 
-/*! 
+/*!
   Set an endpoint or connection option value.
 
   \param[in] handle Endpoint or connection handle.
@@ -1046,7 +1037,7 @@ typedef enum cci_opt_name {
 
   \ingroup opts
 */
-CCI_DECLSPEC int cci_set_opt(cci_opt_handle_t *handle, cci_opt_level_t level, 
+CCI_DECLSPEC int cci_set_opt(cci_opt_handle_t *handle, cci_opt_level_t level,
                              cci_opt_name_t name, const void* val, int len);
 
 /*!
@@ -1066,7 +1057,7 @@ CCI_DECLSPEC int cci_set_opt(cci_opt_handle_t *handle, cci_opt_level_t level,
 
   \ingroup opts
 */
-CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t *handle, cci_opt_level_t level, 
+CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t *handle, cci_opt_level_t level,
                              cci_opt_name_t name, void** val, int *len);
 
 
@@ -1080,30 +1071,30 @@ CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t *handle, cci_opt_level_t level,
 
 /*!
   Send event.
-  
+
   A completion struct instance is returned for each cci_send() that
   requested a completion notification.
-  
+
   On a reliable connection, a sender will generally complete a send
-  when the receiver replies for that message.  Additionally, an error 
+  when the receiver replies for that message.  Additionally, an error
   status may be returned (UNREACHABLE, DISCONNECTED, RNR).
-  
+
   On an unreliable connection, a sender will return CCI_SUCCESS upon
   local completion (i.e., the message has been queued up to some lower
   layer -- there is no guarantee that it is "on the wire", etc.).
   Other send statuses will only be returned for local errors.
-  
+
   The number of fields in this struct is intentionally limited in
   order to reduce costs associated with state storage, caching,
   updating, copying.  For example, there is no field pointing to the
   endpoint used for the send because it can be obtained from the
   cci_connection, or through the endpoint passed to the
   cci_get_event() call.
-  
+
   If it is desirable to match send completions with specific sends
   (it usually is), it is the responsibility of the caller to pass a
   meaningful context value to cci_send().
-  
+
   The ordering of fields in this struct is intended to reduce memory
   holes between fields.
 
@@ -1112,50 +1103,39 @@ CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t *handle, cci_opt_level_t level,
 typedef struct cci_event_send {
   /*! Connection that the send was initiated on. */
   cci_connection_t *connection;
-  
+
   /*! Context value that was passed to cci_send() */
   void *context;
-  
+
   /*! Result of the send. */
   cci_status_t status;
 } cci_event_send_t;
 
 
-/*! 
+/*!
   Receive event.
-  
+
   A completion struct instance is returned for each message received.
-  
+
   The number of fields in this struct is intentionally limited in
   order to reduce costs associated with state storage, caching,
   updating, copying.  For example, there is no field pointing to the
   endpoint because it can be obtained from the cci_connection or
   through the endpoint passed to the cci_get_event() call.
-  
+
   The ordering of fields in this struct is intended to reduce memory
   holes between fields.
 
   \ingroup events
 */
 typedef struct cci_event_recv {
-  /*! The length of the header part of the message (in bytes). 
-    This value may be 0. */
-  const uint32_t header_len;
-  
-  /*! The length of the data part of the message (in bytes). 
-    This value may be 0. */
-  const uint32_t data_len;
-  
-  /*! Pointer to the header part of the received message.  The pointer
-    always points to an address that is 8-byte aligned, unless
-    (header_len == 0), in which case the value is undefined. */
-  void * const header_ptr;
-  
-  /*! Pointer to the data part of the received message.  The pointer
-    always points to an address that is 8-byte aligned, unless
-    (header_len == 0), in which case the value is undefined. */
-  void * const data_ptr;
-  
+  /*! The length of the data (in bytes).  This value may be 0. */
+  const uint32_t len;
+
+  /*! Pointer to the data.  The pointer always points to an address that is
+     8-byte aligned, unless (len == 0), in which case the value is undefined. */
+  void * const ptr;
+
   /*! Connection that this message was received on. */
   cci_connection_t *connection;
 } cci_event_recv_t;
@@ -1217,7 +1197,7 @@ typedef enum cci_event_type {
 
   /*! An active message has been received. */
   CCI_EVENT_RECV,
-  
+
   /*! A new outgoing connection was successfully accepted at the
      peer; a connection is now available for data transfer. */
   CCI_EVENT_CONNECT_SUCCESS,
@@ -1229,13 +1209,13 @@ typedef enum cci_event_type {
 
   /*! A new outgoing connection was rejected by the server. */
   CCI_EVENT_CONNECT_REJECTED,
-  
+
   /*! This event occurs when the keepalive timeout has expired (see
      CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT for more details). */
   CCI_EVENT_KEEPALIVE_TIMEOUT,
-  
+
   /*! A device on this endpoint has failed.
-     
+
       \todo JMS What exactly do we do here?  Do all handles
       (connections, etc.) on the endpoint become stale?  What about
       sends that are in-flight -- do we complete them all with an
@@ -1244,9 +1224,9 @@ typedef enum cci_event_type {
 } cci_event_type_t;
 
 
-/*! 
+/*!
   Generic event
-  
+
   This is the union of Send, Recv and Other events.
 
   \ingroup events
@@ -1254,7 +1234,7 @@ typedef enum cci_event_type {
 typedef struct cci_event {
   /*! Type of the event */
   cci_event_type_t type;
-  
+
   /*! union of event types */
   union {
     cci_event_send_t send;
@@ -1301,7 +1281,7 @@ typedef enum cci_pe_event {
   Get the next available CCI event.
 
   This function never blocks; it polls instantly to see if there is
-  any pending event of any type (send completion, receive, or other 
+  any pending event of any type (send completion, receive, or other
   events -- errors, incoming connection requests, etc.).  If you want to
   block, use the OS handle to use your OS's native blocking mechanism
   (e.g., select/poll on the POSIX fd).  This also allows the app to
@@ -1309,13 +1289,13 @@ typedef enum cci_pe_event {
   happening.  The default OS handle returned when creating the
   endpoint will return the equivalent of a POLL_IN when any event is
   available.
-  
+
   This function borrows the buffer associated with the event; it must
   be explicitly returned later via cci_return_event().
 
   \param[in] endpoint	Endpoint to poll for a new event.
   \param[in] event	New event, if any.
-  \param[in] flags 
+  \param[in] flags
 	- CCI_PE_SEND_EVENT
 	- CCI_PE_RECV_EVENT
 	- CCI_PE_OTHER_EVENT
@@ -1345,7 +1325,7 @@ typedef enum cci_pe_event {
 
   \ingroup events
 */
-CCI_DECLSPEC int cci_get_event(cci_endpoint_t *endpoint, 
+CCI_DECLSPEC int cci_get_event(cci_endpoint_t *endpoint,
                                cci_event_t ** const event,
                                uint32_t flags);
 
@@ -1386,21 +1366,11 @@ CCI_DECLSPEC int cci_return_event(cci_endpoint_t *endpoint, cci_event_t *event);
 
 /*! \defgroup communications Communications */
 
-/*! 
+/*!
   Send a short message.
 
-  am_max_size maximum, no order guaranteed, completion is local.
-
-  Two segments for Header and Data.  When CCI_FLAG_ASYNC is used and
-  the call returns, data has been buffered.
-
-  A short message may have two segments, header and data. The header
-  has a limited size which is retrievable using cci_get_opt() with the
-  \ref CCI_OPT_ENDPT_MAX_HEADER_SIZE flag. The data length is limited
-  to the cci_connection::max_send_size, which may be lower than the
-  cci_device::max_send_size. The application may specify both the
-  header and data, only one, or neither (although nothing will be
-  delivered, the peer will still ack the message on a reliable connection).
+  A short message limited to the size of cci_connection::max_send_size,
+  which may be lower than the cci_device::max_send_size.
 
   If the application needs to send a message larger than
   cci_connection::max_send_size, the application is responsible for
@@ -1408,23 +1378,19 @@ CCI_DECLSPEC int cci_return_event(cci_endpoint_t *endpoint, cci_event_t *event);
 
   When cci_send() returns, the application buffer is reusable. By
   default, CCI will buffer the data internally.
-  
+
 
   \param[in] connection	Connection (destination/reliability).
-  \param[in] header_ptr	Pointer to local header segment.
-  \param[in] header_len	Length of local header segment (limited to 32 bytes).
-  \param[in] data_ptr	Pointer to local data segment.
-  \param[in] data_len	Length of local data segment (limited to max send size).
-  \param[in] context	Cookie to identify the completion through a Send event 
-			when non-blocking.
+  \param[in] msg_ptr    Pointer to local segment.
+  \param[in] msg_len    Length of local segment (limited to max send size).
+  \param[in] context	Cookie to identify the completion through a Send event
+			            when non-blocking.
   \param[in] flags      Optional flags: CCI_FLAG_BLOCKING,
                         CCI_FLAG_NO_COPY, CCI_FLAG_SILENT.  These flags
                         are explained below.
 
   \return CCI_SUCCESS   The message has been queued to send.
   \return CCI_EINVAL    Connection is NULL.
-  \return CCI_EINVAL    header_ptr is NULL and header_len is > 0.
-  \return CCI_EINVAL    data_ptr is NULL and data_len is > 0.
   \return Each driver may have additional error codes.
 
   \todo When someone implements: it would be nice to have a way for an
@@ -1473,11 +1439,10 @@ CCI_DECLSPEC int cci_return_event(cci_endpoint_t *endpoint, cci_event_t *event);
   that the local send buffer is "owned" by the application again) is
   either to close the connection or issue a non-SILENT send.  The
   completion of a non-SILENT send guarantees the completion of all
-  previous SILENT sends.  
+  previous SILENT sends.
 */
-CCI_DECLSPEC int cci_send(cci_connection_t *connection, 
-                          void *header_ptr, uint32_t header_len, 
-                          void *data_ptr, uint32_t data_len, 
+CCI_DECLSPEC int cci_send(cci_connection_t *connection,
+                          void *msg_ptr, uint32_t msg_len,
                           void *context, int flags);
 
 #define CCI_FLAG_BLOCKING   (1 << 0)
@@ -1496,14 +1461,10 @@ CCI_DECLSPEC int cci_send(cci_connection_t *connection,
   cci_sendv() allows the application to gather an array of iovcnt
   buffers pointed to by struct iovec *data.
 
-  The size of the iovec array is limited to 255 elements.
-
   \param[in] connection	Connection (destination/reliability).
-  \param[in] header_ptr	Pointer to local header segment.
-  \param[in] header_len	Length of local header segment (limited to 32 bytes).
   \param[in] data	    Array of local data buffers.
   \param[in] iovcnt	    Count of local data array.
-  \param[in] context	Cookie to identify the completion through a Send event 
+  \param[in] context	Cookie to identify the completion through a Send event
 			            when non-blocking.
   \param[in] flags      Optional flags: \ref CCI_FLAG_BLOCKING,
                         \ref CCI_FLAG_NO_COPY, \ref CCI_FLAG_SILENT.
@@ -1511,15 +1472,12 @@ CCI_DECLSPEC int cci_send(cci_connection_t *connection,
 
   \return CCI_SUCCESS   The message has been queued to send.
   \return CCI_EINVAL    Connection is NULL.
-  \return CCI_EINVAL    header_ptr is NULL and header_len is > 0.
-  \return CCI_EINVAL    data is NULL and iovcnt is > 0.
   \return Each driver may have additional error codes.
 
   \ingroup communications
 
  */
-CCI_DECLSPEC int cci_sendv(cci_connection_t *connection, 
-                           void *header_ptr, uint32_t header_len, 
+CCI_DECLSPEC int cci_sendv(cci_connection_t *connection,
                            struct iovec *data, uint8_t iovcnt,
                            void *context, int flags);
 
@@ -1606,7 +1564,7 @@ CCI_DECLSPEC int cci_rma_register_phys(cci_endpoint_t *endpoint,
 CCI_DECLSPEC int cci_rma_deregister(uint64_t rma_handle);
 
 
-/*! 
+/*!
   Perform a RMA operation between local and remote memory.
 
   Initiate a remote memory WRITE access (move local memory to remote
@@ -1616,8 +1574,8 @@ CCI_DECLSPEC int cci_rma_deregister(uint64_t rma_handle);
   completion does not imply a remote completion event, merely a successful
   RMA operation.
 
-  Optionally, send a remote completion event to the target. If header_ptr
-  and header_len are provided, send a completion event to the target after
+  Optionally, send a remote completion event to the target. If msg_ptr
+  and msg_len are provided, send a completion event to the target after
   the RMA has completed. It is guaranteed to arrive after the RMA operation
   has finished.
 
@@ -1625,16 +1583,16 @@ CCI_DECLSPEC int cci_rma_deregister(uint64_t rma_handle);
   (e.g., no last-byte-written-last).
 
   Only a local completion will be generated.
-  
+
   \param[in] connection     Connection (destination).
-  \param[in] header_ptr     Pointer to local header segment.
-  \param[in] header_len     Length of local header segment (limited to 32 bytes)
+  \param[in] msg_ptr         Pointer to data for the remote completion.
+  \param[in] msg_len         Length of data for the remote completion.
   \param[in] local_handle   Handle of the local RMA area.
   \param[in] local_offset   Offset in the local RMA area.
   \param[in] remote_handle  Handle of the remote RMA area.
   \param[in] remote_offset  Offset in the remote RMA area.
   \param[in] data_len       Length of data segment.
-  \param[in] context        Cookie to identify the completion through a Send event 
+  \param[in] context        Cookie to identify the completion through a Send event
                             when non-blocking.
   \param[in] flags          Optional flags:
     - CCI_FLAG_BLOCKING:    Blocking call (see cci_send() for details).
@@ -1643,13 +1601,12 @@ CCI_DECLSPEC int cci_rma_deregister(uint64_t rma_handle);
     - CCI_FLAG_FENCE:       All previous operations are guaranteed to
                             complete remotely prior to this operation
                             and all subsequent operations.
-    - CCI_FLAG_SILENT:      Generates no local completion event (see cci_send() 
+    - CCI_FLAG_SILENT:      Generates no local completion event (see cci_send()
                             for details).
 
   \return CCI_SUCCESS   The RMA operation has been initiated.
   \return CCI_EINVAL    connection is NULL.
   \return CCI_EINVAL    connection is unreliable.
-  \return CCI_EINVAL    header_ptr is NULL and header_len > 0.
   \return CCI_EINVAL    data_len is 0.
   \return CCI_EINVAL    Both READ and WRITE flags are set.
   \return CCI_EINVAL    Neither the READ or WRITE flag is set.
@@ -1662,9 +1619,9 @@ CCI_DECLSPEC int cci_rma_deregister(uint64_t rma_handle);
 
   \note READ may not be performance efficient.
 */
-CCI_DECLSPEC int cci_rma(cci_connection_t *connection, 
-                         void *header_ptr, uint32_t header_len, 
-                         uint64_t local_handle, uint64_t local_offset, 
+CCI_DECLSPEC int cci_rma(cci_connection_t *connection,
+                         void *msg_ptr, uint32_t msg_len,
+                         uint64_t local_handle, uint64_t local_offset,
                          uint64_t remote_handle, uint64_t remote_offset,
                          uint64_t data_len, void *context, int flags);
 

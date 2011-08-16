@@ -43,17 +43,6 @@ int cci_get_opt(cci_opt_handle_t *handle, cci_opt_level_t level,
     }
 
     switch (name) {
-    case CCI_OPT_ENDPT_MAX_HEADER_SIZE:
-    {
-        uint8_t *size = calloc(1, sizeof(*size));
-        if (!size)
-            return CCI_ENOMEM;
-
-        *size = ep->max_hdr_size;
-        *len = sizeof(*size);
-        *val = size;
-        break;
-    }
     case CCI_OPT_ENDPT_SEND_TIMEOUT:
     {
         uint32_t *timeout = calloc(1, sizeof(*timeout));

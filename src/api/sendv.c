@@ -17,37 +17,12 @@
 #include "plugins/core/core.h"
 
 
-int cci_sendv(cci_connection_t *connection, 
-              void *header_ptr, uint32_t header_len, 
+int cci_sendv(cci_connection_t *connection,
               struct iovec *data, uint8_t iovcnt,
               void *context, int flags)
 {
-    int i = 0;
-
-    if (NULL == connection ||
-        (NULL == header_ptr && header_len > 0) ||
-        (NULL == data && iovcnt > 0)) {
+    if (NULL == connection)
         return CCI_EINVAL;
-    }
 
-    for (i = 0; i < iovcnt; i++) {
-        if (data[i].iov_base && data[i].iov_len == 0) {
-            debug(CCI_DB_INFO, "%s: data[%d] has a pointer but no length",
-                               __func__, i);
-            return CCI_EINVAL;
-        }
-        if (!data[i].iov_base && data[i].iov_len > 0) {
-            debug(CCI_DB_INFO, "%s: data[%d] has a length but no pointer",
-                               __func__, i);
-            return CCI_EINVAL;
-        }
-        if (!data[i].iov_base && data[i].iov_len == 0) {
-            debug(CCI_DB_INFO, "%s: data[%d] has no pointer or length",
-                               __func__, i);
-            return CCI_EINVAL;
-        }
-    }
-
-    return cci_core->sendv(connection, header_ptr, header_len, 
-                           data, iovcnt, context, flags);
+    return cci_core->sendv(connection, data, iovcnt, context, flags);
 }

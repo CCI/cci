@@ -32,7 +32,6 @@ BEGIN_C_DECLS
 #define SOCK_MAX_SACK           (4)     /* pairs of start/end acks */
 #define SOCK_ACK_DELAY          (1)     /* send an ack after every Nth send */
 
-#define SOCK_EP_MAX_HDR_SIZE    (32)    /* max user header size */
 #define SOCK_EP_TX_TIMEOUT_SEC  (64)    /* seconds for now */
 #define SOCK_EP_RX_CNT          (1024)  /* number of rx active messages */
 #define SOCK_EP_TX_CNT          (128)   /* number of tx active messages */
@@ -424,10 +423,9 @@ sock_pack_conn_ack(sock_header_t *header, uint32_t id)
  */
 
 static inline void
-sock_pack_send(sock_header_t *header, uint8_t header_len,
-               uint16_t data_len, uint32_t id)
+sock_pack_send(sock_header_t *header, uint16_t len, uint32_t id)
 {
-    sock_pack_header(header, SOCK_MSG_SEND, header_len, data_len, id);
+    sock_pack_header(header, SOCK_MSG_SEND, 0, len, id);
 }
 
 /* keepalive header:
@@ -659,7 +657,7 @@ typedef struct sock_tx {
     /*! State of send - not to be confused with completion status */
     sock_tx_state_t state;
 
-    /*! Buffer (wire header, user header, data) */
+    /*! Buffer (wire header, data) */
     void *buffer;
 
     /*! Buffer length */
@@ -702,7 +700,7 @@ typedef struct sock_rx {
     /*! Associated event (includes public cci_event_t) */
     cci__evt_t evt;
 
-    /*! Buffer (wire header, user header, data) */
+    /*! Buffer (wire header, data) */
     void *buffer;
 
     /*! Buffer length */
@@ -776,11 +774,11 @@ typedef struct sock_rma_op {
     /*! Pointer to tx for remote completion if needed */
     sock_tx_t *tx;
 
-    /*! Application header len */
-    uint8_t header_len;
+    /*! Application AM len */
+    uint16_t msg_len;
 
-    /*! Application header if provided */
-    char header[32];
+    /*! Application AM ptr if provided */
+    char *msg_ptr;
 } sock_rma_op_t;
 
 typedef struct sock_ep {

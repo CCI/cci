@@ -17,18 +17,12 @@
 #include "plugins/core/core.h"
 
 
-int cci_send(cci_connection_t *connection, 
-             void *header_ptr, uint32_t header_len, 
-             void *data_ptr, uint32_t data_len, 
+int cci_send(cci_connection_t *connection,
+             void *msg_ptr, uint32_t msg_len,
              void *context, int flags)
 {
-    if (NULL == connection ||
-        (NULL == header_ptr && header_len > 0) ||
-        (NULL == data_ptr && data_len > 0)) {
+    if (NULL == connection)
         return CCI_EINVAL;
-    }
 
-    return cci_core->send(connection, header_ptr, header_len, 
-                          data_ptr, data_len,
-                          context, flags);
+    return cci_core->send(connection, msg_ptr, msg_len, context, flags);
 }
