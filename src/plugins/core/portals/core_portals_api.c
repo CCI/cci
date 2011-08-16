@@ -2570,11 +2570,6 @@ static int portals_sendv(
     for (i = 0; i < iovcnt; i++)
         data_len += (uint32_t) data[i].iov_len;
 
-    if (header_len + data_len > connection->max_send_size) {
-        CCI_EXIT;
-        return CCI_EMSGSIZE;
-    }
-
     ret = portals_send_common(connection, data, iovcnt, context, flags, NULL);
 
     CCI_EXIT;
@@ -3451,10 +3446,13 @@ static void portals_get_event_ep(cci__ep_t *ep)
         local = (void *)rma_op->local_handle;
 
         if (rma_op->msg_len) {
+            struct iovec msg;
+
             /* send remote completion msg */
+            msg.iov_base = rma_op->msg_ptr;
+            msg.iov_len = rma_op->msg_len;
             ret = portals_send_common(&local->conn->connection,
-                                      rma_op->header, rma_op->header_len,
-                                      NULL, 0, rma_op->context,
+                                      &msg, 1, rma_op->context,
                                       rma_op->flags, rma_op);
             /* FIXME do what if failed? */
         } else {
@@ -3531,10 +3529,13 @@ static void portals_get_event_ep(cci__ep_t *ep)
             local = (void *)rma_op->local_handle;
 
             if (rma_op->msg_len) {
+                struct iovec msg;
+
                 /* send remote completion msg */
+                msg.iov_base = rma_op->msg_ptr;
+                msg.iov_len = rma_op->msg_len;
                 ret = portals_send_common(&local->conn->connection,
-                                          rma_op->header, rma_op->header_len,
-                                          NULL, 0, rma_op->context,
+                                          &msg, 1, rma_op->context,
                                           rma_op->flags, rma_op);
                 /* FIXME do what if failed? */
             } else {
