@@ -63,10 +63,8 @@ typedef int (*cci_get_opt_fn_t)(cci_opt_handle_t *handle,
                                 cci_opt_name_t name, void** val, int *len);
 typedef int (*cci_arm_os_handle_fn_t)(cci_endpoint_t *endpoint, int flags);
 typedef int (*cci_get_event_fn_t)(cci_endpoint_t *endpoint,
-                                  cci_event_t ** const event,
-                                  uint32_t flags);
-typedef int (*cci_return_event_fn_t)(cci_endpoint_t *endpoint,
-                                     cci_event_t *event);
+                                  cci_event_t ** const event);
+typedef int (*cci_return_event_fn_t)(cci_event_t *event);
 typedef int (*cci_send_fn_t)(cci_connection_t *connection,
                              void *msg_ptr, uint32_t msg_len,
                              void *context, int flags);

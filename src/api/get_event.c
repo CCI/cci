@@ -17,14 +17,8 @@
 #include "plugins/core/core.h"
 
 
-int cci_get_event(cci_endpoint_t *endpoint, 
-                  cci_event_t ** const event,
-                  uint32_t flags)
+int cci_get_event(cci_endpoint_t *endpoint,
+                  cci_event_t ** const event)
 {
-    if (NULL == endpoint ||
-        NULL == event) {
-        return CCI_EINVAL;
-    }
-
-    return cci_core->get_event(endpoint, event, flags);
+    return cci_core->get_event(endpoint, event);
 }
