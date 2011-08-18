@@ -1323,11 +1323,14 @@ typedef struct cci_event_endpoint_device_failed {
 /*!
   Generic event
 
-  This is union of all events.
+  This is union of all events and the event type. Each event must start
+  with the type as well. The application can simply look at the event
+  as a type to determine how to handle it.
 
   \ingroup events
 */
 typedef struct cci_event {
+  cci_event_type_t type;
   cci_event_send_t send;
   cci_event_recv_t recv;
   cci_event_connect_success_t connect_success;
