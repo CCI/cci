@@ -61,13 +61,15 @@ options_t opts = { 0ULL, 0, 0, 0 };
 void
 print_usage()
 {
-    fprintf(stderr, "usage: %s -h <server_uri> [-p <port>] [-s] [-i <iters>] [-c <type>] [-n] "
-                    "[[-w | -r] [-m <max_rma_size> [-C]]]\n", name);
+    fprintf(stderr, "usage: %s -h <server_uri> [-p <port>] [-s] [-i <iters>] "
+            "[-W <warmup>] [-c <type>] [-n] "
+            "[[-w | -r] [-m <max_rma_size> [-C]]]\n", name);
     fprintf(stderr, "where:\n");
     fprintf(stderr, "\t-h\tServer's URI\n");
     fprintf(stderr, "\t-p\tPort of the server's connection service (default %d)\n", DFLT_PORT);
     fprintf(stderr, "\t-s\tSet to run as the server\n");
     fprintf(stderr, "\t-i\tRun this number of iterations\n");
+    fprintf(stderr, "\t-W\tRun this number of warmup iterations\n");
     fprintf(stderr, "\t-c\tConnection type (UU, RU, or RO) set by client only\n");
     fprintf(stderr, "\t-n\tSet CCI_FLAG_NO_COPY ito avoid copying\n");
     fprintf(stderr, "\t-w\tUse RMA WRITE instead of active messages\n");
@@ -97,13 +99,13 @@ poll_events(void)
     int ret;
     cci_event_t *event;
 
-    ret = cci_get_event(endpoint, &event, 0);
+    ret = cci_get_event(endpoint, &event);
     if (ret == CCI_SUCCESS) {
         assert(event);
         switch (event->type) {
         case CCI_EVENT_SEND:
             if (opts.method != AM) {
-                if (!is_server && event->info.send.context == (void*)1) {
+                if (!is_server && event->send.context == (void*)1) {
                     count++;
                     if (count < warmup + iters) {
                         ret = cci_rma(connection, rmt_comp_msg, rmt_comp_len,
@@ -114,7 +116,7 @@ poll_events(void)
                     }
                 }
             }
-            if (!is_server && event->info.send.context == (void *)0xdeadbeef)
+            if (!is_server && event->send.context == (void *)0xdeadbeef)
                 done = 1;
             break;
         case CCI_EVENT_RECV:
@@ -123,20 +125,20 @@ poll_events(void)
                 ready = 1;
                 if (opts.method != AM && !is_server) {
                     /* get server_rma_handle */
-                    opts = *((options_t *)event->info.recv.ptr);
+                    opts = *((options_t *)event->recv.ptr);
                     fprintf(stderr, "server RMA handle is 0x%"PRIx64"\n",
                                     opts.server_rma_handle);
                 }
             } else if (opts.method == AM) {
                 if (is_server) {
-                    if (event->info.recv.len > current_size) {
-                        current_size = event->info.recv.len;
-                    } else if (event->info.recv.len == 3) {
+                    if (event->recv.len > current_size) {
+                        current_size = event->recv.len;
+                    } else if (event->recv.len == 3) {
                         done = 1;
                         return;
                     }
                 } else {
-                    if (event->info.recv.len == current_size)
+                    if (event->recv.len == current_size)
                         count++;
                 }
                 if (is_server ||
@@ -150,12 +152,12 @@ poll_events(void)
             break;
         }
         case CCI_EVENT_CONNECT_SUCCESS:
-        case CCI_EVENT_CONNECT_TIMEOUT:
+        case CCI_EVENT_CONNECT_TIMEDOUT:
         case CCI_EVENT_CONNECT_REJECTED:
             if (!is_server) {
                 connect_done = 1;
                 if (event->type == CCI_EVENT_CONNECT_SUCCESS)
-                    connection = event->info.other.u.connect.connection;
+                    connection = event->connect_success.connection;
                 else
                     connection = NULL;
             }
@@ -163,7 +165,7 @@ poll_events(void)
         default:
             fprintf(stderr, "ignoring event type %d\n", event->type);
         }
-        cci_return_event(endpoint, event);
+        cci_return_event(event);
     }
     return;
 }
@@ -352,7 +354,7 @@ int main(int argc, char *argv[])
 
     name = argv[0];
 
-    while ((c = getopt(argc, argv, "h:p:sc:nwrm:Ci:")) != -1) {
+    while ((c = getopt(argc, argv, "h:p:sc:nwrm:Ci:W:")) != -1) {
         switch (c) {
         case 'h':
             server_uri = strdup(optarg);
@@ -365,6 +367,9 @@ int main(int argc, char *argv[])
             break;
         case 'i':
             iters = strtoul(optarg, NULL, 0);
+            break;
+        case 'W':
+            warmup = strtoul(optarg, NULL, 0);
             break;
         case 'c':
             if (strncasecmp("ru", optarg, 2) == 0)
