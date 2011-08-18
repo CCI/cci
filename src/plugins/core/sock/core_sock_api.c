@@ -76,10 +76,8 @@ static int sock_get_opt(cci_opt_handle_t *handle,
                             cci_opt_name_t name, void** val, int *len);
 static int sock_arm_os_handle(cci_endpoint_t *endpoint, int flags);
 static int sock_get_event(cci_endpoint_t *endpoint,
-                              cci_event_t ** const event,
-                              uint32_t flags);
-static int sock_return_event(cci_endpoint_t *endpoint,
-                                 cci_event_t *event);
+                              cci_event_t ** const event);
+static int sock_return_event(cci_event_t *event);
 static int sock_send(cci_connection_t *connection,
                          void *msg_ptr, uint32_t msg_len,
                          void *context, int flags);
@@ -1075,9 +1073,9 @@ static int sock_accept(cci_conn_req_t *conn_req,
     evt = &tx->evt;
     evt->ep = ep;
     evt->conn = conn;
-    evt->event.type = CCI_EVENT_NONE; /* for now */
-    evt->event.info.other.context = NULL; /* FIXME or crq? */
-    evt->event.info.other.u.connect.connection = &conn->connection;
+    evt->event.type = CCI_EVENT_SEND; /* for now */
+    evt->event.send.context = NULL; /* FIXME or crq? */
+    evt->event.send.connection = &conn->connection;
 
     /* pack the msg */
 
@@ -1317,7 +1315,6 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     sock_header_r_t     *hdr_r      = NULL;
     cci__evt_t          *evt        = NULL;
     cci_event_t         *event      = NULL;
-    cci_event_other_t   *other      = NULL;
     cci_connection_t    *connection = NULL;
     struct sockaddr_in  *sin        = NULL;
     void                *ptr        = NULL;
@@ -1408,11 +1405,9 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     evt->ep = ep;
     evt->conn = conn;
     event = &evt->event;
-    event->type = CCI_EVENT_CONNECT_SUCCESS; /* for now */
-
-    other = &event->info.other;
-    other->context = context;
-    other->u.connect.connection = connection;
+    evt->event.type = CCI_EVENT_CONNECT_SUCCESS; /* for now */
+    evt->event.connect_success.context = context;
+    evt->event.connect_success.connection = connection;
 
     /* pack the msg */
 
@@ -1617,15 +1612,13 @@ static int sock_arm_os_handle(cci_endpoint_t *endpoint, int flags)
 
 
 static int sock_get_event(cci_endpoint_t *endpoint,
-                          cci_event_t ** const event,
-                          uint32_t flags)
+                          cci_event_t ** const event)
 {
     int             ret = CCI_SUCCESS;
     cci__ep_t       *ep;
     cci__evt_t      *ev = NULL, *e;
     cci__dev_t      *dev;
     sock_ep_t       *sep;
-    cci_event_t     *tmp;
 
     CCI_ENTER;
 
@@ -1641,55 +1634,23 @@ static int sock_get_event(cci_endpoint_t *endpoint,
     sock_progress_dev(dev);
 
     pthread_mutex_lock(&ep->lock);
-    if (TAILQ_EMPTY(&ep->evts)) {
-        pthread_mutex_unlock(&ep->lock);
-        *event = NULL;
-        CCI_EXIT;
-        return CCI_EAGAIN;
-    }
 
-    if (!flags) {
-        /* give the user the first event */
-        TAILQ_FOREACH(e, &ep->evts, entry) {
-            if (e->event.type == CCI_EVENT_SEND) {
-                /* NOTE: if it is blocking, skip it since sock_sendv()
-                 * is waiting on it
-                 */
-                sock_tx_t *tx = container_of(e, sock_tx_t, evt);
-                if (tx->flags & CCI_FLAG_BLOCKING) {
-                    continue;
-                } else {
-                    ev = e;
-                    break;
-                }
+    /* give the user the first event */
+    TAILQ_FOREACH(e, &ep->evts, entry) {
+        if (e->event.type == CCI_EVENT_SEND) {
+            /* NOTE: if it is blocking, skip it since sock_sendv()
+             * is waiting on it
+             */
+            sock_tx_t *tx = container_of(e, sock_tx_t, evt);
+            if (tx->flags & CCI_FLAG_BLOCKING) {
+                continue;
             } else {
                 ev = e;
                 break;
             }
-        }
-    } else {
-        TAILQ_FOREACH(e, &ep->evts, entry) {
-            tmp = &e->event;
-
-            if (flags & CCI_PE_SEND_EVENT &&
-                tmp->type == CCI_EVENT_SEND) {
-                sock_tx_t *tx = container_of(e, sock_tx_t, evt);
-                if (tx->flags & CCI_FLAG_BLOCKING) {
-                    continue;
-                } else {
-                    ev = e;
-                    break;
-                }
-            } else if (flags & CCI_PE_RECV_EVENT &&
-                       tmp->type == CCI_EVENT_RECV) {
-                ev = e;
-                break;
-            } else if (flags & CCI_PE_OTHER_EVENT &&
-                       !(tmp->type == CCI_EVENT_SEND ||
-                         tmp->type == CCI_EVENT_RECV)) {
-                ev = e;
-                break;
-            }
+        } else {
+            ev = e;
+            break;
         }
     }
 
@@ -1709,8 +1670,7 @@ static int sock_get_event(cci_endpoint_t *endpoint,
 }
 
 
-static int sock_return_event(cci_endpoint_t *endpoint,
-                             cci_event_t *event)
+static int sock_return_event(cci_event_t *event)
 {
     cci__ep_t   *ep;
     sock_ep_t   *sep;
@@ -1725,15 +1685,10 @@ static int sock_return_event(cci_endpoint_t *endpoint,
         return CCI_ENODEV;
     }
 
-    ep = container_of(endpoint, cci__ep_t, endpoint);
-    sep = ep->priv;
-
     evt = container_of(event, cci__evt_t, event);
 
-    if (evt->ep != ep) {
-        CCI_EXIT;
-        return CCI_EINVAL;
-    }
+    ep = evt->ep;
+    sep = ep->priv;
 
     /* enqueue the event */
 
@@ -1868,7 +1823,7 @@ sock_progress_pending(cci__dev_t *dev)
 
             switch (tx->msg_type) {
             case SOCK_MSG_SEND:
-                event->info.send.status = CCI_ETIMEDOUT;
+                event->send.status = CCI_ETIMEDOUT;
                 break;
             case SOCK_MSG_RMA_WRITE:
                 pthread_mutex_lock(&ep->lock);
@@ -1881,7 +1836,7 @@ sock_progress_pending(cci__dev_t *dev)
                 int i;
                 struct s_active *active_list;
 
-                event->type = CCI_EVENT_CONNECT_TIMEOUT;
+                event->type = CCI_EVENT_CONNECT_TIMEDOUT;
                 if (conn->uri)
                     free((char *) conn->uri);
                 sconn->status = SOCK_CONN_CLOSING;
@@ -2036,12 +1991,12 @@ sock_progress_queued(cci__dev_t *dev)
 
             switch (tx->msg_type) {
             case SOCK_MSG_SEND:
-                event->info.send.status = CCI_ETIMEDOUT;
+                event->send.status = CCI_ETIMEDOUT;
                 break;
             case SOCK_MSG_CONN_REQUEST:
                 /* FIXME only CONN_REQUEST gets an event
                  * the other two need to disconnect the conn */
-                event->type = CCI_EVENT_CONNECT_TIMEOUT;
+                event->type = CCI_EVENT_CONNECT_TIMEDOUT;
                 break;
             case SOCK_MSG_RMA_WRITE:
                 pthread_mutex_lock(&ep->lock);
@@ -2211,7 +2166,6 @@ static int sock_sendv(cci_connection_t *connection,
     void *ptr;
     cci__evt_t *evt;
     cci_event_t *event;     /* generic CCI event */
-    cci_event_send_t *send; /* generic CCI send event */
 
     debug(CCI_DB_FUNC, "entering %s", func);
 
@@ -2261,11 +2215,9 @@ static int sock_sendv(cci_connection_t *connection,
     evt->conn = conn;
     event = &evt->event;
     event->type = CCI_EVENT_SEND;
-
-    send = &(event->info.send);
-    send->connection = connection;
-    send->context = context;
-    send->status = CCI_SUCCESS; /* for now */
+    event->send.connection = connection;
+    event->send.context = context;
+    event->send.status = CCI_SUCCESS; /* for now */
 
     /* pack buffer */
     hdr = (sock_header_t *) tx->buffer;
@@ -2347,7 +2299,7 @@ static int sock_sendv(cci_connection_t *connection,
             select(0, NULL, NULL, NULL, &tv);
 
         /* get status and cleanup */
-        ret = send->status;
+        ret = event->send.status;
 
         /* FIXME race with get_event()
          *       get_event() must ignore sends with
@@ -2621,7 +2573,7 @@ static int sock_rma(cci_connection_t *connection,
             tx->rma_op = rma_op;
 
             tx->evt.event.type = CCI_EVENT_SEND;
-            tx->evt.event.info.send.connection = connection;
+            tx->evt.event.send.connection = connection;
             tx->evt.conn = conn;
             tx->evt.ep = ep;
 
@@ -2791,11 +2743,9 @@ sock_handle_active_message(sock_conn_t *sconn,
 
     event = (cci_event_t *) &evt->event;
     event->type = CCI_EVENT_RECV;
-
-    recv = &(event->info.recv);
-    *((uint32_t *) &recv->len) = len;
-    *((void **) &recv->ptr) = (void *) &hdr->data;
-    recv->connection = &conn->connection;
+    *((uint32_t *) &event->recv.len) = len;
+    *((void **) &event->recv.ptr) = (void *) &hdr->data;
+    event->recv.connection = &conn->connection;
 
     /* if a reliable connection, handle the ack */
 
@@ -2902,7 +2852,7 @@ sock_handle_ack(sock_conn_t *sconn,
                         TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
                     } else {
                         tx->state = SOCK_TX_COMPLETED;
-                        tx->evt.event.info.send.status = CCI_SUCCESS;
+                        tx->evt.event.send.status = CCI_SUCCESS;
                         /* store locally until we can drop the locks */
                         TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
                     }
@@ -2936,7 +2886,7 @@ sock_handle_ack(sock_conn_t *sconn,
                         TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
                     } else {
                         tx->state = SOCK_TX_COMPLETED;
-                        tx->evt.event.info.send.status = CCI_SUCCESS;
+                        tx->evt.event.send.status = CCI_SUCCESS;
                         /* store locally until we can drop the locks */
                         TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
                     }
@@ -2975,7 +2925,7 @@ sock_handle_ack(sock_conn_t *sconn,
                             TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
                         } else {
                             tx->state = SOCK_TX_COMPLETED;
-                            tx->evt.event.info.send.status = CCI_SUCCESS;
+                            tx->evt.event.send.status = CCI_SUCCESS;
                             /* store locally until we can drop the dev->lock */
                             TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
                         }
@@ -3015,8 +2965,8 @@ sock_handle_ack(sock_conn_t *sconn,
 
                 free(rma_op);
                 if (!(flags & CCI_FLAG_SILENT)) {
-                    tx->evt.event.info.send.status = CCI_SUCCESS;
-                    tx->evt.event.info.send.context = context;
+                    tx->evt.event.send.status = CCI_SUCCESS;
+                    tx->evt.event.send.context = context;
                     TAILQ_INSERT_HEAD(&evts, &tx->evt, entry);
                     continue;
                 }
@@ -3039,7 +2989,7 @@ sock_handle_ack(sock_conn_t *sconn,
                 tx->rma_op = rma_op;
 
                 tx->evt.event.type = CCI_EVENT_SEND;
-                tx->evt.event.info.send.connection = connection;
+                tx->evt.event.send.connection = connection;
                 tx->evt.conn = conn;
                 if (i == (rma_op->num_msgs - 1)) {
                     if (rma_op->data_len % connection->max_send_size)
@@ -3077,8 +3027,8 @@ sock_handle_ack(sock_conn_t *sconn,
                     tx->seq = ++(sconn->seq);
 
                     tx->evt.event.type = CCI_EVENT_SEND;
-                    tx->evt.event.info.send.connection = connection;
-                    tx->evt.event.info.send.context = rma_op->context;
+                    tx->evt.event.send.connection = connection;
+                    tx->evt.event.send.context = rma_op->context;
                     tx->evt.conn = conn;
                     tx->evt.ep = ep;
                     sock_pack_send(&hdr_r->header, tx->len, sconn->peer_id);
@@ -3098,8 +3048,8 @@ sock_handle_ack(sock_conn_t *sconn,
                     free(rma_op);
 
                     if (!(flags & CCI_FLAG_SILENT)) {
-                        tx->evt.event.info.send.status = CCI_SUCCESS;
-                        tx->evt.event.info.send.context = context;
+                        tx->evt.event.send.status = CCI_SUCCESS;
+                        tx->evt.event.send.context = context;
                         TAILQ_INSERT_HEAD(&evts, &tx->evt, entry);
                         continue;
                     }
@@ -3278,7 +3228,7 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
 
         event = (cci_event_t *) &evt->event;
         event->type = (enum cci_event_type)reply; /* CCI_EVENT_CONNECT_[SUCCESS|REJECTED] */
-        event->info.other.context = tx->evt.event.info.send.context;
+        event->connect_success.context = tx->evt.event.send.context;
 
         i = sock_ip_hash(sin.sin_addr.s_addr, 0);
         active_list = &sep->active_hash[i];
@@ -3287,7 +3237,7 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
         pthread_mutex_unlock(&ep->lock);
 
         if (CCI_EVENT_CONNECT_SUCCESS == reply) {
-            event->info.other.u.connect.connection = &conn->connection;
+            event->connect_success.connection = &conn->connection;
             sconn->peer_id = peer_id;
             sconn->status = SOCK_CONN_READY;
             *((struct sockaddr_in *) &sconn->sin) = sin;
@@ -3366,8 +3316,8 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
 
     tx->flags = CCI_FLAG_SILENT;
     tx->msg_type = SOCK_MSG_CONN_ACK;
-    tx->evt.event.type = CCI_EVENT_NONE;
-    tx->evt.event.info.other.u.connect.connection = &conn->connection;
+    tx->evt.event.type = CCI_EVENT_SEND;
+    tx->evt.event.connect_success.connection = &conn->connection;
     tx->evt.ep = ep;
     tx->evt.conn = conn;
 
