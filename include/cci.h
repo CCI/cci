@@ -1215,11 +1215,11 @@ typedef struct cci_event_connect_success {
   /*! Type of event - should equal CCI_EVENT_CONNECT_SUCCESS. */
   cci_event_type_t type;
 
-  /*! The new connection. */
-  cci_connection_t *connection;
-
   /*! Context value that was passed to cci_connect() */
   void *context;
+
+  /*! The new connection. */
+  cci_connection_t *connection;
 } cci_event_connect_success_t;
 
 /*!
