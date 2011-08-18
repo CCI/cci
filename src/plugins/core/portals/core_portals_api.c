@@ -157,10 +157,8 @@ static int portals_get_opt(          cci_opt_handle_t     *handle,
 static int portals_arm_os_handle(    cci_endpoint_t       *endpoint,
                                      int                  flags );
 static int portals_get_event(        cci_endpoint_t       *endpoint, 
-                                     cci_event_t ** const event,
-                                     uint32_t             flags );
-static int portals_return_event(     cci_endpoint_t       *endpoint, 
-                                     cci_event_t          *event );
+                                     cci_event_t ** const event);
+static int portals_return_event(     cci_event_t          *event );
 static int portals_send(             cci_connection_t     *connection, 
                                      void                 *ptr,
                                      uint32_t             len, 
@@ -1728,7 +1726,6 @@ static int portals_connect(
     portals_tx_t           *tx=NULL;
     cci__evt_t             *evt=NULL;
     cci_event_t            *event=NULL;
-    cci_event_other_t      *other=NULL;
     ptl_process_id_t       idp;
     portals_conn_request_t conn_request;
     ptl_match_bits_t       bits = 0ULL;
@@ -1804,10 +1801,8 @@ static int portals_connect(
     evt->conn=conn;
     event=&evt->event;
     event->type=CCI_EVENT_CONNECT_SUCCESS; /* for now */
-
-    other=&event->info.other;
-    other->context=context;
-    other->u.connect.connection=connection;
+    event->connect_success.context=context;
+    event->connect_success.connection=connection;
 
     /* pack the bits */
     bits = ((ptl_match_bits_t) port) << PORTALS_EP_SHIFT;
@@ -2166,15 +2161,13 @@ static int portals_arm_os_handle(
 
 
 static int portals_get_event(cci_endpoint_t *endpoint,
-                             cci_event_t **const event,
-                             uint32_t flags )
+                             cci_event_t **const event)
 {
     int             ret = CCI_SUCCESS;
     cci__ep_t       *ep;
     cci__evt_t      *ev = NULL, *e;
     cci__dev_t      *dev;
     portals_ep_t    *pep;
-    cci_event_t     *tmp;
 
     CCI_ENTER;
 
@@ -2190,48 +2183,22 @@ static int portals_get_event(cci_endpoint_t *endpoint,
     portals_get_event_ep(ep);
 
     pthread_mutex_lock(&ep->lock);
-    if (TAILQ_EMPTY(&ep->evts)) {
-        pthread_mutex_unlock(&ep->lock);
-        *event = NULL;
-        CCI_EXIT;
-        return CCI_EAGAIN;
-    }
 
-    if (!flags) {
-        /* give the user the first event */
-        TAILQ_FOREACH(e, &ep->evts, entry) {
-            if (e->event.type == CCI_EVENT_SEND) {
-                if (e->priv) {
-                    portals_rma_op_t *rma_op = e->priv;
-                    if (rma_op->flags & CCI_FLAG_BLOCKING) {
-                        continue;
-                    } else {
-                        ev = e;
-                        break;
-                    }
+    /* give the user the first event */
+    TAILQ_FOREACH(e, &ep->evts, entry) {
+        if (e->event.type == CCI_EVENT_SEND) {
+            if (e->priv) {
+                portals_rma_op_t *rma_op = e->priv;
+                if (rma_op->flags & CCI_FLAG_BLOCKING) {
+                    continue;
                 } else {
-                    /* NOTE: if it is blocking, skip it since portals_send()
-                     * is waiting on it
-                     */
-                    portals_tx_t *tx = container_of(e, portals_tx_t, evt);
-                    if (tx->flags & CCI_FLAG_BLOCKING) {
-                        continue;
-                    } else {
-                        ev = e;
-                        break;
-                    }
+                    ev = e;
+                    break;
                 }
             } else {
-                ev = e;
-                break;
-            }
-        }
-    } else {
-        TAILQ_FOREACH(e, &ep->evts, entry) {
-            tmp = &e->event;
-
-            if (flags & CCI_PE_SEND_EVENT &&
-                tmp->type == CCI_EVENT_SEND) {
+                /* NOTE: if it is blocking, skip it since portals_send()
+                 * is waiting on it
+                 */
                 portals_tx_t *tx = container_of(e, portals_tx_t, evt);
                 if (tx->flags & CCI_FLAG_BLOCKING) {
                     continue;
@@ -2239,16 +2206,10 @@ static int portals_get_event(cci_endpoint_t *endpoint,
                     ev = e;
                     break;
                 }
-            } else if (flags & CCI_PE_RECV_EVENT &&
-                       tmp->type == CCI_EVENT_RECV) {
-                ev = e;
-                break;
-            } else if (flags & CCI_PE_OTHER_EVENT &&
-                       !(tmp->type == CCI_EVENT_SEND ||
-                         tmp->type == CCI_EVENT_RECV)) {
-                ev = e;
-                break;
             }
+        } else {
+            ev = e;
+            break;
         }
     }
 
@@ -2269,8 +2230,7 @@ static int portals_get_event(cci_endpoint_t *endpoint,
 }
 
 
-static int portals_return_event(cci_endpoint_t *endpoint,
-                                cci_event_t *event )
+static int portals_return_event( cci_event_t *event )
 {
     int                 iRC     = CCI_SUCCESS;
     cci__ep_t           *ep     = NULL;
@@ -2287,15 +2247,10 @@ static int portals_return_event(cci_endpoint_t *endpoint,
         return CCI_ENODEV;
     }
 
-    ep = container_of(endpoint, cci__ep_t, endpoint);
-    pep = ep->priv;
-
     evt = container_of(event, cci__evt_t, event);
 
-    if (evt->ep != ep) {
-        CCI_EXIT;
-        return CCI_EINVAL;
-    }
+    ep = evt->ep;
+    pep = ep->priv;
 
     /* enqueue the event */
 
@@ -2442,9 +2397,9 @@ static int portals_send_common(
     tx->evt.conn = conn;
     tx->evt.ep = ep;
     tx->evt.event.type = CCI_EVENT_SEND;
-    tx->evt.event.info.send.connection = connection;
-    tx->evt.event.info.send.context = context;
-    tx->evt.event.info.send.status = CCI_SUCCESS; /* for now */
+    tx->evt.event.send.connection = connection;
+    tx->evt.event.send.context = context;
+    tx->evt.event.send.status = CCI_SUCCESS; /* for now */
 
     /* pack match bits */
     bits = ((ptl_match_bits_t) pconn->peer_ep_id) << PORTALS_EP_SHIFT;
@@ -2530,7 +2485,7 @@ static int portals_send_common(
                 if (&tx->evt == e) {
                     evt = e;
                     TAILQ_REMOVE(&ep->evts, evt, entry);
-                    ret = evt->event.info.send.status;
+                    ret = evt->event.send.status;
                 }
             }
             pthread_mutex_unlock(&ep->lock);
@@ -2877,9 +2832,9 @@ static int portals_rma(cci_connection_t *connection,
     rma_op->tx = NULL;
 
     rma_op->evt.event.type = CCI_EVENT_SEND;
-    rma_op->evt.event.info.send.connection = connection;
-    rma_op->evt.event.info.send.context = context;
-    rma_op->evt.event.info.send.status = CCI_SUCCESS; /* for now */
+    rma_op->evt.event.send.connection = connection;
+    rma_op->evt.event.send.context = context;
+    rma_op->evt.event.send.status = CCI_SUCCESS; /* for now */
     rma_op->evt.ep = ep;
     rma_op->evt.conn = conn;
     rma_op->evt.priv = rma_op;
@@ -2945,7 +2900,7 @@ static int portals_rma(cci_connection_t *connection,
                 if (rma_op == e->priv) {
                     evt = e;
                     TAILQ_REMOVE(&ep->evts, evt, entry);
-                    ret = evt->event.info.send.status;
+                    ret = evt->event.send.status;
                 }
             }
             pthread_mutex_unlock(&ep->lock);
@@ -3122,7 +3077,7 @@ static void portals_handle_conn_reply(cci__ep_t *ep, ptl_event_t pevent)
     rx->am = am;
 
     evt = &rx->evt;
-    evt->event.info.other.context = pconn->tx->evt.event.info.other.context;
+    evt->event.connect_success.context = pconn->tx->evt.event.send.context;
 
     if (pevent.mlength == sizeof(*accept)) {
         /* accept */
@@ -3133,7 +3088,7 @@ static void portals_handle_conn_reply(cci__ep_t *ep, ptl_event_t pevent)
         pconn->peer_conn |= (uint64_t)accept->server_conn_lower;
 
         evt->event.type = CCI_EVENT_CONNECT_SUCCESS;
-        evt->event.info.other.u.connect.connection = &conn->connection;
+        evt->event.connect_success.connection = &conn->connection;
 
         debug(CCI_DB_CONN, "%s: recv'd accept peer_ep_id=%u", __func__, pconn->peer_ep_id);
         pthread_mutex_lock(&ep->lock);
@@ -3206,21 +3161,21 @@ static void portals_handle_active_msg(cci__ep_t *ep, ptl_event_t pevent)
     evt = &rx->evt;
     evt->event.type = CCI_EVENT_RECV;
 
-    *((uint32_t *)&evt->event.info.recv.len) =
+    *((uint32_t *)&evt->event.recv.len) =
         (uint32_t) ((pevent.match_bits >> 11) & 0xFFFF);
-    if (evt->event.info.recv.len)
-        *((void **)&evt->event.info.recv.ptr) =
+    if (evt->event.recv.len)
+        *((void **)&evt->event.recv.ptr) =
             pevent.md.start + pevent.offset;
     else
-        *((void **)&evt->event.info.recv.ptr) = NULL;
+        *((void **)&evt->event.recv.ptr) = NULL;
 
     debug(CCI_DB_MSG, "%s: recv'd len=%d ptr=%p",
           __func__,
-          evt->event.info.recv.len,
-          evt->event.info.recv.ptr);
+          evt->event.recv.len,
+          evt->event.recv.ptr);
 
 #ifdef    PORTALS_8B_OOB
-    len=evt->event.info.recv.len;
+    len=evt->event.recv.len;
     if( len < 9 )                               /* Receive to 8B OOB */
         memcpy(pevent.md.start + pevent.offset, &pevent.hdr_data, len);
 #endif // PORTALS_8B_OOB
@@ -3250,7 +3205,7 @@ portals_complete_rma(portals_rma_op_t *rma_op, portals_rma_handle_t *local, ptl_
         free(rma_op);
     } else {
         /* we are done, issue completion */
-        rma_op->evt.event.info.send.status =
+        rma_op->evt.event.send.status =
             event.ni_fail_type == PTL_NI_OK ? CCI_SUCCESS : CCI_ERROR;
         pthread_mutex_lock(&ep->lock);
         TAILQ_INSERT_HEAD(&ep->evts, &rma_op->evt, entry);
@@ -3331,7 +3286,7 @@ static void portals_get_event_ep(cci__ep_t *ep)
                 pthread_mutex_unlock(&ep->lock);
             } else {
                 /* generate CCI_EVENT_SEND */
-                tx->evt.event.info.send.status =
+                tx->evt.event.send.status =
                     event.ni_fail_type == PTL_NI_OK ? CCI_SUCCESS : CCI_ERROR;
                 pthread_mutex_lock(&ep->lock);
                 TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
@@ -3488,7 +3443,7 @@ static void portals_get_event_ep(cci__ep_t *ep)
                 TAILQ_INSERT_HEAD(&pep->idle_txs, tx, dentry);
                 pthread_mutex_unlock(&ep->lock);
             } else {
-                tx->evt.event.info.send.status =
+                tx->evt.event.send.status =
                     event.ni_fail_type == PTL_NI_OK ? CCI_SUCCESS : CCI_ERROR;
                 pthread_mutex_lock(&ep->lock);
                 TAILQ_INSERT_HEAD(&ep->evts, &tx->evt, entry);
