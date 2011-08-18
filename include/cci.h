@@ -1318,7 +1318,7 @@ typedef struct cci_event_endpoint_device_failed {
 
   /*! The endpoint on the device that failed. */
   cci_endpoint_t *endpoint;
-} cci_event_endpoint_device_failed;
+} cci_event_endpoint_device_failed_t;
 
 /*!
   Generic event
