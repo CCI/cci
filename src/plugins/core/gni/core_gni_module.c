@@ -4,7 +4,6 @@
  */
 
 
-#include <stdio.h>
 #include "cci/config.h"
 #include "cci.h"
 #include "plugins/core/core.h"

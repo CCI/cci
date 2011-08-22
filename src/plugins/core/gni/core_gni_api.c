@@ -12,10 +12,6 @@
 #pragma warning(disable:2259)
 #endif // __INTEL_COMPILER
 
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-#include <inttypes.h>
 #include "cci/config.h"
 #include "cci.h"
 #include "plugins/core/core.h"
@@ -24,6 +20,14 @@
 volatile int32_t                gni_shut_down=0;
 gni_globals_t *                 gglobals=NULL;
 pthread_t                       tid;
+int                             iAmVerbose;  // level of verbosity
+int                             iRank;       // rank of this process
+int                             iSize;       // size of parallel job
+uint32_t                        modes;       // GNI API flags for cd
+uint64_t                        vmdflags;    // memory region attributes
+int                             vmdindex;    // MDDB index
+gni_nic_handle_t                nich;        // GNI API NIC handle
+
 
 // Cycle count sampling code -- START
 #define   ENABLE_GNI_SAMPLING 0
@@ -177,10 +181,8 @@ static int         gni_arm_os_handle(
     int32_t                     flags );
 static int         gni_get_event(
     cci_endpoint_t *            endpoint,
-    cci_event_t ** const        event,
-    uint32_t                    flags );
+    cci_event_t ** const        event );
 static int         gni_return_event(
-    cci_endpoint_t *            endpoint,
     cci_event_t *               event );
 static int         gni_send(
     cci_connection_t *          connection,
@@ -220,8 +222,6 @@ static int         gni_rma(
     void *                      context,
     int32_t                     flags );
 
-static uint8_t     gni_get_ptag(    void);
-static uint32_t    gni_get_cookie( void);
 static void        gni_get_ep_id(
     gni_dev_t *                 gdev,  
     uint32_t *                  id );
@@ -237,6 +237,320 @@ static int gni_add_rx(
 static void *      gni_progress_thread(
     void *                      arg );
 
+
+// Retrieve GNI ptag from environment.
+uint8_t gni_get_ptag(void) {
+
+    char *                   cpPtr;          // character temp
+    char *                   cpTok;
+    uint8_t                  ptag;           // return value
+
+    cpPtr=getenv("PMI_GNI_PTAG");            // from PMI
+    assert( cpPtr!=NULL );                   // something wrong
+    cpTok=strtok( cpPtr, ":" );
+    ptag=(uint8_t)atoi(cpTok);
+    return(ptag);
+}
+
+
+// Retrieve GNI cookie from environment.
+uint32_t gni_get_cookie(void) {
+
+    char *                   cpPtr;          // character temp
+    char *                   cpTok;
+    uint32_t                 cookie;         // return value
+
+    cpPtr=getenv("PMI_GNI_COOKIE");          // from PMI
+    assert( cpPtr!=NULL );                   // something wrong
+    cpTok=strtok( cpPtr, ":" );
+    cookie=(uint32_t)atoi(cpTok);
+    return(cookie);
+}
+
+
+// Retrieve GNI NIC address from environment.  Note this is the address
+// of the host (PE) upon which we are running.
+unsigned int gni_get_nic_address(
+    int                      iDev ) {        // Device for which to look
+
+    char *                   cpTok;
+    char *                   cpPtr;          // character temp
+    int                      i=0;            // Counter for devices
+    int                      iDevice=-1;     // Device (NIC) ID
+    int                      iAddress=-1;    // Address of device
+    gni_return_t             status;         // return value from GNI
+
+    if( (cpPtr=getenv("PMI_GNI_DEV_ID")) ) {;// use this with PMI loaded
+
+        while( (cpTok=strtok( cpPtr, ":" ))!=NULL ) {
+            iDevice=atoi(cpTok);
+            if( iDevice==iDev )             // until matches
+                break;
+            iDevice=-1;                     // fail if no match
+        }
+        assert( iDevice!=-1 );
+
+        cpPtr=getenv("PMI_GNI_LOC_ADDR");
+        while( (cpTok=strtok( cpPtr, ":" ))!=NULL ) {
+
+            iAddress=atoi(cpTok);
+            if( iDevice==i )                 // until iDevice'th address
+                break;
+            i++;                             // go to next device
+            iAddress=-1;                     // fail if cannot find
+        }
+        assert( iAddress!=-1 );
+
+    } else {
+        status=GNI_CdmGetNicAddress( iDev, (uint32_t *)&iAddress,
+                                           (uint32_t *)&iDevice );
+        if( status!=GNI_RC_SUCCESS )         // gripe if GNI API fails
+            fprintf( stderr, "GNI_CdmGetNicAddress returned error %d\n",
+                     status );
+        assert( status==GNI_RC_SUCCESS );
+    }
+    return(iAddress);
+}
+
+
+// Function to pack arbitrary structure into rank-indexed vector.
+void pmi_allgather(
+    void *                   in,             // input structure
+    void *                   out,            // output vector
+    int                      len ) {         // sizeof(*in)
+
+    int                      i;              // integer temp
+    int                      iRV;            // return value from PMI
+    char *                   cpBuf;
+    char *                   cpPtr;          // character temp
+    static int *             ipRanks=NULL;   // re-usable ranks vector
+    static int               iRank=-1;       // rank of this process
+    static int               iSize;          // size of parallel job
+
+    if( iRank==-1 ) {                        // create/fill ranks vector
+        iRV=PMI_Get_size(&iSize);
+        assert( iRV==PMI_SUCCESS );
+        ipRanks=(int *)calloc( iSize, sizeof(int) );
+        assert( ipRanks!=NULL );
+        iRV=PMI_Get_rank(&iRank);
+        assert( iRV==PMI_SUCCESS );
+        iRV=PMI_Allgather( &iRank, ipRanks, sizeof(int) );
+        assert( iRV==PMI_SUCCESS );
+    }
+
+    cpBuf=(char *)calloc( iSize, len );      // Allocate temp for gather
+    assert(cpBuf);
+    iRV=PMI_Allgather( in, cpBuf, len );     // Gather input structures
+    assert( iRV==PMI_SUCCESS );
+
+    for( cpPtr=out, i=0; i<iSize; i++ )      // copy into user vector
+        memcpy( &cpPtr[len*ipRanks[i]], &cpBuf[i*len], len );
+    free(cpBuf);                             // get rid of vector temp
+}
+
+
+void gni_assert(
+    char *                      pcA,         // failed function
+    gni_return_t                status ) {   // GNI API return value
+
+    if( status!=GNI_RC_SUCCESS )             // Gripe if GNI API fails
+        fprintf( stderr, "Rank=%.6d %s error %s\n",
+                 iRank, pcA, gni_err_str[status] );
+    assert( status==GNI_RC_SUCCESS );
+    return;
+}
+
+
+void gni_clear_cdm(
+    gni_cdm_handle_t *          pcdh ) {     // GNI API cd handle
+
+    gni_return_t                status;      // GNI API return value
+
+//  Destroy instance of Communication Domain.
+    status=GNI_CdmDestroy(*pcdh);            // cd handle
+    gni_assert( "GNI_CdmDestroy returned", status );
+    return;
+}
+
+
+void gni_create_cdm(
+    uint32_t                    iN,          // NIC ID (from kernel)
+    gni_cdm_handle_t *          pcdh ) {     // GNI API cd handle
+
+    uint8_t                     ptag;        // ptag for GNI API
+    uint32_t                    cookie;      // cookie for GNI API
+    uint32_t                    iPE;         // PE ID (should == Rank)
+    gni_return_t                status;      // GNI API return value
+
+//  Get cookie and ptag for Communications Domain creation.
+    cookie=gni_get_cookie();
+    ptag=gni_get_ptag();
+
+//  Create instance of Communication Domain.
+    status=GNI_CdmCreate( iRank,             // Note Rank
+                          ptag,              //      ptag
+                          cookie,            //      cookie
+                          modes,             // modes are bit-wise flags
+                          pcdh );            // Get cd handle
+    gni_assert( "GNI_CdmCreate returned", status );
+
+//  Associate the Communication Domain with the gemini NIC.
+//  Note: on Cray XT, PE address==Rank in aprun job.
+    status=GNI_CdmAttach( *pcdh,             // Note cd handle
+                          iN,                // id (? in /dev/kgni?)
+                          &iPE,              // Get PE address
+                          &nich );           // Get NIC handle
+    gni_assert( "GNI_CdmAttach returned", status );
+    return;
+}
+
+
+void gni_clear_cq(
+    gni_cq_handle_t *           pcqh ) {     // GNI API CQ handle - recv
+
+    gni_return_t                status;      // GNI API return value
+
+//  Destroy CQ.
+    status=GNI_CqDestroy(*pcqh);             // Get CQ (sends) handle
+    gni_assert( "GNI_CqDestroy returned", status );
+    return;
+}
+
+
+void gni_create_cq(
+    gni_cq_handle_t *           pcqh ) {     // GNI API CQ handle - recv
+
+    gni_return_t                status;      // GNI API return value
+
+//  Create CQ.
+    status=GNI_CqCreate( nich,               // Note NIC handle
+                         2*iSize,            // ... max events
+                         0,                  // event bundling
+                         GNI_CQ_NOBLOCK,     // cq mode... just use this
+                         NULL,               // address of event handler
+                         NULL,               // context for handler
+                         pcqh );             // Get CQ (sends) handle
+    gni_assert( "GNI_CqCreate returned", status );
+    return;
+}
+
+
+void gni_clear_vmd(
+    uint64_t **                 ppvmd,       // address of memory region
+    gni_mem_handle_t *          pmdh ) {     // GNI API region handle
+
+    gni_return_t                status;      // GNI API return value
+
+    status=GNI_MemDeregister( nich,          // Note NIC handle
+                              pmdh );        // Memory handle
+    gni_assert( "GNI_MemDeregister returned", status );
+    free(*ppvmd);
+    return;
+}
+
+
+void gni_create_vmd(
+    uint64_t **                 ppvmd,       // address of memory region
+    size_t                      len,         // length of memory region
+    gni_cq_handle_t             cqh,         // GNI API cq handle
+    gni_mem_handle_t *          pmdh ) {     // GNI API region handle
+
+    gni_return_t                status;      // GNI API return value
+
+    *ppvmd=malloc(len);                      // Allocate memory
+    assert(*ppvmd);
+
+    status=GNI_MemRegister( nich,            // Note NIC handle
+                            (uint64_t)*ppvmd,// Memory block
+                            len,             // Size of memory block
+                            cqh,             // Note cq handle
+                            vmdflags,        // Memory region attributes
+                            vmdindex,        // Allocation option
+                            pmdh );          // Memory handle
+    gni_assert( "GNI_MemRegister returned", status );
+    return;
+}
+
+
+void gni_clear_ep(
+    gni_ep_handle_t *           peph ) {     // GNI API ep handles list
+
+    gni_return_t                status;      // GNI API return value
+
+    status=GNI_EpDestroy(*peph);
+    gni_assert( "GNI_EpDestroy returned", status );
+    return;
+}
+
+
+void gni_create_ep(
+    gni_cq_handle_t             cqh,         // GNI API cq handle
+    uint32_t                    nic_addr,    // NIC address
+    uint32_t                    id,          // message ID
+    gni_ep_handle_t *           peph ) {     // GNI API ep handles list
+
+    gni_return_t                status;      // GNI API return value
+
+    status=GNI_EpCreate( nich,               // Note NIC handle
+                         cqh,                // Note cq handle
+                         peph );             // Get ep handle
+    gni_assert( "GNI_EpCreate returned", status );
+
+//  Bind endpoint to remote address and message id.  Note: sends
+//  require a bound (to remote PE) ep.
+    status=GNI_EpBind( *peph,                // Note ep handle
+                       nic_addr,             // Remote PE
+                       id );                 // Message ID
+    gni_assert( "GNI_EpBind returned", status );
+    return;
+}
+
+
+void gni_poll_cq(
+    gni_cq_handle_t             cqh,         // GNI API CQ handle
+    gni_cq_entry_t *            pev ) {      // GNI API CQ (event) entry
+
+    gni_return_t                status;      // GNI API return value
+    gni_return_t                poll;        // GNI API return value
+
+//  Poll destination queue for completion.
+    poll=GNI_RC_NOT_DONE;
+    while( poll==GNI_RC_NOT_DONE ) {         // Theoretically, can hang
+        poll=GNI_CqGetEvent( cqh, pev );
+        if( poll==GNI_RC_SUCCESS ) {
+            status=GNI_CQ_OVERRUN(*pev);
+            gni_assert( "GNI_CQ_OVERRUN detected", status );
+        }
+    }
+    assert( poll==GNI_RC_SUCCESS );
+    assert(*pev);
+    return;
+}
+
+
+void gni_get_cq(
+    gni_cq_handle_t             cqh,         // GNI API CQ handle - recv
+    gni_cq_entry_t *            pev ) {      // GNI API CQ (event) entry
+
+    gni_poll_cq( cqh, pev );                 // Get next event off of CQ
+    return;
+}
+
+
+void gni_get_checked_cq(
+    gni_cq_handle_t             cqh,         // GNI API cq handle - send
+    gni_post_descriptor_t **    ppdpost,     // GNI API post retrieval
+    gni_cq_entry_t *            pev ) {      // GNI API cq (event) entry
+
+    gni_return_t                status;      // GNI API return value
+
+    gni_poll_cq( cqh, pev );                 // Get next event off of CQ
+
+//  Check for error in event.
+    status=GNI_GetCompleted( cqh, *pev, ppdpost );
+    gni_assert( "GNI_GetCompleted returned", status );
+    return;
+}
 
 // Public plugin structure.
 //
@@ -291,34 +605,6 @@ cci_plugin_core_t cci_core_gni_plugin= {
 };
 
 
-static uint8_t gni_get_ptag(void) {
-
-    char *                    ptr;
-    char *                    token;
-    uint8_t                   ptag;
-
-    ptr=getenv("PMI_GNI_PTAG");
-    assert(ptr);                             // maybe PMI_Init uncalled
-    token=strtok( ptr, ":" );
-    ptag=(uint8_t)atoi(token);
-    return(ptag);
-}
-
-
-static uint32_t gni_get_cookie(void) {
-
-    char *                    ptr;
-    char *                    token;
-    uint32_t                  cookie;
-
-    ptr=getenv("PMI_GNI_COOKIE");
-    assert(ptr);                             // maybe PMI_Init uncalled
-    token=strtok( ptr, ":" );
-    cookie=(uint32_t)atoi(token);
-    return(cookie); 
-}
-
-
 static int gni_init(
     uint32_t                    abi_ver,
     uint32_t                    flags,
@@ -327,10 +613,9 @@ static int gni_init(
     int32_t                     iRC;
     int32_t                     iReject;
     int32_t                     iFirst;
-    int32_t                     iRank;
+    uint32_t                    iN=0;        // NIC ID (from kernel)
     cci__dev_t *                dev;
     cci_device_t **             dl;
-    gni_return_t                status;
 
     CCI_ENTER;
     GNI_SAMPLE_INIT;
@@ -343,6 +628,15 @@ static int gni_init(
                gni_err_str[iRC] );
         return(CCI_ERROR);
     }
+    iRC=PMI_Get_size(&iSize);
+    if(iRC!=PMI_SUCCESS) {
+
+        debug( CCI_DB_WARN, "FAIL: PMI_Get_size returned error %s",
+               gni_err_str[iRC] );
+        return(CCI_ERROR);
+    }
+    debug( CCI_DB_WARN, "Size=%.8d In gni_init", iSize );
+
     iRC=PMI_Get_rank(&iRank);
     if(iRC!=PMI_SUCCESS) {
 
@@ -402,31 +696,10 @@ static int gni_init(
         debug( CCI_DB_INFO, "Rank=%.8d %s: modes=0x%zx  kid   =0x%zx",
                gdev->Rank, __func__, gdev->modes, gdev->kid );
 
-        status=GNI_CdmCreate( gdev->Rank, gdev->ptag, gdev->cookie,
-                              gdev->modes, &(gdev->cdh) );
-        if( status!=GNI_RC_SUCCESS ) {
-
-            debug( CCI_DB_WARN, "FAIL: GNI_CdmCreate returned error %s",
-                   gni_err_str[status] );
-            return(CCI_ERROR);
-        }
-        debug( CCI_DB_INFO, "Rank=%.8d %s: CdmCreate: cdh   =0x%zx",
+        gni_create_cdm( iN, &(gdev->cdh) );
+        debug( CCI_DB_INFO,
+               "Rank=%.8d %s: gni_create_cdm: cdh   =0x%zx",
                gdev->Rank, __func__, gdev->cdh );
-
-        status=GNI_CdmAttach( gdev->cdh, gdev->kid, &(gdev->idpe),
-                              &(gdev->nh) );
-        if( status!=GNI_RC_SUCCESS ) {
-
-            debug( CCI_DB_WARN, "FAIL: GNI_CdmAttach returned error %s",
-                   gni_err_str[status] );
-            return(CCI_ERROR);
-        }
-        debug( CCI_DB_INFO,
-               "Rank=%.8d %s: CdmAttach: cdh   =0x%zx nh    =0x%zx",
-               gdev->Rank, __func__, gdev->cdh, gdev->nh );
-        debug( CCI_DB_INFO,
-               "Rank=%.8d %s: CdmAttach: cdh   =0x%zx idpe  =0x%zx",
-               gdev->Rank, __func__, gdev->cdh, gdev->idpe );
 
         gdev->ep_ids=calloc( GNI_NUM_BLOCKS, sizeof(*gdev->ep_ids) );
         if (!gdev->ep_ids) {
@@ -645,7 +918,7 @@ static int gni_add_tx(                       // Caller must hold ep->lock
     uint32_t                    remote_addr;
     gni_ep_t *                  gep=ep->priv;
     gni_tx_t *                  tx;    
-    gni_dev_t *                 gdev=ep->dev->priv;
+//  gni_dev_t *                 gdev=ep->dev->priv;
     gni_return_t                status;
 
     status=0;
@@ -662,20 +935,7 @@ static int gni_add_tx(                       // Caller must hold ep->lock
     tx->buffer=gep->txbuf+i*ep->buffer_len;
     tx->len=0;
 
-    status=GNI_EpCreate( gdev->nh, gep->cqhl, &(tx->eph) );
-    if( status!=GNI_RC_SUCCESS ) {
-
-        debug( CCI_DB_WARN, "FAIL: %s: GNI_EpCreate returned error %s",
-               __func__, gni_err_str[(enum cci_status)status] );
-        goto out;
-    }
-    status=GNI_EpBind( tx->eph, remote_addr, i );
-    if( status!=GNI_RC_SUCCESS ) {
-
-        debug( CCI_DB_WARN, "FAIL: %s: GNI_EpBind returned error %s",
-               __func__, gni_err_str[(enum cci_status)status] );
-        goto out;
-    }
+    gni_create_ep( gep->cqhl, remote_addr, i, &(tx->eph) );
 
     TAILQ_INSERT_TAIL( &gep->txs, tx, tentry );
     TAILQ_INSERT_TAIL( &gep->idle_txs, tx, dentry );
@@ -687,7 +947,6 @@ out:
             free(tx);
         }
     }
-//  debug( CCI_DB_INFO, "Rank %.8d Leaving %s: %d", gdev->Rank, __func__, i );
     return(ret);
 }
 
@@ -700,7 +959,7 @@ static int gni_add_rx(                       // Caller must hold ep->lock
     uint32_t                    remote_addr;
     gni_ep_t *                  gep=ep->priv;
     gni_rx_t *                  rx;
-    gni_dev_t *                 gdev=ep->dev->priv;
+//  gni_dev_t *                 gdev=ep->dev->priv;
     gni_return_t                status;
 
     status=0;
@@ -717,20 +976,7 @@ static int gni_add_rx(                       // Caller must hold ep->lock
     rx->buffer=gep->rxbuf+i*ep->buffer_len;
     rx->len=0;
 
-    status=GNI_EpCreate( gdev->nh, gep->cqhl, &(rx->eph) );
-    if( status!=GNI_RC_SUCCESS ) {
-
-        debug( CCI_DB_WARN, "FAIL: %s: GNI_EpCreate returned error %s",
-               __func__, gni_err_str[(enum cci_status)status] );
-        goto out;
-    }
-    status=GNI_EpBind( rx->eph, remote_addr, i );
-    if( status!=GNI_RC_SUCCESS ) {
-
-        debug( CCI_DB_WARN, "FAIL: %s: GNI_EpBind returned error %s",
-               __func__, gni_err_str[(enum cci_status)status] );
-        goto out;
-    }
+    gni_create_ep( gep->cqhl, remote_addr, i, &(rx->eph) );
 
     TAILQ_INSERT_TAIL(&gep->rxs, rx, gentry);
     TAILQ_INSERT_TAIL(&gep->idle_rxs, rx, entry);
@@ -742,7 +988,6 @@ out:
             free(rx);
         }
     }
-//  debug( CCI_DB_INFO, "Rank %.8d Leaving %s: %d", gdev->Rank, __func__, i );
     return(ret);
 }
 
@@ -758,7 +1003,6 @@ static int gni_create_endpoint(   cci_device_t *         device,
     cci__ep_t *                 ep=NULL;
     gni_ep_t *                  gep=NULL;
     gni_dev_t *                 gdev=NULL;
-    gni_return_t                status;
 
     CCI_ENTER;
 
@@ -786,7 +1030,6 @@ static int gni_create_endpoint(   cci_device_t *         device,
     }
 
     (*endpoint)->max_recv_buffer_count=GNI_EP_RX_CNT;
-    ep->max_hdr_size=GNI_EP_MAX_HDR_SIZE;
     ep->rx_buf_cnt=GNI_EP_RX_CNT;
     ep->tx_buf_cnt=GNI_EP_TX_CNT;
     ep->buffer_len=dev->device.max_send_size;
@@ -810,36 +1053,12 @@ static int gni_create_endpoint(   cci_device_t *         device,
            gdev->Rank, __func__, gep->id );
 
 //  Create completion queues for endpoint.
-    status=GNI_CqCreate( gdev->nh,           // Local CQ
-                         GNI_EP_RX_CNT,
-                         0,
-                         GNI_CQ_NOBLOCK,
-                         NULL,
-                         NULL,
-                         &(gep->cqhl) );
-    if( status!=GNI_RC_SUCCESS ) {
-
-        debug( CCI_DB_WARN, "FAIL: GNI_CqCreate returned error %s",
-               gni_err_str[status] );
-        return(CCI_ERROR);
-    }
+    gni_create_cq( &(gep->cqhl) );           // Local CQ
     debug( CCI_DB_INFO,
            "Rank=%.8d %s: CqCreate: nh=0x%zx cqhl=0x%zx",
            gdev->Rank, __func__, gdev->nh, gep->cqhl );
 
-    status=GNI_CqCreate( gdev->nh,           // Destination CQ
-                         GNI_EP_TX_CNT,
-                         0,
-                         GNI_CQ_NOBLOCK,
-                         NULL,
-                         NULL,
-                         &(gep->cqhd) );
-    if( status!=GNI_RC_SUCCESS ) {
-
-        debug( CCI_DB_WARN, "FAIL: GNI_CqCreate returned error %s",
-               gni_err_str[status] );
-        return(CCI_ERROR);
-    }
+    gni_create_cq( &(gep->cqhd) );           // Destination CQ
     debug( CCI_DB_INFO,
            "Rank=%.8d %s: CqCreate: nh=0x%zx cqhd=0x%zx",
            gdev->Rank, __func__, gdev->nh, gep->cqhd );
@@ -879,22 +1098,10 @@ out:
             gni_put_ep_id( gdev, gep->id );
 
         if( gep->cqhl!=0 )
-            if( (status=GNI_CqDestroy(gep->cqhl))!=GNI_RC_SUCCESS ) {
-
-                debug( CCI_DB_WARN,
-                       "FAIL: GNI_CqDestroy returned error %s",
-                       gni_err_str[status] );
-                return(CCI_ERROR);
-            }
+            gni_clear_cq( &(gep->cqhl) );
 
         if( gep->cqhd!=0 )
-            if( (status=GNI_CqDestroy(gep->cqhd))!=GNI_RC_SUCCESS ) {
-
-                debug( CCI_DB_WARN,
-                       "FAIL: GNI_CqDestroy returned error %s",
-                       gni_err_str[status] );
-                return(CCI_ERROR);
-            }
+            gni_clear_cq( &(gep->cqhd) );
 
 //      while( !TAILQ_EMPTY(&gep->txs) )
 //          gni_free_tx( gep, 1 );
@@ -1167,8 +1374,7 @@ static int gni_arm_os_handle(     cci_endpoint_t *       endpoint,
 
 
 static int gni_get_event(         cci_endpoint_t *         endpoint,
-                                  cci_event_t ** const     event,
-                                  uint32_t                 flags ) {
+                                  cci_event_t ** const     event ) {
 
     cci_device_t const *        device;
     cci__dev_t *                dev;
@@ -1189,8 +1395,7 @@ static int gni_get_event(         cci_endpoint_t *         endpoint,
 }
 
 
-static int gni_return_event(      cci_endpoint_t *       endpoint,
-                                  cci_event_t *          event ) {
+static int gni_return_event(      cci_event_t *          event ) {
 
     cci_device_t const *        device;
     cci__dev_t *                dev;

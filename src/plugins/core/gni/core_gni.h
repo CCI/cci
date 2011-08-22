@@ -6,9 +6,15 @@
 #ifndef CCI_CORE_GNI_H
 #define CCI_CORE_GNI_H
 
+#include <inttypes.h>
 #include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 #include <gni_pub.h>
 #include <pmi.h>
+#include <sys/time.h>
 #include "cci/config.h"
 
 BEGIN_C_DECLS
@@ -32,14 +38,15 @@ BEGIN_C_DECLS
 #define GNI_EP_MATCH          ((uint64_t)0)
 #define GNI_EP_IGNORE         (~((uint64_t)0))
 
+
 static inline uint64_t gni_tv_to_usecs(
     struct timeval              tv ) {
         
     return((tv.tv_sec*1000000)+tv.tv_usec);
 }   
 
-#define GNI_TV_TO_USECS(tv)     (((tv).tv_sec*1000000)+(tv).tv_usec)
 
+#define GNI_TV_TO_USECS(tv)     (((tv).tv_sec*1000000)+(tv).tv_usec)
 static inline uint64_t gni_get_usecs(void) {
         
     struct timeval              tv;
@@ -47,6 +54,7 @@ static inline uint64_t gni_get_usecs(void) {
     gettimeofday( &tv, NULL );
     return gni_tv_to_usecs(tv);
 }   
+
 
 #if 0
 static inline uint64_t gni_get_nsecs(void) {
@@ -70,11 +78,31 @@ static inline uint64_t rdtsc(void) {
     return((uint64_t)hi<<32 | lo);
 }
 
+
 static inline uint64_t gni_get_nsecs(void) {
 
     return((uint64_t)((double)rdtsc()/2.6));
 }
 #endif
+
+
+// Use "double" data type, if no statistcal processing on the raw time
+// variable is to be done.  IEEE will provide almost 16 digits of
+// precision; while current date requires only slightly above 15 digits.
+// If standard deviations are to be computed, time^2 requires somewhat
+// more than 30 digits, necessitating use of "long double".  For further
+// reference, see:
+//
+//     http://en.wikipedia.org/wiki/IEEE_754-2008
+static inline long double gni_get_time(void) {
+
+    struct timeval           tv;             // time temp
+
+    gettimeofday( &tv, NULL );
+    return( ((long double)tv.tv_usec/(long double)1000000) +
+             (long double)tv.tv_sec );
+}
+
 
 typedef struct gni_globals {
 
@@ -141,7 +169,6 @@ typedef struct gni_tx {
                                              //          dev->queued
                                              //          dev->pending
 }   gni_tx_t;
-
 
 typedef struct gni_ep {
 
