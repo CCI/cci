@@ -150,6 +150,7 @@ typedef struct gni_rx {
     int32_t                     flags;       // CCI flags
     void *                      buffer;      // active msg buffer
     uint16_t                    len;         // length of buffer
+    gni_mem_handle_t            mem_hndl;    // GNI API region handle
     gni_ep_handle_t             eph;         // ep handle
     TAILQ_ENTRY(gni_rx)         gentry;      // Hangs on ep->rxs
     TAILQ_ENTRY(gni_rx)         entry;       // Hangs on ep->idle_rxs
@@ -163,6 +164,7 @@ typedef struct gni_tx {
     int32_t                     flags;       // CCI flags
     void *                      buffer;      // active msg buffer
     uint16_t                    len;         // length of buffer
+    gni_mem_handle_t            mem_hndl;    // GNI API region handle
     gni_ep_handle_t             eph;         // ep handle
     TAILQ_ENTRY(gni_tx)         tentry;      // Hangs on ep->txs
     TAILQ_ENTRY(gni_tx)         dentry;      // Hangs on ep->idle_txs

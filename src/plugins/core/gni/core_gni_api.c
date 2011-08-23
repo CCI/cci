@@ -23,9 +23,17 @@ pthread_t                       tid;
 int                             iAmVerbose;  // level of verbosity
 int                             iRank;       // rank of this process
 int                             iSize;       // size of parallel job
-uint32_t                        modes;       // GNI API flags for cd
-uint64_t                        vmdflags;    // memory region attributes
-int                             vmdindex;    // MDDB index
+uint32_t                        iN=0;        // NIC ID (from kernel)
+uint32_t                        modes=GNI_CDM_MODE_FORK_NOCOPY       | \
+                                      GNI_CDM_MODE_FMA_SHARED        | \
+                                      0;     // GNI API flags for cd
+uint64_t                        vmdflags=GNI_MEM_READWRITE           | \
+                                         GNI_MEM_USE_GART;
+                                             // memory region attributes
+int                             vmdindex=-1; // use next available entry
+                                             //   in Memory Domain
+                                             //   Descriptor Block
+size_t                          vmdmask=0x3f;// 
 gni_nic_handle_t                nich;        // GNI API NIC handle
 
 
@@ -689,7 +697,7 @@ static int gni_init(
         gdev->ptag=gni_get_ptag();           // Retrieve GNI parameters
         gdev->cookie=gni_get_cookie();       // 'd.o.'
         gdev->Rank=iRank;                    // 'd.o.'
-        gdev->modes=0;                       // for now...
+        gdev->modes=modes;                   // cdm flags
         gdev->kid=0;                         // On arthur-login1...
         debug( CCI_DB_INFO, "Rank=%.8d %s: ptag =%3u  cookie=0x%zx",
                gdev->Rank, __func__, gdev->ptag, gdev->cookie );
@@ -919,9 +927,7 @@ static int gni_add_tx(                       // Caller must hold ep->lock
     gni_ep_t *                  gep=ep->priv;
     gni_tx_t *                  tx;    
 //  gni_dev_t *                 gdev=ep->dev->priv;
-    gni_return_t                status;
 
-    status=0;
     remote_addr=0;
     tx=calloc( 1, sizeof(*tx) );
     if(!tx) {
@@ -935,7 +941,14 @@ static int gni_add_tx(                       // Caller must hold ep->lock
     tx->buffer=gep->txbuf+i*ep->buffer_len;
     tx->len=0;
 
-    gni_create_ep( gep->cqhl, remote_addr, i, &(tx->eph) );
+    gni_create_vmd( (uint64_t **)&(tx->buffer),
+                    ep->buffer_len,
+                    gep->cqhd,
+                    &(tx->mem_hndl) );
+    gni_create_ep( gep->cqhl,
+                   remote_addr,
+                   i,
+                   &(tx->eph) );
 
     TAILQ_INSERT_TAIL( &gep->txs, tx, tentry );
     TAILQ_INSERT_TAIL( &gep->idle_txs, tx, dentry );
@@ -960,9 +973,7 @@ static int gni_add_rx(                       // Caller must hold ep->lock
     gni_ep_t *                  gep=ep->priv;
     gni_rx_t *                  rx;
 //  gni_dev_t *                 gdev=ep->dev->priv;
-    gni_return_t                status;
 
-    status=0;
     remote_addr=0;
     rx=calloc( 1, sizeof(*rx) );
     if(!rx) {
@@ -976,7 +987,14 @@ static int gni_add_rx(                       // Caller must hold ep->lock
     rx->buffer=gep->rxbuf+i*ep->buffer_len;
     rx->len=0;
 
-    gni_create_ep( gep->cqhl, remote_addr, i, &(rx->eph) );
+    gni_create_vmd( (uint64_t **)&(rx->buffer),
+                    ep->buffer_len,
+                    gep->cqhd,
+                    &(rx->mem_hndl) );
+    gni_create_ep( gep->cqhl,
+                   remote_addr,
+                   i,
+                   &(rx->eph) );
 
     TAILQ_INSERT_TAIL(&gep->rxs, rx, gentry);
     TAILQ_INSERT_TAIL(&gep->idle_rxs, rx, entry);
