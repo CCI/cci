@@ -1329,7 +1329,7 @@ typedef struct cci_event_endpoint_device_failed {
 
   \ingroup events
 */
-typedef struct cci_event {
+typedef union cci_event {
   cci_event_type_t type;
   cci_event_send_t send;
   cci_event_recv_t recv;
