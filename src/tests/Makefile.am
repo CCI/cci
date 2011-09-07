@@ -11,6 +11,7 @@ TESTS = \
 	client	\
 	pingpong_rma	\
 	pingpong	\
-	stream
+	stream	\
+	register
 
 check_PROGRAMS = $(TESTS)
