@@ -110,6 +110,12 @@ typedef struct gni_globals {
     const cci_device_t **       devices;     // Array of devices
 }   gni_globals_t;
 
+typedef struct gni_remote {
+    uint32_t                    nic_addr;
+    gni_mem_handle_t            mem_hndl;
+    uint64_t *                  buffer;
+}   gni_remote_t;
+
 typedef struct gni_dev {
 
     uint8_t                     ptag;        // protection tag
@@ -122,6 +128,7 @@ typedef struct gni_dev {
     uint32_t                    idpe;        // pointer to PE address
     uint32_t                    progressing; // Being progressed?
     uint64_t *                  ep_ids;      // Endpoint id blocks
+    gni_remote_t *              remote;
     gni_cdm_handle_t            cdh;         // Comm. domain handle
     gni_nic_handle_t            nh;          // NIC handle
 }   gni_dev_t;
@@ -190,6 +197,13 @@ typedef struct gni_ep {
     TAILQ_HEAD(g_ops, gni_rma_op)
                                  rma_ops;    // List of RMA operations
 }   gni_ep_t;
+
+typedef struct gni_lep {
+
+    gni_cq_handle_t             cqhd;        // destination queue
+    gni_cq_handle_t             cqhl;        // destination queue
+    gni_ep_handle_t *           peph;
+}   gni_lep_t;
 
 int cci_core_gni_post_load(
     cci_plugin_t *              me );

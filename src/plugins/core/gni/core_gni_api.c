@@ -19,22 +19,21 @@
 
 volatile int32_t                gni_shut_down=0;
 gni_globals_t *                 gglobals=NULL;
-pthread_t                       tid;
-int                             iAmVerbose;  // level of verbosity
-int                             iRank;       // rank of this process
-int                             iSize;       // size of parallel job
-uint32_t                        iN=0;        // NIC ID (from kernel)
-uint32_t                        modes=GNI_CDM_MODE_FORK_NOCOPY       | \
-                                      GNI_CDM_MODE_FMA_SHARED        | \
-                                      0;     // GNI API flags for cd
-uint64_t                        vmdflags=GNI_MEM_READWRITE           | \
+pthread_t                       gni_tid;
+int                             gni_rank;    // rank of this process
+int                             gni_size;    // size of parallel job
+uint32_t                        gni_kid=0;   // NIC ID (from kernel)
+uint32_t                        gni_cdmm=GNI_CDM_MODE_FORK_NOCOPY    | \
+                                         GNI_CDM_MODE_FMA_SHARED     | \
+                                         0;  // GNI API flags for cd
+uint64_t                        gni_vmdf=GNI_MEM_READWRITE           | \
                                          GNI_MEM_USE_GART;
                                              // memory region attributes
-int                             vmdindex=-1; // use next available entry
+int                             gni_vmdi=-1; // use next available entry
                                              //   in Memory Domain
                                              //   Descriptor Block
-size_t                          vmdmask=0x3f;// 
-gni_nic_handle_t                nich;        // GNI API NIC handle
+size_t                          gni_mask=0x3f;// 
+gni_nic_handle_t                gni_nich;        // GNI API NIC handle
 
 
 // Cycle count sampling code -- START
@@ -332,26 +331,26 @@ void pmi_allgather(
     char *                   cpBuf;
     char *                   cpPtr;          // character temp
     static int *             ipRanks=NULL;   // re-usable ranks vector
-    static int               iRank=-1;       // rank of this process
-    static int               iSize;          // size of parallel job
+    static int               pmi_rank=-1;    // rank of this process
+    static int               pmi_size;       // size of parallel job
 
-    if( iRank==-1 ) {                        // create/fill ranks vector
-        iRV=PMI_Get_size(&iSize);
+    if( pmi_rank==-1 ) {                     // create/fill ranks vector
+        iRV=PMI_Get_size(&pmi_size);
         assert( iRV==PMI_SUCCESS );
-        ipRanks=(int *)calloc( iSize, sizeof(int) );
+        ipRanks=(int *)calloc( pmi_size, sizeof(int) );
         assert( ipRanks!=NULL );
-        iRV=PMI_Get_rank(&iRank);
+        iRV=PMI_Get_rank(&pmi_rank);
         assert( iRV==PMI_SUCCESS );
-        iRV=PMI_Allgather( &iRank, ipRanks, sizeof(int) );
+        iRV=PMI_Allgather( &pmi_rank, ipRanks, sizeof(int) );
         assert( iRV==PMI_SUCCESS );
     }
 
-    cpBuf=(char *)calloc( iSize, len );      // Allocate temp for gather
+    cpBuf=(char *)calloc( pmi_size, len );   // Allocate temp for gather
     assert(cpBuf);
     iRV=PMI_Allgather( in, cpBuf, len );     // Gather input structures
     assert( iRV==PMI_SUCCESS );
 
-    for( cpPtr=out, i=0; i<iSize; i++ )      // copy into user vector
+    for( cpPtr=out, i=0; i<pmi_size; i++ )   // copy into user vector
         memcpy( &cpPtr[len*ipRanks[i]], &cpBuf[i*len], len );
     free(cpBuf);                             // get rid of vector temp
 }
@@ -363,7 +362,7 @@ void gni_assert(
 
     if( status!=GNI_RC_SUCCESS )             // Gripe if GNI API fails
         fprintf( stderr, "Rank=%.6d %s error %s\n",
-                 iRank, pcA, gni_err_str[status] );
+                 gni_rank, pcA, gni_err_str[status] );
     assert( status==GNI_RC_SUCCESS );
     return;
 }
@@ -382,7 +381,7 @@ void gni_clear_cdm(
 
 
 void gni_create_cdm(
-    uint32_t                    iN,          // NIC ID (from kernel)
+    uint32_t                    gni_kid,     // NIC ID (from kernel)
     gni_cdm_handle_t *          pcdh ) {     // GNI API cd handle
 
     uint8_t                     ptag;        // ptag for GNI API
@@ -395,19 +394,19 @@ void gni_create_cdm(
     ptag=gni_get_ptag();
 
 //  Create instance of Communication Domain.
-    status=GNI_CdmCreate( iRank,             // Note Rank
+    status=GNI_CdmCreate( gni_rank,          // Note Rank
                           ptag,              //      ptag
                           cookie,            //      cookie
-                          modes,             // modes are bit-wise flags
+                          gni_cdmm,          // bit-wise flags
                           pcdh );            // Get cd handle
     gni_assert( "GNI_CdmCreate returned", status );
 
 //  Associate the Communication Domain with the gemini NIC.
 //  Note: on Cray XT, PE address==Rank in aprun job.
     status=GNI_CdmAttach( *pcdh,             // Note cd handle
-                          iN,                // id (? in /dev/kgni?)
+                          gni_kid,           // id (? in /dev/kgni?)
                           &iPE,              // Get PE address
-                          &nich );           // Get NIC handle
+                          &gni_nich );           // Get NIC handle
     gni_assert( "GNI_CdmAttach returned", status );
     return;
 }
@@ -431,8 +430,8 @@ void gni_create_cq(
     gni_return_t                status;      // GNI API return value
 
 //  Create CQ.
-    status=GNI_CqCreate( nich,               // Note NIC handle
-                         2*iSize,            // ... max events
+    status=GNI_CqCreate( gni_nich,               // Note NIC handle
+                         2*gni_size,         // ... max events
                          0,                  // event bundling
                          GNI_CQ_NOBLOCK,     // cq mode... just use this
                          NULL,               // address of event handler
@@ -449,7 +448,7 @@ void gni_clear_vmd(
 
     gni_return_t                status;      // GNI API return value
 
-    status=GNI_MemDeregister( nich,          // Note NIC handle
+    status=GNI_MemDeregister( gni_nich,          // Note NIC handle
                               pmdh );        // Memory handle
     gni_assert( "GNI_MemDeregister returned", status );
     free(*ppvmd);
@@ -468,12 +467,12 @@ void gni_create_vmd(
     *ppvmd=malloc(len);                      // Allocate memory
     assert(*ppvmd);
 
-    status=GNI_MemRegister( nich,            // Note NIC handle
+    status=GNI_MemRegister( gni_nich,            // Note NIC handle
                             (uint64_t)*ppvmd,// Memory block
                             len,             // Size of memory block
                             cqh,             // Note cq handle
-                            vmdflags,        // Memory region attributes
-                            vmdindex,        // Allocation option
+                            gni_vmdf,        // Memory region attributes
+                            gni_vmdi,        // Allocation option
                             pmdh );          // Memory handle
     gni_assert( "GNI_MemRegister returned", status );
     return;
@@ -499,7 +498,7 @@ void gni_create_ep(
 
     gni_return_t                status;      // GNI API return value
 
-    status=GNI_EpCreate( nich,               // Note NIC handle
+    status=GNI_EpCreate( gni_nich,               // Note NIC handle
                          cqh,                // Note cq handle
                          peph );             // Get ep handle
     gni_assert( "GNI_EpCreate returned", status );
@@ -621,7 +620,6 @@ static int gni_init(
     int32_t                     iRC;
     int32_t                     iReject;
     int32_t                     iFirst;
-    uint32_t                    iN=0;        // NIC ID (from kernel)
     cci__dev_t *                dev;
     cci_device_t **             dl;
 
@@ -636,23 +634,23 @@ static int gni_init(
                gni_err_str[iRC] );
         return(CCI_ERROR);
     }
-    iRC=PMI_Get_size(&iSize);
+    iRC=PMI_Get_size(&gni_size);
     if(iRC!=PMI_SUCCESS) {
 
         debug( CCI_DB_WARN, "FAIL: PMI_Get_size returned error %s",
                gni_err_str[iRC] );
         return(CCI_ERROR);
     }
-    debug( CCI_DB_WARN, "Size=%.8d In gni_init", iSize );
+    debug( CCI_DB_WARN, "Size=%.8d In gni_init", gni_size );
 
-    iRC=PMI_Get_rank(&iRank);
+    iRC=PMI_Get_rank(&gni_rank);
     if(iRC!=PMI_SUCCESS) {
 
         debug( CCI_DB_WARN, "FAIL: PMI_Get_rank returned error %s",
                gni_err_str[iRC] );
         return(CCI_ERROR);
     }
-    debug( CCI_DB_WARN, "Rank=%.8d In gni_init", iRank );
+    debug( CCI_DB_WARN, "Rank=%.8d In gni_init", gni_rank );
 
 //  Step 2.  Extract gemini devices from global configuration.
     if( !(gglobals=calloc( 1, sizeof(*gglobals) )) )
@@ -696,18 +694,25 @@ static int gni_init(
         gdev->progressing=0;                 // initialize progress flag
         gdev->ptag=gni_get_ptag();           // Retrieve GNI parameters
         gdev->cookie=gni_get_cookie();       // 'd.o.'
-        gdev->Rank=iRank;                    // 'd.o.'
-        gdev->modes=modes;                   // cdm flags
-        gdev->kid=0;                         // On arthur-login1...
+        gdev->Rank=gni_rank;                 // 'd.o.'
+        gdev->modes=gni_cdmm;                // cdm flags
+        gdev->kid=gni_kid;                   // On arthur-login1...
         debug( CCI_DB_INFO, "Rank=%.8d %s: ptag =%3u  cookie=0x%zx",
                gdev->Rank, __func__, gdev->ptag, gdev->cookie );
         debug( CCI_DB_INFO, "Rank=%.8d %s: modes=0x%zx  kid   =0x%zx",
                gdev->Rank, __func__, gdev->modes, gdev->kid );
 
-        gni_create_cdm( iN, &(gdev->cdh) );
+        gni_create_cdm( gni_kid, &(gdev->cdh) );
         debug( CCI_DB_INFO,
                "Rank=%.8d %s: gni_create_cdm: cdh   =0x%zx",
                gdev->Rank, __func__, gdev->cdh );
+
+        gdev->remote=calloc( gni_size, sizeof(gni_remote_t) );
+        if (!gdev->remote) {
+
+            iRC=CCI_ENOMEM;
+            goto out;
+        }
 
         gdev->ep_ids=calloc( GNI_NUM_BLOCKS, sizeof(*gdev->ep_ids) );
         if (!gdev->ep_ids) {
@@ -750,7 +755,7 @@ static int gni_init(
     *((cci_device_t ***)&gglobals->devices)=dl;
 
 //  Try to create progress thread.
-    iRC=pthread_create( &tid, NULL, gni_progress_thread, NULL );
+    iRC=pthread_create( &gni_tid, NULL, gni_progress_thread, NULL );
 
 out:
     if(iRC) {                                // Failed
@@ -767,6 +772,14 @@ out:
             }
         }
         free(dl);                            // Free devices list
+
+        if(dev->priv) {
+
+            gni_dev_t *         gdev=dev->priv;
+
+            if(gdev->remote)
+                free(gdev->remote);
+        }
 
         if(gglobals) {
 
@@ -841,7 +854,7 @@ static int gni_free_devices(
     pthread_mutex_lock(&globals->lock);
     gni_shut_down=1;
     pthread_mutex_unlock(&globals->lock);
-    pthread_join( tid, NULL );
+    pthread_join( gni_tid, NULL );
 
     pthread_mutex_lock(&globals->lock);
     TAILQ_FOREACH( dev, &globals->devs, entry ) {
@@ -1021,6 +1034,13 @@ static int gni_create_endpoint(   cci_device_t *         device,
     cci__ep_t *                 ep=NULL;
     gni_ep_t *                  gep=NULL;
     gni_dev_t *                 gdev=NULL;
+#if 1
+    struct remote_address {
+        gni_mem_handle_t        rem_hndl;
+        uint64_t *              rem_addr;
+        uint32_t                rem_nich;
+    } __attribute__((packed))   remote_addr;
+#endif
 
     CCI_ENTER;
 
@@ -1037,7 +1057,7 @@ static int gni_create_endpoint(   cci_device_t *         device,
         goto out;
     }
     gdev=dev->priv;
-    debug(CCI_DB_WARN, "Rank=%.8d In gni_create_endpoint", gdev->Rank);
+    debug(CCI_DB_WARN, "Rank=%.8d In gni_create_endpoint, sizeof(remote_address)=%ldB", gdev->Rank, sizeof(remote_addr) );
 
     ep=container_of( *endpoint, cci__ep_t, endpoint );
     ep->priv=calloc( 1, sizeof(*gep) );
@@ -1168,6 +1188,10 @@ static int gni_bind(              cci_device_t *         device,
 
     cci__dev_t *                dev;
     gni_dev_t *                 gdev;
+    gni_cdm_handle_t            cdh;
+    gni_remote_t                local;
+    gni_lep_t                   glep;
+
 
     if(!gglobals) {
 
@@ -1176,8 +1200,21 @@ static int gni_bind(              cci_device_t *         device,
     }
     dev=container_of( device, cci__dev_t, device );
     gdev=dev->priv;
-    debug( CCI_DB_WARN,
-           "Rank=%.8d In gni_bind", gdev->Rank );
+    cdh=gdev->cdh;
+    local.nic_addr=gni_get_nic_address(gni_kid);
+    glep.peph=(gni_ep_handle_t *)calloc( gni_size,
+                                         sizeof(gni_ep_handle_t) );
+    pmi_allgather( &local, &(gdev->remote), sizeof(gni_remote_t) );
+    gni_create_cq( &(glep.cqhd) );
+    gni_create_cq( &(glep.cqhl) );
+/*
+    gni_create_vmd( &(local.buffer), gni_size*sizeof(uint64_t),
+                    glep.cqhd, &(local.mem_hndl) );
+    pmi_allgather( &local, &(gdev->remote), sizeof(gni_remote_t) );
+*/
+
+    debug( CCI_DB_WARN, "Rank %.8d %s: cdh=%zp\n",
+           gdev->Rank, __func__, cdh );
 
     return(CCI_ERR_NOT_IMPLEMENTED);
 }
@@ -1590,13 +1627,13 @@ static void *gni_progress_thread(
 
     while(!gni_shut_down) {
 
-        cci__dev_t *            dev;
+//      cci__dev_t *            dev;
         cci_device_t const **   device;
 
         /* for each device, try progressing */
         for( device=gglobals->devices; *device!=NULL; device++ ) {
 
-            dev=container_of( *device, cci__dev_t, device );
+//          dev=container_of( *device, cci__dev_t, device );
 //          gni_progress_dev(dev);
         }
         usleep(GNI_PROG_TIME_US);
