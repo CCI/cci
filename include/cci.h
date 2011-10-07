@@ -1549,7 +1549,7 @@ CCI_DECLSPEC int cci_send(cci_connection_t *connection,
 
  */
 CCI_DECLSPEC int cci_sendv(cci_connection_t *connection,
-                           struct iovec *data, uint8_t iovcnt,
+                           struct iovec *data, uint32_t iovcnt,
                            void *context, int flags);
 
 
