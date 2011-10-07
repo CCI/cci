@@ -572,6 +572,374 @@ CCI_DECLSPEC int cci_create_endpoint(cci_device_t *device,
 CCI_DECLSPEC int cci_destroy_endpoint(cci_endpoint_t *endpoint);
 
 
+/* ================================================================== */
+/*                                                                    */
+/*                           EVENTS                                   */
+/*                                                                    */
+/* ================================================================== */
+
+/*! \defgroup events Events */
+
+/*!
+  Event types.
+
+  Each event has a unique type and the first element is always the event type.
+  A detailed description of each event is provided with the event structure.
+
+  The CCI_EVENT_NONE event type is never passed to the application and is for
+  internal CCI use only.
+
+  \ingroup events
+ */
+typedef enum cci_event_type {
+
+  /*! Never use - for internal CCI use only. */
+  CCI_EVENT_NONE,
+
+  /*! A send or RMA has completed. */
+  CCI_EVENT_SEND,
+
+  /*! An active message has been received. */
+  CCI_EVENT_RECV,
+
+  /*! A new outgoing connection was successfully accepted at the
+     peer; a connection is now available for data transfer. */
+  CCI_EVENT_CONNECT_SUCCESS,
+
+  /*! A new outgoing connection did not complete the accept/connect
+     handshake with the peer in a finite time.  CCI has therefore
+     given up attempting to continue to create this connection. */
+  CCI_EVENT_CONNECT_TIMEDOUT,
+
+  /*! A new outgoing connection was rejected by the server. */
+  CCI_EVENT_CONNECT_REJECTED,
+
+  /*! This event occurs when the keepalive timeout has expired (see
+     CCI_OPT_ENDPT_KEEPALIVE_TIMEDOUT for more details). */
+  CCI_EVENT_KEEPALIVE_TIMEDOUT,
+
+  /*! A device on this endpoint has failed.
+
+      \todo JMS What exactly do we do here?  Do all handles
+      (connections, etc.) on the endpoint become stale?  What about
+      sends that are in-flight -- do we complete them all with an
+      error?  And so on. */
+  CCI_EVENT_ENDPOINT_DEVICE_FAILED
+} cci_event_type_t;
+
+/*!
+  Send event.
+
+  A completion struct instance is returned for each cci_send() that
+  requested a completion notification.
+
+  On a reliable connection, a sender will generally complete a send
+  when the receiver replies for that message.  Additionally, an error
+  status may be returned (UNREACHABLE, DISCONNECTED, RNR).
+
+  On an unreliable connection, a sender will return CCI_SUCCESS upon
+  local completion (i.e., the message has been queued up to some lower
+  layer -- there is no guarantee that it is "on the wire", etc.).
+  Other send statuses will only be returned for local errors.
+
+  The number of fields in this struct is intentionally limited in
+  order to reduce costs associated with state storage, caching,
+  updating, copying.  For example, there is no field pointing to the
+  endpoint used for the send because it can be obtained from the
+  cci_connection, or through the endpoint passed to the
+  cci_get_event() call.
+
+  If it is desirable to match send completions with specific sends
+  (it usually is), it is the responsibility of the caller to pass a
+  meaningful context value to cci_send().
+
+  The ordering of fields in this struct is intended to reduce memory
+  holes between fields.
+
+  \ingroup events
+*/
+typedef struct cci_event_send {
+  /*! Type of event - should equal CCI_EVENT_SEND */
+  cci_event_type_t type;
+
+  /*! Connection that the send was initiated on. */
+  cci_connection_t *connection;
+
+  /*! Context value that was passed to cci_send() */
+  void *context;
+
+  /*! Result of the send. */
+  cci_status_t status;
+} cci_event_send_t;
+
+
+/*!
+  Receive event.
+
+  A completion struct instance is returned for each message received.
+
+  The number of fields in this struct is intentionally limited in
+  order to reduce costs associated with state storage, caching,
+  updating, copying.  For example, there is no field pointing to the
+  endpoint because it can be obtained from the cci_connection or
+  through the endpoint passed to the cci_get_event() call.
+
+  The ordering of fields in this struct is intended to reduce memory
+  holes between fields.
+
+  \ingroup events
+*/
+typedef struct cci_event_recv {
+  /*! Type of event - should equal CCI_EVENT_RECV */
+  cci_event_type_t type;
+
+  /*! The length of the data (in bytes).  This value may be 0. */
+  const uint32_t len;
+
+  /*! Pointer to the data.  The pointer always points to an address that is
+     8-byte aligned, unless (len == 0), in which case the value is undefined. */
+  void * const ptr;
+
+  /*! Connection that this message was received on. */
+  cci_connection_t *connection;
+} cci_event_recv_t;
+
+/*!
+  Connect success event.
+
+  A connect has completed successfully and the new connection is
+  available for communication. The context is returned that was
+  passed to cci_connect().
+
+  The number of fields in this struct is intentionally limited in
+  order to reduce costs associated with state storage, caching,
+  updating, copying.  For example, there is no field pointing to the
+  endpoint because it can be obtained from the cci_connection or
+  through the endpoint passed to the cci_get_event() call.
+
+  The ordering of fields in this struct is intended to reduce memory
+  holes between fields.
+
+  \ingroup events
+*/
+typedef struct cci_event_connect_success {
+  /*! Type of event - should equal CCI_EVENT_CONNECT_SUCCESS. */
+  cci_event_type_t type;
+
+  /*! Context value that was passed to cci_connect() */
+  void *context;
+
+  /*! The new connection. */
+  cci_connection_t *connection;
+} cci_event_connect_success_t;
+
+/*!
+  Connect timeout event.
+
+  A connect has timed out. No new connection is available. The context
+  is returned that was passed to cci_connect().
+
+  The number of fields in this struct is intentionally limited in
+  order to reduce costs associated with state storage, caching,
+  updating, copying.  For example, there is no field pointing to the
+  endpoint because it can be obtained from the cci_connection or
+  through the endpoint passed to the cci_get_event() call.
+
+  The ordering of fields in this struct is intended to reduce memory
+  holes between fields.
+
+  \ingroup events
+*/
+typedef struct cci_event_connect_timedout {
+  /*! Type of event - should equal CCI_EVENT_CONNECT_TIMEDOUT. */
+  cci_event_type_t type;
+
+  /*! Context value that was passed to cci_connect() */
+  void *context;
+} cci_event_connect_timedout_t;
+
+/*!
+  Connection rejected event.
+
+  The server rejected our connection request. No new connection is
+  available. The context is returned that was passed to cci_connect().
+
+  The number of fields in this struct is intentionally limited in
+  order to reduce costs associated with state storage, caching,
+  updating, copying.  For example, there is no field pointing to the
+  endpoint because it can be obtained from the cci_connection or
+  through the endpoint passed to the cci_get_event() call.
+
+  The ordering of fields in this struct is intended to reduce memory
+  holes between fields.
+
+  \ingroup events
+*/
+typedef struct cci_event_connect_rejected {
+  /*! Type of event - should equal CCI_EVENT_CONNECT_REJECTED. */
+  cci_event_type_t type;
+
+  /*! Context value that was passed to cci_connect() */
+  void *context;
+} cci_event_connect_rejected_t;
+
+/*!
+  Keepalive timeout event.
+
+  The peer has not sent us anything within the timeout period.
+
+  The number of fields in this struct is intentionally limited in
+  order to reduce costs associated with state storage, caching,
+  updating, copying.  For example, there is no field pointing to the
+  endpoint because it can be obtained from the cci_connection or
+  through the endpoint passed to the cci_get_event() call.
+
+  The ordering of fields in this struct is intended to reduce memory
+  holes between fields.
+
+  \ingroup events
+*/
+typedef struct cci_event_keepalive_timedout {
+  /*! Type of event - should equal CCI_EVENT_KEEPALIVE_TIMEDOUT. */
+  cci_event_type_t type;
+
+  /*! The connection that timed out. */
+  cci_connection_t *connection;
+} cci_event_keepalive_timedout_t;
+
+/*!
+  Endpoint device failed event.
+
+  The endpoint's device has failed.
+
+  The number of fields in this struct is intentionally limited in
+  order to reduce costs associated with state storage, caching,
+  updating, copying.  For example, there is no field pointing to the
+  endpoint because it can be obtained from the cci_connection or
+  through the endpoint passed to the cci_get_event() call.
+
+  The ordering of fields in this struct is intended to reduce memory
+  holes between fields.
+
+  \ingroup events
+*/
+typedef struct cci_event_endpoint_device_failed {
+  /*! Type of event - should equal CCI_EVENT_CONNECT_REJECTED. */
+  cci_event_type_t type;
+
+  /*! The endpoint on the device that failed. */
+  cci_endpoint_t *endpoint;
+} cci_event_endpoint_device_failed_t;
+
+/*!
+  Generic event
+
+  This is union of all events and the event type. Each event must start
+  with the type as well. The application can simply look at the event
+  as a type to determine how to handle it.
+
+  \ingroup events
+*/
+typedef union cci_event {
+  cci_event_type_t type;
+  cci_event_send_t send;
+  cci_event_recv_t recv;
+  cci_event_connect_success_t connect_success;
+  cci_event_connect_timedout_t connect_timedout;
+  cci_event_connect_rejected_t connect_rejected;
+  cci_event_keepalive_timedout_t keepalive_timedout;
+  cci_event_endpoint_device_failed_t endpoint_device_failed;
+} cci_event_t;
+
+
+/********************/
+/*                  */
+/*  Event handling  */
+/*                  */
+/********************/
+
+/*!
+
+  \todo From Patrick: This function is for windows. The default way to
+   do Object synchronization in Windows is to have the kernel
+   continuously notify the Object in user-space. On Unixes, we can
+   catch the call to poll to arm the interrupt, but we can't on
+   Windows, so we have a function for that.  Since we are not Windows
+   gurus, we decided to freeze it until we ask a pro about it.
+
+  \todo JMS What about blocking for incoming connection requests on
+   the cci_service_t?  That returns an OS handle, too.x
+
+  \ingroup events
+*/
+CCI_DECLSPEC int cci_arm_os_handle(cci_endpoint_t *endpoint, int flags);
+
+/*!
+  Get the next available CCI event.
+
+  This function never blocks; it polls instantly to see if there is
+  any pending event of any type (send completion, receive, or other
+  events -- errors, incoming connection requests, etc.).  If you want to
+  block, use the OS handle to use your OS's native blocking mechanism
+  (e.g., select/poll on the POSIX fd).  This also allows the app to
+  busy poll for a while and then OS block if nothing interesting is
+  happening.  The default OS handle returned when creating the
+  endpoint will return the equivalent of a POLL_IN when any event is
+  available.
+
+  This function borrows the buffer associated with the event; it must
+  be explicitly returned later via cci_return_event().
+
+  \param[in] endpoint   Endpoint to poll for a new event.
+  \param[in] event      New event, if any.
+
+  \return CCI_SUCCESS   An event was retrieved.
+  \return CCI_EAGAIN    No event is available.
+  \return Each driver may have additional error codes.
+
+   To discuss:
+
+   - it may be convenient to optionally get multiple OS handles; one
+     each for send completions, receives, and "other" (errors,
+     incoming connection requests, etc.).  Should that be part of
+     endpoint creation?  If we allow this concept, do we need a way to
+     pass in a different CQ here to get just those types of events?
+
+   - How do we have CCI-implementation private space in the event --
+     bound by size?  I.e., how/who determines the max inline data
+     size?
+
+  \ingroup events
+*/
+CCI_DECLSPEC int cci_get_event(cci_endpoint_t *endpoint,
+                               cci_event_t ** const event);
+
+/*!
+  This function returns the buffer associated with an event that was
+  previously obtained via cci_get_event().  The data buffer associated
+  with the event will immediately become stale to the application.
+
+  Events may be returned in any order; they do not need to be returned
+  in the same order that cci_poll_event() issued them.  All events
+  must be returned, even send completions and "other" events -- not
+  just receive events.  However, it is possible (likely) that
+  returning send completion and "other" events will be no-ops.
+
+  \param[in] endpoint	Endpoint that provided the event.
+  \param[in] event	    Event to return.
+
+  \return CCI_SUCCESS  The event was returned to CCI.
+  \return Each driver may have additional error codes.
+
+  \todo What to do about hardware that cannot return buffers out of
+     order?  Is the overhead of software queued returns (to effect
+     in-order hardware returns) acceptable?
+
+  \ingroup events
+*/
+CCI_DECLSPEC int cci_return_event(cci_event_t *event);
+
+
 /*====================================================================*/
 /*                                                                    */
 /*                            CONNECTIONS                             */
@@ -1059,375 +1427,6 @@ CCI_DECLSPEC int cci_set_opt(cci_opt_handle_t *handle, cci_opt_level_t level,
 */
 CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t *handle, cci_opt_level_t level,
                              cci_opt_name_t name, void** val, int *len);
-
-
-/* ================================================================== */
-/*                                                                    */
-/*                           EVENTS                                   */
-/*                                                                    */
-/* ================================================================== */
-
-/*! \defgroup events Events */
-
-/*!
-  Event types.
-
-  Each event has a unique type and the first element is always the event type.
-  A detailed description of each event is provided with the event structure.
-
-  The CCI_EVENT_NONE event type is never passed to the application and is for
-  internal CCI use only.
-
-  \ingroup events
- */
-typedef enum cci_event_type {
-
-  /*! Never use - for internal CCI use only. */
-  CCI_EVENT_NONE,
-
-  /*! A send or RMA has completed. */
-  CCI_EVENT_SEND,
-
-  /*! An active message has been received. */
-  CCI_EVENT_RECV,
-
-  /*! A new outgoing connection was successfully accepted at the
-     peer; a connection is now available for data transfer. */
-  CCI_EVENT_CONNECT_SUCCESS,
-
-  /*! A new outgoing connection did not complete the accept/connect
-     handshake with the peer in a finite time.  CCI has therefore
-     given up attempting to continue to create this connection. */
-  CCI_EVENT_CONNECT_TIMEDOUT,
-
-  /*! A new outgoing connection was rejected by the server. */
-  CCI_EVENT_CONNECT_REJECTED,
-
-  /*! This event occurs when the keepalive timeout has expired (see
-     CCI_OPT_ENDPT_KEEPALIVE_TIMEDOUT for more details). */
-  CCI_EVENT_KEEPALIVE_TIMEDOUT,
-
-  /*! A device on this endpoint has failed.
-
-      \todo JMS What exactly do we do here?  Do all handles
-      (connections, etc.) on the endpoint become stale?  What about
-      sends that are in-flight -- do we complete them all with an
-      error?  And so on. */
-  CCI_EVENT_ENDPOINT_DEVICE_FAILED
-} cci_event_type_t;
-
-/*!
-  Send event.
-
-  A completion struct instance is returned for each cci_send() that
-  requested a completion notification.
-
-  On a reliable connection, a sender will generally complete a send
-  when the receiver replies for that message.  Additionally, an error
-  status may be returned (UNREACHABLE, DISCONNECTED, RNR).
-
-  On an unreliable connection, a sender will return CCI_SUCCESS upon
-  local completion (i.e., the message has been queued up to some lower
-  layer -- there is no guarantee that it is "on the wire", etc.).
-  Other send statuses will only be returned for local errors.
-
-  The number of fields in this struct is intentionally limited in
-  order to reduce costs associated with state storage, caching,
-  updating, copying.  For example, there is no field pointing to the
-  endpoint used for the send because it can be obtained from the
-  cci_connection, or through the endpoint passed to the
-  cci_get_event() call.
-
-  If it is desirable to match send completions with specific sends
-  (it usually is), it is the responsibility of the caller to pass a
-  meaningful context value to cci_send().
-
-  The ordering of fields in this struct is intended to reduce memory
-  holes between fields.
-
-  \ingroup events
-*/
-typedef struct cci_event_send {
-  /*! Type of event - should equal CCI_EVENT_SEND */
-  cci_event_type_t type;
-
-  /*! Connection that the send was initiated on. */
-  cci_connection_t *connection;
-
-  /*! Context value that was passed to cci_send() */
-  void *context;
-
-  /*! Result of the send. */
-  cci_status_t status;
-} cci_event_send_t;
-
-
-/*!
-  Receive event.
-
-  A completion struct instance is returned for each message received.
-
-  The number of fields in this struct is intentionally limited in
-  order to reduce costs associated with state storage, caching,
-  updating, copying.  For example, there is no field pointing to the
-  endpoint because it can be obtained from the cci_connection or
-  through the endpoint passed to the cci_get_event() call.
-
-  The ordering of fields in this struct is intended to reduce memory
-  holes between fields.
-
-  \ingroup events
-*/
-typedef struct cci_event_recv {
-  /*! Type of event - should equal CCI_EVENT_RECV */
-  cci_event_type_t type;
-
-  /*! The length of the data (in bytes).  This value may be 0. */
-  const uint32_t len;
-
-  /*! Pointer to the data.  The pointer always points to an address that is
-     8-byte aligned, unless (len == 0), in which case the value is undefined. */
-  void * const ptr;
-
-  /*! Connection that this message was received on. */
-  cci_connection_t *connection;
-} cci_event_recv_t;
-
-/*!
-  Connect success event.
-
-  A connect has completed successfully and the new connection is
-  available for communication. The context is returned that was
-  passed to cci_connect().
-
-  The number of fields in this struct is intentionally limited in
-  order to reduce costs associated with state storage, caching,
-  updating, copying.  For example, there is no field pointing to the
-  endpoint because it can be obtained from the cci_connection or
-  through the endpoint passed to the cci_get_event() call.
-
-  The ordering of fields in this struct is intended to reduce memory
-  holes between fields.
-
-  \ingroup events
-*/
-typedef struct cci_event_connect_success {
-  /*! Type of event - should equal CCI_EVENT_CONNECT_SUCCESS. */
-  cci_event_type_t type;
-
-  /*! Context value that was passed to cci_connect() */
-  void *context;
-
-  /*! The new connection. */
-  cci_connection_t *connection;
-} cci_event_connect_success_t;
-
-/*!
-  Connect timeout event.
-
-  A connect has timed out. No new connection is available. The context
-  is returned that was passed to cci_connect().
-
-  The number of fields in this struct is intentionally limited in
-  order to reduce costs associated with state storage, caching,
-  updating, copying.  For example, there is no field pointing to the
-  endpoint because it can be obtained from the cci_connection or
-  through the endpoint passed to the cci_get_event() call.
-
-  The ordering of fields in this struct is intended to reduce memory
-  holes between fields.
-
-  \ingroup events
-*/
-typedef struct cci_event_connect_timedout {
-  /*! Type of event - should equal CCI_EVENT_CONNECT_TIMEDOUT. */
-  cci_event_type_t type;
-
-  /*! Context value that was passed to cci_connect() */
-  void *context;
-} cci_event_connect_timedout_t;
-
-/*!
-  Connection rejected event.
-
-  The server rejected our connection request. No new connection is
-  available. The context is returned that was passed to cci_connect().
-
-  The number of fields in this struct is intentionally limited in
-  order to reduce costs associated with state storage, caching,
-  updating, copying.  For example, there is no field pointing to the
-  endpoint because it can be obtained from the cci_connection or
-  through the endpoint passed to the cci_get_event() call.
-
-  The ordering of fields in this struct is intended to reduce memory
-  holes between fields.
-
-  \ingroup events
-*/
-typedef struct cci_event_connect_rejected {
-  /*! Type of event - should equal CCI_EVENT_CONNECT_REJECTED. */
-  cci_event_type_t type;
-
-  /*! Context value that was passed to cci_connect() */
-  void *context;
-} cci_event_connect_rejected_t;
-
-/*!
-  Keepalive timeout event.
-
-  The peer has not sent us anything within the timeout period.
-
-  The number of fields in this struct is intentionally limited in
-  order to reduce costs associated with state storage, caching,
-  updating, copying.  For example, there is no field pointing to the
-  endpoint because it can be obtained from the cci_connection or
-  through the endpoint passed to the cci_get_event() call.
-
-  The ordering of fields in this struct is intended to reduce memory
-  holes between fields.
-
-  \ingroup events
-*/
-typedef struct cci_event_keepalive_timedout {
-  /*! Type of event - should equal CCI_EVENT_KEEPALIVE_TIMEDOUT. */
-  cci_event_type_t type;
-
-  /*! The connection that timed out. */
-  cci_connection_t *connection;
-} cci_event_keepalive_timedout_t;
-
-/*!
-  Endpoint device failed event.
-
-  The endpoint's device has failed.
-
-  The number of fields in this struct is intentionally limited in
-  order to reduce costs associated with state storage, caching,
-  updating, copying.  For example, there is no field pointing to the
-  endpoint because it can be obtained from the cci_connection or
-  through the endpoint passed to the cci_get_event() call.
-
-  The ordering of fields in this struct is intended to reduce memory
-  holes between fields.
-
-  \ingroup events
-*/
-typedef struct cci_event_endpoint_device_failed {
-  /*! Type of event - should equal CCI_EVENT_CONNECT_REJECTED. */
-  cci_event_type_t type;
-
-  /*! The endpoint on the device that failed. */
-  cci_endpoint_t *endpoint;
-} cci_event_endpoint_device_failed_t;
-
-/*!
-  Generic event
-
-  This is union of all events and the event type. Each event must start
-  with the type as well. The application can simply look at the event
-  as a type to determine how to handle it.
-
-  \ingroup events
-*/
-typedef union cci_event {
-  cci_event_type_t type;
-  cci_event_send_t send;
-  cci_event_recv_t recv;
-  cci_event_connect_success_t connect_success;
-  cci_event_connect_timedout_t connect_timedout;
-  cci_event_connect_rejected_t connect_rejected;
-  cci_event_keepalive_timedout_t keepalive_timedout;
-  cci_event_endpoint_device_failed_t endpoint_device_failed;
-} cci_event_t;
-
-
-/********************/
-/*                  */
-/*  Event handling  */
-/*                  */
-/********************/
-
-/*!
-
-  \todo From Patrick: This function is for windows. The default way to
-   do Object synchronization in Windows is to have the kernel
-   continuously notify the Object in user-space. On Unixes, we can
-   catch the call to poll to arm the interrupt, but we can't on
-   Windows, so we have a function for that.  Since we are not Windows
-   gurus, we decided to freeze it until we ask a pro about it.
-
-  \todo JMS What about blocking for incoming connection requests on
-   the cci_service_t?  That returns an OS handle, too.x
-
-  \ingroup events
-*/
-CCI_DECLSPEC int cci_arm_os_handle(cci_endpoint_t *endpoint, int flags);
-
-/*!
-  Get the next available CCI event.
-
-  This function never blocks; it polls instantly to see if there is
-  any pending event of any type (send completion, receive, or other
-  events -- errors, incoming connection requests, etc.).  If you want to
-  block, use the OS handle to use your OS's native blocking mechanism
-  (e.g., select/poll on the POSIX fd).  This also allows the app to
-  busy poll for a while and then OS block if nothing interesting is
-  happening.  The default OS handle returned when creating the
-  endpoint will return the equivalent of a POLL_IN when any event is
-  available.
-
-  This function borrows the buffer associated with the event; it must
-  be explicitly returned later via cci_return_event().
-
-  \param[in] endpoint   Endpoint to poll for a new event.
-  \param[in] event      New event, if any.
-
-  \return CCI_SUCCESS   An event was retrieved.
-  \return CCI_EAGAIN    No event is available.
-  \return Each driver may have additional error codes.
-
-   To discuss:
-
-   - it may be convenient to optionally get multiple OS handles; one
-     each for send completions, receives, and "other" (errors,
-     incoming connection requests, etc.).  Should that be part of
-     endpoint creation?  If we allow this concept, do we need a way to
-     pass in a different CQ here to get just those types of events?
-
-   - How do we have CCI-implementation private space in the event --
-     bound by size?  I.e., how/who determines the max inline data
-     size?
-
-  \ingroup events
-*/
-CCI_DECLSPEC int cci_get_event(cci_endpoint_t *endpoint,
-                               cci_event_t ** const event);
-
-/*!
-  This function returns the buffer associated with an event that was
-  previously obtained via cci_get_event().  The data buffer associated
-  with the event will immediately become stale to the application.
-
-  Events may be returned in any order; they do not need to be returned
-  in the same order that cci_poll_event() issued them.  All events
-  must be returned, even send completions and "other" events -- not
-  just receive events.  However, it is possible (likely) that
-  returning send completion and "other" events will be no-ops.
-
-  \param[in] endpoint	Endpoint that provided the event.
-  \param[in] event	    Event to return.
-
-  \return CCI_SUCCESS  The event was returned to CCI.
-  \return Each driver may have additional error codes.
-
-  \todo What to do about hardware that cannot return buffers out of
-     order?  Is the overhead of software queued returns (to effect
-     in-order hardware returns) acceptable?
-
-  \ingroup events
-*/
-CCI_DECLSPEC int cci_return_event(cci_event_t *event);
-
 
 
 /* ================================================================== */
