@@ -18,19 +18,14 @@
 #include "cci_lib_types.h"
 #include "plugins/core/core.h"
 
-int cci_create_endpoint(cci_device_t *device, 
-                        int flags, 
-                        cci_endpoint_t **endpoint, 
+int cci_create_endpoint(cci_device_t *device,
+                        int flags,
+                        cci_endpoint_t **endpoint,
                         cci_os_handle_t *fd)
 {
     int ret;
     cci__ep_t *ep;
     cci__dev_t *dev;
-
-    if (NULL == endpoint ||
-        NULL == fd) {
-        return CCI_EINVAL;
-    }
 
     if (NULL == device) {
         /* walk list of devs to find default device */

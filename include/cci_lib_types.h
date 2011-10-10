@@ -64,9 +64,6 @@ typedef struct cci__dev {
     /*! Endpoints */
     TAILQ_HEAD(s_eps, cci__ep) eps;
 
-    /*! Listening endpoints */
-    TAILQ_HEAD(s_dleps, cci__lep) leps;
-
     /*! Lock for eps, leps */
     pthread_mutex_t lock;
 
@@ -113,24 +110,6 @@ typedef struct cci__ep {
     void *priv;
 } cci__ep_t;
 
-/*! CCI private connection request */
-typedef struct cci__crq {
-    /*! Public connection request (devices, cnt, ptr, len, attribute) */
-    cci_conn_req_t conn_req;
-
-    /*! Owning listening endpoint */
-    struct cci__lep *lep;
-
-    /*! Entry to hang on lep->crqs and svc->crqs */
-    TAILQ_ENTRY(cci__crq) entry;
-
-    /*! Entry to hang on lep->all_crqs for clean up */
-    TAILQ_ENTRY(cci__crq) lentry;
-
-    /*! Pointer to device specific struct */
-    void *priv;
-} cci__crq_t;
-
 /*! CCI private connection */
 typedef struct cci__conn {
     /*! Public connection (max_send_size, endpoint, attribute) */
@@ -153,27 +132,6 @@ cci_conn_is_reliable(cci__conn_t *conn)
             conn->connection.attribute == CCI_CONN_ATTR_RU);
 }
 
-/*! CCI private connection manager service */
-typedef struct cci__svc {
-    /*! Public service (bogus) */
-    cci_service_t service;
-
-    /*! Port to listen on */
-    uint32_t port;
-
-    /*! Bound listening endpoints */
-    TAILQ_HEAD(s_sleps, cci__lep) leps;
-
-    /*! Pending connection requests */
-    TAILQ_HEAD(s_scrqs, cci__crq) crqs;
-
-    /*! Lock to protect leps and crqs */
-    pthread_mutex_t lock;
-
-    /* Entry to hang on globals->svcs */
-    TAILQ_ENTRY(cci__svc) entry;
-} cci__svc_t;
-
 /*! CCI private event */
 typedef struct cci__evt {
     /*! Public event (type, union of send/recv/other) */
@@ -192,51 +150,6 @@ typedef struct cci__evt {
     void *priv;
 } cci__evt_t;
 
-typedef enum cci__lep_state {
-    CCI_LEP_CLOSING = -1,
-    CCI_LEP_INIT,
-    CCI_LEP_READY
-} cci__lep_state_t;
-
-/*! CCI private listening endpoint (created when device is bound to service) */
-typedef struct cci__lep {
-    /*! Is this listening endpoint usable? */
-    cci__lep_state_t state;
-
-    /*! Owning device */
-    cci__dev_t *dev;
-
-    /*! Service we are bound to */
-    struct cci__svc *svc;
-
-    /*! Number of crqs when bound */
-    int backlog;
-
-    /*! Entry to hang on svc->leps */
-    TAILQ_ENTRY(cci__lep) sentry;
-
-    /*! Entry to hang on dev->leps */
-    TAILQ_ENTRY(cci__lep) dentry;
-
-    /*! List of idle connection requests */
-    TAILQ_HEAD(s_lcrqs, cci__crq) crqs;
-
-    /*! List of all connection requests */
-    TAILQ_HEAD(s_acrqs, cci__crq) all_crqs;
-
-    /*! List of passive connections pending REJECT replies */
-    TAILQ_HEAD(s_passive, cci__crq) passive;
-
-    /*! Lock to protect crqs */
-    pthread_mutex_t lock;
-
-    /*! Pointer to device specific struct */
-    void *priv;
-
-    /*! Debug mask */
-    uint32_t debug;
-} cci__lep_t;
-
 /*! CCI private global state */
 typedef struct cci__globals {
     /*! List of all known devices */
@@ -247,9 +160,6 @@ typedef struct cci__globals {
 
     /*! Lock to protect svcs */
     pthread_mutex_t lock;
-
-    /*! List of connection manager services sorted by port number */
-    TAILQ_HEAD(s_svcs, cci__svc) svcs;
 } cci__globals_t;
 
 extern cci__globals_t *globals;
@@ -275,33 +185,6 @@ extern cci__globals_t *globals;
  *    the local variable name, then the name is repeated as in
  *    example 2 */
 #define container_of(p,stype,field) ((stype *)(((uint8_t *)(p)) - offsetof(stype, field)))
-
-static inline uint32_t
-cci__get_svc_port(uint32_t *port)
-{
-    uint32_t p = 4096;
-    cci__svc_t *svc;
-
-    if (*port)
-        p = *port;
-
-    TAILQ_FOREACH(svc, &globals->svcs, entry) {
-        if (svc->port > p) {
-            return CCI_SUCCESS;
-        } else if (svc->port == p) {
-            if (*port)
-                return CCI_EBUSY;
-            else
-                p++;
-        }
-        if (p == 0) {
-            /* we rolled over */
-            return CCI_EBUSY;
-        }
-    }
-
-    return CCI_SUCCESS;
-}
 
 extern int cci__debug;
 
