@@ -19,9 +19,5 @@
 
 int cci_reject(cci_conn_req_t *conn_req)
 {
-    if (NULL == conn_req) {
-        return CCI_EINVAL;
-    }
-
     return cci_core->reject(conn_req);
 }
