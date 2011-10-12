@@ -58,7 +58,7 @@ static int mx_send(cci_connection_t *connection,
                          void *context, int flags);
 static int mx_sendv(cci_connection_t *connection, 
                           void *header_ptr, uint32_t header_len, 
-                          struct iovec *data, uint8_t iovcnt,
+                          struct iovec *data, uint32_t iovcnt,
                           void *context, int flags);
 static int mx_rma_register(cci_endpoint_t *endpoint, 
                            cci_connection_t *connection,
@@ -288,7 +288,7 @@ static int mx_send(cci_connection_t *connection,
 
 static int mx_sendv(cci_connection_t *connection, 
                           void *header_ptr, uint32_t header_len, 
-                          struct iovec *data, uint8_t iovcnt,
+                          struct iovec *data, uint32_t iovcnt,
                           void *context, int flags)
 {
     printf("In mx_sendv\n");

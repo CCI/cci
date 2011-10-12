@@ -200,7 +200,7 @@ static int         gni_send(
 static int         gni_sendv(
     cci_connection_t *          connection,
     struct iovec *              data,
-    uint8_t                     iovcnt,
+    uint32_t                    iovcnt,
     void *                      context,
     int32_t                     flags );
 static int         gni_rma_register(
@@ -1498,7 +1498,7 @@ static int gni_send(              cci_connection_t *     connection,
 
 static int gni_sendv(             cci_connection_t *     connection,
                                   struct iovec *         data,
-                                  uint8_t                iovcnt,
+                                  uint32_t               iovcnt,
                                   void *                 context,
                                   int32_t                flags ) {
 

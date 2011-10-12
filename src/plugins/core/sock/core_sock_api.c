@@ -82,7 +82,7 @@ static int sock_send(cci_connection_t *connection,
                          void *msg_ptr, uint32_t msg_len,
                          void *context, int flags);
 static int sock_sendv(cci_connection_t *connection,
-                          struct iovec *data, uint8_t iovcnt,
+                          struct iovec *data, uint32_t iovcnt,
                           void *context, int flags);
 static int sock_rma_register(cci_endpoint_t *endpoint,
                              cci_connection_t *connection,
@@ -2135,7 +2135,7 @@ static int sock_send(cci_connection_t *connection,
                          void *msg_ptr, uint32_t msg_len,
                          void *context, int flags)
 {
-    uint8_t iovcnt = 0;
+    uint32_t iovcnt = 0;
     struct iovec iov = { NULL, 0 };
 
     if (msg_ptr && msg_len) {
@@ -2149,7 +2149,7 @@ static int sock_send(cci_connection_t *connection,
 
 
 static int sock_sendv(cci_connection_t *connection,
-                          struct iovec *data, uint8_t iovcnt,
+                          struct iovec *data, uint32_t iovcnt,
                           void *context, int flags)
 {
     int i, ret, is_reliable = 0, data_len = 0;

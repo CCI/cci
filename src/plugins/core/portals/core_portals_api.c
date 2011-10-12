@@ -166,7 +166,7 @@ static int portals_send(             cci_connection_t     *connection,
                                      int                  flags );
 static int portals_sendv(            cci_connection_t     *connection, 
                                      struct iovec         *data,
-                                     uint8_t              iovcnt,
+                                     uint32_t             iovcnt,
                                      void                 *context,
                                      int                  flags );
 static int portals_rma_register(     cci_endpoint_t       *endpoint,
@@ -2330,7 +2330,7 @@ static int portals_return_event( cci_event_t *event )
 static int portals_send_common(
     cci_connection_t       *connection,
     struct iovec           *data,
-    uint8_t                iovcnt,
+    uint32_t               iovcnt,
     void                   *context,
     int                    flags,
     portals_rma_op_t       *rma_op ) {

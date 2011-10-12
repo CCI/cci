@@ -69,7 +69,7 @@ typedef int (*cci_send_fn_t)(cci_connection_t *connection,
                              void *msg_ptr, uint32_t msg_len,
                              void *context, int flags);
 typedef int (*cci_sendv_fn_t)(cci_connection_t *connection,
-                              struct iovec *data, uint8_t iovcnt,
+                              struct iovec *data, uint32_t iovcnt,
                               void *context, int flags);
 typedef int (*cci_rma_register_fn_t)(cci_endpoint_t *endpoint,
                                      cci_connection_t *connection,
