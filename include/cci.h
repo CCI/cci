@@ -576,6 +576,205 @@ CCI_DECLSPEC int cci_create_endpoint(cci_device_t *device,
  */
 CCI_DECLSPEC int cci_destroy_endpoint(cci_endpoint_t *endpoint);
 
+/*====================================================================*/
+/*                                                                    */
+/*                            CONNECTIONS                             */
+/*                                                                    */
+/*====================================================================*/
+
+/*! \defgroup connection Connections */
+
+
+/********************/
+/*                  */
+/*      SERVER      */
+/*                  */
+/********************/
+
+
+/*!
+  Connection request attributes.
+
+  Reliable connections deliver messages once. If the packet cannot
+  be delivered after a specific amount of time, the connection is
+  broken; there is no guarantee regarding which messages have been
+  received successfully before the connection was broken.
+
+  Connections can be ordered or unordered, but note that ordered
+  unreliable connections are forbidden.  Also, note that ordering of
+  RMA operations only applies to target notification, not data
+  delivery.
+
+  Unreliable unordered connections have no timeout.
+
+  Multicast is always unreliable unordered.  Multicast connections
+  are always unidirectional, send *or* receive.  If an endpoint wants
+  to join a multicast group to both send and receive, it needs to
+  establish two distinct connections, one for sending and one for
+  receiving.
+
+  \ingroup connection
+*/
+typedef enum cci_conn_attribute {
+  CCI_CONN_ATTR_RO,		/*!< Reliable ordered.  Means that
+                                   both completions and delivery are
+                                   in the same order that they were
+                                   issued. */
+  CCI_CONN_ATTR_RU,		/*!< Reliable unordered.  Means that
+                                   delivery is guaranteed, but both
+                                   delivery and completion may be in a
+                                   different order than they were
+                                   issued. */
+  CCI_CONN_ATTR_UU,		/*!< Unreliable unordered (RMA
+                                   forbidden).  Delivery is not
+                                   guaranteed, and both delivery and
+                                   completions may be in a different
+                                   order than they were issued. */
+  CCI_CONN_ATTR_UU_MC_TX,	/*!< Multicast send (RMA forbidden) */
+  CCI_CONN_ATTR_UU_MC_RX	/*!< Multicast recv (RMA forbidden) */
+} cci_conn_attribute_t;
+
+
+/*!
+  Connection handle.
+
+  \ingroup connection
+*/
+typedef struct cci_connection {
+  /*! Maximum send size for the connection */
+  uint32_t max_send_size;
+  /*! Local endpoint associated to the connection */
+  cci_endpoint_t *endpoint;
+  /*! Attributes of the connection */
+  cci_conn_attribute_t attribute;
+} cci_connection_t;
+
+struct cci_event_connect_request;
+
+/*!
+  Accept a connection request and establish a connection with a specific
+  endpoint.
+
+  \param[in] conn_req	A connection request event previously returned by
+			cci_get_event().
+  \param[in,out]	Connection pointer to a connection request structure.
+
+  \return CCI_SUCCESS   The connection has been established.
+  \return Each driver may have additional error codes.
+
+  Upon success, the incoming connection request is bound to the
+  desired endpoint and a connection handle is filled in.  The
+  connection request event must still be returned to CCI via
+  cci_return_event().
+
+  \ingroup connection
+*/
+CCI_DECLSPEC int cci_accept(struct cci_event_connect_request *conn_req,
+                            cci_connection_t **connection);
+
+/*!
+  Reject a connection request.
+
+  \param[in] conn_req	Connection request event to reject.
+
+  \return CCI_SUCCESS	Connection request has been rejected.
+  \return Each driver may have additional error codes.
+
+   Rejects an incoming connection request.  The connection request
+   event must still be returned to CCI via cci_return_event().
+
+   \ingroup connection
+ */
+CCI_DECLSPEC int cci_reject(struct cci_event_connect_request *conn_req);
+
+
+/*! \example server.c
+ *  This application demonstrates opening an endpoint, getting connection
+ *  requests, accepting connections, polling for events, and echoing received
+ *  messages back to the client.
+ */
+
+
+/********************/
+/*                  */
+/*      CLIENT      */
+/*                  */
+/********************/
+
+/*!
+  Initiate a connection request (client side).
+
+  Request a connection from a specific endpoint. The server endpoint's address
+  is described by a Uniform Resource Identifier. The use of an URI allows for
+  flexible description (IP address, hostname, etc).
+
+  The connection request can carry limited amount of data to be passed to the
+  server for application-specific usage (identification, authentication, etc).
+
+  The connect call is always non-blocking, reliable and requires a decision
+  by the server (accept or reject), even for an unreliable connection, except
+  for multicast.
+
+  Multicast connections don't necessarily involve a discrete connection
+  server, they may be handled by IGMP or other distributed framework.
+
+  Upon completion, an ...
+
+  \param[in] endpoint	Local endpoint to use for requested connection.
+  \param[in] server_uri	Uniform Resource Identifier of the server and is
+                        generated by the server's endpoint when it is created.
+  \param[in] data_ptr	Pointer to connection data to be sent in the
+                        connection request (for authentication, etc).
+  \param[in] data_len	Length of connection data.  Implementations must
+                        support data_len values <= 1,024 bytes.
+  \param[in] attribute	Attributes of the requested connection (reliability,
+                        ordering, multicast, etc).
+  \param[in] context	Cookie to be used to identify the completion through
+                        a connect accepted, rejected, or timedout event.
+  \param[in] flags      Currently unused.
+  \param[in] timeout	NULL means forever.
+
+  \return CCI_SUCCESS   The request is buffered and ready to be sent or
+                        has been sent.
+  \return Each driver may have additional error codes.
+
+  \ingroup connection
+*/
+/* QUESTION: data is cached or not ? */
+CCI_DECLSPEC int cci_connect(cci_endpoint_t *endpoint, char *server_uri,
+                             void *data_ptr, uint32_t data_len,
+                             cci_conn_attribute_t attribute,
+                             void *context, int flags, struct timeval *timeout);
+
+/*!
+  This constant is the maximum value of data_len passed to cci_connect().
+
+  \ingroup connection
+ */
+#define CCI_CONN_REQ_LEN    (1024)  /* see above */
+
+/*!
+  Tear down an existing connection.
+
+  Operation is local, remote side is not notified. From that point,
+  both local and remote side will get a DISCONNECTED communication error
+  if sends are initiated on  this connection.
+
+  \param[in] connection	Connection to sever.
+
+  \return CCI_SUCCESS   The connection's resources have been released.
+  \return CCI_EINVAL    Connection is NULL.
+  \return Each driver may have additional error codes.
+
+  \ingroup connection
+ */
+CCI_DECLSPEC int cci_disconnect(cci_connection_t *connection);
+
+/*! \example client.c
+ *  This application demonstrates opening an endpoint, connecting to a
+ *  server, sending messages, and polling for events.
+ */
+
 
 /* ================================================================== */
 /*                                                                    */
@@ -977,204 +1176,6 @@ CCI_DECLSPEC int cci_get_event(cci_endpoint_t *endpoint,
   \ingroup events
 */
 CCI_DECLSPEC int cci_return_event(cci_event_t *event);
-
-
-/*====================================================================*/
-/*                                                                    */
-/*                            CONNECTIONS                             */
-/*                                                                    */
-/*====================================================================*/
-
-/*! \defgroup connection Connections */
-
-
-/********************/
-/*                  */
-/*      SERVER      */
-/*                  */
-/********************/
-
-
-/*!
-  Connection request attributes.
-
-  Reliable connections deliver messages once. If the packet cannot
-  be delivered after a specific amount of time, the connection is
-  broken; there is no guarantee regarding which messages have been
-  received successfully before the connection was broken.
-
-  Connections can be ordered or unordered, but note that ordered
-  unreliable connections are forbidden.  Also, note that ordering of
-  RMA operations only applies to target notification, not data
-  delivery.
-
-  Unreliable unordered connections have no timeout.
-
-  Multicast is always unreliable unordered.  Multicast connections
-  are always unidirectional, send *or* receive.  If an endpoint wants
-  to join a multicast group to both send and receive, it needs to
-  establish two distinct connections, one for sending and one for
-  receiving.
-
-  \ingroup connection
-*/
-typedef enum cci_conn_attribute {
-  CCI_CONN_ATTR_RO,		/*!< Reliable ordered.  Means that
-                                   both completions and delivery are
-                                   in the same order that they were
-                                   issued. */
-  CCI_CONN_ATTR_RU,		/*!< Reliable unordered.  Means that
-                                   delivery is guaranteed, but both
-                                   delivery and completion may be in a
-                                   different order than they were
-                                   issued. */
-  CCI_CONN_ATTR_UU,		/*!< Unreliable unordered (RMA
-                                   forbidden).  Delivery is not
-                                   guaranteed, and both delivery and
-                                   completions may be in a different
-                                   order than they were issued. */
-  CCI_CONN_ATTR_UU_MC_TX,	/*!< Multicast send (RMA forbidden) */
-  CCI_CONN_ATTR_UU_MC_RX	/*!< Multicast recv (RMA forbidden) */
-} cci_conn_attribute_t;
-
-
-/*!
-  Connection handle.
-
-  \ingroup connection
-*/
-typedef struct cci_connection {
-  /*! Maximum send size for the connection */
-  uint32_t max_send_size;
-  /*! Local endpoint associated to the connection */
-  cci_endpoint_t *endpoint;
-  /*! Attributes of the connection */
-  cci_conn_attribute_t attribute;
-} cci_connection_t;
-
-/*!
-  Accept a connection request and establish a connection with a specific
-  endpoint.
-
-  \param[in] conn_req	A connection request event previously returned by
-			cci_get_event().
-  \param[in,out]	Connection pointer to a connection request structure.
-
-  \return CCI_SUCCESS   The connection has been established.
-  \return Each driver may have additional error codes.
-
-  Upon success, the incoming connection request is bound to the
-  desired endpoint and a connection handle is filled in.  The
-  connection request event must still be returned to CCI via
-  cci_return_event().
-
-  \ingroup connection
-*/
-CCI_DECLSPEC int cci_accept(cci_event_connect_request_t *conn_req,
-                            cci_connection_t **connection);
-
-/*!
-  Reject a connection request.
-
-  \param[in] conn_req	Connection request event to reject.
-
-  \return CCI_SUCCESS	Connection request has been rejected.
-  \return Each driver may have additional error codes.
-
-   Rejects an incoming connection request.  The connection request
-   event must still be returned to CCI via cci_return_event().
-
-   \ingroup connection
- */
-CCI_DECLSPEC int cci_reject(cci_event_connect_request_t *conn_req);
-
-
-/*! \example server.c
- *  This application demonstrates opening an endpoint, getting connection
- *  requests, accepting connections, polling for events, and echoing received
- *  messages back to the client.
- */
-
-
-/********************/
-/*                  */
-/*      CLIENT      */
-/*                  */
-/********************/
-
-/*!
-  Initiate a connection request (client side).
-
-  Request a connection from a specific endpoint. The server endpoint's address
-  is described by a Uniform Resource Identifier. The use of an URI allows for
-  flexible description (IP address, hostname, etc).
-
-  The connection request can carry limited amount of data to be passed to the
-  server for application-specific usage (identification, authentication, etc).
-
-  The connect call is always non-blocking, reliable and requires a decision
-  by the server (accept or reject), even for an unreliable connection, except
-  for multicast.
-
-  Multicast connections don't necessarily involve a discrete connection
-  server, they may be handled by IGMP or other distributed framework.
-
-  Upon completion, an ...
-
-  \param[in] endpoint	Local endpoint to use for requested connection.
-  \param[in] server_uri	Uniform Resource Identifier of the server and is
-                        generated by the server's endpoint when it is created.
-  \param[in] data_ptr	Pointer to connection data to be sent in the
-                        connection request (for authentication, etc).
-  \param[in] data_len	Length of connection data.  Implementations must
-                        support data_len values <= 1,024 bytes.
-  \param[in] attribute	Attributes of the requested connection (reliability,
-                        ordering, multicast, etc).
-  \param[in] context	Cookie to be used to identify the completion through
-                        a connect accepted, rejected, or timedout event.
-  \param[in] flags      Currently unused.
-  \param[in] timeout	NULL means forever.
-
-  \return CCI_SUCCESS   The request is buffered and ready to be sent or
-                        has been sent.
-  \return Each driver may have additional error codes.
-
-  \ingroup connection
-*/
-/* QUESTION: data is cached or not ? */
-CCI_DECLSPEC int cci_connect(cci_endpoint_t *endpoint, char *server_uri,
-                             void *data_ptr, uint32_t data_len,
-                             cci_conn_attribute_t attribute,
-                             void *context, int flags, struct timeval *timeout);
-
-/*!
-  This constant is the maximum value of data_len passed to cci_connect().
-
-  \ingroup connection
- */
-#define CCI_CONN_REQ_LEN    (1024)  /* see above */
-
-/*!
-  Tear down an existing connection.
-
-  Operation is local, remote side is not notified. From that point,
-  both local and remote side will get a DISCONNECTED communication error
-  if sends are initiated on  this connection.
-
-  \param[in] connection	Connection to sever.
-
-  \return CCI_SUCCESS   The connection's resources have been released.
-  \return CCI_EINVAL    Connection is NULL.
-  \return Each driver may have additional error codes.
-
-  \ingroup connection
- */
-CCI_DECLSPEC int cci_disconnect(cci_connection_t *connection);
-
-/*! \example client.c
- *  This application demonstrates opening an endpoint, connecting to a
- *  server, sending messages, and polling for events.
- */
 
 
 
