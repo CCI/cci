@@ -882,12 +882,12 @@ typedef union cci_event {
   cci_event_type_t type;
   cci_event_send_t send;
   cci_event_recv_t recv;
-  cci_event_connect_accepted_t accept;
-  cci_event_connect_rejected_t reject;
+  cci_event_connect_accepted_t accepted;
+  cci_event_connect_rejected_t rejected;
   cci_event_connect_timedout_t conn_timedout;
   cci_event_connect_request_t request;
   cci_event_keepalive_timedout_t keepalive;
-  cci_event_endpoint_device_failed_t failed;
+  cci_event_endpoint_device_failed_t dev_failed;
 } cci_event_t;
 
 
