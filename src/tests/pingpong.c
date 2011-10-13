@@ -19,7 +19,6 @@
 
 #include "cci.h"
 
-#define DFLT_PORT   54321
 #define ITERS       (512 * 1024)
 #define WARMUP      (1024)
 #define MAX_RMA_SIZE    (4 * 1024 * 1024)
@@ -34,7 +33,6 @@ int warmup = WARMUP;
 char *name;
 char *server_uri;
 char *buffer;
-uint32_t port = DFLT_PORT;
 uint32_t current_size = 0;
 cci_device_t **devices = NULL;
 cci_endpoint_t *endpoint = NULL;
@@ -61,12 +59,11 @@ options_t opts = { 0ULL, 0, 0, 0 };
 void
 print_usage()
 {
-    fprintf(stderr, "usage: %s -h <server_uri> [-p <port>] [-s] [-i <iters>] "
+    fprintf(stderr, "usage: %s -h <server_uri> [-s] [-i <iters>] "
             "[-W <warmup>] [-c <type>] [-n] "
             "[[-w | -r] [-m <max_rma_size> [-C]]]\n", name);
     fprintf(stderr, "where:\n");
     fprintf(stderr, "\t-h\tServer's URI\n");
-    fprintf(stderr, "\t-p\tPort of the server's connection service (default %d)\n", DFLT_PORT);
     fprintf(stderr, "\t-s\tSet to run as the server\n");
     fprintf(stderr, "\t-i\tRun this number of iterations\n");
     fprintf(stderr, "\t-W\tRun this number of warmup iterations\n");
@@ -151,13 +148,13 @@ poll_events(void)
             }
             break;
         }
-        case CCI_EVENT_CONNECT_SUCCESS:
+        case CCI_EVENT_CONNECT_ACCEPTED:
         case CCI_EVENT_CONNECT_TIMEDOUT:
         case CCI_EVENT_CONNECT_REJECTED:
             if (!is_server) {
                 connect_done = 1;
-                if (event->type == CCI_EVENT_CONNECT_SUCCESS)
-                    connection = event->connect_success.connection;
+                if (event->type == CCI_EVENT_CONNECT_ACCEPTED)
+                    connection = event->accepted.connection;
                 else
                     connection = NULL;
             }
@@ -189,13 +186,13 @@ do_client()
     /* let server start */
     sleep(3);
 
-	/* initiate connect */
-	ret = cci_connect(endpoint, server_uri, port, &opts, sizeof(opts), attr, NULL, 0, NULL);
+    /* initiate connect */
+    ret = cci_connect(endpoint, server_uri, &opts, sizeof(opts), attr, NULL, 0, NULL);
     check_return("cci_connect", ret, 1);
 
-	/* poll for connect completion */
-	while (!connect_done)
-        poll_events();
+    /* poll for connect completion */
+    while (!connect_done)
+       poll_events();
 
     if (!connection) {
         fprintf(stderr, "no connection\n");
@@ -300,23 +297,20 @@ void
 do_server()
 {
     int ret, accept = 0;
-    cci_os_handle_t bind_fd;
-    cci_service_t *service = NULL;
-
-    /* we don't associate the endpoint with the service? */
-    ret = cci_bind(devices[0], 10, &port, &service, &bind_fd);
-    check_return("cci_bind", ret, 1);
 
     while (!accept) {
-        cci_conn_req_t *conn_req;
+        cci_event_t *event;
 
-        ret = cci_get_conn_req(service, &conn_req);
-        if (ret == 0 && conn_req) {
+        ret = cci_get_event(endpoint, &event);
+        if (ret == 0 && event) {
             accept = 1;
             ready = 1;
-            opts = *((options_t *)conn_req->data_ptr);
-            ret = cci_accept(conn_req, endpoint, &connection);
+            opts = *((options_t *)event->request.data_ptr);
+            ret = cci_accept(event, &connection);
             check_return("cci_accept", ret, 1);
+
+	    ret = cci_return_event(event);
+            check_return("cci_return_event", ret, 1);
 
             if (opts.method == AM)
                 ret = posix_memalign((void **)&buffer, 4096, connection->max_send_size);
@@ -339,10 +333,6 @@ do_server()
     while (!done)
         poll_events();
 
-    /* clean up */
-    ret = cci_unbind(service, devices[0]);
-    check_return("cci_unbind", ret, 0);
-
     return;
 }
 
@@ -354,13 +344,10 @@ int main(int argc, char *argv[])
 
     name = argv[0];
 
-    while ((c = getopt(argc, argv, "h:p:sc:nwrm:Ci:W:")) != -1) {
+    while ((c = getopt(argc, argv, "h:sc:nwrm:Ci:W:")) != -1) {
         switch (c) {
         case 'h':
             server_uri = strdup(optarg);
-            break;
-        case 'p':
-            port = strtoul(optarg, NULL, 0);
             break;
         case 's':
             is_server = 1;
@@ -442,6 +429,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "cci_create_endpoint() failed with %s\n", cci_strerror(ret));
         exit(EXIT_FAILURE);
     }
+    printf("Opened %s\n", endpoint->name);
 
     if (is_server)
         do_server();
