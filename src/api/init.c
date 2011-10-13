@@ -41,7 +41,7 @@ cci__get_debug_env(void)
         comma = strchr(debug, ',');
         if (comma) {
             /* find the comma */
-            *comma = '\0'; 
+            *comma = '\0';
             next = comma + 1;
         } else {
             /* last item */
@@ -118,7 +118,6 @@ void cci__free_dev(cci__dev_t *dev)
         free(dev->driver);
 
     /* TODO dev->priv */
-    /* TODO dev->leps */
 
     free(dev);
 
@@ -257,7 +256,6 @@ int cci__parse_config(const char *path)
             dev->priority = 50; /* default */
             /* dev->is_default = 0; */
             TAILQ_INIT(&dev->eps);
-            TAILQ_INIT(&dev->leps);
             pthread_mutex_init(&dev->lock, NULL);
 
             d = &dev->device;
@@ -439,7 +437,6 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
             return CCI_ENOMEM;
 
         TAILQ_INIT(&globals->devs);
-        TAILQ_INIT(&globals->svcs);
 
         ret = pthread_mutex_init(&globals->lock, NULL);
         if (ret) {

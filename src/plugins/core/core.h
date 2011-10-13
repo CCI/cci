@@ -39,17 +39,10 @@ typedef int (*cci_create_endpoint_fn_t)(cci_device_t *device,
                                         cci_endpoint_t **endpoint,
                                         cci_os_handle_t *fd);
 typedef int (*cci_destroy_endpoint_fn_t)(cci_endpoint_t *endpoint);
-typedef int (*cci_bind_fn_t)(cci_device_t *device, int backlog, uint32_t *port,
-                             cci_service_t **service, cci_os_handle_t *fd);
-typedef int (*cci_unbind_fn_t)(cci_service_t *service, cci_device_t *device);
-typedef int (*cci_get_conn_req_fn_t)(cci_service_t *service,
-                                     cci_conn_req_t **conn_req);
-typedef int (*cci_accept_fn_t)(cci_conn_req_t *conn_req,
-                               cci_endpoint_t *endpoint,
+typedef int (*cci_accept_fn_t)(union cci_event *conn_req,
                                cci_connection_t **connection);
-typedef int (*cci_reject_fn_t)(cci_conn_req_t *conn_req);
+typedef int (*cci_reject_fn_t)(union cci_event *conn_req);
 typedef int (*cci_connect_fn_t)(cci_endpoint_t *endpoint, char *server_uri,
-                                uint32_t port,
                                 void *data_ptr, uint32_t data_len,
                                 cci_conn_attribute_t attribute,
                                 void *context, int flags,
@@ -98,9 +91,6 @@ typedef struct {
     cci_free_devices_fn_t free_devices;
     cci_create_endpoint_fn_t create_endpoint;
     cci_destroy_endpoint_fn_t destroy_endpoint;
-    cci_bind_fn_t bind;
-    cci_unbind_fn_t unbind;
-    cci_get_conn_req_fn_t get_conn_req;
     cci_accept_fn_t accept;
     cci_reject_fn_t reject;
     cci_connect_fn_t connect;

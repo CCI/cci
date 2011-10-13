@@ -17,7 +17,7 @@
 #include "plugins/core/core.h"
 
 
-int cci_accept(cci_event_connect_request_t *conn_req
+int cci_accept(union cci_event *conn_req,
                cci_connection_t **connection)
 {
     return cci_core->accept(conn_req, connection);

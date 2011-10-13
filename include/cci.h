@@ -649,7 +649,7 @@ typedef struct cci_connection {
   cci_conn_attribute_t attribute;
 } cci_connection_t;
 
-struct cci_event_connect_request;
+union cci_event;
 
 /*!
   Accept a connection request and establish a connection with a specific
@@ -669,7 +669,7 @@ struct cci_event_connect_request;
 
   \ingroup connection
 */
-CCI_DECLSPEC int cci_accept(struct cci_event_connect_request *conn_req,
+CCI_DECLSPEC int cci_accept(union cci_event *conn_req,
                             cci_connection_t **connection);
 
 /*!
@@ -685,7 +685,7 @@ CCI_DECLSPEC int cci_accept(struct cci_event_connect_request *conn_req,
 
    \ingroup connection
  */
-CCI_DECLSPEC int cci_reject(struct cci_event_connect_request *conn_req);
+CCI_DECLSPEC int cci_reject(union cci_event *conn_req);
 
 
 /*! \example server.c
@@ -869,14 +869,14 @@ typedef struct cci_event_send {
   /*! Type of event - should equal CCI_EVENT_SEND */
   cci_event_type_t type;
 
+  /*! Result of the send. */
+  cci_status_t status;
+
   /*! Connection that the send was initiated on. */
   cci_connection_t *connection;
 
   /*! Context value that was passed to cci_send() */
   void *context;
-
-  /*! Result of the send. */
-  cci_status_t status;
 } cci_event_send_t;
 
 
@@ -1010,14 +1010,14 @@ typedef struct cci_event_connect_request {
   /*! Type of event - should equal CCI_EVENT_CONNECT_REQUEST. */
   cci_event_type_t type;
 
-  /*! Attribute of requested connection */
-  cci_conn_attribute_t attribute;
-
   /*! Length of connection data */
   uint32_t data_len;
 
   /*! Pointer to connection data received with the connection request */
   const void *data_ptr;
+
+  /*! Attribute of requested connection */
+  cci_conn_attribute_t attribute;
 } cci_event_connect_request_t;
 
 /*!
@@ -1438,7 +1438,7 @@ CCI_DECLSPEC int cci_send(cci_connection_t *connection,
 
  */
 CCI_DECLSPEC int cci_sendv(cci_connection_t *connection,
-                           struct iovec *data, uint8_t iovcnt,
+                           struct iovec *data, uint32_t iovcnt,
                            void *context, int flags);
 
 

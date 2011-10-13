@@ -8,13 +8,11 @@ noinst_LTLIBRARIES = libcci_api.la
 libcci_api_la_SOURCES = \
         accept.c \
         arm_os_handle.c \
-        bind.c \
         connect.c \
         create_endpoint.c \
         destroy_endpoint.c \
         disconnect.c \
         free_devices.c \
-        get_conn_req.c \
         get_devices.c \
         get_event.c \
         get_opt.c \
@@ -28,5 +26,4 @@ libcci_api_la_SOURCES = \
         send.c \
         sendv.c \
         set_opt.c \
-        strerror.c \
-        unbind.c
+        strerror.c

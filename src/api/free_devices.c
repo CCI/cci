@@ -25,25 +25,6 @@ int cci_free_devices(cci_device_t const **devices)
         return CCI_EINVAL;
     }
 
-    /* unbind services */
-    pthread_mutex_lock(&globals->lock);
-    while (!TAILQ_EMPTY(&globals->svcs)) {
-        cci__svc_t *svc = TAILQ_FIRST(&globals->svcs);
-        cci__lep_t *lep = NULL;
-
-        pthread_mutex_lock(&svc->lock);
-        if (!TAILQ_EMPTY(&svc->leps)) {
-            lep = TAILQ_FIRST(&svc->leps);
-        }   
-        pthread_mutex_unlock(&svc->lock);
-        pthread_mutex_unlock(&globals->lock);
-        if (lep)
-            cci_unbind(&lep->svc->service, &lep->dev->device);
-
-        pthread_mutex_lock(&globals->lock);
-    }
-    pthread_mutex_unlock(&globals->lock);
-
     /* for each device
      *     for each endpoint
      *         close_endpoint
