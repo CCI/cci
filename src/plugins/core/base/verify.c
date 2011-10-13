@@ -22,9 +22,6 @@ int cci_plugins_core_verify(cci_plugin_t *plugin)
         NULL == p->free_devices ||
         NULL == p->create_endpoint ||
         NULL == p->destroy_endpoint ||
-        NULL == p->bind ||
-        NULL == p->unbind ||
-        NULL == p->get_conn_req ||
         NULL == p->accept ||
         NULL == p->reject ||
         NULL == p->connect ||
