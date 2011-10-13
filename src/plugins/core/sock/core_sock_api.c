@@ -52,17 +52,10 @@ static int sock_create_endpoint(cci_device_t *device,
                                     cci_endpoint_t **endpoint,
                                     cci_os_handle_t *fd);
 static int sock_destroy_endpoint(cci_endpoint_t *endpoint);
-static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
-                         cci_service_t **service, cci_os_handle_t *fd);
-static int sock_unbind(cci_service_t *service, cci_device_t *device);
-static int sock_get_conn_req(cci_service_t *service,
-                                 cci_conn_req_t **conn_req);
-static int sock_accept(cci_conn_req_t *conn_req,
-                           cci_endpoint_t *endpoint,
+static int sock_accept(union cci_event *event,
                            cci_connection_t **connection);
-static int sock_reject(cci_conn_req_t *conn_req);
+static int sock_reject(union cci_event *conn_req);
 static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
-                            uint32_t port,
                             void *data_ptr, uint32_t data_len,
                             cci_conn_attribute_t attribute,
                             void *context, int flags,
@@ -142,9 +135,6 @@ cci_plugin_core_t cci_core_sock_plugin = {
     sock_free_devices,
     sock_create_endpoint,
     sock_destroy_endpoint,
-    sock_bind,
-    sock_unbind,
-    sock_get_conn_req,
     sock_accept,
     sock_reject,
     sock_connect,
@@ -421,8 +411,6 @@ sock_set_nonblocking(cci_os_handle_t sock, sock_fd_type_t type, void *p)
     sglobals->fd_idx[sock].type = type;
     if (type == SOCK_FD_EP)
         sglobals->fd_idx[sock].ep = p;
-    else
-        sglobals->fd_idx[sock].lep = p;
     pthread_mutex_unlock(&globals->lock);
     return 0;
 }
@@ -465,7 +453,8 @@ static int sock_create_endpoint(cci_device_t *device,
     sock_ep_t *sep = NULL;
     sock_dev_t *sdev;
     struct sockaddr_in sin;
-    socklen_t len = sizeof(sin);
+    socklen_t slen;
+    char name[40];
 
     CCI_ENTER;
 
@@ -511,11 +500,24 @@ static int sock_create_endpoint(cci_device_t *device,
     sin.sin_family = AF_INET;
     sin.sin_addr.s_addr = sdev->ip;
 
-    ret = bind(sep->sock, (const struct sockaddr *) &sin, len);
+    ret = bind(sep->sock, (const struct sockaddr *) &sin, sizeof(sin));
     if (ret) {
         ret = errno;
         goto out;
     }
+
+    slen = sizeof(sep->sin);
+
+    ret = getsockname(sep->sock, (struct sockaddr *) &sep->sin, &slen);
+    if (ret) {
+        ret = errno;
+        goto out;
+    }
+
+    memset(name, 0, sizeof(name));
+    sprintf(name, "ip://");
+    sock_sin_to_name(sep->sin, name + (uintptr_t)5, sizeof(name) - 5);
+    *((char **)&ep->endpoint.name) = strdup(name);
 
     for (i = 0; i < SOCK_EP_HASH_SIZE; i++) {
         TAILQ_INIT(&sep->conn_hash[i]);
@@ -713,186 +715,6 @@ static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
     return CCI_SUCCESS;
 }
 
-/*! sock_bind()
- *
- * device, port, service are always set
- */
-static int sock_bind(cci_device_t *device, int backlog, uint32_t *port,
-                     cci_service_t **service, cci_os_handle_t *fd)
-{
-    int ret;
-    cci__dev_t  *dev    = NULL;
-    cci__svc_t  *svc    = NULL;
-    cci__lep_t  *lep    = NULL;
-    cci__crq_t  *crq    = NULL;
-    sock_dev_t  *sdev   = NULL;
-    sock_lep_t  *slep   = NULL;
-    sock_crq_t  *scrq   = NULL;
-    struct sockaddr_in sin;
-    socklen_t len = sizeof(sin);
-
-    CCI_ENTER;
-
-    if (!sglobals) {
-        CCI_EXIT;
-        return CCI_ENODEV;
-    }
-
-    dev = container_of(device, cci__dev_t, device);
-    if (0 != strcmp("sock", dev->driver)) {
-        ret = CCI_EINVAL;
-        goto out;
-    }
-
-    if (*port > (64 * 1024)) {
-        CCI_EXIT;
-        return CCI_ERANGE;
-    }
-
-    svc = container_of(*service, cci__svc_t, service);
-    TAILQ_FOREACH(lep, &svc->leps, sentry) {
-        if (lep->dev == dev) {
-            break;
-        }
-    }
-
-    /* allocate sock listening endpoint */
-    slep = calloc(1, sizeof(*slep));
-    if (!slep) {
-        CCI_EXIT;
-        return CCI_ENOMEM;
-    }
-
-    /* alloc sock_crq_t for each cci__crq_t */
-    TAILQ_FOREACH(crq, &lep->crqs, entry) {
-        crq->priv = calloc(1, sizeof(*scrq));
-        if (!crq->priv) {
-            ret = CCI_ENOMEM;
-            goto out;
-        }
-        scrq = crq->priv;
-        scrq->buffer = calloc(1, CCI_CONN_REQ_LEN + SOCK_CONN_REQ_HDR_LEN);
-        if (!scrq->buffer) {
-            ret = CCI_ENOMEM;
-            goto out;
-        }
-    }
-
-    TAILQ_INIT(&lep->passive);
-
-    /* open socket */
-    slep->sock = socket(PF_INET, SOCK_DGRAM, 0);
-    if (slep->sock == -1) {
-        ret = errno;
-        goto out;
-    }
-
-    /* bind socket to device and port */
-    sdev = dev->priv;
-    memset(&sin, 0, sizeof(sin));
-    sin.sin_family = AF_INET;
-    sin.sin_port = htons((uint16_t) *port);
-    sin.sin_addr.s_addr = sdev->ip;
-
-    ret = bind(slep->sock, (const struct sockaddr *) &sin, len);
-    if (ret) {
-        ret = errno;
-        goto out;
-    }
-
-    /* create OS handle */
-    /* TODO */
-
-    lep->priv = slep;
-
-    ret = sock_set_nonblocking(slep->sock, SOCK_FD_LEP, lep);
-    if (ret)
-        goto out;
-
-    CCI_EXIT;
-    return CCI_SUCCESS;
-
-out:
-    if (slep) {
-        TAILQ_FOREACH(crq, &lep->crqs, entry) {
-            scrq = crq->priv;
-            if (scrq) {
-                if (scrq->buffer)
-                    free(scrq->buffer);
-                free(scrq);
-                crq->priv = NULL;
-            }
-        }
-        if (slep->sock > 0)
-            sock_close_socket(slep->sock);
-        free(slep);
-        lep->priv = NULL;
-    }
-    CCI_EXIT;
-    return ret;
-}
-
-/* We only cleanup the private lep and crqs */
-static int sock_unbind(cci_service_t *service, cci_device_t *device)
-{
-    cci__dev_t  *dev    = NULL;
-    cci__svc_t  *svc    = NULL;
-    cci__lep_t  *lep    = NULL;
-    cci__crq_t  *crq    = NULL;
-    sock_lep_t  *slep   = NULL;
-    sock_crq_t  *scrq   = NULL;
-
-    CCI_ENTER;
-
-    if (!sglobals) {
-        CCI_EXIT;
-        return CCI_ENODEV;
-    }
-
-    dev = container_of(device, cci__dev_t, device);
-    svc = container_of(service, cci__svc_t, service);
-
-    pthread_mutex_lock(&svc->lock);
-    TAILQ_FOREACH(lep, &svc->leps, sentry) {
-        if (lep->dev == dev) {
-            break;
-        }
-    }
-    pthread_mutex_unlock(&svc->lock);
-
-    slep = lep->priv;
-
-    pthread_mutex_lock(&lep->lock);
-    TAILQ_FOREACH(crq, &lep->all_crqs, lentry) {
-        scrq = crq->priv;
-        free(scrq->buffer);
-        free(scrq);
-    }
-    sock_close_socket(slep->sock);
-    /* TODO close(slep->fd); */
-    pthread_mutex_unlock(&lep->lock);
-
-    free(slep);
-
-    CCI_EXIT;
-    return CCI_SUCCESS;
-}
-
-
-/* NOTE: currently never called */
-static int sock_get_conn_req(cci_service_t *service,
-                                 cci_conn_req_t **conn_req)
-{
-    CCI_ENTER;
-
-    if (!sglobals) {
-        CCI_EXIT;
-        return CCI_ENODEV;
-    }
-
-    CCI_EXIT;
-    return CCI_ERR_NOT_IMPLEMENTED;
-}
 
 static void
 sock_get_id(sock_ep_t *ep, uint32_t *id)
@@ -949,8 +771,7 @@ static uint8_t sock_ip_hash(in_addr_t ip, uint16_t port)
     return (port & 0x00FF) ^ ((port & 0xFF00) >> 8);
 }
 
-static int sock_accept(cci_conn_req_t *conn_req,
-                           cci_endpoint_t *endpoint,
+static int sock_accept(union cci_event *event,
                            cci_connection_t **connection)
 {
     uint8_t         a;
@@ -959,20 +780,20 @@ static int sock_accept(cci_conn_req_t *conn_req,
     uint32_t        peer_seq;
     uint32_t        peer_ts;
     int             i;
+    cci_endpoint_t  *endpoint;
     cci__ep_t       *ep     = NULL;
-    cci__crq_t      *crq    = NULL;
     cci__conn_t     *conn   = NULL;
     cci__evt_t      *evt    = NULL;
     cci__dev_t      *dev    = NULL;
     sock_ep_t       *sep    = NULL;
-    sock_crq_t      *scrq   = NULL;
     sock_conn_t     *sconn  = NULL;
     sock_dev_t      *sdev   = NULL;
     sock_header_r_t *hdr_r  = NULL;
     sock_msg_type_t type;
     sock_tx_t       *tx     = NULL;
+    sock_rx_t       *rx     = NULL;
     sock_handshake_t    *hs = NULL;
-    uint32_t        id, ack, max_recv_buffer_count, mss;
+    uint32_t        id, ack, max_recv_buffer_count, mss = 0;
 
 
     CCI_ENTER;
@@ -982,10 +803,11 @@ static int sock_accept(cci_conn_req_t *conn_req,
         return CCI_ENODEV;
     }
 
-    ep = container_of(endpoint, cci__ep_t, endpoint);
+    evt = container_of(event, cci__evt_t, event);
+    rx = container_of(evt, sock_rx_t, evt);
+    ep = evt->ep;
+    endpoint = &ep->endpoint;
     sep = ep->priv;
-    crq = container_of(conn_req, cci__crq_t, conn_req);
-    scrq = crq->priv;
     dev = ep->dev;
     sdev = dev->priv;
 
@@ -1018,7 +840,7 @@ static int sock_accept(cci_conn_req_t *conn_req,
         return CCI_ENOBUFS;
     }
 
-    hdr_r = scrq->buffer;
+    hdr_r = rx->buffer;
     sock_parse_header(&hdr_r->header, &type, &a, &b, &unused);
     sock_parse_seq_ts(&hdr_r->seq_ts, &peer_seq, &peer_ts);
 
@@ -1026,7 +848,7 @@ static int sock_accept(cci_conn_req_t *conn_req,
     conn->connection.endpoint = endpoint;
     conn->connection.max_send_size = dev->device.max_send_size;
 
-    hs = (sock_handshake_t *) (scrq->buffer + sizeof(*hdr_r));
+    hs = (sock_handshake_t *) (rx->buffer + (uintptr_t) sizeof(sock_header_r_t));
     sock_parse_handshake(hs, &id, &ack, &max_recv_buffer_count, &mss);
     if (mss < SOCK_MIN_MSS) {
         /* FIXME do what? */
@@ -1041,7 +863,7 @@ static int sock_accept(cci_conn_req_t *conn_req,
     sconn->conn = conn;
     sconn->cwnd = SOCK_INITIAL_CWND;
     sconn->status = SOCK_CONN_READY; /* set ready since the app thinks it is */
-    *((struct sockaddr_in *) &sconn->sin) = scrq->sin;
+    *((struct sockaddr_in *) &sconn->sin) = rx->sin;
     sconn->peer_id = id;
     sock_get_id(sep, &sconn->id);
     sconn->seq = sock_get_new_seq(); /* even for UU since this reply is reliable */
@@ -1074,13 +896,13 @@ static int sock_accept(cci_conn_req_t *conn_req,
     evt->ep = ep;
     evt->conn = conn;
     evt->event.type = CCI_EVENT_SEND; /* for now */
-    evt->event.send.context = NULL; /* FIXME or crq? */
+    evt->event.send.context = NULL; /* FIXME */
     evt->event.send.connection = &conn->connection;
 
     /* pack the msg */
 
     hdr_r = (sock_header_r_t *) tx->buffer;
-    sock_pack_conn_reply(&hdr_r->header, CCI_EVENT_CONNECT_SUCCESS,
+    sock_pack_conn_reply(&hdr_r->header, CCI_EVENT_CONNECT_ACCEPTED,
                          sconn->peer_id);
     sock_pack_seq_ts(&hdr_r->seq_ts, sconn->seq, (uint32_t) sconn->last_ack_ts);
     hs = (sock_handshake_t *) (tx->buffer + sizeof(*hdr_r));
@@ -1112,8 +934,12 @@ static int sock_accept(cci_conn_req_t *conn_req,
     return CCI_SUCCESS;
 }
 
-
-static int sock_reject(cci_conn_req_t *conn_req)
+/* Send reject reply to client.
+ *
+ * We cannot use the event's buffer since the app will most likely return the
+ * event before we get an ack from the client. We will get a tx for the reply.
+ */
+static int sock_reject(union cci_event *event)
 {
     int             ret     = CCI_SUCCESS;
     uint8_t         a;
@@ -1121,14 +947,16 @@ static int sock_reject(cci_conn_req_t *conn_req)
     uint32_t        peer_id;
     uint32_t        peer_seq;
     uint32_t        peer_ts;
-    char            buffer[SOCK_CONN_REQ_HDR_LEN];
-    cci__lep_t      *lep     = NULL;
-    cci__crq_t      *crq    = NULL;
-    sock_crq_t      *scrq   = NULL;
-    sock_lep_t      *slep    = NULL;
+    cci__evt_t      *evt    = NULL;
+    cci__dev_t      *dev    = NULL;
+    cci__ep_t       *ep     = NULL;
+    sock_ep_t       *sep    = NULL;
+    sock_dev_t      *sdev   = NULL;
     sock_header_r_t *hdr_r  = NULL;
     sock_msg_type_t type;
     char name[32];
+    sock_rx_t       *rx     = NULL;
+    sock_tx_t       *tx     = NULL;
 
     CCI_ENTER;
 
@@ -1137,51 +965,74 @@ static int sock_reject(cci_conn_req_t *conn_req)
         return CCI_ENODEV;
     }
 
-    crq = container_of(conn_req, cci__crq_t, conn_req);
-    scrq = crq->priv;
-    lep = crq->lep;
-    slep = lep->priv;
-
-    hdr_r = scrq->buffer;
+    hdr_r = (void *) event->request.data_ptr;
     sock_parse_header(&hdr_r->header, &type, &a, &b, &peer_id);
     sock_parse_seq_ts(&hdr_r->seq_ts, &peer_seq, &peer_ts);
 
+    evt = container_of(event, cci__evt_t, event);
+    ep = evt->ep;
+    rx = container_of(evt, sock_rx_t, evt);
+
+    /* get a tx */
+    pthread_mutex_lock(&ep->lock);
+    if (!TAILQ_EMPTY(&sep->idle_txs)) {
+        tx = TAILQ_FIRST(&sep->idle_txs);
+        TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
+    }
+    pthread_mutex_unlock(&ep->lock);
+
+    if (!tx) {
+	    ret = CCI_ENOBUFS;
+	    goto out;
+    }
+
+    /* prep the tx */
+
+    tx->msg_type = SOCK_MSG_CONN_REPLY;
+    tx->evt.ep = ep;
+    tx->evt.conn = NULL;
+    tx->evt.event.type = CCI_EVENT_CONNECT_REJECTED;
+    tx->last_attempt_us = 0ULL;
+    tx->timeout_us = 0ULL;
+    tx->rma_op = NULL;
+    tx->sin = rx->sin;
+
     /* prepare conn_reply */
 
-    hdr_r = (sock_header_r_t *) buffer;
+    hdr_r = (sock_header_r_t *) tx->buffer;
     sock_pack_conn_reply(&hdr_r->header, CCI_EVENT_CONNECT_REJECTED, peer_id);
     sock_pack_seq_ts(&hdr_r->seq_ts, peer_seq, 0);
 
-    scrq->peer_id = peer_id;
-    scrq->last_attempt_us = sock_get_usecs();
-    scrq->timeout_us = scrq->last_attempt_us + (10 * 1000000);
+    tx->len = sizeof(*hdr_r);
 
-    /* queue here until acked */
-    pthread_mutex_lock(&lep->lock);
-    TAILQ_INSERT_TAIL(&lep->passive, crq, entry);
-    pthread_mutex_unlock(&lep->lock);
+    /* insert at tail of device's queued list */
+
+    dev = ep->dev;
+    sdev = dev->priv;
+
+    tx->state = SOCK_TX_QUEUED;
+    pthread_mutex_lock(&dev->lock);
+    TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
+    pthread_mutex_unlock(&dev->lock);
+
+    /* try to progress txs */
+
+    sock_progress_dev(dev);
 
     memset(name, 0, sizeof(name));
-    sock_sin_to_name(scrq->sin, name, sizeof(name));
-    debug((CCI_DB_MSG|CCI_DB_CONN), "listening ep %d sending reject to %s",
-          slep->sock, name);
+    sock_sin_to_name(rx->sin, name, sizeof(name));
+    debug((CCI_DB_MSG|CCI_DB_CONN), "ep %d sending reject to %s",
+          sep->sock, name);
 
-    ret = sock_sendto(slep->sock, buffer, sizeof(*hdr_r), scrq->sin);
-    if (ret != (int) sizeof(*hdr_r)) {
-        debug((CCI_DB_CONN|CCI_DB_MSG), "unable to send reject to %s with"
-              "%s", name, cci_strerror((enum cci_status)ret));
-    }
-
-    /* TODO when progressing, walk passive list and resend as needed */
-
+out:
     CCI_EXIT;
     return ret;
 }
 
-static int sock_getaddrinfo(const char *uri, in_addr_t *in)
+static int sock_getaddrinfo(const char *uri, in_addr_t *in, uint16_t *port)
 {
     int ret;
-    char *hostname, *colon;
+    char *hostname, *svc, *colon;
     struct addrinfo *ai, hints;
 
     if (0 == strncmp("ip://", uri, 5))
@@ -1192,15 +1043,23 @@ static int sock_getaddrinfo(const char *uri, in_addr_t *in)
     }
 
     colon = strchr(hostname, ':');
-    if (colon)
-        colon = '\0';
+    if (colon) {
+        *colon = '\0';
+    } else {
+        free(hostname);
+        CCI_EXIT;
+	return CCI_EINVAL;
+    }
+
+    colon++;
+    svc = colon;
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_DGRAM;
     hints.ai_protocol = IPPROTO_UDP;
 
-    ret = getaddrinfo(hostname, NULL, &hints, &ai);
+    ret = getaddrinfo(hostname, svc, &hints, &ai);
     free(hostname);
 
     if (ret) {
@@ -1210,6 +1069,7 @@ static int sock_getaddrinfo(const char *uri, in_addr_t *in)
     }
 
     *in = ((struct sockaddr_in *)ai->ai_addr)->sin_addr.s_addr;
+    *port = ((struct sockaddr_in *)ai->ai_addr)->sin_port;
     freeaddrinfo(ai);
 
     CCI_EXIT;
@@ -1239,6 +1099,7 @@ sock_find_open_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id)
     return sconn;
 }
 
+#if 0
 static sock_conn_t *
 sock_find_new_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id)
 {
@@ -1261,6 +1122,7 @@ sock_find_new_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id)
     CCI_EXIT;
     return sconn;
 }
+#endif
 
 static sock_conn_t *
 sock_find_active_conn(sock_ep_t *sep, in_addr_t ip, uint32_t id)
@@ -1289,15 +1151,14 @@ sock_find_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id, sock_ms
     switch (type) {
     case SOCK_MSG_CONN_REPLY:
         return sock_find_active_conn(sep, ip, id);
-    case SOCK_MSG_CONN_ACK:
-        return sock_find_new_conn(sep, ip, port, id);
+    //case SOCK_MSG_CONN_ACK:
+        //return sock_find_new_conn(sep, ip, port, id);
     default:
         return sock_find_open_conn(sep, ip, port, id);
     }
 }
 
 static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
-                            uint32_t port,
                             void *data_ptr, uint32_t data_len,
                             cci_conn_attribute_t attribute,
                             void *context, int flags,
@@ -1322,6 +1183,7 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     uint32_t            ts          = 0;
     struct s_active     *active_list;
     sock_handshake_t    *hs         = NULL;
+    uint16_t            port;
 
     CCI_ENTER;
 
@@ -1361,12 +1223,12 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     sin = (struct sockaddr_in *) &sconn->sin;
     memset(sin, 0, sizeof(*sin));
     sin->sin_family = AF_INET;
-    sin->sin_port = htons(port);
 
-    ret = sock_getaddrinfo(server_uri, &ip);
+    ret = sock_getaddrinfo(server_uri, &ip, &port);
     if (ret)
         goto out;
     sin->sin_addr.s_addr = ip;  /* already in network order */
+    sin->sin_port = port;	/* already in network order */
 
     /* peer will assign id */
 
@@ -1405,9 +1267,9 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     evt->ep = ep;
     evt->conn = conn;
     event = &evt->event;
-    evt->event.type = CCI_EVENT_CONNECT_SUCCESS; /* for now */
-    evt->event.connect_success.context = context;
-    evt->event.connect_success.connection = connection;
+    evt->event.type = CCI_EVENT_CONNECT_ACCEPTED; /* for now */
+    evt->event.accepted.context = context;
+    evt->event.accepted.connection = connection;
 
     /* pack the msg */
 
@@ -1885,7 +1747,7 @@ sock_progress_pending(cci__dev_t *dev)
 
 #if 0
         if (tx->send_count == 1 && tx->msg_type == SOCK_MSG_SEND && 0) {
-            debug(CCI_DB_INFO, "%s: reducing cwnd from %d to %d\n"
+            debug(CCI_DB_INFO, "%s: reducing cwnd from %d to %d"
                                "    reducing ssthresh from %d to %d",
                                __func__, sconn->cwnd, 2, sconn->ssthresh,
                                sconn->pending / 2 + 1);
@@ -1904,7 +1766,7 @@ sock_progress_pending(cci__dev_t *dev)
               sock_msg_type(tx->msg_type), tx->seq, tx->send_count);
         ret = sock_sendto(sep->sock, tx->buffer, tx->len, sconn->sin);
         if (ret != tx->len) {
-            debug((CCI_DB_MSG|CCI_DB_INFO), "sendto() failed with %s\n", cci_strerror((enum cci_status)errno));
+            debug((CCI_DB_MSG|CCI_DB_INFO), "sendto() failed with %s", cci_strerror((enum cci_status)errno));
             continue;
         }
     }
@@ -2059,7 +1921,7 @@ sock_progress_queued(cci__dev_t *dev)
         if (ret == -1) {
             switch (errno) {
             default:
-                debug((CCI_DB_MSG|CCI_DB_INFO), "sendto() failed with %s\n", strerror(errno));
+                debug((CCI_DB_MSG|CCI_DB_INFO), "sendto() failed with %s", strerror(errno));
                 /* fall through */
             case EINTR:
             case EAGAIN:
@@ -3084,6 +2946,43 @@ sock_handle_ack(sock_conn_t *sconn,
     return;
 }
 
+static void
+sock_handle_conn_request(sock_rx_t *rx,
+                         cci_conn_attribute_t attr,
+                         uint16_t len,
+			 struct sockaddr_in sin,
+			 cci__ep_t *ep)
+{
+    char name[32];
+
+    CCI_ENTER;
+
+    memset(name, 0, sizeof(name));
+    sock_sin_to_name(sin, name, sizeof(name));
+    debug(CCI_DB_CONN, "recv'd conn_req from %s", name);
+
+    rx->evt.event.type = CCI_EVENT_CONNECT_REQUEST;
+    rx->evt.event.request.attribute = attr;
+    *((uint32_t *) &rx->evt.event.request.data_len) = len;
+    if (len)
+        *((void **) &rx->evt.event.request.data_ptr) =
+                (void *) ((((sock_header_r_t *)rx->buffer)->data) +
+                (uintptr_t)sizeof(sock_handshake_t));
+    else
+        *((void **) &rx->evt.event.request.data_ptr) = NULL;
+
+    /* queue event on endpoint's completed event queue */
+
+    pthread_mutex_lock(&ep->lock);
+    TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
+    pthread_mutex_unlock(&ep->lock);
+
+    /* TODO notify via ep->fd */
+
+    CCI_EXIT;
+    return;
+}
+
 /* Possible states and what to do:
  *
  * Recv         send        send        with        complete    switch
@@ -3142,7 +3041,7 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
             sock_sin_to_name(sin, from, sizeof(from));
             debug((CCI_DB_CONN|CCI_DB_MSG), "ep %d recv'd conn_reply (%s) from %s"
                   " with no matching conn", sep->sock,
-                  reply == CCI_EVENT_CONNECT_SUCCESS ? "success" : "rejected",
+                  reply == CCI_EVENT_CONNECT_ACCEPTED ? "success" : "rejected",
                   from);
             /* simply ack this msg and cleanup */
             memset(&hdr, 0, sizeof(hdr));
@@ -3203,7 +3102,7 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
             /* how can we be active without a tx pending? */
             debug(CCI_DB_WARN, "ep %d received conn_reply (%s) from %s "
                   "with an active conn and no matching tx", sep->sock,
-                  reply == CCI_EVENT_CONNECT_SUCCESS ? "success" : "rejected",
+                  reply == CCI_EVENT_CONNECT_ACCEPTED ? "success" : "rejected",
                   from);
             /* we can't transition to ready since we do not have the
              * context from the conn_request tx */
@@ -3228,7 +3127,7 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
 
         event = (cci_event_t *) &evt->event;
         event->type = (enum cci_event_type)reply; /* CCI_EVENT_CONNECT_[SUCCESS|REJECTED] */
-        event->connect_success.context = tx->evt.event.send.context;
+        event->accepted.context = tx->evt.event.send.context;
 
         i = sock_ip_hash(sin.sin_addr.s_addr, 0);
         active_list = &sep->active_hash[i];
@@ -3236,8 +3135,8 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
         TAILQ_REMOVE(active_list, sconn, entry);
         pthread_mutex_unlock(&ep->lock);
 
-        if (CCI_EVENT_CONNECT_SUCCESS == reply) {
-            event->connect_success.connection = &conn->connection;
+        if (CCI_EVENT_CONNECT_ACCEPTED == reply) {
+            event->accepted.connection = &conn->connection;
             sconn->peer_id = peer_id;
             sconn->status = SOCK_CONN_READY;
             *((struct sockaddr_in *) &sconn->sin) = sin;
@@ -3280,7 +3179,7 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
         TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
         pthread_mutex_unlock(&ep->lock);
 
-        if (reply != CCI_EVENT_CONNECT_SUCCESS) {
+        if (reply != CCI_EVENT_CONNECT_ACCEPTED) {
             CCI_EXIT;
             return;
         }
@@ -3317,7 +3216,7 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
     tx->flags = CCI_FLAG_SILENT;
     tx->msg_type = SOCK_MSG_CONN_ACK;
     tx->evt.event.type = CCI_EVENT_SEND;
-    tx->evt.event.connect_success.connection = &conn->connection;
+    tx->evt.event.accepted.connection = &conn->connection;
     tx->evt.ep = ep;
     tx->evt.conn = conn;
 
@@ -3504,7 +3403,7 @@ sock_drop_msg(cci_os_handle_t sock)
 static int
 sock_recvfrom_ep(cci__ep_t *ep)
 {
-    int ret = 0, drop_msg = 0, q_rx = 0, reply = 0, again = 0;
+    int ret = 0, drop_msg = 0, q_rx = 0, reply = 0, request = 0, again = 0;
     uint8_t a;
     uint16_t b;
     uint32_t id;
@@ -3542,9 +3441,6 @@ sock_recvfrom_ep(cci__ep_t *ep)
         return 0;
     }
 
-    /* peek at msg header.
-     * handler must call recvfrom for the full msg. */
-
     ret = recvfrom(sep->sock, rx->buffer, ep->buffer_len,
                    0, (struct sockaddr *)&sin, &sin_len);
     if (ret < (int) sizeof(sock_header_t)) {
@@ -3557,20 +3453,29 @@ sock_recvfrom_ep(cci__ep_t *ep)
     /* lookup connection from sin and id */
 
     sock_parse_header(rx->buffer, &type, &a, &b, &id);
-    if (SOCK_MSG_CONN_REPLY == type)
+    if (SOCK_MSG_CONN_REPLY == type) {
         reply = 1;
-    sconn = sock_find_conn(sep, sin.sin_addr.s_addr, sin.sin_port, id, type);
+    } else if (SOCK_MSG_CONN_REQUEST == type) {
+        request = 1;
+        rx->sin = sin;
+    }
+
+    if (!request)
+        sconn = sock_find_conn(sep, sin.sin_addr.s_addr, sin.sin_port, id, type);
 
     {
         char name[32];
-        memset(name, 0, sizeof(name));
-        sock_sin_to_name(sin, name, sizeof(name));
-        debug((CCI_DB_MSG), "ep %d recv'd %s msg from %s with %d bytes",
-              sep->sock, sock_msg_type(type), name, a + b);
+
+	if (CCI_DB_MSG & cci__debug) {
+            memset(name, 0, sizeof(name));
+            sock_sin_to_name(sin, name, sizeof(name));
+            debug((CCI_DB_MSG), "ep %d recv'd %s msg from %s with %d bytes",
+                  sep->sock, sock_msg_type(type), name, a + b);
+	}
     }
 
     /* if no conn, drop msg, requeue rx */
-    if (!sconn && !reply) {
+    if (!sconn && !reply && !request) {
         debug((CCI_DB_CONN|CCI_DB_MSG), "no sconn for incoming %s msg "
                "from %s:%d", sock_msg_type(type),
                inet_ntoa(sin.sin_addr), ntohs(sin.sin_port));
@@ -3591,10 +3496,7 @@ sock_recvfrom_ep(cci__ep_t *ep)
 
     switch (type) {
     case SOCK_MSG_CONN_REQUEST:
-        debug((CCI_DB_MSG|CCI_DB_CONN), "conn request on non-listening "
-                "endpoint from %s:%d", inet_ntoa(sin.sin_addr),
-                ntohs(sin.sin_port));
-        q_rx = 1;
+        sock_handle_conn_request(rx, a, b, sin, ep);
         break;
     case SOCK_MSG_CONN_REPLY:
         sock_handle_conn_reply(sconn, rx, a, b, id, sin, ep);
@@ -3624,7 +3526,7 @@ sock_recvfrom_ep(cci__ep_t *ep)
     case SOCK_MSG_RMA_READ_REPLY:
         break;
     default:
-        debug(CCI_DB_MSG, "unknown active message with type %u\n", (enum sock_msg_type)type);
+        debug(CCI_DB_MSG, "unknown active message with type %u", (enum sock_msg_type)type);
     }
 
 out:
@@ -3643,6 +3545,7 @@ out:
     return again;
 }
 
+#if 0
 static void
 sock_recvfrom_lep(cci__lep_t *lep)
 {
@@ -3788,6 +3691,7 @@ sock_recvfrom_lep(cci__lep_t *lep)
 
     return;
 }
+#endif
 
 static void
 sock_ack_conns(cci__ep_t *ep)
@@ -3992,8 +3896,8 @@ static void *sock_recv_thread(void *arg)
 
                 if (idx->type == SOCK_FD_EP) {
                     sock_recvfrom_ep(idx->ep);
-                } else if (idx->type == SOCK_FD_LEP) {
-                    sock_recvfrom_lep(idx->lep);
+                //} else if (idx->type == SOCK_FD_LEP) {
+                    //sock_recvfrom_lep(idx->lep);
                 }
                 start = i;
             }

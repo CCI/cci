@@ -69,26 +69,25 @@ sock_get_usecs(void)
 
 /* Valid URI include:
  *
- * ip://1.2.3.4         # IPv4 address
- * ip://foo.bar.com     # Resolvable name
+ * ip://1.2.3.4:5555      # IPv4 address and port
+ * ip://foo.bar.com:5555  # Resolvable name and port
  */
 
 /* Valid URI arguments:
  *
- * :eth0                # Interface name
+ * :eth0                  # Interface name
  */
 
 /* A sock device needs the following items in the config file:
  *
- * driver = sock        # must be lowercase
- * ip = 0.0.0.0         # valid IPv4 address of the adapter to use
+ * driver = sock          # must be lowercase
+ * ip = 0.0.0.0           # valid IPv4 address of the adapter to use
  *
  * A sock device may have these items:
  *
- * mtu = 9000           # MTU less headers will become max_send_size
- * listen_port = 54321  # port to listen on
- * min_port = 4444      # lowest port to use for endpoints
- * max_port = 5555      # highest port to use for endpoints
+ * mtu = 9000             # MTU less headers will become max_send_size
+ * min_port = 4444        # lowest port to use for endpoints
+ * max_port = 5555        # highest port to use for endpoints
  */
 
 /* Message types */
@@ -410,7 +409,7 @@ sock_pack_conn_ack(sock_header_t *header, uint32_t id)
     <---------- 32 bits ---------->
     <- 8 -> <- 8 -> <---- 16 ----->
    +-------+-------+---------------+
-   | type  | hlen  |   data len    |
+   | type  | rsvd  |   data len    |
    +-------+-------+---------------+
    |              id               |
    +-------------------------------+
@@ -691,6 +690,9 @@ typedef struct sock_tx {
 
     /*! Number of RNR nacks received */
     uint32_t rnr;
+
+    /*! Peer address if connect reject message (i.e. no conn) */
+    struct sockaddr_in sin;
 } sock_tx_t;
 
 /*! Receive active message context.
@@ -711,6 +713,9 @@ typedef struct sock_rx {
 
     /*! Entry for hanging on ep->rxs */
     TAILQ_ENTRY(sock_rx) gentry;
+
+    /*! Peer's sockaddr_in for connection requests */
+    struct sockaddr_in sin;
 } sock_rx_t;
 
 typedef struct sock_rma_handle {
@@ -782,6 +787,9 @@ typedef struct sock_rma_op {
 } sock_rma_op_t;
 
 typedef struct sock_ep {
+    /* Our IP and port */
+    struct sockaddr_in sin;
+
     /*! Is closing? */
     int closing;
 
@@ -944,43 +952,14 @@ typedef struct sock_dev {
     int is_progressing;
 } sock_dev_t;
 
-typedef struct sock_lep {
-    /*! OS handle for poll/select */
-    cci_os_handle_t fd;
-
-    /*! Socket for receiving conn requests */
-    cci_os_handle_t sock;
-} sock_lep_t;
-
-typedef struct sock_crq {
-    /*! Buffer for conn request */
-    void *buffer;
-
-    /*! Client's sockaddr_in */
-    const struct sockaddr_in sin;
-
-    /*! Peer's id if we reject */
-    uint32_t peer_id;
-
-    /*! Last send in microseconds if reject */
-    uint64_t last_attempt_us;
-
-    /*! Timeout in microseconds if reject */
-    uint64_t timeout_us;
-} sock_crq_t;
-
 typedef enum sock_fd_type {
     SOCK_FD_UNUSED  = 0,
     SOCK_FD_EP,
-    SOCK_FD_LEP
 } sock_fd_type_t;
 
 typedef struct sock_fd_idx {
     sock_fd_type_t type;
-    union {
-        cci__ep_t *ep;
-        cci__lep_t *lep;
-    };
+    cci__ep_t *ep;
 } sock_fd_idx_t;
 
 typedef struct sock_globals {
