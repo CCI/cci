@@ -24,17 +24,10 @@ static int template_create_endpoint(cci_device_t *device,
                                     cci_endpoint_t **endpoint,
                                     cci_os_handle_t *fd);
 static int template_destroy_endpoint(cci_endpoint_t *endpoint);
-static int template_bind(cci_device_t *device, int backlog, uint32_t *port,
-                         cci_service_t **service, cci_os_handle_t *fd);
-static int template_unbind(cci_service_t *service, cci_device_t *device);
-static int template_get_conn_req(cci_service_t *service,
-                                 cci_conn_req_t **conn_req);
-static int template_accept(cci_conn_req_t *conn_req,
-                           cci_endpoint_t *endpoint,
+static int template_accept(union cci_event *event,
                            cci_connection_t **connection);
-static int template_reject(cci_conn_req_t *conn_req);
+static int template_reject(union cci_event *event);
 static int template_connect(cci_endpoint_t *endpoint, char *server_uri,
-                            uint32_t port,
                             void *data_ptr, uint32_t data_len,
                             cci_conn_attribute_t attribute,
                             void *context, int flags,
@@ -108,9 +101,6 @@ cci_plugin_core_t cci_core_template_plugin = {
     template_free_devices,
     template_create_endpoint,
     template_destroy_endpoint,
-    template_bind,
-    template_unbind,
-    template_get_conn_req,
     template_accept,
     template_reject,
     template_connect,
@@ -174,31 +164,7 @@ static int template_destroy_endpoint(cci_endpoint_t *endpoint)
 }
 
 
-static int template_bind(cci_device_t *device, int backlog, uint32_t *port,
-                         cci_service_t **service, cci_os_handle_t *fd)
-{
-    printf("In template_bind\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
-}
-
-
-static int template_unbind(cci_service_t *service, cci_device_t *device)
-{
-    printf("In template_unbind\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
-}
-
-
-static int template_get_conn_req(cci_service_t *service,
-                                 cci_conn_req_t **conn_req)
-{
-    printf("In template_get_conn_req\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
-}
-
-
-static int template_accept(cci_conn_req_t *conn_req,
-                           cci_endpoint_t *endpoint,
+static int template_accept(union cci_event *event,
                            cci_connection_t **connection)
 {
     printf("In template_accept\n");
@@ -206,7 +172,7 @@ static int template_accept(cci_conn_req_t *conn_req,
 }
 
 
-static int template_reject(cci_conn_req_t *conn_req)
+static int template_reject(union cci_event *event)
 {
     printf("In template_reject\n");
     return CCI_ERR_NOT_IMPLEMENTED;
@@ -214,7 +180,6 @@ static int template_reject(cci_conn_req_t *conn_req)
 
 
 static int template_connect(cci_endpoint_t *endpoint, char *server_uri,
-                            uint32_t port,
                             void *data_ptr, uint32_t data_len,
                             cci_conn_attribute_t attribute,
                             void *context, int flags,
