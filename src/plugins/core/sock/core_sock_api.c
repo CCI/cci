@@ -1102,31 +1102,6 @@ sock_find_open_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id)
     return sconn;
 }
 
-#if 0
-static sock_conn_t *
-sock_find_new_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id)
-{
-    uint8_t i;
-    struct s_conns *conn_list;
-    sock_conn_t *sconn = NULL, *sc;
-
-    CCI_ENTER;
-
-    i = sock_ip_hash(ip, port);
-    conn_list = &sep->conn_hash[i];
-    TAILQ_FOREACH(sc, conn_list, entry) {
-        if (sc->sin.sin_addr.s_addr == ip &&
-            sc->sin.sin_port == port &&
-            sc->peer_id == id) {
-                sconn = sc;
-                break;
-        }
-    }
-    CCI_EXIT;
-    return sconn;
-}
-#endif
-
 static sock_conn_t *
 sock_find_active_conn(sock_ep_t *sep, in_addr_t ip, uint32_t id)
 {
@@ -1154,8 +1129,6 @@ sock_find_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id, sock_ms
     switch (type) {
     case SOCK_MSG_CONN_REPLY:
         return sock_find_active_conn(sep, ip, id);
-    //case SOCK_MSG_CONN_ACK:
-        //return sock_find_new_conn(sep, ip, port, id);
     default:
         return sock_find_open_conn(sep, ip, port, id);
     }
@@ -3546,154 +3519,6 @@ out:
 
     return again;
 }
-
-#if 0
-static void
-sock_recvfrom_lep(cci__lep_t *lep)
-{
-    int             ret     = 0;
-    uint8_t         a;
-    uint16_t        b;
-    uint32_t        id;
-    uint32_t        len     = SOCK_CONN_REQ_HDR_LEN + CCI_CONN_REQ_LEN;
-    char            buffer[len];  /* per CCI spec */
-    char            *ptr    = buffer;
-    cci__crq_t      *crq    = NULL;
-    cci__svc_t      *svc    = NULL;
-    sock_crq_t      *scrq   = NULL;
-    struct sockaddr_in sin;
-    socklen_t       sin_len = sizeof(sin);
-    sock_lep_t      *slep   = NULL;
-    sock_msg_type_t type;
-
-    CCI_ENTER;
-
-    /* get idle crq */
-
-    slep = lep->priv;
-    if (!slep)
-        return;
-    pthread_mutex_lock(&lep->lock);
-    if (lep->state == CCI_LEP_CLOSING) {
-        pthread_mutex_unlock(&lep->lock);
-        return;
-    }
-    if (!TAILQ_EMPTY(&lep->crqs)) {
-        crq = TAILQ_FIRST(&lep->crqs);
-        TAILQ_REMOVE(&lep->crqs, crq, entry);
-    }
-    pthread_mutex_unlock(&lep->lock);
-
-    /* recv msg */
-
-    if (crq) {
-        scrq = crq->priv;
-        ptr = scrq->buffer;
-    }
-
-    ret = recvfrom(slep->sock, ptr, len, 0, (struct sockaddr *)&sin, &sin_len);
-    if (ret < SOCK_CONN_REQ_HDR_LEN || !crq) {
-        /* nothing available or partial header, return.
-         * let the client retry */
-        if (crq) {
-            pthread_mutex_lock(&lep->lock);
-            TAILQ_INSERT_HEAD(&lep->crqs, crq, entry);
-            pthread_mutex_unlock(&lep->lock);
-        }
-        CCI_EXIT;
-        return;
-    }
-
-    /* lookup connection from sin and id */
-
-    sock_parse_header((sock_header_t *)scrq->buffer, &type, &a, &b, &id);
-
-    {
-        char name[32];
-        memset(name, 0, sizeof(name));
-        sock_sin_to_name(sin, name, sizeof(name));
-        debug((CCI_DB_MSG), "listening ep %d recv'd %s msg from %s",
-              slep->sock, sock_msg_type(type), name);
-    }
-
-    /* FIXME need to handle conn_ack after a reject as well */
-    /* if !conn_req, drop msg, requeue crq */
-    if (!(type == SOCK_MSG_CONN_REQUEST ||
-          type == SOCK_MSG_CONN_ACK)) {
-        char name[32];
-
-        memset(name, 0, sizeof(name));
-        sock_sin_to_name(sin, name, sizeof(name));
-        debug(CCI_DB_MSG, "listening ep %d recv'd %s msg from %s - discarding it",
-              slep->sock, sock_msg_type(type), name);
-        pthread_mutex_lock(&lep->lock);
-        TAILQ_INSERT_HEAD(&lep->crqs, crq, entry);
-        pthread_mutex_unlock(&lep->lock);
-        CCI_EXIT;
-        return;
-    }
-
-    switch (type) {
-    case SOCK_MSG_CONN_REQUEST:
-    {
-        char name[32];
-
-        memset(name, 0, sizeof(name));
-        sock_sin_to_name(sin, name, sizeof(name));
-        /* FIXME we need to determine on which devices this peer is reachable */
-        *((cci_device_t ***) &(crq->conn_req.devices)) = (cci_device_t **) sglobals->devices;
-        crq->conn_req.devices_cnt = sglobals->count;
-        crq->conn_req.data_len = b;
-        crq->conn_req.data_ptr = (((sock_header_r_t *)scrq->buffer)->data) +
-                                 (uintptr_t)sizeof(sock_handshake_t);
-        crq->conn_req.attribute = (enum cci_conn_attribute)a;
-        *((struct sockaddr_in *) &scrq->sin) = sin;
-
-        debug(CCI_DB_CONN, "recv'd conn_req from %s", name);
-
-        svc = lep->svc;
-        pthread_mutex_lock(&svc->lock);
-        TAILQ_INSERT_TAIL(&svc->crqs, crq, entry);
-        pthread_mutex_unlock(&svc->lock);
-
-        break;
-    }
-    case SOCK_MSG_CONN_ACK:
-    {
-        char name[32];
-        cci__crq_t *c, *ctmp;
-        sock_crq_t *sc;
-
-        memset(name, 0, sizeof(name));
-        sock_sin_to_name(sin, name, sizeof(name));
-
-        debug((CCI_DB_MSG|CCI_DB_CONN), "listening ep %d recv'd conn_ack "
-              "from %s", slep->sock, name);
-
-        /* remove crq from lep and return it to avail list */
-        pthread_mutex_lock(&lep->lock);
-        TAILQ_INSERT_HEAD(&lep->crqs, crq, entry);
-        TAILQ_FOREACH_SAFE(c, &lep->passive, entry, ctmp) {
-            sc = c->priv;
-            if (sc->peer_id == id) {
-                TAILQ_REMOVE(&lep->passive, c, entry);
-                /* hang on svc after droppping lep->lock */
-                TAILQ_INSERT_HEAD(&lep->crqs, c, entry);
-                break;
-            }
-        }
-        pthread_mutex_unlock(&lep->lock);
-        break;
-    }
-    default:
-        break;
-    }
-
-    CCI_EXIT;
-
-    return;
-}
-#endif
 
 static void
 sock_ack_conns(cci__ep_t *ep)
