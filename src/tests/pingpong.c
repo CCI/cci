@@ -213,6 +213,8 @@ do_client()
     ret = posix_memalign((void **)&buffer, 4096, max);
     check_return("memalign buffer", ret, 1);
 
+    memset(buffer, 'b', max);
+
     if (opts.method != AM) {
         ret = cci_rma_register(endpoint, connection, buffer,
                                max, &local_rma_handle);
@@ -303,6 +305,8 @@ do_server()
 
         ret = cci_get_event(endpoint, &event);
         if (ret == 0 && event) {
+            int len;
+
             accept = 1;
             ready = 1;
             opts = *((options_t *)event->request.data_ptr);
@@ -313,11 +317,14 @@ do_server()
             check_return("cci_return_event", ret, 1);
 
             if (opts.method == AM)
-                ret = posix_memalign((void **)&buffer, 4096, connection->max_send_size);
+                len = connection->max_send_size;
             else
-                ret = posix_memalign((void **)&buffer, 4096, opts.max_rma_size);
+                len = opts.max_rma_size;
 
+            ret = posix_memalign((void **)&buffer, 4096, len);
             check_return("memalign buffer", ret, 1);
+
+	    memset(buffer, 'a', len);
 
             if (opts.method != AM) {
                 ret = cci_rma_register(endpoint, connection, buffer,
