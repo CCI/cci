@@ -708,6 +708,8 @@ static int sock_destroy_endpoint(cci_endpoint_t *endpoint)
         free(sep);
         ep->priv = NULL;
     }
+    if (endpoint->name)
+        free((char *) endpoint->name);
     pthread_mutex_unlock(&ep->lock);
     pthread_mutex_unlock(&dev->lock);
 
@@ -1033,7 +1035,7 @@ static int sock_getaddrinfo(const char *uri, in_addr_t *in, uint16_t *port)
 {
     int ret;
     char *hostname, *svc, *colon;
-    struct addrinfo *ai, hints;
+    struct addrinfo *ai = NULL, hints;
 
     if (0 == strncmp("ip://", uri, 5))
         hostname = strdup(&uri[5]);
@@ -1063,7 +1065,8 @@ static int sock_getaddrinfo(const char *uri, in_addr_t *in, uint16_t *port)
     free(hostname);
 
     if (ret) {
-        freeaddrinfo(ai);
+        if (ai)
+            freeaddrinfo(ai);
         CCI_EXIT;
         return ret;
     }
@@ -2584,7 +2587,6 @@ sock_handle_active_message(sock_conn_t *sconn,
     cci__conn_t *conn = sconn->conn;
     sock_header_t *hdr;         /* wire header */
     cci_event_t *event;             /* generic CCI event */
-    cci_event_recv_t *recv;         /* generic CCI recv event */
     cci_endpoint_t *endpoint;        /* generic CCI endpoint */
     cci__ep_t *ep;
 
@@ -2613,7 +2615,7 @@ sock_handle_active_message(sock_conn_t *sconn,
 
     if (cci_conn_is_reliable(conn)) {
         sock_header_r_t *hdr_r = (sock_header_r_t *) rx->buffer;
-        *((void **) &recv->ptr) = (void *) &hdr_r->data;
+        *((void **) &event->recv.ptr) = (void *) &hdr_r->data;
     }
 
     /* queue event on endpoint's completed event queue */
@@ -3410,7 +3412,7 @@ sock_recvfrom_ep(cci__ep_t *ep)
     sock_rx_t *rx = NULL;
     struct sockaddr_in sin;
     socklen_t sin_len = sizeof(sin);
-    sock_conn_t *sconn;
+    sock_conn_t *sconn = NULL;
     sock_ep_t *sep;
     sock_msg_type_t type;
 
@@ -3894,11 +3896,8 @@ static void *sock_recv_thread(void *arg)
             if (FD_ISSET(i, &fds)) {
                 sock_fd_idx_t *idx = (sock_fd_idx_t *)&sglobals->fd_idx[i];
 
-                if (idx->type == SOCK_FD_EP) {
+                if (idx->type == SOCK_FD_EP)
                     sock_recvfrom_ep(idx->ep);
-                //} else if (idx->type == SOCK_FD_LEP) {
-                    //sock_recvfrom_lep(idx->lep);
-                }
                 start = i;
             }
             i = (i + 1) % nfds;
