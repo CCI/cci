@@ -41,10 +41,8 @@ static int template_get_opt(cci_opt_handle_t *handle,
                             cci_opt_name_t name, void** val, int *len);
 static int template_arm_os_handle(cci_endpoint_t *endpoint, int flags);
 static int template_get_event(cci_endpoint_t *endpoint,
-                              cci_event_t ** const event,
-                              uint32_t flags);
-static int template_return_event(cci_endpoint_t *endpoint,
-                                 cci_event_t *event);
+                              cci_event_t ** const event);
+static int template_return_event(cci_event_t *event);
 static int template_send(cci_connection_t *connection,
                          void *msg_ptr, uint32_t msg_len,
                          void *context, int flags);
@@ -223,16 +221,14 @@ static int template_arm_os_handle(cci_endpoint_t *endpoint, int flags)
 
 
 static int template_get_event(cci_endpoint_t *endpoint,
-                              cci_event_t ** const event,
-                              uint32_t flags)
+                              cci_event_t ** const event)
 {
     printf("In template_get_event\n");
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
-static int template_return_event(cci_endpoint_t *endpoint,
-                                 cci_event_t *event)
+static int template_return_event(cci_event_t *event)
 {
     printf("In template_return_event\n");
     return CCI_ERR_NOT_IMPLEMENTED;
