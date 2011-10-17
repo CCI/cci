@@ -6,7 +6,7 @@
 
 pkglib_LTLIBRARIES = cci_core_sock.la
 
-cci_core_sock_la_LDFLAGS = -module -avoid-version
+cci_core_sock_la_LDFLAGS = -module -avoid-version -lpthread
 cci_core_sock_la_SOURCES = \
         core_sock.h \
         core_sock_module.c \
