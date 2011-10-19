@@ -9,7 +9,14 @@
 
 #include "cci/config.h"
 
+#include <netpacket/packet.h>
+
 BEGIN_C_DECLS
+
+typedef struct eth_dev {
+  /*! Mac address of the interface */
+  struct sockaddr_ll addr;
+} eth_dev_t;
 
 int cci_core_eth_post_load(cci_plugin_t *me);
 int cci_core_eth_pre_unload(cci_plugin_t *me);

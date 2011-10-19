@@ -7,6 +7,8 @@
 #include "cci/config.h"
 
 #include <stdio.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 
 #include "cci.h"
 #include "plugins/core/core.h"
@@ -131,11 +133,173 @@ static const char *eth_strerror(enum cci_status status)
     return NULL;
 }
 
-
-static int eth_get_devices(cci_device_t const ***devices)
+static int eth__get_device_info(cci_device_t *device)
 {
-    printf("In eth_get_devices\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+  /* FIXME get those from the driver */
+  device->max_send_size = 1024;
+  device->rate = 10000000000ULL;
+  device->pci.domain = -1;
+  device->pci.bus = -1;
+  device->pci.dev = -1;
+  device->pci.func = -1;
+  /* check if up */
+  /* get the iface name and use it for dev->name if not reading the config file */
+
+  return 0;
+}
+
+static int eth_get_devices(cci_device_t const ***devices_p)
+{
+    int ret;
+    cci__dev_t *_dev;
+    cci_device_t **devices;
+    unsigned count = 0;
+    cci_device_t *device;
+    eth_dev_t *edev;
+
+    CCI_ENTER;
+
+    devices = calloc(CCI_MAX_DEVICES, sizeof(*devices));
+    if (!devices) {
+        ret = CCI_ENOMEM;
+        goto out;
+    }
+
+    if (TAILQ_EMPTY(&globals->devs)) {
+      /* get all ethernet devices from the system */
+      struct ifaddrs *addrs, *addr;
+      struct sockaddr_ll *lladdr;
+
+      if (getifaddrs(&addrs) == -1) {
+	ret = errno;
+	goto out;
+      }
+
+      for (addr = addrs; addr != NULL; addr = addr->ifa_next) {
+	/* need a packet iface with an address */
+	if (addr->ifa_addr->sa_family != AF_PACKET
+	    || addr->ifa_addr == NULL)
+	  continue;
+	/* ignore loopback and */
+	if (addr->ifa_flags & IFF_LOOPBACK)
+	  continue;
+	/* ignore iface if not up */
+	if (!(addr->ifa_flags & IFF_UP))
+	  continue;
+	/* make sure this is mac address ?! */
+	lladdr = (struct sockaddr_ll*) addr->ifa_addr;
+	if (lladdr->sll_halen != 6)
+	  continue;
+
+	_dev = calloc(1, sizeof(*_dev));
+	edev = calloc(1, sizeof(*edev));
+	if (!_dev || !edev) {
+	  free(_dev);
+	  free(edev);
+	  ret = CCI_ENOMEM;
+	  goto out;
+	}
+	device = &_dev->device;
+	_dev->priv = edev;
+
+	device->name = "foo"; /* FIXME */
+	memcpy(&edev->addr.sll_addr, &lladdr->sll_addr, 6);
+
+	if (eth__get_device_info(device) < 0) {
+	  free(edev);
+	  continue;
+	}
+
+	devices[count] = device;
+	count++;
+      }
+
+      freeifaddrs(addrs);
+
+    } else {
+      /* find devices that we own in the config file */
+      TAILQ_FOREACH(_dev, &globals->devs, entry) {
+        if (0 == strcmp("eth", _dev->driver)) {
+	  const char **arg;
+	  int gotmac = 0;
+
+	  device = &_dev->device;
+
+	  edev = calloc(1, sizeof(*edev));
+	  if (!edev) {
+	    ret = CCI_ENOMEM;
+	    goto out;
+	  }
+	  _dev->priv = edev;
+
+	  /* parse conf_argv */
+	  for (arg = device->conf_argv;
+	       *arg != NULL;
+	       arg++) {
+	    unsigned char addr[6];
+	    if (6 == sscanf(*arg, "mac=%02x:%02x:%02x:%02x:%02x:%02x",
+			    &addr[0], &addr[1], &addr[2], &addr[3], &addr[4], &addr[5])) {
+	      edev->addr.sll_halen = 6;
+	      memcpy(&edev->addr.sll_addr, addr, 6);
+	      gotmac = 1;
+	    }
+	  }
+
+	  if (!gotmac || eth__get_device_info(device) < 0) {
+	    free(edev);
+	    continue;
+	  }
+
+	  devices[count] = device;
+	  count++;
+        }
+      }
+    }
+
+    {
+      int i;
+      debug(CCI_DB_INFO, "listing devices:");
+      for(i=0; i<count; i++) {
+	cci_device_t *device = devices[i];
+	cci__dev_t *_dev = container_of(device, cci__dev_t, device);
+        eth_dev_t *edev = _dev->priv;
+	struct sockaddr_ll *addr = &edev->addr;
+	debug(CCI_DB_INFO, "  device `%s' has address %02x:%02x:%02x:%02x:%02x:%02x",
+	       device->name,
+	       addr->sll_addr[0],
+	       addr->sll_addr[1],
+	       addr->sll_addr[2],
+	       addr->sll_addr[3],
+	       addr->sll_addr[4],
+	       addr->sll_addr[5]);
+      }
+      debug(CCI_DB_INFO, "end of device list.");
+    }
+
+    devices = realloc(devices, (count + 1) * sizeof(cci_device_t *));
+    devices[count] = NULL;
+
+    *devices_p = devices;
+
+    CCI_EXIT;
+    return CCI_SUCCESS;
+
+out:
+    if (devices) {
+        cci_device_t const *device;
+        cci__dev_t *my_dev;
+
+        for (device = devices[0];
+             device != NULL;
+             device++) {
+            my_dev = container_of(device, cci__dev_t, device);
+            if (my_dev->priv)
+                free(my_dev->priv);
+        }
+        free(devices);
+    }
+    CCI_EXIT;
+    return ret;
 }
 
 
