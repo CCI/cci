@@ -1,0 +1,2 @@
+obj-m += ccieth.o
+ccieth-y = ccieth-main.o
