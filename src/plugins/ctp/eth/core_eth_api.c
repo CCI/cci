@@ -142,6 +142,7 @@ static int eth__get_device_info(cci_device_t *device, struct sockaddr_ll *ll)
   int fd;
   int ret;
   struct ccieth_ioctl_get_info arg;
+  cci__dev_t *_dev = container_of(device, cci__dev_t, device);
 
   fd = open("/dev/ccieth", O_RDONLY);
   if (fd < 0)
@@ -165,7 +166,8 @@ static int eth__get_device_info(cci_device_t *device, struct sockaddr_ll *ll)
   device->pci.bus = -1;
   device->pci.dev = -1;
   device->pci.func = -1;
-  /* check if up */
+  /* FIXME: check if up */
+  _dev->is_up = 1;
   /* get the iface name and use it for dev->name if not reading the config file */
 
   return 0;
@@ -336,17 +338,48 @@ static int eth_free_devices(cci_device_t const **devices)
 static int eth_create_endpoint(cci_device_t *device,
                                int flags,
                                cci_endpoint_t **endpoint,
-                               cci_os_handle_t *fd)
+                               cci_os_handle_t *fdp)
 {
-    printf("In eth_create_endpoint\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+  cci__ep_t *_ep;
+  eth_ep_t *eep;
+  int fd;
+  int ret;
+
+  _ep = container_of(*endpoint, cci__ep_t, endpoint);
+  eep = calloc(1, sizeof(eth_ep_t));
+  if (!eep) {
+    ret = CCI_ENOMEM;
+    goto out;
+  }
+  _ep->priv = eep;
+
+  fd = open("/dev/ccieth", O_RDWR);
+  if (fd < 0)
+    goto out_with_eep;
+
+  ret = ioctl(fd, CCIETH_IOCTL_CREATE_ENDPOINT);
+  if (ret < 0)
+    goto out_with_fd;
+
+  *fdp = eep->fd = fd;
+  return CCI_SUCCESS;
+
+ out_with_fd:
+  close(fd);
+ out_with_eep:
+  free(eep);
+ out:
+  return ret;
 }
 
 
 static int eth_destroy_endpoint(cci_endpoint_t *endpoint)
 {
-    printf("In eth_destroy_endpoint\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+  cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
+  eth_ep_t *eep = ep->priv;
+  close(eep->fd);
+  free(eep);
+  return CCI_SUCCESS;
 }
 
 

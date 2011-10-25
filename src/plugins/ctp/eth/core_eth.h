@@ -18,6 +18,10 @@ typedef struct eth_dev {
   struct sockaddr_ll addr;
 } eth_dev_t;
 
+typedef struct eth_ep {
+  int fd;
+} eth_ep_t;
+
 int cci_core_eth_post_load(cci_plugin_t *me);
 int cci_core_eth_pre_unload(cci_plugin_t *me);
 

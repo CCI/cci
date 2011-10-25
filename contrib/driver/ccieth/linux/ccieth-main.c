@@ -18,12 +18,18 @@
 static int
 ccieth_miscdev_open(struct inode * inode, struct file * file)
 {
+	file->private_data = NULL;
 	return 0;
 }
 
 static int
 ccieth_miscdev_release(struct inode * inode, struct file * file)
 {
+	struct ccieth_endpoint *ep = file->private_data;
+	if (ep) {
+		kfree(ep);
+		file->private_data = NULL;
+	}
 	return 0;
 }
 
@@ -82,6 +88,25 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		if (ret)
 			return -EFAULT;
 
+
+		return 0;
+	}
+
+	case CCIETH_IOCTL_CREATE_ENDPOINT: {
+		struct ccieth_endpoint *ep, **epp;
+
+		if (!(file->f_mode & FMODE_WRITE))
+			return -EACCES;
+
+		ep = kmalloc(10, GFP_KERNEL);
+		if (!ep)
+			return -ENOMEM;
+
+		epp = (struct ccieth_endpoint **) &file->private_data;
+		if (cmpxchg(epp, NULL, ep)) {
+			kfree(ep);
+			return -EBUSY;
+		}
 
 		return 0;
 	}

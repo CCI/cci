@@ -21,3 +21,5 @@ struct ccieth_ioctl_get_info {
   __u64 rate;
   /* 24 */
 };
+
+#define CCIETH_IOCTL_CREATE_ENDPOINT 0x8542
