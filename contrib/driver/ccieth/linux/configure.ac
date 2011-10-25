@@ -5,4 +5,5 @@ AC_INIT(ccieth,
 AC_CONFIG_SRCDIR(ccieth-main.c)
 AC_CONFIG_LINKS(Kbuild:Kbuild)
 AC_CONFIG_LINKS(ccieth-main.c:ccieth-main.c)
+AC_CONFIG_LINKS(ccieth_io.h:ccieth_io.h)
 AC_OUTPUT(Makefile)

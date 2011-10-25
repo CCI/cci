@@ -9,6 +9,10 @@
 #include <stdio.h>
 #include <ifaddrs.h>
 #include <net/if.h>
+#include <sys/ioctl.h>
+#include <fcntl.h>
+
+#include "../contrib/driver/ccieth/linux/ccieth_io.h"
 
 #include "cci.h"
 #include "plugins/core/core.h"
@@ -133,8 +137,23 @@ static const char *eth_strerror(enum cci_status status)
     return NULL;
 }
 
-static int eth__get_device_info(cci_device_t *device)
+static int eth__get_device_info(cci_device_t *device, struct sockaddr_ll *ll)
 {
+  int fd;
+  int ret;
+  struct ccieth_ioctl_get_info arg;
+
+  fd = open("/dev/ccieth", O_RDONLY);
+  if (fd < 0)
+    return -1;
+
+  memcpy(&arg.addr, &ll->sll_addr, 6);
+  ret = ioctl(fd, CCIETH_IOCTL_GET_INFO, &arg);
+  if (ret < 0)
+    return -1;
+
+  close(fd);
+
   /* FIXME get those from the driver */
   device->max_send_size = 1024;
   device->rate = 10000000000ULL;
@@ -205,7 +224,7 @@ static int eth_get_devices(cci_device_t const ***devices_p)
 	device->name = "foo"; /* FIXME */
 	memcpy(&edev->addr.sll_addr, &lladdr->sll_addr, 6);
 
-	if (eth__get_device_info(device) < 0) {
+	if (eth__get_device_info(device, &edev->addr) < 0) {
 	  free(edev);
 	  continue;
 	}
@@ -245,7 +264,7 @@ static int eth_get_devices(cci_device_t const ***devices_p)
 	    }
 	  }
 
-	  if (!gotmac || eth__get_device_info(device) < 0) {
+	  if (!gotmac || eth__get_device_info(device, &edev->addr) < 0) {
 	    free(edev);
 	    continue;
 	  }

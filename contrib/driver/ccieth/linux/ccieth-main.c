@@ -6,6 +6,10 @@
 #include <linux/module.h>
 #include <linux/miscdevice.h>
 #include <linux/fs.h>
+#include <linux/uaccess.h>
+#include <linux/types.h>
+
+#include <ccieth_io.h>
 
 static int
 ccieth_miscdev_open(struct inode * inode, struct file * file)
@@ -22,7 +26,31 @@ ccieth_miscdev_release(struct inode * inode, struct file * file)
 static long
 ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 {
-	return -EINVAL;
+	int ret;
+
+	switch (cmd) {
+	case CCIETH_IOCTL_GET_INFO: {
+		/* get a sockaddr_ll from userspace */
+		struct ccieth_ioctl_get_info gi_arg;
+		
+		ret = copy_from_user(&gi_arg, (const __user void *) arg, sizeof(gi_arg));
+		if (ret)
+			return -EFAULT;
+
+		printk("getting info for mac %02x:%02x:%02x:%02x:%02x:%02x",
+		       gi_arg.addr[0],
+		       gi_arg.addr[1],
+		       gi_arg.addr[2],
+		       gi_arg.addr[3],
+		       gi_arg.addr[4],
+		       gi_arg.addr[5]);
+
+		return 0;
+	}
+
+	default:
+		return -EINVAL;
+	}
 }
 
 static struct file_operations
