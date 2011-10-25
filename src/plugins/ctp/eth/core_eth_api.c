@@ -147,12 +147,16 @@ static int eth__get_device_info(cci_device_t *device, struct sockaddr_ll *ll)
   if (fd < 0)
     return -1;
 
+  /* FIXME: rather use the ethtool interface (get_settings for speed), and SIOCGIFMTU */
   memcpy(&arg.addr, &ll->sll_addr, 6);
   ret = ioctl(fd, CCIETH_IOCTL_GET_INFO, &arg);
   if (ret < 0)
     return -1;
 
   close(fd);
+
+  printf("max %d rate %lld pci %04x:%02x:%02x.%01x\n",
+	 arg.max_send_size, arg.rate, arg.pci_domain, arg.pci_bus, arg.pci_dev, arg.pci_func);
 
   /* FIXME get those from the driver */
   device->max_send_size = 1024;
