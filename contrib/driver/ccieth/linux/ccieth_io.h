@@ -23,3 +23,9 @@ struct ccieth_ioctl_get_info {
 };
 
 #define CCIETH_IOCTL_CREATE_ENDPOINT 0x8542
+
+struct ccieth_ioctl_create_endpoint {
+  __u8 addr[6];
+  __u8 pad1[2];
+  /* 8 */
+};

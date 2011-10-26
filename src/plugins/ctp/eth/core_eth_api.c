@@ -340,6 +340,9 @@ static int eth_create_endpoint(cci_device_t *device,
                                cci_endpoint_t **endpoint,
                                cci_os_handle_t *fdp)
 {
+  struct ccieth_ioctl_create_endpoint arg;
+  cci__dev_t *_dev = container_of(device, cci__dev_t, device);
+  eth_dev_t *edev = _dev->priv;
   cci__ep_t *_ep;
   eth_ep_t *eep;
   int fd;
@@ -357,7 +360,9 @@ static int eth_create_endpoint(cci_device_t *device,
   if (fd < 0)
     goto out_with_eep;
 
-  ret = ioctl(fd, CCIETH_IOCTL_CREATE_ENDPOINT);
+  
+  memcpy(&arg.addr, &edev->addr.sll_addr, 6);
+  ret = ioctl(fd, CCIETH_IOCTL_CREATE_ENDPOINT, &arg);
   if (ret < 0)
     goto out_with_fd;
 

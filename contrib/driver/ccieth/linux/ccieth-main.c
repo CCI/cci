@@ -11,9 +11,76 @@
 #include <linux/netdevice.h>
 #include <linux/if_arp.h>
 #include <linux/pci.h>
+#include <linux/idr.h>
 #include <linux/rcupdate.h>
 
 #include <ccieth_io.h>
+
+static struct idr ccieth_ep_idr;
+static spinlock_t ccieth_ep_idr_lock;
+
+struct ccieth_endpoint {
+	struct net_device *ifp;
+	int id;
+};
+
+static void
+ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
+{
+	spin_lock(&ccieth_ep_idr_lock);
+	idr_remove(&ccieth_ep_idr, ep->id);
+	spin_unlock(&ccieth_ep_idr_lock);
+	dev_put(ep->ifp);
+	kfree(ep);
+}
+
+static struct ccieth_endpoint *
+ccieth_create_endpoint(struct ccieth_ioctl_create_endpoint *arg)
+{
+	struct ccieth_endpoint *ep;
+	struct net_device *ifp;
+	int id;
+	int err;
+
+	rcu_read_lock();
+	ifp = dev_getbyhwaddr_rcu(&init_net, ARPHRD_ETHER, (const char *) &arg->addr);
+	if (!ifp) {
+		rcu_read_unlock();
+		err = -ENODEV;
+		goto out;
+	}
+	dev_hold(ifp);
+	rcu_read_unlock();
+
+	if (!idr_pre_get(&ccieth_ep_idr, GFP_KERNEL)) {
+		err = -ENOMEM;
+		goto out_with_ifp;
+	}
+	spin_lock(&ccieth_ep_idr_lock);
+	err = idr_get_new(&ccieth_ep_idr, ep, &id);
+	spin_unlock(&ccieth_ep_idr_lock);
+	if (err)
+		goto out_with_ifp;
+
+	ep = kmalloc(sizeof(struct ccieth_endpoint), GFP_KERNEL);
+	if (!ep) {
+		err = -ENOMEM;
+		goto out_with_id;
+	}
+	ep->ifp = ifp;
+	ep->id = id;
+
+	return ep;
+
+out_with_id:
+	spin_lock(&ccieth_ep_idr_lock);
+	idr_remove(&ccieth_ep_idr, id);
+	spin_unlock(&ccieth_ep_idr_lock);
+out_with_ifp:
+	dev_put(ifp);
+out:
+	return ERR_PTR(err);
+}
 
 static int
 ccieth_miscdev_open(struct inode * inode, struct file * file)
@@ -27,8 +94,8 @@ ccieth_miscdev_release(struct inode * inode, struct file * file)
 {
 	struct ccieth_endpoint *ep = file->private_data;
 	if (ep) {
-		kfree(ep);
 		file->private_data = NULL;
+		ccieth_destroy_endpoint(ep);
 	}
 	return 0;
 }
@@ -81,7 +148,8 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 						gi_arg.rate = ((u64) speed) * 1000000;
 				}
 			}
-		}
+		} else
+			ret = -ENODEV;
 		rcu_read_unlock();
 
 		ret = copy_to_user((__user void *) arg, &gi_arg, sizeof(gi_arg));
@@ -93,18 +161,23 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 	}
 
 	case CCIETH_IOCTL_CREATE_ENDPOINT: {
+		struct ccieth_ioctl_create_endpoint ce_arg;
 		struct ccieth_endpoint *ep, **epp;
 
 		if (!(file->f_mode & FMODE_WRITE))
 			return -EACCES;
 
-		ep = kmalloc(10, GFP_KERNEL);
-		if (!ep)
-			return -ENOMEM;
+		ret = copy_from_user(&ce_arg, (const __user void *) arg, sizeof(ce_arg));
+		if (ret)
+			return -EFAULT;
+
+		ep = ccieth_create_endpoint(&ce_arg);
+		if (IS_ERR(ep))
+			return PTR_ERR(ep);
 
 		epp = (struct ccieth_endpoint **) &file->private_data;
 		if (cmpxchg(epp, NULL, ep)) {
-			kfree(ep);
+			ccieth_destroy_endpoint(ep);
 			return -EBUSY;
 		}
 
@@ -136,6 +209,9 @@ ccieth_init(void)
 {
 	int ret;
 
+	idr_init(&ccieth_ep_idr);
+	spin_lock_init(&ccieth_ep_idr_lock);
+
 	ret = misc_register(&ccieth_miscdev);
 	if (ret < 0)
 		goto out;
@@ -150,6 +226,7 @@ void
 ccieth_exit(void)
 {
 	misc_deregister(&ccieth_miscdev);
+	idr_destroy(&ccieth_ep_idr);
 }
 
 module_init(ccieth_init);
