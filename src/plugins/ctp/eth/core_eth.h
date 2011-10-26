@@ -13,14 +13,14 @@
 
 BEGIN_C_DECLS
 
-typedef struct eth_dev {
+typedef struct eth__dev {
   /*! Mac address of the interface */
   struct sockaddr_ll addr;
-} eth_dev_t;
+} eth__dev_t;
 
-typedef struct eth_ep {
+typedef struct eth__ep {
   int fd;
-} eth_ep_t;
+} eth__ep_t;
 
 int cci_core_eth_post_load(cci_plugin_t *me);
 int cci_core_eth_pre_unload(cci_plugin_t *me);

@@ -180,7 +180,7 @@ static int eth_get_devices(cci_device_t const ***devices_p)
     cci_device_t **devices;
     unsigned count = 0;
     cci_device_t *device;
-    eth_dev_t *edev;
+    eth__dev_t *edev;
 
     CCI_ENTER;
 
@@ -287,7 +287,7 @@ static int eth_get_devices(cci_device_t const ***devices_p)
       for(i=0; i<count; i++) {
 	cci_device_t *device = devices[i];
 	cci__dev_t *_dev = container_of(device, cci__dev_t, device);
-        eth_dev_t *edev = _dev->priv;
+        eth__dev_t *edev = _dev->priv;
 	struct sockaddr_ll *addr = &edev->addr;
 	debug(CCI_DB_INFO, "  device `%s' has address %02x:%02x:%02x:%02x:%02x:%02x",
 	       device->name,
@@ -342,14 +342,14 @@ static int eth_create_endpoint(cci_device_t *device,
 {
   struct ccieth_ioctl_create_endpoint arg;
   cci__dev_t *_dev = container_of(device, cci__dev_t, device);
-  eth_dev_t *edev = _dev->priv;
+  eth__dev_t *edev = _dev->priv;
   cci__ep_t *_ep;
-  eth_ep_t *eep;
+  eth__ep_t *eep;
   int fd;
   int ret;
 
   _ep = container_of(*endpoint, cci__ep_t, endpoint);
-  eep = calloc(1, sizeof(eth_ep_t));
+  eep = calloc(1, sizeof(eth__ep_t));
   if (!eep) {
     ret = CCI_ENOMEM;
     goto out;
@@ -381,7 +381,7 @@ static int eth_create_endpoint(cci_device_t *device,
 static int eth_destroy_endpoint(cci_endpoint_t *endpoint)
 {
   cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
-  eth_ep_t *eep = ep->priv;
+  eth__ep_t *eep = ep->priv;
   close(eep->fd);
   free(eep);
   return CCI_SUCCESS;
