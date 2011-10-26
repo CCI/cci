@@ -28,4 +28,7 @@ struct ccieth_ioctl_create_endpoint {
   __u8 addr[6];
   __u8 pad1[2];
   /* 8 */
+  __u32 id;
+  __u32 pad2;
+  /* 16 */
 };

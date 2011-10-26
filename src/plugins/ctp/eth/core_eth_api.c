@@ -334,6 +334,21 @@ static int eth_free_devices(cci_device_t const **devices)
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
+#define CCIETH_URI_LENGTH (6 /* prefix */ + 17 /* mac */ + 1 /* colon */ + 8 /* id */ + 1 /* \0 */)
+
+static void
+ccieth_uri_sprintf(char *name, const uint8_t *addr, uint32_t id)
+{
+  sprintf(name, "eth://%02x:%02x:%02x:%02x:%02x:%02x:%08x",
+	  addr[0], addr[1], addr[2], addr[3], addr[4], addr[5], id);
+}
+
+static int
+ccieth_uri_sscanf(const char *name, uint8_t *addr, uint32_t id)
+{
+  return sscanf(name, "eth://%02x:%02x:%02x:%02x:%02x:%02x:%08x",
+		&addr[0], &addr[1], &addr[2], &addr[3], &addr[4], &addr[5], &id) == 7 ? 0 : -1;
+}
 
 static int eth_create_endpoint(cci_device_t *device,
                                int flags,
@@ -345,6 +360,7 @@ static int eth_create_endpoint(cci_device_t *device,
   eth__dev_t *edev = _dev->priv;
   cci__ep_t *_ep;
   eth__ep_t *eep;
+  char *name;
   int fd;
   int ret;
 
@@ -356,21 +372,29 @@ static int eth_create_endpoint(cci_device_t *device,
   }
   _ep->priv = eep;
 
-  fd = open("/dev/ccieth", O_RDWR);
-  if (fd < 0)
+  name = malloc(CCIETH_URI_LENGTH);
+  if (!name)
     goto out_with_eep;
 
-  
+  fd = open("/dev/ccieth", O_RDWR);
+  if (fd < 0)
+    goto out_with_name;
+
   memcpy(&arg.addr, &edev->addr.sll_addr, 6);
   ret = ioctl(fd, CCIETH_IOCTL_CREATE_ENDPOINT, &arg);
   if (ret < 0)
     goto out_with_fd;
+
+  ccieth_uri_sprintf(name, (const uint8_t *)&edev->addr.sll_addr, arg.id);
+  *((char **)&(*endpoint)->name) = name;
 
   *fdp = eep->fd = fd;
   return CCI_SUCCESS;
 
  out_with_fd:
   close(fd);
+ out_with_name:
+  free(name);
  out_with_eep:
   free(eep);
  out:

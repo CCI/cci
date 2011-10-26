@@ -68,7 +68,7 @@ ccieth_create_endpoint(struct ccieth_ioctl_create_endpoint *arg)
 		goto out_with_id;
 	}
 	ep->ifp = ifp;
-	ep->id = id;
+	arg->id = ep->id = id;
 
 	return ep;
 
@@ -180,6 +180,10 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 			ccieth_destroy_endpoint(ep);
 			return -EBUSY;
 		}
+
+		ret = copy_to_user((__user void *) arg, &ce_arg, sizeof(ce_arg));
+		if (ret)
+			return -EFAULT;
 
 		return 0;
 	}
