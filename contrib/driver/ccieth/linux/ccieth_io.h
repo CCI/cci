@@ -35,3 +35,14 @@ struct ccieth_ioctl_create_endpoint {
 
 #define CCIETH_MMAP_RECVQ_OFFSET 0x0
 
+struct ccieth_recvq_slot {
+  __u8 type;
+  __u8 pad1;
+  __u16 data_length;
+  __u32 data_offset;
+  /* 8 */
+  __u32 next_busy_offset; /* offset of the next slot to handle, or -1 if none yet (set by the kernel, read by the lib) */
+  __u32 next_free_offset; /* offset of the next free slot if we're not busy anymore, or -1 if none yet (kernel use only) */
+  /* 16 */
+};
+  

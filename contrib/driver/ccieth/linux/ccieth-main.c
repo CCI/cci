@@ -23,7 +23,43 @@ struct ccieth_endpoint {
 	struct net_device *ifp;
 	int id;
 	char * recvq;
+	__u32 last_busy_slot_offset; /* offset of the last filled slot.
+				      * its next_busy_offset must be -1.
+				      * it will be changed when a new free slot is used.
+				      */
+	__u32 last_free_slot_offset; /* offset of the last freed slot.
+				      * its next_free_offset must be -1.
+				      * it will be changed when a new busy slot is returned.
+				      */
+	__u32 first_free_slot_offset; /* offset of the next freed slot to use. */
 };
+
+/*
+ * endpoint init:
+ * - set last_busy_slot_offset to first slot
+ * - set first_free_slot_offset to second slot
+ * - queue all other slots in the free list
+ * - set last_free_slot_offset to the last one
+ * - set next_free_offset to -1 in last slot
+ * - set next_busy_offset to -1 in first slot
+ * - queue a OK event in first slot
+ *
+ * new event:
+ * - if first_free_slot_offset is -1, event queue full
+ * - take first_free_slot_offset and make it its successor
+ * - set slot next_busy_slot to -1
+ * - fill event slot
+ * - set last_busy_slot_offset next_busy_offset to new slot
+ * - set last_busy_slot_offset to new slot
+ *
+ * return event:
+ * - set next_free_slot_offset to -1
+ * - if first_free_slot_offset is -1, make it the new slot
+ * - otherwise make last_free_slot_offset next_free_offset the new slot
+ *
+ * userspace:
+ * - remind last slot offset, poll on its next_busy_offset
+ */
 
 static void
 ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
