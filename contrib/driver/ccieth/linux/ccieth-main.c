@@ -150,15 +150,14 @@ ccieth_miscdev_mmap(struct file * file, struct vm_area_struct * vma)
 	void *buffer;
 	int ret;
 
-	if (!ep) {
-		ret = -EINVAL;
-		goto out;
-	}
-
-        if (offset != CCIETH_MMAP_RECVQ_OFFSET) {
+	if (!ep || offset != CCIETH_MMAP_RECVQ_OFFSET) {
                 ret = -EINVAL;
                 goto out;
         }
+	if (vma->vm_flags & (VM_WRITE|VM_MAYWRITE)) {
+		ret = -EACCES;
+		goto out;
+	}
 
         buffer = vmalloc_user(size);
         if (!buffer) {
