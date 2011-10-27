@@ -22,6 +22,7 @@ static spinlock_t ccieth_ep_idr_lock;
 struct ccieth_endpoint {
 	struct net_device *ifp;
 	int id;
+	char * recvq;
 };
 
 static void
@@ -31,6 +32,9 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 	idr_remove(&ccieth_ep_idr, ep->id);
 	spin_unlock(&ccieth_ep_idr_lock);
 	dev_put(ep->ifp);
+	if (ep->recvq) {
+		vfree(ep->recvq);
+	}
 	kfree(ep);
 }
 
@@ -69,6 +73,7 @@ ccieth_create_endpoint(struct ccieth_ioctl_create_endpoint *arg)
 	}
 	ep->ifp = ifp;
 	arg->id = ep->id = id;
+	ep->recvq = NULL;
 
 	return ep;
 
@@ -98,6 +103,50 @@ ccieth_miscdev_release(struct inode * inode, struct file * file)
 		ccieth_destroy_endpoint(ep);
 	}
 	return 0;
+}
+
+static int
+ccieth_miscdev_mmap(struct file * file, struct vm_area_struct * vma)
+{
+	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
+        unsigned long size = vma->vm_end - vma->vm_start;
+	struct ccieth_endpoint *ep = file->private_data;
+	void *buffer;
+	int ret;
+
+	if (!ep) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+        if (offset != CCIETH_MMAP_RECVQ_OFFSET) {
+                ret = -EINVAL;
+                goto out;
+        }
+
+        buffer = vmalloc_user(size);
+        if (!buffer) {
+                ret = -ENOMEM;
+                goto out;
+        }
+
+        ret = remap_vmalloc_range(vma, buffer, 0);
+        if (ret < 0) {
+                goto out_with_buffer;
+        }
+
+	/* FIXME: allow multiple mmap'ed buffers for recvq resizing */
+	if (cmpxchg(&ep->recvq, NULL, buffer)) {
+		ret = -EBUSY;
+		goto out_with_buffer;
+	}
+
+	return 0;
+
+out_with_buffer:
+	vfree(buffer);
+out:
+	return ret;
 }
 
 static long
@@ -198,6 +247,7 @@ ccieth_miscdev_fops = {
 	.owner = THIS_MODULE,
 	.open = ccieth_miscdev_open,
 	.release = ccieth_miscdev_release,
+	.mmap = ccieth_miscdev_mmap,
         .unlocked_ioctl = ccieth_miscdev_ioctl,
 };
 

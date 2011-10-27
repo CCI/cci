@@ -10,6 +10,7 @@
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <fcntl.h>
 
 #include "../contrib/driver/ccieth/linux/ccieth_io.h"
@@ -360,6 +361,7 @@ static int eth_create_endpoint(cci_device_t *device,
   eth__dev_t *edev = _dev->priv;
   cci__ep_t *_ep;
   eth__ep_t *eep;
+  void *recvq;
   char *name;
   int fd;
   int ret;
@@ -387,6 +389,12 @@ static int eth_create_endpoint(cci_device_t *device,
 
   ccieth_uri_sprintf(name, (const uint8_t *)&edev->addr.sll_addr, arg.id);
   *((char **)&(*endpoint)->name) = name;
+
+  recvq = mmap(NULL, 4096*1024 /* FIXME */, PROT_READ, MAP_SHARED, fd, CCIETH_MMAP_RECVQ_OFFSET);
+  printf("recvq %p\n", recvq);
+  if (recvq == MAP_FAILED)
+    goto out_with_fd;
+  eep->recvq = recvq;
 
   *fdp = eep->fd = fd;
   return CCI_SUCCESS;

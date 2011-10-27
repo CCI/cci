@@ -32,3 +32,6 @@ struct ccieth_ioctl_create_endpoint {
   __u32 pad2;
   /* 16 */
 };
+
+#define CCIETH_MMAP_RECVQ_OFFSET 0x0
+

@@ -20,6 +20,7 @@ typedef struct eth__dev {
 
 typedef struct eth__ep {
   int fd;
+  volatile void *recvq;
 } eth__ep_t;
 
 int cci_core_eth_post_load(cci_plugin_t *me);
