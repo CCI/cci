@@ -15,6 +15,7 @@
 #include <linux/rcupdate.h>
 
 #include <ccieth_io.h>
+#include <ccieth_common.h>
 
 static struct idr ccieth_ep_idr;
 static spinlock_t ccieth_ep_idr_lock;
@@ -305,6 +306,8 @@ ccieth_init(void)
 	if (ret < 0)
 		goto out;
 
+	ccieth_recv_init();
+
 	return 0;
 
 out:
@@ -314,6 +317,7 @@ out:
 void
 ccieth_exit(void)
 {
+	ccieth_recv_exit();
 	misc_deregister(&ccieth_miscdev);
 	idr_destroy(&ccieth_ep_idr);
 }
