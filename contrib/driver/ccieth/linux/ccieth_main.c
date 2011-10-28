@@ -157,8 +157,7 @@ ccieth_miscdev_mmap(struct file * file, struct vm_area_struct * vma)
                 ret = -EINVAL;
                 goto out;
         }
-	if (vma->vm_flags & (VM_WRITE/*|VM_MAYWRITE*/)) {
-		/* FIXME: VM_MAYWRITE automatically added if file is open RW, open RO instead? */
+	if (vma->vm_flags & (VM_WRITE|VM_MAYWRITE)) {
 		ret = -EACCES;
 		goto out;
 	}
@@ -251,9 +250,6 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 	case CCIETH_IOCTL_CREATE_ENDPOINT: {
 		struct ccieth_ioctl_create_endpoint ce_arg;
 		struct ccieth_endpoint *ep, **epp;
-
-		if (!(file->f_mode & FMODE_WRITE))
-			return -EACCES;
 
 		ret = copy_from_user(&ce_arg, (const __user void *) arg, sizeof(ce_arg));
 		if (ret)

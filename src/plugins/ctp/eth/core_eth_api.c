@@ -414,7 +414,7 @@ static int eth_create_endpoint(cci_device_t *device,
     goto out_with_eep;
   }
 
-  fd = open("/dev/ccieth", O_RDWR); /* FIXME: open R/O to prevent VM_MAYWRITE in mmap? */
+  fd = open("/dev/ccieth", O_RDONLY);
   if (fd < 0) {
     ret = errno;
     goto out_with_name;
