@@ -85,6 +85,8 @@ ccieth_create_endpoint(struct ccieth_ioctl_create_endpoint *arg)
 
 	rcu_read_lock();
 	ifp = dev_getbyhwaddr_rcu(&init_net, ARPHRD_ETHER, (const char *) &arg->addr);
+	if (!ifp) /* allow loopback to ease development */
+		ifp = dev_getbyhwaddr_rcu(&init_net, ARPHRD_LOOPBACK, (const char *) &arg->addr);
 	if (!ifp) {
 		rcu_read_unlock();
 		err = -ENODEV;
