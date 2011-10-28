@@ -375,25 +375,33 @@ static int eth_create_endpoint(cci_device_t *device,
   _ep->priv = eep;
 
   name = malloc(CCIETH_URI_LENGTH);
-  if (!name)
+  if (!name) {
+    ret = CCI_ENOMEM;
     goto out_with_eep;
+  }
 
   fd = open("/dev/ccieth", O_RDWR);
-  if (fd < 0)
+  if (fd < 0) {
+    ret = errno;
     goto out_with_name;
+  }
 
   memcpy(&arg.addr, &edev->addr.sll_addr, 6);
   ret = ioctl(fd, CCIETH_IOCTL_CREATE_ENDPOINT, &arg);
-  if (ret < 0)
+  if (ret < 0) {
+    ret = errno;
     goto out_with_fd;
+  }
 
   ccieth_uri_sprintf(name, (const uint8_t *)&edev->addr.sll_addr, arg.id);
   *((char **)&(*endpoint)->name) = name;
 
   recvq = mmap(NULL, 4096*1024 /* FIXME */, PROT_READ, MAP_SHARED, fd, CCIETH_MMAP_RECVQ_OFFSET);
   printf("recvq %p\n", recvq);
-  if (recvq == MAP_FAILED)
+  if (recvq == MAP_FAILED) {
+    ret = errno;
     goto out_with_fd;
+  }
   eep->recvq = recvq;
 
   *fdp = eep->fd = fd;
