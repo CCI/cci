@@ -203,8 +203,8 @@ static int eth_get_devices(cci_device_t const ***devices_p)
 
       for (addr = addrs; addr != NULL; addr = addr->ifa_next) {
 	/* need a packet iface with an address */
-	if (addr->ifa_addr->sa_family != AF_PACKET
-	    || addr->ifa_addr == NULL)
+	if (addr->ifa_addr == NULL
+	    || addr->ifa_addr->sa_family != AF_PACKET)
 	  continue;
 	/* ignore loopback and */
 	if (addr->ifa_flags & IFF_LOOPBACK)
@@ -228,7 +228,7 @@ static int eth_get_devices(cci_device_t const ***devices_p)
 	device = &_dev->device;
 	_dev->priv = edev;
 
-	device->name = "foo"; /* FIXME */
+	device->name = strdup(addr->ifa_name);
 	memcpy(&edev->addr.sll_addr, &lladdr->sll_addr, 6);
 
 	if (eth__get_device_info(device, &edev->addr) < 0) {
