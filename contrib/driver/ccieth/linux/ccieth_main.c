@@ -129,6 +129,12 @@ out:
 static int
 ccieth_miscdev_open(struct inode * inode, struct file * file)
 {
+	/* mmap for write would let the application break the recvq.
+	 * it wouldn't break the driver, but there's no reason to let users do so.
+	 */
+	if (file->f_mode & FMODE_WRITE)
+		return -EINVAL;
+
 	file->private_data = NULL;
 	return 0;
 }
