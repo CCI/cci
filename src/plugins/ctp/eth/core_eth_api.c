@@ -263,7 +263,7 @@ static int eth_get_devices(cci_device_t const ***devices_p)
 	       *arg != NULL;
 	       arg++) {
 	    unsigned char addr[6];
-	    if (6 == sscanf(*arg, "mac=%02x:%02x:%02x:%02x:%02x:%02x",
+	    if (6 == sscanf(*arg, "mac=%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
 			    &addr[0], &addr[1], &addr[2], &addr[3], &addr[4], &addr[5])) {
 	      edev->addr.sll_halen = 6;
 	      memcpy(&edev->addr.sll_addr, addr, 6);
