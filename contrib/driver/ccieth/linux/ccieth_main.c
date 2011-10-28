@@ -155,7 +155,8 @@ ccieth_miscdev_mmap(struct file * file, struct vm_area_struct * vma)
                 ret = -EINVAL;
                 goto out;
         }
-	if (vma->vm_flags & (VM_WRITE|VM_MAYWRITE)) {
+	if (vma->vm_flags & (VM_WRITE/*|VM_MAYWRITE*/)) {
+		/* FIXME: VM_MAYWRITE automatically added if file is open RW, open RO instead? */
 		ret = -EACCES;
 		goto out;
 	}
