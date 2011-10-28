@@ -138,19 +138,23 @@ static const char *eth_strerror(enum cci_status status)
     return NULL;
 }
 
-static int eth__get_device_info(cci_device_t *device, struct sockaddr_ll *ll)
+static int eth__get_device_info(cci__dev_t *_dev, struct ifaddrs *addr)
 {
   int fd;
   int ret;
   struct ccieth_ioctl_get_info arg;
-  cci__dev_t *_dev = container_of(device, cci__dev_t, device);
+  cci_device_t *device = &_dev->device;
+  struct sockaddr_ll *lladdr = (struct sockaddr_ll*) addr->ifa_addr;
 
+  _dev->is_up = (addr->ifa_flags & IFF_UP != 0);
+    
   fd = open("/dev/ccieth", O_RDONLY);
   if (fd < 0)
     return -1;
 
   /* FIXME: rather use the ethtool interface (get_settings for speed), and SIOCGIFMTU */
-  memcpy(&arg.addr, &ll->sll_addr, 6);
+  memcpy(&arg.addr, &lladdr->sll_addr, 6);
+
   ret = ioctl(fd, CCIETH_IOCTL_GET_INFO, &arg);
   if (ret < 0)
     return -1;
@@ -167,9 +171,6 @@ static int eth__get_device_info(cci_device_t *device, struct sockaddr_ll *ll)
   device->pci.bus = -1;
   device->pci.dev = -1;
   device->pci.func = -1;
-  /* FIXME: check if up */
-  _dev->is_up = 1;
-  /* get the iface name and use it for dev->name if not reading the config file */
 
   return 0;
 }
@@ -182,6 +183,8 @@ static int eth_get_devices(cci_device_t const ***devices_p)
     unsigned count = 0;
     cci_device_t *device;
     eth__dev_t *edev;
+    struct ifaddrs *addrs = NULL, *addr;
+    struct sockaddr_ll *lladdr;
 
     CCI_ENTER;
 
@@ -191,16 +194,13 @@ static int eth_get_devices(cci_device_t const ***devices_p)
         goto out;
     }
 
+    if (getifaddrs(&addrs) == -1) {
+      ret = errno;
+      goto out;
+    }
+
     if (TAILQ_EMPTY(&globals->devs)) {
       /* get all ethernet devices from the system */
-      struct ifaddrs *addrs, *addr;
-      struct sockaddr_ll *lladdr;
-
-      if (getifaddrs(&addrs) == -1) {
-	ret = errno;
-	goto out;
-      }
-
       for (addr = addrs; addr != NULL; addr = addr->ifa_next) {
 	/* need a packet iface with an address */
 	if (addr->ifa_addr == NULL
@@ -228,10 +228,13 @@ static int eth_get_devices(cci_device_t const ***devices_p)
 	device = &_dev->device;
 	_dev->priv = edev;
 
+	/* get what would have been in the config file */
 	device->name = strdup(addr->ifa_name);
 	memcpy(&edev->addr.sll_addr, &lladdr->sll_addr, 6);
 
-	if (eth__get_device_info(device, &edev->addr) < 0) {
+	/* get all remaining info as usual */
+	if (eth__get_device_info(_dev, addr) < 0) {
+	  free(_dev);
 	  free(edev);
 	  continue;
 	}
@@ -239,8 +242,6 @@ static int eth_get_devices(cci_device_t const ***devices_p)
 	devices[count] = device;
 	count++;
       }
-
-      freeifaddrs(addrs);
 
     } else {
       /* find devices that we own in the config file */
@@ -262,16 +263,43 @@ static int eth_get_devices(cci_device_t const ***devices_p)
 	  for (arg = device->conf_argv;
 	       *arg != NULL;
 	       arg++) {
-	    unsigned char addr[6];
+	    unsigned char lladdr[6];
 	    if (6 == sscanf(*arg, "mac=%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
-			    &addr[0], &addr[1], &addr[2], &addr[3], &addr[4], &addr[5])) {
+			    &lladdr[0], &lladdr[1], &lladdr[2], &lladdr[3], &lladdr[4], &lladdr[5])) {
 	      edev->addr.sll_halen = 6;
-	      memcpy(&edev->addr.sll_addr, addr, 6);
+	      memcpy(&edev->addr.sll_addr, lladdr, 6);
 	      gotmac = 1;
 	    }
 	  }
 
-	  if (!gotmac || eth__get_device_info(device, &edev->addr) < 0) {
+	  /* we need at least an address */
+	  if (!gotmac) {
+	    free(edev);
+	    continue;
+	  }
+
+	  /* find the corresponding ifaddr in the system list */
+	  for (addr = addrs; addr != NULL; addr = addr->ifa_next) {
+	    /* need a packet iface with an address */
+	    if (!addr->ifa_addr)
+	      continue;
+	    if (addr->ifa_addr->sa_family != AF_PACKET)
+	      continue;
+	    /* make sure this is mac address ?! */
+	    lladdr = (struct sockaddr_ll*) addr->ifa_addr;
+	    if (lladdr->sll_halen != 6)
+	      continue;
+	    /* is this the address we want ? */
+	    if (!memcmp(&edev->addr.sll_addr, &lladdr->sll_addr, 6))
+	      break;
+	  }
+	  if (!addr) {
+	    free(edev);
+	    continue;
+	  }
+
+	  /* get all remaining info as usual */
+	  if (eth__get_device_info(_dev, addr) < 0) {
 	    free(edev);
 	    continue;
 	  }
@@ -281,6 +309,9 @@ static int eth_get_devices(cci_device_t const ***devices_p)
         }
       }
     }
+
+    freeifaddrs(addrs);
+    addrs = NULL;
 
     {
       int i;
@@ -311,6 +342,9 @@ static int eth_get_devices(cci_device_t const ***devices_p)
     return CCI_SUCCESS;
 
 out:
+    if (addrs) {
+      freeifaddrs(addrs);
+    }
     if (devices) {
         cci_device_t const *device;
         cci__dev_t *my_dev;
