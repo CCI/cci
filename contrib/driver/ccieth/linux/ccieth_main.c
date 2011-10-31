@@ -127,6 +127,20 @@ out:
 }
 
 static int
+ccieth_get_event(struct ccieth_endpoint *ep, struct ccieth_ioctl_get_event *arg)
+{
+
+	return -ENOSYS;
+}
+
+static int
+ccieth_return_event(struct ccieth_endpoint *ep, const struct ccieth_ioctl_return_event *arg)
+{
+
+	return -ENOSYS;
+}
+
+static int
 ccieth_miscdev_open(struct inode * inode, struct file * file)
 {
 	/* mmap for write would let the application break the recvq.
@@ -274,6 +288,42 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		ret = copy_to_user((__user void *) arg, &ce_arg, sizeof(ce_arg));
 		if (ret)
 			return -EFAULT;
+
+		return 0;
+	}
+
+	case CCIETH_IOCTL_GET_EVENT: {
+		struct ccieth_ioctl_get_event ge_arg;
+		struct ccieth_endpoint *ep = file->private_data;
+
+		if (!ep)
+			return -EINVAL;
+
+		ret = ccieth_get_event(ep, &ge_arg);
+		if (ret < 0)
+			return ret;
+
+		ret = copy_to_user((__user void *) arg, &ge_arg, sizeof(ge_arg));
+		if (ret)
+			return -EFAULT;
+
+		return 0;
+	}
+
+	case CCIETH_IOCTL_RETURN_EVENT: {
+		struct ccieth_ioctl_return_event re_arg;
+		struct ccieth_endpoint *ep = file->private_data;
+
+		if (!ep)
+			return -EINVAL;
+
+		ret = copy_from_user(&re_arg, (__user void *) arg, sizeof(re_arg));
+		if (ret)
+			return -EFAULT;
+
+		ret = ccieth_return_event(ep, &re_arg);
+		if (ret < 0)
+			return ret;
 
 		return 0;
 	}

@@ -33,6 +33,25 @@ struct ccieth_ioctl_create_endpoint {
   /* 16 */
 };
 
+#define CCIETH_IOCTL_GET_EVENT 0x6734
+
+struct ccieth_ioctl_get_event {
+  __u8 type;
+  __u8 pad1;
+  __u16 data_length;
+  __u32 data_offset;
+  /* 8 */
+  __u32 event_offset; /* FIXME: not needed when passing events through the mmap'ed recvq */
+  __u32 pad2;
+  /* 16 */
+};
+
+#define CCIETH_IOCTL_RETURN_EVENT 0x5678
+
+struct ccieth_ioctl_return_event {
+  __u32 event_offset;
+};
+
 #define CCIETH_MMAP_RECVQ_OFFSET 0x0
 
 struct ccieth_recvq_slot {
@@ -45,4 +64,3 @@ struct ccieth_recvq_slot {
   __u32 next_free_offset; /* offset of the next free slot if we're not busy anymore, or -1 if none yet (kernel use only) */
   /* 16 */
 };
-  
