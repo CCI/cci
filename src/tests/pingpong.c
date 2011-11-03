@@ -126,14 +126,13 @@ poll_events(void)
                     fprintf(stderr, "server RMA handle is 0x%"PRIx64"\n",
                                     opts.server_rma_handle);
                 }
+            } else if (is_server && event->recv.len == 3) {
+                done = 1;
+                break;
             } else if (opts.method == AM) {
                 if (is_server) {
-                    if (event->recv.len > current_size) {
+                    if (event->recv.len > current_size)
                         current_size = event->recv.len;
-                    } else if (event->recv.len == 3) {
-                        done = 1;
-                        return;
-                    }
                 } else {
                     if (event->recv.len == current_size)
                         count++;
@@ -292,6 +291,9 @@ do_client()
     while (!done)
         poll_events();
 
+    printf("client done\n");
+    sleep(1);
+
     return;
 }
 
@@ -339,6 +341,9 @@ do_server()
 
     while (!done)
         poll_events();
+
+    printf("server done\n");
+    sleep(1);
 
     return;
 }
