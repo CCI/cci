@@ -16,21 +16,20 @@ extern const char *ptl_event_str[];
 
 BEGIN_C_DECLS
 
+#define PORTALS_URI               "portals://"
 #define PORTALS_DEFAULT_MSS       (8192)     /* 8 KB */
 #define PORTALS_MIN_MSS           (1024)
 #define PORTALS_MAX_MSS           (64 * 1024)
 
-#define PORTALS_BLOCK_SIZE        (64)       /* bytes for id storage */
 #define PORTALS_EP_BUF_LEN        (8192)     /* 8 kB for now */
 #define PORTALS_EP_RX_CNT         (1024)     /* max rx messages */
 #define PORTALS_EP_TX_CNT         (128)      /* max tx messages */
 #define PORTALS_EQ_RX_CNT         PORTALS_EP_RX_CNT * 3
 #define PORTALS_EQ_TX_CNT         PORTALS_EP_TX_CNT * 4
-#define PORTALS_BLOCK_SIZE        (64)       /* 64b blocks for id */
-#define PORTALS_NUM_BLOCKS        (16384)    /* number of blocks */
-#define PORTALS_MAX_EP_ID         (PORTALS_BLOCK_SIZE * PORTALS_NUM_BLOCKS)
-#define PORTALS_EP_BITS           (32)
-#define PORTALS_EP_SHIFT          (32)
+#define PORTALS_BLOCK_SIZE        (64)       /* 64b blocks for idx */
+#define PORTALS_NUM_BLOCKS        (4)        /* number of blocks */
+#define PORTALS_MIN_INDEX         (32)       /* Starting pt_index to use */
+#define PORTALS_MAX_EP_IDX        (128)      /* can be overridden by PtlNIInit() */
 #define PORTALS_PROG_TIME_US      (10000) /* try to progress every N microseconds */
 
 #define PORTALS_WILDCARD          {PTL_NID_ANY, PTL_PID_ANY}
@@ -78,6 +77,23 @@ static inline uint64_t portals_get_nsecs(void)
     return (uint64_t)((double)rdtsc() / 2.6);
 }
 #endif
+
+
+/* Valid URI include:
+ *
+ * portals://nid:pid:idx    # Portals NID, PID, and Portal Table Index
+ */
+
+/* A portals device needs the following items in the config file:
+ *
+ * driver = portals       # must be lowercase
+ *
+ * A portals device may have these items:
+ *
+ * min_idx = 55           # set the minimum index - must be a valid Portal table index
+ * mss = 8192             # max_send_size for MSGs
+ */
+
 
 
 /* Limit of 4 message types to ensure that we only use 2 bits for msg type */
@@ -134,10 +150,10 @@ static inline void portals_parse_match_bits(
 
    Matchbits:
     <---------------------------- 64 bits --------------------------->
-    <----------- 32b -------------->  5b  <---- 16b ----> <- 8b -> 1 2b
-   +--------------------------------+----+---------------+--------+-+--+
-   |      receiver endpoint id      |rsvd|   data len    | reservd|R|T |
-   +--------------------------------+----+---------------+--------+-+--+
+    <--------------- 37b ---------------> <---- 16b ----> <- 8b -> 1 2b
+   +-------------------------------------+---------------+--------+-+--+
+   |              reserved               |   data len    | reservd|R|T |
+   +-------------------------------------+---------------+--------+-+--+
    where T is PORTALS_MSG_SEND
 
    R is 0 for UU and 1 for RO/RU
@@ -188,7 +204,7 @@ typedef enum portals_msg_oob_type {
     <--------------------------- 62 bits -------------------------> 2b
     <------------ 32b ------------> <---- 16b ----> <- 8b -> <4b> 2b 2b
    +-------------------------------+---------------+--------+----+--+--+
-   |      server endpoint id       |      len      |  attr  |rsv |O |T |
+   |            reserved           |      len      |  attr  |rsv |O |T |
    +-------------------------------+---------------+--------+----+--+--+
    where T is PORTALS_MSG_OOB and O is PORTALS_MSG_OOB_CONN_REQUEST
 
@@ -201,7 +217,7 @@ typedef enum portals_msg_oob_type {
    +--------------------------------+
    |      max_recv_buffer_count     |
    +--------------------------------+
-   |      client's endpoint id      |
+   |          client_ep_idx         |
    +--------------------------------+
 
  */
@@ -209,7 +225,7 @@ typedef enum portals_msg_oob_type {
 typedef struct portals_conn_request {
     uint32_t max_send_size;         /* mss that the client supports */
     uint32_t max_recv_buffer_count; /* max recvs the client can handle */
-    uint32_t client_ep_id;          /* client's endpoint id */
+    uint32_t client_ep_idx;         /* client's portals table idx */
 }   portals_conn_request_t;
 
 /* connection reply (accept):
@@ -217,7 +233,7 @@ typedef struct portals_conn_request {
    Matchbits:
     <--------------------------- 62 bits ----------------------> 2b 2b
    +-------------------------------+----------------------------+--+--+
-   |      client endpoint id       |           reserved         |O |T |
+   |                            reserved                        |O |T |
    +-------------------------------+----------------------------+--+--+
    where T is PORTALS_MSG_OOB and O is PORTALS_MSG_OOB_CONN_REPLY
 
@@ -238,7 +254,6 @@ typedef struct portals_conn_request {
  */
 
 typedef struct portals_conn_accept {
-    uint32_t server_ep_id;
     uint32_t max_send_size;         /* the min of the two mss */
     uint32_t max_recv_buffer_count; /* max recvs the server can handle */
     uint32_t server_conn_upper;     /* upper 32 bits of server conn opaque */
@@ -249,8 +264,8 @@ typedef struct portals_conn_accept {
 
    Matchbits:
     <--------------------------- 62 bits ----------------------> 2b 2b
-   +-------------------------------+------------------------------+--+
-   |      client endpoint id       |           reserved         |O |T |
+   +-------------------------------+----------------------------+--+--+
+   |                            reserved                        |O |T |
    +-------------------------------+----------------------------+--+--+
    where T is PORTALS_MSG_OOB and O is PORTALS_MSG_OOB_CONN_REPLY
 
@@ -302,7 +317,7 @@ typedef struct portals_rx {
 
 typedef struct portals_dev {
     ptl_process_id_t       idp;
-    ptl_pt_index_t         table_index;
+    uint32_t               min_idx;          /* minimum table index */
     ptl_handle_ni_t        niHandle;         /* Seastar handle */
     int                    max_mes;          /* Match Entries */
     int                    max_mds;          /* Memory Descriptors */
@@ -313,7 +328,7 @@ typedef struct portals_dev {
     int                    max_me_list;      /* ME's to Portals Index */
     int                    max_getput_md;    /* Max len atomic swap */
     int                    is_progressing;   /* Being progressed? */
-    uint64_t               *ep_ids;          /* Endpoint id blocks */
+    uint64_t               *ep_idxs;         /* Endpoint idx blocks */
 }   portals_dev_t;
 
 typedef struct portals_globals {
@@ -390,36 +405,20 @@ typedef struct portals_rma_op {
 
 
 typedef struct portals_ep {
-    uint32_t                        id;         /* id for endpoint multiplexing */
+    uint32_t                        idx;        /* our Portals table index */
+    //uint32_t                        id;         /* id for endpoint multiplexing */
     ptl_handle_eq_t                 eqh;        /* eventq handle */
     int                             in_use;     /* token to serialize get_event */
     TAILQ_HEAD(p_txs, portals_tx)   txs;        /* List of all txs */
     TAILQ_HEAD(p_txsi, portals_tx)  idle_txs;   /* List of idle txs */
     TAILQ_HEAD(p_rxs, portals_rx)   rxs;        /* List of all rxs */
     TAILQ_HEAD(p_rxsi, portals_rx)  idle_rxs;   /* List of all rxs */
-    TAILQ_HEAD(p_ams, portals_am_buffer) ams;   /* List of AM buffers */ 
-    TAILQ_HEAD(p_oams, portals_am_buffer) orphan_ams;   /* List of DONE AM buffers */ 
+    TAILQ_HEAD(p_ams, portals_am_buffer) ams;   /* List of AM buffers */
+    TAILQ_HEAD(p_oams, portals_am_buffer) orphan_ams;   /* List of DONE AM buffers */
     TAILQ_HEAD(p_conns, portals_conn) conns;    /* List of all conns for cleanup */
     TAILQ_HEAD(p_handles, portals_rma_handle) handles; /* List of all registered RMA regions */
     TAILQ_HEAD(s_ops, portals_rma_op) rma_ops;
 }   portals_ep_t;
-
-typedef struct portals_lep {
-
-    cci_os_handle_t        fd;               /* OS handle for poll */
-    ptl_handle_eq_t                 eqh;        /* eventq handle */
-}   portals_lep_t;
-
-typedef struct portals_crq {
-    void                   *buffer;     /* Buffer for optional payload */
-    ptl_handle_md_t         mdh;        /* Memory descriptor handle */
-    ptl_handle_me_t         meh;        /* Match list entry handle */
-    ptl_process_id_t       idp;         /* Client's nid, pid */
-    uint32_t               client_id;   /* Client's ep id */
-    uint32_t               mss;         /* Client's MSS */
-    uint32_t               max_recv_buffer_count;
-    uint64_t               client_conn; /* Client's conn addr */
-}   portals_crq_t;
 
 /* Connection info */
 typedef enum portals_conn_status {
@@ -435,6 +434,7 @@ typedef struct portals_conn {
     cci__conn_t             *conn;          /* Owning conn */
     portals_conn_status_t   status;         /* Status */
     ptl_process_id_t        idp;            /* Peer's (NID, PID) */
+    uint32_t                idx;            /* Peer's Portals table index */
     uint64_t                peer_conn;      /* Peer's conn addr */
     uint32_t                peer_ep_id;     /* Peer's endpoint ID */
     uint32_t                max_tx_cnt;     /* Max sends in flight */
