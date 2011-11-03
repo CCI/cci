@@ -369,7 +369,7 @@ static int portals_init(
         pdev->max_md_iovecs=niLimit.max_md_iovecs;
         pdev->max_me_list=niLimit.max_me_list;
         pdev->max_getput_md=niLimit.max_getput_md;
-        debug( CCI_DB_ALL, "My portals ID is: port://%u,%hu",
+        debug( CCI_DB_INFO, "My portals NID:PID is: %u:%hu",
                  (pdev->idp).nid, (pdev->idp).pid );
         debug( CCI_DB_INFO, "My portals limits are: max_mes=%d",
                  pdev->max_mes );
@@ -908,6 +908,7 @@ static int portals_create_endpoint(
     portals_ep_t           *pep=NULL;
     portals_dev_t          *pdev=NULL;
     uint32_t               msg_length;
+    char                   name[64];
 
     CCI_ENTER;
 
@@ -1016,8 +1017,15 @@ static int portals_create_endpoint(
         }
     }
 
-    debug(CCI_DB_ALL, "opening "PORTALS_URI"%u:%hu:%u",
-          pdev->idp.nid, pdev->idp.pid, pep->idx);
+    memset(name, 0, sizeof(name));
+    snprintf(name, 64, "%s%u:%hu:%u", PORTALS_URI, pdev->idp.nid, pdev->idp.pid, pep->idx);
+    *((char **)(&(*endpoint)->name)) = strdup(name);
+    if (!(*endpoint)->name) {
+        iRC = CCI_ENOMEM;
+        goto out;
+    }
+
+    debug(CCI_DB_EP, "opening %s", (*endpoint)->name);
 
     pthread_mutex_lock(&dev->lock);
     pdev->is_progressing=0;
@@ -2045,6 +2053,7 @@ static int portals_return_event( cci_event_t *event )
             pthread_mutex_unlock(&ep->lock);
         }
         break;
+    case CCI_EVENT_CONNECT_REQUEST:
     case CCI_EVENT_CONNECT_ACCEPTED:
     case CCI_EVENT_CONNECT_REJECTED:
     case CCI_EVENT_RECV:
@@ -2832,7 +2841,6 @@ static void portals_handle_conn_reply(cci__ep_t *ep, ptl_event_t pevent)
     debug(CCI_DB_CONN, "accept->max_recv_buffer_count = %u", accept->max_recv_buffer_count);
     debug(CCI_DB_CONN, "accept->server_conn_upper = 0x%x", accept->server_conn_upper);
     debug(CCI_DB_CONN, "accept->server_conn_lower = 0x%x", accept->server_conn_lower);
-    debug(CCI_DB_ALL, "am=%p", am);
 
     /* do we need to unlink this buffer? */
     if (am->length - (pevent.offset + pevent.mlength) < dev->device.max_send_size) {
