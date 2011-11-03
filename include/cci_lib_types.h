@@ -200,6 +200,7 @@ extern int cci__debug;
 #define CCI_DB_INFO   (1 << 6) /* just informational */
 #define CCI_DB_WARN   (1 << 7) /* non-fatal error */
 #define CCI_DB_DRVR   (1 << 8) /* driver function returned error */
+#define CCI_DB_EP     (1 << 9) /* endpoint handling */
 
 #define CCI_DB_ALL    (~0)     /* print everything */
 #define CCI_DB_DFLT   (CCI_DB_ERR|CCI_DB_WARN)
