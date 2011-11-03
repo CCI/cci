@@ -141,28 +141,14 @@ static int         gni_create_endpoint(
     cci_os_handle_t *           fd );
 static int         gni_destroy_endpoint(
     cci_endpoint_t *            endpoint );
-static int         gni_bind(
-    cci_device_t *              device,
-    int32_t                     backlog,
-    uint32_t *                  port,
-    cci_service_t **            service,
-    cci_os_handle_t *           fd );
-static int         gni_unbind(
-    cci_service_t *             service,
-    cci_device_t *              device );
-static int         gni_get_conn_req(
-    cci_service_t *             service,
-    cci_conn_req_t **           conn_req );
 static int         gni_accept(
-    cci_conn_req_t *            conn_req,
-    cci_endpoint_t *            endpoint,
+    union cci_event *           conn_req,
     cci_connection_t **         connection );
 static int         gni_reject(
-    cci_conn_req_t *            conn_req );
+    union cci_event *           conn_req );
 static int         gni_connect(
     cci_endpoint_t *            endpoint,
     char *                      server_uri,
-    uint32_t                    port,
     void *                      data_ptr,
     uint32_t                    data_len,
     cci_conn_attribute_t        attribute,
@@ -591,9 +577,6 @@ cci_plugin_core_t cci_core_gni_plugin= {
     gni_free_devices,
     gni_create_endpoint,
     gni_destroy_endpoint,
-    gni_bind,
-    gni_unbind,
-    gni_get_conn_req,
     gni_accept,
     gni_reject,
     gni_connect,
@@ -682,7 +665,6 @@ static int gni_init(
         device->pci.bus=-1;                  // per CCI spec
         device->pci.dev=-1;                  // per CCI spec
         device->pci.func=-1;                 // per CCI spec
-        TAILQ_INIT(&dev->leps);
 
         if( !(dev->priv=calloc( 1, sizeof(*gdev) )) ) {
 
@@ -1180,90 +1162,7 @@ static int gni_destroy_endpoint(  cci_endpoint_t *       endpoint ) {
 }
 
 
-static int gni_bind(              cci_device_t *         device,
-                                  int32_t                backlog,
-                                  uint32_t *             port,
-                                  cci_service_t **       service,
-                                  cci_os_handle_t *      fd ) {
-
-    cci__dev_t *                dev;
-    gni_dev_t *                 gdev;
-    gni_cdm_handle_t            cdh;
-    gni_remote_t                local;
-    gni_lep_t                   glep;
-
-
-    if(!gglobals) {
-
-        CCI_EXIT;
-        return(CCI_ENODEV);
-    }
-    dev=container_of( device, cci__dev_t, device );
-    gdev=dev->priv;
-    cdh=gdev->cdh;
-    local.nic_addr=gni_get_nic_address(gni_kid);
-    glep.peph=(gni_ep_handle_t *)calloc( gni_size,
-                                         sizeof(gni_ep_handle_t) );
-    pmi_allgather( &local, &(gdev->remote), sizeof(gni_remote_t) );
-    gni_create_cq( &(glep.cqhd) );
-    gni_create_cq( &(glep.cqhl) );
-/*
-    gni_create_vmd( &(local.buffer), gni_size*sizeof(uint64_t),
-                    glep.cqhd, &(local.mem_hndl) );
-    pmi_allgather( &local, &(gdev->remote), sizeof(gni_remote_t) );
-*/
-
-    debug( CCI_DB_WARN, "Rank %.8d %s: cdh=%zp\n",
-           gdev->Rank, __func__, cdh );
-
-    return(CCI_ERR_NOT_IMPLEMENTED);
-}
-
-
-static int gni_unbind(            cci_service_t *        service,
-                                  cci_device_t *         device ) {
-
-    cci__dev_t *                dev;
-    gni_dev_t *                 gdev;
-
-    if(!gglobals) {
-
-        CCI_EXIT;
-        return(CCI_ENODEV);
-    }
-    dev=container_of( device, cci__dev_t, device );
-    gdev=dev->priv;
-    debug( CCI_DB_WARN,
-           "Rank=%.8d In gni_unbind", gdev->Rank );
-
-    return(CCI_ERR_NOT_IMPLEMENTED);
-}
-
-
-static int gni_get_conn_req(      cci_service_t *        service,
-                                  cci_conn_req_t **      conn_req ) {
-
-    cci_device_t const *        device;
-    cci__dev_t *                dev;
-    gni_dev_t *                 gdev;
-
-    if(!gglobals) {
-
-        CCI_EXIT;
-        return(CCI_ENODEV);
-    }
-    device=*(gglobals->devices);
-    dev=container_of( device, cci__dev_t, device );
-    gdev=dev->priv;
-    debug( CCI_DB_WARN,
-           "Rank=%.8d In gni_get_conn_req", gdev->Rank );
-
-    return(CCI_ERR_NOT_IMPLEMENTED);
-}
-
-
-static int gni_accept(            cci_conn_req_t *       conn_req,
-                                  cci_endpoint_t *       endpoint,
+static int gni_accept(            union cci_event *      conn_req,
                                   cci_connection_t **    connection ) {
 
     cci_device_t const *        device;
@@ -1285,7 +1184,7 @@ static int gni_accept(            cci_conn_req_t *       conn_req,
 }
 
 
-static int gni_reject(            cci_conn_req_t *       conn_req ) {
+static int gni_reject(            union cci_event *      conn_req ) {
 
     cci_device_t const *        device;
     cci__dev_t *                dev;
@@ -1308,7 +1207,6 @@ static int gni_reject(            cci_conn_req_t *       conn_req ) {
 
 static int gni_connect(           cci_endpoint_t *       endpoint,
                                   char *                 server_uri,
-                                  uint32_t               port,
                                   void *                 data_ptr,
                                   uint32_t               data_len,
                                   cci_conn_attribute_t   attribute,
