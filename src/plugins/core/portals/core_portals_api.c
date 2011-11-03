@@ -2200,6 +2200,7 @@ static int portals_send_common(
             offset += data[i].iov_len;
         }
     }
+    tx->len = data_len;
 
 #ifdef    PORTALS_8B_OOB
     if( data_len < 9 ) {                       /* Send up to 8B OOB */
@@ -2244,7 +2245,7 @@ static int portals_send_common(
     debug(CCI_DB_MSG,
              "%s: ("PORTALS_URI"%u:%hu:%u): posted:"
              " ret=%s len=%d", __func__, pconn->idp.nid, pconn->idp.pid,
-                                 pconn->idx, ptl_err_str[ret], tx->len );
+                                 pconn->idx, ptl_err_str[ret], data_len );
     /*
      * If blocking, only wait if reliable. Unreliable only needs local
      * completion and since we always buffer, they are locally complete.
