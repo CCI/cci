@@ -336,7 +336,7 @@ static int eth_get_devices(cci_device_t const ***devices_p)
     devices = realloc(devices, (count + 1) * sizeof(cci_device_t *));
     devices[count] = NULL;
 
-    *devices_p = devices;
+    *devices_p = (cci_device_t const **) devices;
 
     CCI_EXIT;
     return CCI_SUCCESS;
