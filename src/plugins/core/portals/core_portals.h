@@ -436,7 +436,6 @@ typedef struct portals_conn {
     ptl_process_id_t        idp;            /* Peer's (NID, PID) */
     uint32_t                idx;            /* Peer's Portals table index */
     uint64_t                peer_conn;      /* Peer's conn addr */
-    uint32_t                peer_ep_id;     /* Peer's endpoint ID */
     uint32_t                max_tx_cnt;     /* Max sends in flight */
     uint32_t                mss;            /* max_segment_size for this conn */
     portals_tx_t            *tx;            /* for conn request */

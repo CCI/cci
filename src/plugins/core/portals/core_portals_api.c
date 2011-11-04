@@ -1285,8 +1285,8 @@ static int portals_accept(
     tx->evt.event.type=CCI_EVENT_SEND;
     memcpy(tx->buffer, &accept, ac_len);
 
-    debug(CCI_DB_CONN, "%s: to %u,%hu client_id=%u peer_conn=%llx",
-          __func__, pconn->idp.nid, pconn->idp.pid, pconn->peer_ep_id,
+    debug(CCI_DB_CONN, "%s: to %u:%hu:%u peer_conn=%llx",
+          __func__, pconn->idp.nid, pconn->idp.pid, pconn->idx,
           (unsigned long long) pconn->peer_conn);
     ret = PtlPutRegion(tx->mdh,           /* Handle to MD */
                  0,
