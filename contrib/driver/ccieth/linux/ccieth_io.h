@@ -3,6 +3,9 @@
  * Copyright © INRIA 2011
  */
 
+#ifndef CCIETH_IO_H
+#define CCIETH_IO_H 1
+
 #include <linux/types.h>
 
 #define CCIETH_IOCTL_GET_INFO 0x1
@@ -64,3 +67,5 @@ struct ccieth_recvq_slot {
 	__u32 next_free_offset;	/* offset of the next free slot if we're not busy anymore, or -1 if none yet (kernel use only) */
 	/* 16 */
 };
+
+#endif /* CCIETH_IO_H */
