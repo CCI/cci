@@ -84,9 +84,9 @@ ccieth_create_endpoint(struct ccieth_ioctl_create_endpoint *arg)
 	int err;
 
 	rcu_read_lock();
-	ifp = dev_getbyhwaddr_rcu(&init_net, ARPHRD_ETHER, (const char *) &arg->addr);
+	ifp = dev_getbyhwaddr_rcu(&init_net, ARPHRD_ETHER, (const char *)&arg->addr);
 	if (!ifp) /* allow loopback to ease development */
-		ifp = dev_getbyhwaddr_rcu(&init_net, ARPHRD_LOOPBACK, (const char *) &arg->addr);
+		ifp = dev_getbyhwaddr_rcu(&init_net, ARPHRD_LOOPBACK, (const char *)&arg->addr);
 	if (!ifp) {
 		rcu_read_unlock();
 		err = -ENODEV;
@@ -141,7 +141,7 @@ ccieth_return_event(struct ccieth_endpoint *ep, const struct ccieth_ioctl_return
 }
 
 static int
-ccieth_miscdev_open(struct inode * inode, struct file * file)
+ccieth_miscdev_open(struct inode *inode, struct file *file)
 {
 	/* mmap for write would let the application break the recvq.
 	 * it wouldn't break the driver, but there's no reason to let users do so.
@@ -154,7 +154,7 @@ ccieth_miscdev_open(struct inode * inode, struct file * file)
 }
 
 static int
-ccieth_miscdev_release(struct inode * inode, struct file * file)
+ccieth_miscdev_release(struct inode *inode, struct file *file)
 {
 	struct ccieth_endpoint *ep = file->private_data;
 	if (ep) {
@@ -165,33 +165,33 @@ ccieth_miscdev_release(struct inode * inode, struct file * file)
 }
 
 static int
-ccieth_miscdev_mmap(struct file * file, struct vm_area_struct * vma)
+ccieth_miscdev_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
-        unsigned long size = vma->vm_end - vma->vm_start;
+	unsigned long size = vma->vm_end - vma->vm_start;
 	struct ccieth_endpoint *ep = file->private_data;
 	void *buffer;
 	int ret;
 
 	if (!ep || offset != CCIETH_MMAP_RECVQ_OFFSET) {
-                ret = -EINVAL;
-                goto out;
-        }
+		ret = -EINVAL;
+		goto out;
+	}
 	if (vma->vm_flags & (VM_WRITE|VM_MAYWRITE)) {
 		ret = -EACCES;
 		goto out;
 	}
 
-        buffer = vmalloc_user(size);
-        if (!buffer) {
-                ret = -ENOMEM;
-                goto out;
-        }
+	buffer = vmalloc_user(size);
+	if (!buffer) {
+		ret = -ENOMEM;
+		goto out;
+	}
 
-        ret = remap_vmalloc_range(vma, buffer, 0);
-        if (ret < 0) {
-                goto out_with_buffer;
-        }
+	ret = remap_vmalloc_range(vma, buffer, 0);
+	if (ret < 0) {
+		goto out_with_buffer;
+	}
 
 	/* FIXME: allow multiple mmap'ed buffers for recvq resizing */
 	if (cmpxchg(&ep->recvq, NULL, buffer)) {
@@ -218,7 +218,7 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		struct ccieth_ioctl_get_info gi_arg;
 		struct net_device *ifp;
 
-		ret = copy_from_user(&gi_arg, (const __user void *) arg, sizeof(gi_arg));
+		ret = copy_from_user(&gi_arg, (const __user void *)arg, sizeof(gi_arg));
 		if (ret)
 			return -EFAULT;
 
@@ -230,7 +230,7 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		gi_arg.rate = 0;
 
 		rcu_read_lock();
-		ifp = dev_getbyhwaddr_rcu(&init_net, ARPHRD_ETHER, (const char *) &gi_arg.addr);
+		ifp = dev_getbyhwaddr_rcu(&init_net, ARPHRD_ETHER, (const char *)&gi_arg.addr);
 		if (ifp) {
 			struct device *dev = ifp->dev.parent;
 
@@ -259,7 +259,7 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 			ret = -ENODEV;
 		rcu_read_unlock();
 
-		ret = copy_to_user((__user void *) arg, &gi_arg, sizeof(gi_arg));
+		ret = copy_to_user((__user void *)arg, &gi_arg, sizeof(gi_arg));
 		if (ret)
 			return -EFAULT;
 
@@ -271,7 +271,7 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		struct ccieth_ioctl_create_endpoint ce_arg;
 		struct ccieth_endpoint *ep, **epp;
 
-		ret = copy_from_user(&ce_arg, (const __user void *) arg, sizeof(ce_arg));
+		ret = copy_from_user(&ce_arg, (const __user void *)arg, sizeof(ce_arg));
 		if (ret)
 			return -EFAULT;
 
@@ -279,13 +279,13 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		if (IS_ERR(ep))
 			return PTR_ERR(ep);
 
-		epp = (struct ccieth_endpoint **) &file->private_data;
+		epp = (struct ccieth_endpoint **)&file->private_data;
 		if (cmpxchg(epp, NULL, ep)) {
 			ccieth_destroy_endpoint(ep);
 			return -EBUSY;
 		}
 
-		ret = copy_to_user((__user void *) arg, &ce_arg, sizeof(ce_arg));
+		ret = copy_to_user((__user void *)arg, &ce_arg, sizeof(ce_arg));
 		if (ret)
 			return -EFAULT;
 
@@ -303,7 +303,7 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		if (ret < 0)
 			return ret;
 
-		ret = copy_to_user((__user void *) arg, &ge_arg, sizeof(ge_arg));
+		ret = copy_to_user((__user void *)arg, &ge_arg, sizeof(ge_arg));
 		if (ret)
 			return -EFAULT;
 
@@ -317,7 +317,7 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		if (!ep)
 			return -EINVAL;
 
-		ret = copy_from_user(&re_arg, (__user void *) arg, sizeof(re_arg));
+		ret = copy_from_user(&re_arg, (__user void *)arg, sizeof(re_arg));
 		if (ret)
 			return -EFAULT;
 
@@ -339,7 +339,7 @@ ccieth_miscdev_fops = {
 	.open = ccieth_miscdev_open,
 	.release = ccieth_miscdev_release,
 	.mmap = ccieth_miscdev_mmap,
-        .unlocked_ioctl = ccieth_miscdev_ioctl,
+	.unlocked_ioctl = ccieth_miscdev_ioctl,
 };
 
 static struct miscdevice
