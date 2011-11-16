@@ -445,6 +445,36 @@ sock_pack_keepalive(sock_header_t *header, uint32_t id)
     sock_pack_header(header, SOCK_MSG_KEEPALIVE, 0, 0, id);
 }
 
+/* nack header and nack(s)
+
+    <---------- 32 bits ---------->
+    <- 8 -> <- 8 -> <---- 16 ----->
+   +-------+-------+---------------+
+   | type  |  cnt  |               |
+   +-------+-----------------------+
+   |              seq              |
+   +-------------------------------+
+   |           timestamp           |
+   +-------------------------------+
+ 
+   type: SOCK_MSG_RNR
+
+ */
+/* FIXME GV: i do not think we need "count" */
+static inline void
+sock_pack_nack(sock_header_r_t *header_r, sock_msg_type_t type, uint32_t peer_id,
+               uint32_t seq, uint32_t ts, int count)
+{
+    sock_pack_header(&header_r->header, type, (uint8_t) count, 0, peer_id);
+    sock_pack_seq_ts(&header_r->seq_ts, seq, ts);
+}
+
+static inline void
+sock_parse_nack(sock_header_r_t *header_r, sock_msg_type_t type) {
+    /* Nothing to do? */
+}
+
+
 /* ack header and ack(s):
 
     <---------- 32 bits ---------->
@@ -925,6 +955,9 @@ typedef struct sock_conn {
 
     /*! List of RMA ops in process in case of fence */
     TAILQ_HEAD(s_rmas, sock_rma_op) rmas;
+
+    /*! Flag to know if the receiver is ready or not */
+    uint32_t rnr;
 } sock_conn_t;
 
 /* Only call if holding the ep->lock and sconn->acks is not empty
@@ -977,13 +1010,16 @@ typedef struct sock_globals {
 
     /*! fd_set for open endpoint sock fds */
     fd_set fds;
+
+    /*! List of all connections with keepalive enabled */
+    TAILQ_HEAD (ka_conns, sock_conn) ka_conns;
 } sock_globals_t;
 
 #ifndef FD_COPY
 #define FD_COPY(a,b) memcpy(a,b,sizeof(fd_set))
 #endif
 
-extern volatile sock_globals_t *sglobals;
+extern sock_globals_t *sglobals;
 
 
 int cci_core_sock_post_load(cci_plugin_t *me);

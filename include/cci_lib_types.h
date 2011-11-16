@@ -121,6 +121,9 @@ typedef struct cci__conn {
     /*! Send timeout in microseconds (if 0 use ep->tx_timeout) */
     uint32_t tx_timeout;
 
+    /*! Keepalive timeout in microseconds */
+    uint32_t keepalive_timeout;
+
     /*! Pointer to device specific struct */
     void *priv;
 } cci__conn_t;

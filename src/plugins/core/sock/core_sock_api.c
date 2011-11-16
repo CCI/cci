@@ -37,7 +37,7 @@
 #include "core_sock.h"
 
 volatile int sock_shut_down = 0;
-volatile sock_globals_t *sglobals = NULL;
+sock_globals_t *sglobals = NULL;
 pthread_t progress_tid, recv_tid;
 
 /*
@@ -220,6 +220,8 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
         CCI_EXIT;
         return CCI_ENOMEM;
     }
+
+    TAILQ_INIT (&sglobals->ka_conns);
 
     srandom((unsigned int) sock_get_usecs());
 
@@ -1347,6 +1349,13 @@ static int sock_disconnect(cci_connection_t *connection)
     ep = container_of(connection->endpoint, cci__ep_t, endpoint);
     sep = ep->priv;
 
+    /* GV: we should do the same if set_opt is used to put the keepalive back
+           to 0 */
+    if (conn->keepalive_timeout != 0UL && is_reliable (conn)) {
+        /* Remove the connection is the list of connections using keepalive */
+        TAILQ_REMOVE (&sglobals->ka_conns, sconn, entry);
+    }
+
     if (conn->uri)
         free((char *) conn->uri);
 
@@ -1649,7 +1658,6 @@ sock_progress_pending(cci__dev_t *dev)
         /* has it timed out? */
 
         if (SOCK_U64_LT(tx->timeout_us, now)) {
-
             /* dequeue */
 
             TAILQ_REMOVE(&sdev->pending, tx, dentry);
@@ -1660,42 +1668,43 @@ sock_progress_pending(cci__dev_t *dev)
                 sconn->pending--;
 
             switch (tx->msg_type) {
-            case SOCK_MSG_SEND:
-                event->send.status = CCI_ETIMEDOUT;
-                break;
-            case SOCK_MSG_RMA_WRITE:
-                pthread_mutex_lock(&ep->lock);
-                tx->rma_op->pending--;
-                tx->rma_op->status = CCI_ETIMEDOUT;
-                pthread_mutex_unlock(&ep->lock);
-                break;
-            case SOCK_MSG_CONN_REQUEST:
-            {
-                int i;
-                struct s_active *active_list;
+                case SOCK_MSG_SEND:
+                    event->send.status = CCI_ETIMEDOUT;
+                    fprintf (stderr, "CCI_ETIMEDOUT!\n");
+                    break;
+                case SOCK_MSG_RMA_WRITE:
+                    pthread_mutex_lock(&ep->lock);
+                    tx->rma_op->pending--;
+                    tx->rma_op->status = CCI_ETIMEDOUT;
+                    pthread_mutex_unlock(&ep->lock);
+                    break;
+                case SOCK_MSG_CONN_REQUEST:
+                    {
+                        int i;
+                        struct s_active *active_list;
 
-                event->type = CCI_EVENT_CONNECT_TIMEDOUT;
-                if (conn->uri)
-                    free((char *) conn->uri);
-                sconn->status = SOCK_CONN_CLOSING;
-                i = sock_ip_hash(sconn->sin.sin_addr.s_addr, 0);
-                active_list = &sep->active_hash[i];
-                pthread_mutex_lock(&ep->lock);
-                TAILQ_REMOVE(active_list, sconn, entry);
-                pthread_mutex_unlock(&ep->lock);
-                free(sconn);
-                free(conn);
-                sconn = NULL;
-                conn = NULL;
-                tx->evt.ep = ep;
-                tx->evt.conn = NULL;
-                break;
-            }
-            case SOCK_MSG_CONN_REPLY:
-            case SOCK_MSG_CONN_ACK:
-            default:
-                /* TODO */
-                CCI_EXIT;
+                        event->type = CCI_EVENT_CONNECT_TIMEDOUT;
+                        if (conn->uri)
+                            free((char *) conn->uri);
+                        sconn->status = SOCK_CONN_CLOSING;
+                        i = sock_ip_hash(sconn->sin.sin_addr.s_addr, 0);
+                        active_list = &sep->active_hash[i];
+                        pthread_mutex_lock(&ep->lock);
+                        TAILQ_REMOVE(active_list, sconn, entry);
+                        pthread_mutex_unlock(&ep->lock);
+                        free(sconn);
+                        free(conn);
+                        sconn = NULL;
+                        conn = NULL;
+                        tx->evt.ep = ep;
+                        tx->evt.conn = NULL;
+                        break;
+                    }
+                case SOCK_MSG_CONN_REPLY:
+                case SOCK_MSG_CONN_ACK:
+                default:
+                    /* TODO */
+                    CCI_EXIT;
                 return;
             }
             /* if SILENT, put idle tx */
@@ -2042,10 +2051,16 @@ static int sock_sendv(cci_connection_t *connection,
     tx->flags = flags;
 
     /* zero even if unreliable */
-
-    tx->last_attempt_us = 0ULL;
-    tx->timeout_us = 0ULL;
-    tx->rma_op = NULL;
+    if (!is_reliable) {
+        tx->last_attempt_us = 0ULL;
+        tx->timeout_us = 0ULL;
+        tx->rma_op = NULL;
+    } else {
+        /* GV: not sure last_attempt_us and rma_op are correctly set here */
+        tx->last_attempt_us = 0ULL;
+        tx->timeout_us = sock_get_usecs() + SOCK_EP_TX_TIMEOUT_SEC * 1000000;
+        tx->rma_op = NULL;
+    }
 
     /* setup generic CCI event */
     evt = &tx->evt;
@@ -2602,6 +2617,26 @@ sock_handle_active_message(sock_conn_t *sconn,
     CCI_EXIT;
 
     return;
+}
+
+/*!
+  Handle incoming RNR messages
+ */
+static void
+sock_handle_rnr (sock_conn_t *sconn,
+                 uint32_t seq,
+                 uint32_t ts)
+{
+    sock_tx_t       *tx     = NULL;
+    sock_tx_t       *tmp    = NULL;
+
+    /* Find the corresponding SEQ/TS */
+    TAILQ_FOREACH_SAFE(tx, &sconn->tx_seqs, tx_seq, tmp) {
+        if (tx->seq == seq) {
+            debug (CCI_DB_MSG, "%s receiver not ready", __func__);
+            tx->rnr = 1;
+        }
+    }
 }
 
 /*!
@@ -3375,10 +3410,11 @@ sock_drop_msg(cci_os_handle_t sock)
     return;
 }
 
+#define TEST_RNR 0
 static int
 sock_recvfrom_ep(cci__ep_t *ep)
 {
-    int ret = 0, drop_msg = 0, q_rx = 0, reply = 0, request = 0, again = 0;
+    int ret = 0, drop_msg = 0, q_rx = 0, reply = 0, request = 0, again = 0, ka = 0;
     uint8_t a;
     uint16_t b;
     uint32_t id;
@@ -3435,6 +3471,9 @@ sock_recvfrom_ep(cci__ep_t *ep)
         rx->sin = sin;
     }
 
+    if (SOCK_MSG_KEEPALIVE == type)
+        ka = 1;
+
     if (!request)
         sconn = sock_find_conn(sep, sin.sin_addr.s_addr, sin.sin_port, id, type);
 
@@ -3450,7 +3489,7 @@ sock_recvfrom_ep(cci__ep_t *ep)
     }
 
     /* if no conn, drop msg, requeue rx */
-    if (!sconn && !reply && !request) {
+    if (!ka && !sconn && !reply && !request) {
         debug((CCI_DB_CONN|CCI_DB_MSG), "no sconn for incoming %s msg "
                "from %s:%d", sock_msg_type(type),
                inet_ntoa(sin.sin_addr), ntohs(sin.sin_port));
@@ -3482,9 +3521,25 @@ sock_recvfrom_ep(cci__ep_t *ep)
     case SOCK_MSG_DISCONNECT:
         break;
     case SOCK_MSG_SEND:
+        /* Just for testing, we artifically drop msgs (only for reliable 
+           connections */
+        if (TEST_RNR && cci_conn_is_reliable(sconn->conn) && !q_rx) {
+            drop_msg = 1;
+            goto out;
+        }
         sock_handle_active_message(sconn, rx, b, id);
         break;
+    case SOCK_MSG_RNR: {
+        sock_header_r_t *hdr_r = rx->buffer;
+        uint32_t seq;
+        uint32_t ts;
+
+        sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
+        sock_handle_rnr(sconn, seq, ts);
+        break;
+        }
     case SOCK_MSG_KEEPALIVE:
+        /* Nothing to do? */
         break;
     case SOCK_MSG_ACK_ONLY:
     case SOCK_MSG_ACK_UP_TO:
@@ -3510,14 +3565,126 @@ out:
         TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
         pthread_mutex_unlock(&ep->lock);
     }
-    if (0 && drop_msg) {
-        //FIXME need to send a RNR msg back to the sender
+    if (drop_msg && cci_conn_is_reliable(sconn->conn)) {
+        sock_header_r_t *hdr_r = rx->buffer;
+        char buffer[SOCK_MAX_HDR_SIZE];
+        int len = 0;
+        uint32_t seq;
+        uint32_t ts;
+
+        /* We get the TS and SEQ (remember, we are in the context of a reliable
+           connection */
+        sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
+
+        /* Send a RNR msg back to the sender */
+        memset(buffer, 0, sizeof(buffer));
+        hdr_r = (sock_header_r_t *) buffer;
+        sock_pack_nack(hdr_r,
+                       SOCK_MSG_RNR,
+                       sconn->peer_id,
+                       seq,
+                       ts,
+                       0);
+        len = sizeof(*hdr_r);
+        sock_sendto(sep->sock, buffer, len, sconn->sin);
+
+        /* Then drop the message */
         sock_drop_msg(sep->sock);
     }
 
     CCI_EXIT;
 
     return again;
+}
+
+/*
+ * Check whether a keeplive timeout expired for a given endpoint.
+ */
+static void
+sock_keepalive(void)
+{
+    sock_conn_t *sconn;
+    cci__conn_t *conn;
+    cci_connection_t pub_conn;
+    uint64_t    now     = 0ULL;
+    uint32_t    ka_timeout;
+    int i;
+
+    CCI_ENTER;
+
+    if (TAILQ_EMPTY(&sglobals->ka_conns))
+        return;
+
+    fprintf (stderr, "Hmmm...\n");
+
+    now = sock_get_usecs();
+
+    TAILQ_FOREACH (sconn, &sglobals->ka_conns, entry) {
+        conn = sconn->conn;
+
+        if (conn->keepalive_timeout == 0ULL)
+            return;
+
+        /* The keepalive is assumed to expire if we did not hear anything from the
+           peer since the last receive + keepalive timeout. */
+        ka_timeout = sconn->ts + conn->keepalive_timeout;
+
+        if (SOCK_U64_LT(now, ka_timeout)) {
+            int len;
+            char buffer[SOCK_MAX_HDR_SIZE];
+            sock_header_t                   *hdr        = NULL;
+            cci_event_keepalive_timedout_t  *event      = NULL;
+            cci__evt_t                      *evt        = NULL;
+            cci_endpoint_t                  *endpoint   = NULL;
+            cci__ep_t                       *ep         = NULL;
+            sock_ep_t                       *sep        = NULL;
+            sock_tx_t                       *tx         = NULL;
+
+            fprintf (stderr, "Keepalive timeout generating event!!\n");
+            /*
+             * We generate a keepalive event
+             */
+
+            /* GV: should we use sock_return_event() here? */
+            TAILQ_HEAD(s_evts, cci__evt) evts = TAILQ_HEAD_INITIALIZER(evts);
+            TAILQ_INIT(&evts);
+            evt = TAILQ_FIRST(&evts);
+            event = (cci_event_keepalive_timedout_t*)evt;
+            event->type = CCI_EVENT_KEEPALIVE_TIMEDOUT;
+            event->connection = &conn->connection;
+            TAILQ_REMOVE(&evts, evt, entry);
+            ep = evt->ep;
+            pthread_mutex_lock(&ep->lock);
+            TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+            pthread_mutex_unlock(&ep->lock);
+
+            /*
+             * Finally we send an heartbeat
+             */
+
+            /* Get a TX */
+            pthread_mutex_lock(&ep->lock);
+            if (!TAILQ_EMPTY(&sep->idle_txs)) {
+                tx = TAILQ_FIRST(&sep->idle_txs);
+                TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
+            }
+            pthread_mutex_unlock(&ep->lock);
+
+            /* Prepare and send the msg */
+            ep = container_of(conn->connection.endpoint, cci__ep_t, endpoint);
+            sep = ep->priv;
+            memset (buffer, 0, sizeof(buffer));
+            hdr = (sock_header_t *) buffer;
+            sock_pack_keepalive (hdr, sconn->peer_id);
+            len = sizeof(*hdr);
+            sock_sendto(sep->sock, buffer, len, sconn->sin);
+        }
+    }
+
+    fprintf (stderr, "OK!\n");
+
+    CCI_EXIT;
+    return;
 }
 
 static void
@@ -3662,6 +3829,11 @@ static void *sock_progress_thread(void *arg)
         cci_device_t const **device;
 
         pthread_mutex_unlock(&globals->lock);
+
+        /* For each connection with keepalive set. We do here since the list
+           of such connections is independent from any device (we do not want
+           to go from device to connections. */
+        sock_keepalive ();
 
         /* for each device, try progressing */
         for (device = sglobals->devices;
