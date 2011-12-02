@@ -13,22 +13,31 @@
 #include <string.h>
 #include <unistd.h>
 #include <gni_pub.h>
-#include <pmi.h>
 #include <sys/time.h>
+#include <sys/utsname.h>
 #include "cci/config.h"
 
 BEGIN_C_DECLS
 
+// The format of the GNI URI is:
+//
+//     gni://{NODENAME}.{NIC ADDRESS}.{INSTANCE ID}
+//
+#define GNI_URI               "gni://"
+#define GNI_LINE_SIZE         (64)           // .. if not tuned via OS
+#define GNI_PAGE_SIZE         (4096)         // .. if not tuned via OS
+
+#define GNI_MAX_HDR_SIZE      (32)           // per CCI spec
 #define GNI_DEFAULT_MSS       ( 8 * 1024)    // 8 kB
 #define GNI_MIN_MSS           (1024)
-#define GNI_MAX_MSS           (64 * 1024)
+#define GNI_MAX_SIZE          (64 * 1024 - 1)// max payload + header
+#define GNI_MAX_MSS           (GNI_MAX_SIZE - GNI_MAX_HDR_SIZE - 8)
 
 #define GNI_BLOCK_SIZE        (64)           // bytes for id storage
-#define GNI_EP_MAX_HDR_SIZE   (32)           // per CCI spec
-#define GNI_EP_BUF_LEN        (64 * 1024)    // 64 kB
+#define GNI_EP_MAX_HDR_SIZE   (GNI_MAX_HDR_SIZE)
+#define GNI_EP_BUF_LEN        (GNI_MAX_MSS)  // 65495 B
 #define GNI_EP_RX_CNT         (1024)         // MAX rx messages
 #define GNI_EP_TX_CNT         (128)          // MAX tx messages
-#define GNI_BLOCK_SIZE        (64)           // 64b blocks for id
 #define GNI_NUM_BLOCKS        (16384)        // number of blocks
 #define GNI_MAX_EP_ID         (GNI_BLOCK_SIZE * GNI_NUM_BLOCKS)
 #define GNI_EP_BITS           (32)
@@ -110,27 +119,20 @@ typedef struct gni_globals {
     const cci_device_t **       devices;     // Array of devices
 }   gni_globals_t;
 
-typedef struct gni_remote {
-    uint32_t                    nic_addr;
-    gni_mem_handle_t            mem_hndl;
-    uint64_t *                  buffer;
-}   gni_remote_t;
-
 typedef struct gni_dev {
 
+    uint8_t                     kid;         // 
     uint8_t                     ptag;        // protection tag
-    uint8_t                     pad0;        // pad
-    uint16_t                    pad1;        // pad
-    uint32_t                    Rank;        // parallel job Rank
-    uint32_t                    cookie;      // system generated ID
-    uint32_t                    modes;       // Comm. domain flag(s)
-    uint32_t                    kid;         // Minor number of device
-    uint32_t                    idpe;        // pointer to PE address
+    uint16_t                    pad;         // pad
+    uint32_t                    cookie;      // GNI cookie
+    uint32_t                    modes;       // CD flag(s)
+    uint32_t                    nic_address; // NIC address of device
+    uint32_t                    inst_id;     // instance ID/PID
     uint32_t                    progressing; // Being progressed?
+    gni_cdm_handle_t            cd_hndl;     // CD handle
+    gni_nic_handle_t            nic_hndl;    // NIC handle
+    char *                      nodename;
     uint64_t *                  ep_ids;      // Endpoint id blocks
-    gni_remote_t *              remote;
-    gni_cdm_handle_t            cdh;         // Comm. domain handle
-    gni_nic_handle_t            nh;          // NIC handle
 }   gni_dev_t;
 
 // Limit of 4 message types to ensure we only use 2 bits for msg type
@@ -158,7 +160,7 @@ typedef struct gni_rx {
     void *                      buffer;      // active msg buffer
     uint16_t                    len;         // length of buffer
     gni_mem_handle_t            mem_hndl;    // GNI API region handle
-    gni_ep_handle_t             eph;         // ep handle
+    gni_ep_handle_t             ep_hndl;     // ep handle
     TAILQ_ENTRY(gni_rx)         gentry;      // Hangs on ep->rxs
     TAILQ_ENTRY(gni_rx)         entry;       // Hangs on ep->idle_rxs
 }   gni_rx_t;
@@ -172,19 +174,28 @@ typedef struct gni_tx {
     void *                      buffer;      // active msg buffer
     uint16_t                    len;         // length of buffer
     gni_mem_handle_t            mem_hndl;    // GNI API region handle
-    gni_ep_handle_t             eph;         // ep handle
+    gni_ep_handle_t             ep_hndl;     // ep handle
     TAILQ_ENTRY(gni_tx)         tentry;      // Hangs on ep->txs
     TAILQ_ENTRY(gni_tx)         dentry;      // Hangs on ep->idle_txs
                                              //          dev->queued
                                              //          dev->pending
 }   gni_tx_t;
 
+typedef struct gni_mailbox {
+    uint32_t                    nic_address;
+    uint32_t                    inst_id;
+    gni_smsg_attr_t             attributes;
+}   gni_mailbox_t;
+
 typedef struct gni_ep {
 
     uint32_t                    id;          // id for multiplexing
-    gni_cq_handle_t             cqhl;        // Local CQ handle
-    gni_cq_handle_t             cqhd;        // Destination CQ handle
     int32_t                     in_use;      // to serialize get_event
+    int32_t                     vmd_index;   // VMD option(s)
+    uint64_t                    vmd_flags;   // VMD flag(s)
+    gni_cq_handle_t             src_cq_hndl; // Local CQ handle
+    gni_cq_handle_t             dst_cq_hndl; // Destination CQ handle
+    gni_mailbox_t               mailbox;
     void *                      txbuf;       // Large buffer for tx's
     void *                      rxbuf;       // Large buffer for rx's
     TAILQ_HEAD(g_txs, gni_tx)   txs;         // List of all txs
@@ -202,7 +213,7 @@ typedef struct gni_lep {
 
     gni_cq_handle_t             cqhd;        // destination queue
     gni_cq_handle_t             cqhl;        // destination queue
-    gni_ep_handle_t *           peph;
+    gni_ep_handle_t *           ep_hndl_list;
 }   gni_lep_t;
 
 int cci_core_gni_post_load(
