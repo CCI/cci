@@ -655,9 +655,9 @@ union cci_event;
   Accept a connection request and establish a connection with a specific
   endpoint.
 
-  \param[in] conn_req	A connection request event previously returned by
-			cci_get_event().
-  \param[in,out]	Connection pointer to a connection request structure.
+  \param[in] conn_req		A connection request event previously returned by
+				cci_get_event().
+  \param[in,out] connection	Connection pointer to a connection request structure.
 
   \return CCI_SUCCESS   The connection has been established.
   \return Each driver may have additional error codes.
@@ -1163,7 +1163,6 @@ CCI_DECLSPEC int cci_get_event(cci_endpoint_t *endpoint,
   just receive events.  However, it is possible (likely) that
   returning send completion and "other" events will be no-ops.
 
-  \param[in] endpoint	Endpoint that provided the event.
   \param[in] event	    Event to return.
 
   \return CCI_SUCCESS  The event was returned to CCI.
