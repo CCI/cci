@@ -17,112 +17,104 @@
 
 int main(int argc, char *argv[])
 {
-    int ret;
-    uint32_t caps = 0, port = 54321;
-    cci_device_t **devices = NULL;
-    cci_endpoint_t *endpoint = NULL;
-    cci_os_handle_t ep_fd, bind_fd;
-    cci_service_t *service = NULL;
-    cci_connection_t *connection = NULL;
+	int ret;
+	uint32_t caps = 0;
+	cci_device_t **devices = NULL;
+	cci_endpoint_t *endpoint = NULL;
+	cci_os_handle_t ep_fd;
+	cci_connection_t *connection = NULL;
 
-    /* init */
-    ret = cci_init(CCI_ABI_VERSION, 0, &caps);
-    if (ret) {
-        fprintf(stderr, "cci_init() failed with %s\n", cci_strerror(ret));
-        exit(EXIT_FAILURE);
-    }
+	/* init */
+	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
+	if (ret) {
+		fprintf(stderr, "cci_init() failed with %s\n",
+			cci_strerror(ret));
+		exit(EXIT_FAILURE);
+	}
 
-    /* get devices */
-    ret = cci_get_devices((cci_device_t const *** const) &devices);
-    if (ret) {
-        fprintf(stderr, "cci_get_devices() failed with %s\n", cci_strerror(ret));
-        exit(EXIT_FAILURE);
-    }
+	/* get devices */
+	ret = cci_get_devices((cci_device_t const ***const)&devices);
+	if (ret) {
+		fprintf(stderr, "cci_get_devices() failed with %s\n",
+			cci_strerror(ret));
+		exit(EXIT_FAILURE);
+	}
 
-    /* create an endpoint */
-    ret = cci_create_endpoint(NULL, 0, &endpoint, &ep_fd);
-    if (ret) {
-        fprintf(stderr, "cci_create_endpoint() failed with %s\n", cci_strerror(ret));
-        exit(EXIT_FAILURE);
-    }
+	/* create an endpoint */
+	ret = cci_create_endpoint(NULL, 0, &endpoint, &ep_fd);
+	if (ret) {
+		fprintf(stderr, "cci_create_endpoint() failed with %s\n",
+			cci_strerror(ret));
+		exit(EXIT_FAILURE);
+	}
+	printf("opened %s\n", endpoint->name);
 
-    /* bind first device to the service at port 54321 */
-    ret = cci_bind(devices[0], 10, &port,&service, &bind_fd);
-    if (ret) {
-        fprintf(stderr, "cci_bind() failed with %s\n", cci_strerror(ret));
-        exit(EXIT_FAILURE);
-    }
+	while (1) {
+		char *buffer;
+		cci_event_t *event;
 
-    while (1) {
-        int accept = 1;
-        char *buffer;
-        cci_conn_req_t *conn_req;
-        cci_event_t *event;
+		ret = cci_get_event(endpoint, &event, 0);
+		if (ret != CCI_SUCCESS) {
+			if (ret != CCI_EAGAIN) {
+				fprintf(stderr, "cci_get_event() returned %s",
+					cci_strerror(ret));
+			}
+			continue;
+		}
+		switch (event->type) {
+		case CCI_EVENT_RECV:
+			{
+				memcpy(buffer,
+				       event->recv.ptr, event->recv.len);
+				buffer[event->recv.len] = 0;
+				printf("recv'd \"%s\"\n", buffer);
 
-        ret = cci_get_conn_req(service, &conn_req);
-        if (ret == CCI_SUCCESS) {
-            /* inspect conn_req_t and decide to accept or reject */
+				/* echo the message to the client */
+				ret = cci_send(connection,
+					       event->recv.ptr,
+					       event->recv.len, NULL, 0);
+				if (ret != CCI_SUCCESS)
+					fprintf(stderr,
+						"send returned %s\n",
+						cci_strerror(ret));
+				break;
+			}
+		case CCI_EVENT_SEND:
+			printf("completed send\n");
+			break;
+		case CCI_EVENT_CONNECT_REQUEST:
+			{
+				int accept = 1;
 
-            if (accept) {
-                /* associate this connect request with this endpoint */
-                ret = cci_accept(conn_req, endpoint, &connection);
-                if (ret != CCI_SUCCESS) {
-                    fprintf(stderr, "cci_accept() returned %s",
-                                    cci_strerror(ret));
-                } else if (!buffer) {
-                    buffer = calloc(1, connection->max_send_size + 1);
-                    /* check for buffer ... */
-                }
+				if (accept) {
+					ret = cci_accept(event, &connection);
+					if (ret != CCI_SUCCESS) {
+						fprintf(stderr,
+							"cci_accept() returned %s",
+							cci_strerror(ret));
+					} else if (!buffer) {
+						buffer =
+						    calloc(1,
+							   connection->
+							   max_send_size + 1);
+						/* check for buffer ... */
+					}
 
-            } else {
-                cci_reject(conn_req);
-            }
-        }
+				} else {
+					cci_reject(conn_req);
+				}
+			}
+			break;
+		default:
+			fprintf(stderr, "unexpected event %d", event->type);
+			break;
+		}
+		cci_return_event(endpoint, event);
+	}
 
-        /* check for next event...
-         * handle communication over existing connections */
+	/* clean up */
+	cci_destroy_endpoint(endpoint);
+	cci_free_devices((cci_device_t const **)devices);
 
-again:
-        ret = cci_get_event(endpoint, &event, 0);
-        if (ret == CCI_SUCCESS) {
-            switch (event->type) {
-                case CCI_EVENT_RECV:
-                {
-                    memcpy(buffer, event->info.recv.header_ptr, event->info.recv.header_len);
-                    buffer[event->info.recv.header_len] = 0;
-                    printf("recv'd:\n");
-                    printf("\theader: \"%s\"\n", buffer);
-                    memcpy(buffer, event->info.recv.data_ptr, event->info.recv.data_len);
-                    buffer[event->info.recv.data_len] = 0;
-                    printf("\tdata: \"%s\"\n", buffer);
-
-                    /* echo the message to the client */
-                    ret = cci_send(connection,
-                                   event->info.recv.header_ptr,
-                                   event->info.recv.header_len,
-                                   event->info.recv.data_ptr,
-                                   event->info.recv.data_len,
-                                   NULL, 0);
-                    if (ret != CCI_SUCCESS)
-                        fprintf(stderr, "send returned %s\n", cci_strerror(ret));
-                    break;
-                }
-                case CCI_EVENT_SEND:
-                    printf("completed send\n");
-                    break;
-                default:
-                    fprintf(stderr, "unexpected event %d", event->type);
-                    break;
-            }
-            cci_return_event(endpoint, event);
-            goto again;
-        }
-    }
-
-    /* clean up */
-    cci_unbind(service, NULL);
-    cci_destroy_endpoint(endpoint);
-    cci_free_devices((cci_device_t const **) devices);
-
-    return 0;
+	return 0;
 }
