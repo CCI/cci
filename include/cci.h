@@ -1480,31 +1480,6 @@ CCI_DECLSPEC int cci_rma_register(cci_endpoint_t *endpoint,
                                   void *start, uint64_t length,
                                   uint64_t *rma_handle);
 
-/*! \private
-
-  This data structure should map to the native scatter/gather list
-  that is used down in the kernel.
-
-  \ingroup communications
- */
-typedef struct cci_sg {
-    /* JMS is this right?  Is it different than cci_iovec_t? */
-    uint64_t address;
-    uint32_t length;
-} cci_sg_t;
-
-/*! \private
-
-  This is just like cci_rma_register(), but it is to be used in the
-  kernel only.
-
-  \ingroup communications
- */
-CCI_DECLSPEC int cci_rma_register_phys(cci_endpoint_t *endpoint,
-                                       cci_connection_t *connection,
-                                       cci_sg_t *sg_list, uint32_t sg_cnt,
-                                       uint64_t *rma_handle);
-
 /*!
   Deregister memory.
 
