@@ -81,10 +81,6 @@ static int sock_rma_register(cci_endpoint_t *endpoint,
                              cci_connection_t *connection,
                              void *start, uint64_t length,
                              uint64_t *rma_handle);
-static int sock_rma_register_phys(cci_endpoint_t *endpoint,
-                                  cci_connection_t *connection,
-                                  cci_sg_t *sg_list, uint32_t sg_cnt,
-                                  uint64_t *rma_handle);
 static int sock_rma_deregister(uint64_t rma_handle);
 static int sock_rma(cci_connection_t *connection,
                         void *header_ptr, uint32_t header_len,
@@ -147,7 +143,6 @@ cci_plugin_core_t cci_core_sock_plugin = {
     sock_send,
     sock_sendv,
     sock_rma_register,
-    sock_rma_register_phys,
     sock_rma_deregister,
     sock_rma
 };
@@ -2191,23 +2186,6 @@ static int sock_rma_register(cci_endpoint_t *endpoint,
     CCI_EXIT;
 
     return CCI_SUCCESS;
-}
-
-
-static int sock_rma_register_phys(cci_endpoint_t *endpoint,
-                                  cci_connection_t *connection,
-                                  cci_sg_t *sg_list, uint32_t sg_cnt,
-                                  uint64_t *rma_handle)
-{
-    CCI_ENTER;
-
-    if (!sglobals) {
-        CCI_EXIT;
-        return CCI_ENODEV;
-    }
-
-    CCI_EXIT;
-    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 

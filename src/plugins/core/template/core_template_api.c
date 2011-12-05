@@ -53,10 +53,6 @@ static int template_rma_register(cci_endpoint_t *endpoint,
                                  cci_connection_t *connection,
                                  void *start, uint64_t length,
                                  uint64_t *rma_handle);
-static int template_rma_register_phys(cci_endpoint_t *endpoint,
-                                      cci_connection_t *connection,
-                                      cci_sg_t *sg_list, uint32_t sg_cnt,
-                                      uint64_t *rma_handle);
 static int template_rma_deregister(uint64_t rma_handle);
 static int template_rma(cci_connection_t *connection,
                         void *msg_ptr, uint32_t msg_len,
@@ -111,7 +107,6 @@ cci_plugin_core_t cci_core_template_plugin = {
     template_send,
     template_sendv,
     template_rma_register,
-    template_rma_register_phys,
     template_rma_deregister,
     template_rma
 };
@@ -259,16 +254,6 @@ static int template_rma_register(cci_endpoint_t *endpoint,
                                  uint64_t *rma_handle)
 {
     printf("In template_rma_register\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
-}
-
-
-static int template_rma_register_phys(cci_endpoint_t *endpoint,
-                                      cci_connection_t *connection,
-                                      cci_sg_t *sg_list, uint32_t sg_cnt,
-                                      uint64_t *rma_handle)
-{
-    printf("In template_rma_register_phys\n");
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 

@@ -163,11 +163,6 @@ static int portals_rma_register(     cci_endpoint_t       *endpoint,
                                      void                 *start,
                                      uint64_t             length,
                                      uint64_t             *rma_handle );
-static int portals_rma_register_phys(cci_endpoint_t       *endpoint,
-                                     cci_connection_t     *connection,
-                                     cci_sg_t             *sg_list,
-                                     uint32_t             sg_cnt,
-                                     uint64_t             *rma_handle );
 static int portals_rma_deregister(   uint64_t             rma_handle );
 static int portals_rma(              cci_connection_t     *connection,
                                      void                 *msg_ptr,
@@ -232,7 +227,6 @@ cci_plugin_core_t cci_core_portals_plugin={
     portals_send,
     portals_sendv,
     portals_rma_register,
-    portals_rma_register_phys,
     portals_rma_deregister,
     portals_rma
 };
@@ -2444,20 +2438,6 @@ out:
     return iRC;
 }
 
-
-// Todo
-static int portals_rma_register_phys(
-    cci_endpoint_t         *endpoint,
-    cci_connection_t       *connection,
-    cci_sg_t               *sg_list,
-    uint32_t               sg_cnt,
-    uint64_t               *rma_handle ) {
-
-    CCI_ENTER;
-    CCI_EXIT;
-
-    return CCI_ERR_NOT_IMPLEMENTED;
-}
 
 /* NOTE: caller should hold ep->lock */
 static void portals_rma_handle_decref(portals_rma_handle_t *handle)

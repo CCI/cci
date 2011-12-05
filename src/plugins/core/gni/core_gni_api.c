@@ -213,12 +213,6 @@ static int         gni_rma_register(
     void *                      start,
     uint64_t                    length,
     uint64_t *                  rma_handle );
-static int         gni_rma_register_phys(
-    cci_endpoint_t *            endpoint,
-    cci_connection_t *          connection,
-    cci_sg_t *                  sg_list,
-    uint32_t                    sg_cnt,
-    uint64_t *                  rma_handle );
 static int         gni_rma_deregister(
     uint64_t                  rma_handle );
 static int         gni_rma(
@@ -453,7 +447,6 @@ cci_plugin_core_t cci_core_gni_plugin= {
     gni_send,
     gni_sendv,
     gni_rma_register,
-    gni_rma_register_phys,
     gni_rma_deregister,
     gni_rma
 };
@@ -1435,32 +1428,6 @@ static int gni_rma_register(      cci_endpoint_t *       endpoint,
     gdev=dev->priv;
     debug( CCI_DB_WARN,
            "%8s.%5d In gni_rma_register()",
-           gdev->nodename, gdev->inst_id );
-
-    return(CCI_ERR_NOT_IMPLEMENTED);
-}
-
-
-static int gni_rma_register_phys( cci_endpoint_t *       endpoint,
-                                  cci_connection_t *     connection,
-                                  cci_sg_t *             sg_list,
-                                  uint32_t               sg_cnt,
-                                  uint64_t *             rma_handle ) {
-
-    cci_device_t const *        device;
-    cci__dev_t *                dev;
-    gni_dev_t *                 gdev;
-
-    if(!gglobals) {
-
-        CCI_EXIT;
-        return(CCI_ENODEV);
-    }
-    device=*(gglobals->devices);
-    dev=container_of( device, cci__dev_t, device );
-    gdev=dev->priv;
-    debug( CCI_DB_WARN,
-           "%8s.%5d In gni_rma_register_phys()",
            gdev->nodename, gdev->inst_id );
 
     return(CCI_ERR_NOT_IMPLEMENTED);
