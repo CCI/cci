@@ -1151,7 +1151,6 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     sock_tx_t           *tx         = NULL;
     sock_header_r_t     *hdr_r      = NULL;
     cci__evt_t          *evt        = NULL;
-    cci_event_t         *event      = NULL;
     cci_connection_t    *connection = NULL;
     struct sockaddr_in  *sin        = NULL;
     void                *ptr        = NULL;
@@ -1242,7 +1241,6 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     evt = &tx->evt;
     evt->ep = ep;
     evt->conn = conn;
-    event = &evt->event;
     evt->event.type = CCI_EVENT_CONNECT_ACCEPTED; /* for now */
     evt->event.accepted.context = context;
     evt->event.accepted.connection = connection;
@@ -1370,8 +1368,6 @@ static int sock_set_opt(cci_opt_handle_t *handle,
     int             ret     = CCI_SUCCESS;
     cci__ep_t       *ep     = NULL;
     cci__conn_t     *conn   = NULL;
-    sock_ep_t       *sep    = NULL;
-    sock_conn_t     *sconn  = NULL;
 
     CCI_ENTER;
 
@@ -1382,10 +1378,8 @@ static int sock_set_opt(cci_opt_handle_t *handle,
 
     if (CCI_OPT_LEVEL_ENDPOINT == level) {
         ep = container_of(handle->endpoint, cci__ep_t, endpoint);
-        sep = ep->priv;
     } else {
         conn = container_of(handle->connection, cci__conn_t, connection);
-        sconn = conn->priv;
     }
 
     switch (name) {
@@ -1456,7 +1450,6 @@ static int sock_get_event(cci_endpoint_t *endpoint,
     cci__ep_t       *ep;
     cci__evt_t      *ev = NULL, *e;
     cci__dev_t      *dev;
-    sock_ep_t       *sep;
 
     CCI_ENTER;
 
@@ -1466,7 +1459,6 @@ static int sock_get_event(cci_endpoint_t *endpoint,
     }
 
     ep = container_of(endpoint, cci__ep_t, endpoint);
-    sep = ep->priv;
     dev = ep->dev;
 
     sock_progress_dev(dev);
@@ -2992,7 +2984,6 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
     sock_tx_t       *tx = NULL, *tmp = NULL, *t = NULL;
     sock_header_r_t *hdr_r;     /* wire header */
     cci_event_t     *event;     /* generic CCI event */
-    cci_endpoint_t  *endpoint;  /* generic CCI endpoint */
     uint32_t        seq;        /* peer's seq */
     uint32_t        ts;         /* FIXME our original seq */
     sock_handshake_t    *hs = NULL;
@@ -3036,7 +3027,6 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
     }
 
     conn = sconn->conn;
-    endpoint = &ep->endpoint;
     dev = ep->dev;
     sdev = dev->priv;
 
