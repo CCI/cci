@@ -492,7 +492,7 @@ typedef struct cci_endpoint {
       this URI. */
   char const * const name;
 
-  /*! Application specific context. */
+  /*! Application-provided, private context. */
   void *context;
 } cci_endpoint_t;
 
@@ -650,7 +650,7 @@ typedef struct cci_connection {
   cci_endpoint_t *endpoint;
   /*! Attributes of the connection */
   cci_conn_attribute_t attribute;
-  /*! Application specific context. */
+  /*! Application-provided, private context. */
   void *context;
 } cci_connection_t;
 
