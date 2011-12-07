@@ -261,7 +261,7 @@ process no longer needs a connection, it can call cci_disconnect().
 \subsection msgs Messages
 
 Once the connection is established, the two processes can start
-communicating. CCI provides two methods, messages (MSG) and remote
+communicating. CCI provides two methods, Messages (MSG) and remote
 memory access (RMA), which we discuss in the \ref RMA section.
 
 CCI MSGs have a maximum size that is device dependent. Ideally, the
