@@ -150,7 +150,7 @@ Unfortunately, both Sockets and Verbs associate buffers to a connection,
 which negatively affects scalability. A robust and scalable
 communication interface should provide connection-oriented semantics
 without per-connection resources.
-    
+
 Communication reliability is often seen as a way to improve overall
 robustness. For some applications such as Media Content Delivery (IPTV),
 Financial Trading (HFT) or system-health monitoring, the provided
@@ -258,39 +258,30 @@ reply within the timeout set in the client’s cci_connect(), the client
 gets an CCI_EVENT_OTHER event with a type of CONNECT_TIMEOUT.  When a
 process no longer needs a connection, it can call cci_disconnect().
 
-\subsection am_msgs Active Messages
+\subsection msgs Messages
 
 Once the connection is established, the two processes can start
-communicating. CCI provides two methods, active messages and remote
+communicating. CCI provides two methods, messages (MSG) and remote
 memory access (RMA), which we discuss in the \ref RMA section.
 
-CCI’s version of active messages does not fully mirror Active Messages
-(AM). Like the original AM, CCI’s active messages have a maximum size
-that is device dependent. Ideally, the size is equal to the link MTU
-(less wire headers). The driving idea to limiting the message size to a
-single MTU is that future networks may have many paths through the
-network due to fabrics with high-radix switches and/or NICs with
-multiple ports connected to redundant switches for fault-tolerance.
-Limiting the active message size limited to a single MTU vastly
-simplifies the requirements for message completion — either it arrives
-or it does not.
+CCI MSGs have a maximum size that is device dependent. Ideally, the
+size is equal to the link MTU (less wire headers). The driving idea to
+limiting the message size to a single MTU is that future networks may
+have many paths through the network due to fabrics with high-radix
+switches and/or NICs with multiple ports connected to redundant switches
+for fault-tolerance.  Limiting the MSG size limited to a single MTU
+vastly simplifies the requirements for message completion — either it
+arrives or it does not.
 
-Where CCI differs from the original Active Messages is handling of
-incoming messages. In Active Messages, the message contains an address
-of the handler that will process it, which assumes all processes have
-identical memory spaces. The difficulty with invoking handlers is there
-is no bound on how long the handler will run. While running, the
-communication library cannot process any more messages and could lead to
-dropping messages. Instead, CCI returns an event of type CCI_EVENT_RECV.
-The application can get the event and hold it without blocking CCI from
+On receipt of a MSG, CCI returns an event of type CCI_EVENT_RECV.  The
+application can get the event and hold it without blocking CCI from
 continuing to service other communications.
 
-The cci_send() parameters include the connection, header and data
-pointers and their respective lengths, an application context pointer,
-and flags. Either or both of the pointers may be NULL. The header is
-currently limited to a maximum length of 32 bytes.  The context pointer
-is returned in the CCI_EVENT_SEND completion event and can be used to
-allow the application to retrieve its internal state.
+The cci_send() parameters include the connection, a data pointer and
+length, an application context pointer, and flags. The pointer may be
+NULL.  The context pointer is returned in the CCI_EVENT_SEND completion
+event and can be used to allow the application to retrieve its internal
+state.
 
 The optional flags parameter can accept the following:
 
@@ -301,29 +292,29 @@ The optional flags parameter can accept the following:
  - CCI_FLAG_NO_COPY is a hint to CCI that the application does not need
    the buffer back until the send completes and is free to use zero-copy
    methods if supported.
-   
+
  - CCI_FLAG_SILENT indicates that the process does not want a completion
    event for this send.
 
 On the receiver, a call to cci_get_event() returns a CCI_EVENT_RECV
-event which includes pointers to the header and data, their lengths, and
-a pointer to the connection. The receiving process can choose to simply
-inspect the data in-place, modify the data in-place and send it to
-another process, or copy it out if it needs to keep the data long-term.
-When the process no longer needs the buffer, it releases it back to CCI
-with cci_return_event(). It should be noted that if the application does
-not process CCI_EVENT_RECV events and return them to CCI fast enough,
-that CCI may still need to drop incoming messages.
+event which includes a pointer to the data, its length, and a pointer to
+the connection. The receiving process can choose to simply inspect the
+data in-place, modify the data in-place and send it to another process,
+or copy it out if it needs to keep the data long-term.  When the process
+no longer needs the buffer, it releases it back to CCI with
+cci_return_event(). It should be noted that if the application does not
+process CCI_EVENT_RECV events and return them to CCI fast enough, that
+CCI may still need to drop incoming messages.
 
 CCI also provides cci_sendv() that takes an array of data pointers and
 an array of lengths instead of the just the one data pointer and length
 in cci_send(). Lastly, CCI does not require memory registration for
-sending or receiving active messages.
+sending or receiving MSGs.
 
 \anchor RMA
 \subsection rma Remote Memory Access
 
-Clearly, messages limited to a single MTU will not meet the needs of all
+Clearly, MSGs limited to a single MTU will not meet the needs of all
 applications. Applications such as file systems which need to move
 large, bulk messages need much more. To accommodate them, CCI also
 provides remote memory access (RMA). RMA transfers are only allowed on
@@ -341,17 +332,15 @@ handle to cci_rma_deregister().
 
 For a RMA transfer to take place, both processes must register their
 local memory and they need to pass the handle of the target process to
-the initiator process using one or more active messages.
+the initiator process using one or more MSGs.
 
-The cci_rma() call takes the connection pointer, an optional header
+The cci_rma() call takes the connection pointer, an optional MSG
 pointer and length, the local RMA handle and offset, the remote RMA
 handle and offset, the transfer length, an application context
 pointer, and a set of flags.
 
-If the header pointer and length are set, the initiator will send a
-completion message to the target that arrives as an active message with
-the header set and no data payload. Like with cci_send(), the header length
-is limited to 32 bytes.
+If the MSG pointer and length are set, the initiator will send a
+completion message to the target that arrives as an MSG with the data.
 
 The flag options include:
 
@@ -364,6 +353,6 @@ The flag options include:
 
 CCI does not guarantee delivery order within an operation (i.e. no
 last-byte-written-last mandate), but order is guaranteed between data
-delivery and the remote receive event if the header is specified.
+delivery and the remote receive event if the MSG is specified.
 
 */

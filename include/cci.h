@@ -808,7 +808,7 @@ typedef enum cci_event_type {
   /*! A send or RMA has completed. */
   CCI_EVENT_SEND,
 
-  /*! An active message has been received. */
+  /*! A message has been received. */
   CCI_EVENT_RECV,
 
   /*! A new outgoing connection was successfully accepted at the
