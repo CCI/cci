@@ -608,6 +608,11 @@ CCI_DECLSPEC int cci_destroy_endpoint(cci_endpoint_t *endpoint);
   RMA operations only applies to target notification, not data
   delivery.
 
+  For reliable connections, unordered connections allow the most
+  aggressive optimization of the underlying network(s) to provide better
+  performance. Requesting Ordered connections will reduce performance on
+  most networks.
+
   Unreliable unordered connections have no timeout.
 
   Multicast is always unreliable unordered.  Multicast connections
