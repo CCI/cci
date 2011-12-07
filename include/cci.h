@@ -491,6 +491,9 @@ typedef struct cci_endpoint {
       to pass to cci_connect(). The application should never need to parse
       this URI. */
   char const * const name;
+
+  /*! Application-provided, private context. */
+  void *context;
 } cci_endpoint_t;
 
 /*! OS-native handles
@@ -647,6 +650,8 @@ typedef struct cci_connection {
   cci_endpoint_t *endpoint;
   /*! Attributes of the connection */
   cci_conn_attribute_t attribute;
+  /*! Application-provided, private context. */
+  void *context;
 } cci_connection_t;
 
 union cci_event;
