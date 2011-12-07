@@ -27,7 +27,7 @@
  * \todo How do we return errors for non-zero-copy sends?  (e.g., RNR
    errors that take a while to occur -- may be long after the send has
    locally completed).  We can't necessarily return a pointer to the
-   messsage that failed because the app may have overwritten it by
+   message that failed because the app may have overwritten it by
    then.  Possible: we could return an asynch event send error with a
    pointer to our internal buffer, with the condition that the
    internal buffer will be released when the event is returned...?
@@ -998,7 +998,7 @@ typedef struct cci_event_connect_rejected {
 /*!
   Connection request event.
 
-  An incoming conenction request from a client. It includes the
+  An incoming connection request from a client. It includes the
   requested connection attributes (reliability and ordering) and
   an optional payload.
 
@@ -1257,7 +1257,7 @@ typedef enum cci_opt_name {
       raised on that connection.
 
       - The CCI implementation will automatically send control
-      hearbeats across an inactive (but still alive) connection to
+      heartbeats across an inactive (but still alive) connection to
       reset the peer's keepalive timer before it times out.
 
       If a keepalive event is raised, the keepalive timeout is set to
@@ -1464,7 +1464,7 @@ CCI_DECLSPEC int cci_sendv(cci_connection_t *connection,
   connection. If it is NULL, then any reliable connection on that
   endpoint can access that memory.
 
-  It is allowable to have overlapping registerations.
+  It is allowable to have overlapping registrations.
 
   \param[in]  endpoint      Local endpoint to use for RMA.
   \param[in]  connection    Restrict RMA to this connection.
@@ -1489,7 +1489,7 @@ CCI_DECLSPEC int cci_rma_register(cci_endpoint_t *endpoint,
   Deregister memory.
 
   If an RMA is in progress that uses this handle, the RMA may abort or
-  the deregisteration may fail.
+  the deregistration may fail.
 
   Once deregistered, the handle is stale.
 
