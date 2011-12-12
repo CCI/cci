@@ -1456,18 +1456,17 @@ CCI_DECLSPEC int cci_sendv(cci_connection_t *connection,
 /*!
   Register memory for RMA operations.
 
-  The intent is that this function is invoked frequently -- "just
-  register everything" before invoking RMA operations.
+  Prior to accessing memory using RMA, the application must register
+  the memory with an endpoint. Memory registered with one endpoint may
+  not be accessed via another endpoint, unless also registered with
+  that endpoint (i.e. an endpoint serves as a protection domain).
 
-  In the best case, the implementation is cheap/fast enough that the
-  invocation time doesn't noticeably affect performance (e.g., MX and
-  PSM).  If the implementation is slow (e.g., IB/iWARP), this function
-  should probably have a registration cache so that at least repeated
-  registrations are fast.
+  If the connection is provided (and the endpoint's driver supports this
+  feature), the memory is only exposed to that connection. If it is NULL,
+  then any reliable connection on that endpoint can access that memory.
 
-  If the connection is provided, the memory is only exposed to that
-  connection. If it is NULL, then any reliable connection on that
-  endpoint can access that memory.
+  Registration may take awhile depending on the underlying device and
+  should not be in the critical path.
 
   It is allowable to have overlapping registrations.
 
@@ -1480,6 +1479,7 @@ CCI_DECLSPEC int cci_sendv(cci_connection_t *connection,
   \return CCI_SUCCESS   The memory is ready for RMA.
   \return CCI_EINVAL    endpoint, start, or rma_handle is NULL.
   \return CCI_EINVAL    connection is unreliable.
+  \return CCI_ENOTSUP   driver does not support setting a connection.
   \return CCI_EINVAL    length is 0.
   \return Each driver may have additional error codes.
 
