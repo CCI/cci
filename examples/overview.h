@@ -86,7 +86,7 @@ available.  Choice is good but too much choice is worse. Fortunately,
 software programmers are efficient at reducing overly complex interfaces
 to a minimum set of useful semantics. For example, MPI specifies over
 300 functions but the vast majority of MPI applications only use a
-fraction of them.  
+fraction of them.
 
 Similarly, relative simplicity was the main drive behind the wide
 adoption of the BSD Socket interface. A communication interface should
@@ -102,7 +102,7 @@ one-sided, and asynchronous operations. To deliver the best performance,
 a communication interface should present semantics that can efficiently
 leverage all these techniques as provided by modern high-speed networks.
 
-\subsection scalability Scalabity
+\subsection scalability Scalability
 
 Projections for leadership scale systems in HPC include hundreds of
 thousands of nodes and millions of cores. In the commercial space, Cloud
@@ -156,9 +156,9 @@ robustness. For some applications such as Media Content Delivery (IPTV),
 Financial Trading (HFT) or system-health monitoring, the provided
 reliability may be incompatible with their timing requirements.
 Furthermore, the most scalable multicast implementations are unreliable.
-For these reasons, a large share of applications use unreliable connec-
-tions. A communication interface should provide different levels of
-connection reliability, as well as support for multicast.
+For these reasons, a large share of applications use unreliable
+connections. A communication interface should provide different levels
+of connection reliability, as well as support for multicast.
 
 \section api The CCI Interface
 
@@ -169,7 +169,7 @@ to discuss how CCI can meet the goals outlined above.
 
 Before calling any function, the application must call cci_init(). The
 application may call cci_init() multiple times with different
-parameters. The application can then call cci_get_devices() to obtain an
+parameters. The application thens calls cci_get_devices() to obtain an
 array of available devices. The devices are parsed from a config file
 and each device has a name, an array keyword/value strings, a maximum
 send size in bytes, and PCI information if needed. Each device’s maximum
@@ -178,21 +178,25 @@ more communication is needed, the application calls cci_free_devices().
 
 \subsection endpts Communication Endpoints
 
-All communication in CCI revolves around an endpoint. Each endpoint has
-some number of device-sized buffers available for sending and receiving
-messages of small, unexpected messages. The application calls
+All communication in CCI revolves around an endpoint. A single endpoint
+can communicate with any number of peers.
+
+Each endpoint has some number of device-sized buffers available for
+sending and receiving small, unexpected messages. The application calls
 cci_create_endpoint() and cci_destroy_endpoint(), respectively, to
 obtain or release an endpoint. The application may alter the number of
 send and/or receive buffers using cci_get_opt() and cci_set_opt().
+
+The endpoint provides a context pointer for the application to use. The
+application may use the context pointer to provide access to additional
+state allocated by the application related to that endpoint.
 
 \subsection evts Event Handling
 
 CCI is inherently asynchronous and all communication functions only
 initiate communication. When a communication completes, it generates an
-event.  There are three event types: CCI_EVENT_SEND, CCI_EVENT_RECV, and
-CCI_EVENT_OTHER. The CCI_EVENT_OTHER event returns connection success,
-rejection or timeout events as well as endpoint and/or device failure
-events.
+event.  There are many event types: CCI_EVENT_SEND, CCI_EVENT_RECV,
+CCI_EVENT_CONNECT_REQUEST, etc.
 
 An application can poll for an event with cci_get_event(), which returns
 an event structure of which the contents vary depending on the event’s
@@ -208,13 +212,14 @@ available.
 
 CCI defines a connection struct which includes the maximum send size
 negotiated by the two instances of CCI, a pointer to the owning
-endpoint, and the connection attribute.
+endpoint, the connection attribute, and a context pointer.
 
 As mentioned above, some applications may need reliable delivery while
-other may not. Among applications needing reliable delivery, some may
+others may not. Among applications needing reliable delivery, some may
 need in-order completion (e.g. traditional SOCK_STREAM semantics) and
 others may accept out-of-order completion as long as communications are
-initiated in-order (e.g. MPI point-to-point).
+initiated in-order (e.g. MPI point-to-point). Typically, most networks
+can provide higher performance for unordered versus ordered connections.
 
 In order to provide applications with the level of service appropriate
 for their needs, CCI provides multiple types of connection attributes:
@@ -230,33 +235,29 @@ connections to the other process.
 
 \subsection conn_est Connection Establishment
 
-CCI mirrors the client/server connection semantics of Sockets. A process
-willing to accept connections will first cci_bind() a device to a name
-service at a specified port with a backlog parameter. The call returns a
-pointer to a service. When a server no longer wishes to receive
-connection requests, it can cci_unbind() from the service.
+CCI provides a client/server semantic for connection establishment.
+Every open endpoint is able to initiate and receive connection
+requests.
 
 To initiate a connection, the client calls cci_connect() with parameters
-including an endpoint, a string URI for the server, the port, optionally
-a pointer to a limited sized payload and its length, the connection
-attribute, a pointer to an optional application context, and a timeout.
+including an endpoint, a string URI for the server, optionally a pointer
+to a limited sized payload and its length, the connection attribute, a
+pointer to an optional application context, and a timeout.
 
-The server then polls for connection requests using cci_get_conn_request()
-passing in the service pointer. If one is ready, it returns a \ref conn_req
-struct which contains an array of compatible devices, the number of
-devices in the array, a pointer to the application payload and its
-length if the client sent it, and the requested connection attribute.
+The server polls for events which may include connection requests. When
+a connection request event is returned, it includes a pointer to the
+application payload and its length if the client sent it, and the
+requested connection attribute.
 
 The server then calls either cci_accept() or cci_reject(). The
-cci_accept() call binds the connection request to an endpoint previously
-created from one of the compatible devices and returns a connection
-pointer. The client gets an CCI_EVENT_OTHER event with the type
-CONNECT_SUCCESS.  If the server calls cci_reject(), the client get an
-other event with the type CONNECT_REJECTED.  On the server, the
-connection request is stale after either call. If the server does not
-reply within the timeout set in the client’s cci_connect(), the client
-gets an CCI_EVENT_OTHER event with a type of CONNECT_TIMEOUT.  When a
-process no longer needs a connection, it can call cci_disconnect().
+cci_accept() call returns a new connection pointer. The client gets an
+CCI_EVENT_CONNECT_ACCEPTED event.  If the server calls cci_reject(), the
+client get a CCI_EVENT_CONNECT_REJECTED event.  On the server, the
+connection request event must then be returned using cci_return_event()
+just like every other event. If the server does not reply within the
+timeout set in the client’s cci_connect(), the client gets an
+CCI_EVENT_CONNECT_TIMEDOUT event.  When a process no longer needs a
+connection, it can call cci_disconnect().
 
 \subsection msgs Messages
 
@@ -324,11 +325,12 @@ Before using RMA, the process needs to explicitly register the memory.
 CCI provides cci_rma_register() which takes pointers to the endpoint, the
 connection, and the start of the region to be registered as well as the
 length of the region and it returns a RMA handle. If the connection
-pointer is set, RMA operations on that handle will be limited to that
-one connection. If the connection is NULL, then RMA operations on that
-handle will be limited to any connection on that endpoint. When a
-process no longer needs to RMA in to or out of the region, it passes the
-handle to cci_rma_deregister().
+pointer is set and the underlying device supports this feature, RMA
+operations on that handle will be limited to that one connection. If it
+does not, it will return CCI_ENOTSUP. If the connection is NULL, then
+RMA operations on that handle will be limited to any connection on that
+endpoint. When a process no longer needs to RMA in to or out of the
+region, it passes the handle to cci_rma_deregister().
 
 For a RMA transfer to take place, both processes must register their
 local memory and they need to pass the handle of the target process to
