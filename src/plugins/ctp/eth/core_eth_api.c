@@ -61,10 +61,6 @@ static int eth_rma_register(cci_endpoint_t *endpoint,
                             cci_connection_t *connection,
                             void *start, uint64_t length,
                             uint64_t *rma_handle);
-static int eth_rma_register_phys(cci_endpoint_t *endpoint,
-                                 cci_connection_t *connection,
-                                 cci_sg_t *sg_list, uint32_t sg_cnt,
-                                 uint64_t *rma_handle);
 static int eth_rma_deregister(uint64_t rma_handle);
 static int eth_rma(cci_connection_t *connection,
                    void *msg_ptr, uint32_t msg_len,
@@ -119,7 +115,6 @@ cci_plugin_core_t cci_core_eth_plugin = {
     eth_send,
     eth_sendv,
     eth_rma_register,
-    eth_rma_register_phys,
     eth_rma_deregister,
     eth_rma
 };
@@ -559,16 +554,6 @@ static int eth_rma_register(cci_endpoint_t *endpoint,
                             uint64_t *rma_handle)
 {
     printf("In eth_rma_register\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
-}
-
-
-static int eth_rma_register_phys(cci_endpoint_t *endpoint,
-                                 cci_connection_t *connection,
-                                 cci_sg_t *sg_list, uint32_t sg_cnt,
-                                 uint64_t *rma_handle)
-{
-    printf("In eth_rma_register_phys\n");
     return CCI_ERR_NOT_IMPLEMENTED;
 }
 
