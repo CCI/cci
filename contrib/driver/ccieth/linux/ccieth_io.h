@@ -7,8 +7,9 @@
 #define CCIETH_IO_H 1
 
 #include <linux/types.h>
+#include <linux/ioctl.h>
 
-#define CCIETH_IOCTL_GET_INFO 0x1
+#define CCIETH_IOCTL_MAGIC 'C'
 
 struct ccieth_ioctl_get_info {
 	__u8 addr[6];
@@ -24,8 +25,7 @@ struct ccieth_ioctl_get_info {
 	__u64 rate;
 	/* 24 */
 };
-
-#define CCIETH_IOCTL_CREATE_ENDPOINT 0x8542
+#define CCIETH_IOCTL_GET_INFO _IOW(CCIETH_IOCTL_MAGIC, 0x1, struct ccieth_ioctl_get_info)
 
 struct ccieth_ioctl_create_endpoint {
 	__u8 addr[6];
@@ -35,8 +35,7 @@ struct ccieth_ioctl_create_endpoint {
 	__u32 pad2;
 	/* 16 */
 };
-
-#define CCIETH_IOCTL_GET_EVENT 0x6734
+#define CCIETH_IOCTL_CREATE_ENDPOINT _IOWR(CCIETH_IOCTL_MAGIC, 0x2, struct ccieth_ioctl_create_endpoint)
 
 struct ccieth_ioctl_get_event {
 	__u8 type;
@@ -48,12 +47,12 @@ struct ccieth_ioctl_get_event {
 	__u32 pad2;
 	/* 16 */
 };
-
-#define CCIETH_IOCTL_RETURN_EVENT 0x5678
+#define CCIETH_IOCTL_GET_EVENT _IOW(CCIETH_IOCTL_MAGIC, 0x3, struct ccieth_ioctl_get_event)
 
 struct ccieth_ioctl_return_event {
 	__u32 event_offset;
 };
+#define CCIETH_IOCTL_RETURN_EVENT _IOR(CCIETH_IOCTL_MAGIC, 0x4, struct ccieth_ioctl_return_event)
 
 #define CCIETH_MMAP_RECVQ_OFFSET 0x0
 
