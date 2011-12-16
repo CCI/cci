@@ -625,6 +625,7 @@ verbs_create_endpoint(cci_device_t *device,
 	int		ret	= CCI_SUCCESS;
 	int		fflags	= 0;
 	int		pg_sz	= 0;
+	char		name[64];
 	size_t		len	= 0;
 	cci__dev_t	*dev	= NULL;
 	cci__ep_t	*ep	= NULL;
@@ -700,6 +701,11 @@ verbs_create_endpoint(cci_device_t *device,
 		ret = errno;
 		goto out;
 	}
+
+	memset(name, 0, sizeof(name));
+	sprintf(name, "%s%s:%hu", VERBS_URI,
+			inet_ntoa(vep->sin.sin_addr), ntohs(vep->sin.sin_port));
+	*((char **)&ep->endpoint.name) = strdup(name);
 
 	vep->pd = ibv_alloc_pd(vdev->context);
 	if (!vep->pd) {
