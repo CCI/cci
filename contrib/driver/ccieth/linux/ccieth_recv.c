@@ -7,13 +7,13 @@
 #include <linux/rcupdate.h>
 
 #include <ccieth_common.h>
+#include <ccieth_wire.h>
 
 static int
 ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 	    struct net_device *orig_dev)
 {
-	u32 eid;
-	u8 pktype;
+	struct ccieth_pkt_header hdr;
 	struct ccieth_endpoint *ep;
 	int err;
 
@@ -24,17 +24,14 @@ ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 	/* len doesn't include header */
 	skb_push(skb, ETH_HLEN);
 
-	/* extract common headers TODO cleanup with an actual struct */
-	err = skb_copy_bits(skb, sizeof(struct ethhdr), &eid, sizeof(eid));
-	if (err)
-		goto out;
-	err = skb_copy_bits(skb, sizeof(struct ethhdr)+sizeof(eid), &pktype, sizeof(pktype));
+	/* extract common headers */
+	err = skb_copy_bits(skb, 0, &hdr, sizeof(hdr));
 	if (err)
 		goto out;
 
 	/* check endpoint is attached to this ifp */
 	rcu_read_lock();
-	ep = idr_find(&ccieth_ep_idr, eid);
+	ep = idr_find(&ccieth_ep_idr, hdr.endpoint_id);
 	rcu_read_unlock();
 	if (!ep || ep->ifp != ifp) {
 		err = -EINVAL;
@@ -52,7 +49,7 @@ out:
 }
 
 struct packet_type ccieth_pt = {
-	.type = __constant_htons(0x86df),
+	.type = __constant_htons(ETH_P_CCI),
 	.func = ccieth_recv,
 };
 

@@ -16,6 +16,7 @@
 
 #include <ccieth_io.h>
 #include <ccieth_common.h>
+#include <ccieth_wire.h>
 
 struct idr ccieth_ep_idr;
 static spinlock_t ccieth_ep_idr_lock;
@@ -128,7 +129,7 @@ static int
 ccieth_send_connect(struct ccieth_endpoint *ep, const struct ccieth_ioctl_send_connect *arg)
 {
 	struct sk_buff *skb;
-	char *buffer;
+	struct ccieth_pkt_header *hdr;
 	int err;
 
         skb = alloc_skb(ETH_ZLEN, GFP_KERNEL);
@@ -139,16 +140,16 @@ ccieth_send_connect(struct ccieth_endpoint *ep, const struct ccieth_ioctl_send_c
 		
 	skb_reset_mac_header(skb);
 	skb_reset_network_header(skb);
-	skb->protocol = __constant_htons(0x86df);
+	skb->protocol = __constant_htons(ETH_P_CCI);
 	skb_put(skb, ETH_ZLEN);
 	skb->dev = ep->ifp;
 
-	buffer = skb_mac_header(skb);
-	memset(buffer, 0, 14);
-	((struct ethhdr *) buffer)->h_proto = __constant_cpu_to_be16(0x86df);
-	*((u32*)(buffer+sizeof(struct ethhdr))) = ep->id;
+	hdr = (struct ccieth_pkt_header *) skb_mac_header(skb);
+	memset(hdr, 0, 14); /* clear src and dst macs FIXME */
+	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
+	hdr->endpoint_id = ep->id;
+	hdr->type = 0; /* FIXME */
         dev_queue_xmit(skb);
-	printk("sent connect\n");
 	return 0;
 
 out:
