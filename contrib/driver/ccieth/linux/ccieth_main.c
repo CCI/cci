@@ -150,7 +150,7 @@ ccieth_send_connect(struct ccieth_endpoint *ep, const struct ccieth_ioctl_send_c
 	memcpy(&hdr->eth.h_source, ep->ifp->dev_addr, 6);
 	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
 	hdr->endpoint_id = arg->dest_eid;
-	hdr->type = 0; /* FIXME */
+	hdr->type = CCIETH_PKT_CONNECT;
         dev_queue_xmit(skb);
 	return 0;
 

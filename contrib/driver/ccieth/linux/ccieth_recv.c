@@ -10,6 +10,14 @@
 #include <ccieth_wire.h>
 
 static int
+ccieth_recv_connect(struct net_device *ifp, struct ccieth_endpoint *ep,
+		    struct ccieth_pkt_header *hdr, struct sk_buff *skb)
+{
+
+	return 0;
+}
+
+static int
 ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 	    struct net_device *orig_dev)
 {
@@ -37,11 +45,21 @@ ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 		err = -EINVAL;
 		goto out;
 	}
-		
-	printk("got a packet with ep %p\n", ep);
 
-	dev_kfree_skb(skb);
-	return 0;
+	printk("got a packet with ep %p type %d\n", ep, hdr.type);
+
+	/* FIXME: take a ref on the endpoint, and change the destroy code to use kref if we can hot-remove interfaces */
+
+	switch (hdr.type) {
+	case CCIETH_PKT_CONNECT:
+		err = ccieth_recv_connect(ifp, ep, &hdr, skb);
+		break;
+	default:
+		err = -EINVAL;
+		break;
+	}
+
+	/* FIXME: release ref on endpoint */
 
 out:
 	dev_kfree_skb(skb);

@@ -18,4 +18,8 @@ struct ccieth_pkt_header {
 	/* 24 */
 };
 
+enum ccieth_pkt_type {
+	CCIETH_PKT_CONNECT,
+};
+
 #endif /* CCIETH_WIRE_H */
