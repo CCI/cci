@@ -41,7 +41,7 @@ ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 		goto out;
 	}
 		
-	printk("got a packet\n");
+	printk("got a packet with ep %p\n", ep);
 
 	dev_kfree_skb(skb);
 	return 0;

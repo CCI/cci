@@ -125,6 +125,37 @@ ccieth_return_event(struct ccieth_endpoint *ep, const struct ccieth_ioctl_return
 }
 
 static int
+ccieth_send_connect(struct ccieth_endpoint *ep, const struct ccieth_ioctl_send_connect *arg)
+{
+	struct sk_buff *skb;
+	char *buffer;
+	int err;
+
+        skb = alloc_skb(ETH_ZLEN, GFP_KERNEL);
+	if (!skb) {
+		err = -ENOMEM;
+		goto out;
+	}
+		
+	skb_reset_mac_header(skb);
+	skb_reset_network_header(skb);
+	skb->protocol = __constant_htons(0x86df);
+	skb_put(skb, ETH_ZLEN);
+	skb->dev = ep->ifp;
+
+	buffer = skb_mac_header(skb);
+	memset(buffer, 0, 14);
+	((struct ethhdr *) buffer)->h_proto = __constant_cpu_to_be16(0x86df);
+	*((u32*)(buffer+sizeof(struct ethhdr))) = ep->id;
+        dev_queue_xmit(skb);
+	printk("sent connect\n");
+	return 0;
+
+out:
+	return err;
+}
+
+static int
 ccieth_miscdev_open(struct inode *inode, struct file *file)
 {
 	/* mmap for write would let the application break the recvq.
@@ -306,6 +337,24 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 			return -EFAULT;
 
 		ret = ccieth_return_event(ep, &re_arg);
+		if (ret < 0)
+			return ret;
+
+		return 0;
+	}
+
+	case CCIETH_IOCTL_SEND_CONNECT: {
+		struct ccieth_ioctl_send_connect sc_arg;
+		struct ccieth_endpoint *ep = file->private_data;
+
+		if (!ep)
+			return -EINVAL;
+
+		ret = copy_from_user(&sc_arg, (__user void *)arg, sizeof(sc_arg));
+		if (ret)
+			return -EFAULT;
+
+		ret = ccieth_send_connect(ep, &sc_arg);
 		if (ret < 0)
 			return ret;
 

@@ -54,6 +54,11 @@ struct ccieth_ioctl_return_event {
 };
 #define CCIETH_IOCTL_RETURN_EVENT _IOR(CCIETH_IOCTL_MAGIC, 0x4, struct ccieth_ioctl_return_event)
 
+struct ccieth_ioctl_send_connect {
+	__u32 dest_eid;
+};
+#define CCIETH_IOCTL_SEND_CONNECT _IOR(CCIETH_IOCTL_MAGIC, 0x5, struct ccieth_ioctl_send_connect)
+
 #define CCIETH_MMAP_RECVQ_OFFSET 0x0
 
 struct ccieth_recvq_slot {

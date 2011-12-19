@@ -425,6 +425,13 @@ static int eth_create_endpoint(cci_device_t *device,
   ccieth_uri_sprintf(name, (const uint8_t *)&edev->addr.sll_addr, arg.id);
   *((char **)&(*endpoint)->name) = name;
 
+  {
+	  struct ccieth_ioctl_send_connect arg;
+	  ret = ioctl(fd, CCIETH_IOCTL_SEND_CONNECT, &arg);
+	  if (ret < 0)
+		  perror("send connect");
+  }
+
   recvq = mmap(NULL, 4096*1024 /* FIXME */, PROT_READ, MAP_SHARED, fd, CCIETH_MMAP_RECVQ_OFFSET);
   printf("recvq %p\n", recvq);
   if (recvq == MAP_FAILED) {
