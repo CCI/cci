@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/param.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <ifaddrs.h>
@@ -370,6 +371,9 @@ verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 	/* for each ifaddr, check if it is a RDMA device */
 	ret = verbs_find_rdma_devices(vglobals->contexts, count, &ifaddrs);
 	if (ret) {
+		/* TODO */
+		ret = CCI_ENODEV;
+		goto out;
 	}
 	vglobals->ifaddrs = ifaddrs;
 
@@ -625,7 +629,7 @@ verbs_create_endpoint(cci_device_t *device,
 	int		ret	= CCI_SUCCESS;
 	int		fflags	= 0;
 	int		pg_sz	= 0;
-	char		name[64];
+	char		name[MAXHOSTNAMELEN + 16]; /* verbs:// + host + port */
 	size_t		len	= 0;
 	cci__dev_t	*dev	= NULL;
 	cci__ep_t	*ep	= NULL;
@@ -650,6 +654,14 @@ verbs_create_endpoint(cci_device_t *device,
 		goto out;
 	}
 	vep = ep->priv;
+
+	TAILQ_INIT(&vep->txs);
+	TAILQ_INIT(&vep->idle_txs);
+	TAILQ_INIT(&vep->rxs);
+	TAILQ_INIT(&vep->idle_rxs);
+	TAILQ_INIT(&vep->conns);
+	TAILQ_INIT(&vep->handles);
+	TAILQ_INIT(&vep->rma_ops);
 
 	(*endpoint)->max_recv_buffer_count = VERBS_EP_RX_CNT;
 	ep->rx_buf_cnt = VERBS_EP_RX_CNT;
@@ -718,14 +730,6 @@ verbs_create_endpoint(cci_device_t *device,
 		ret = errno;
 		goto out;
 	}
-
-	TAILQ_INIT(&vep->txs);
-	TAILQ_INIT(&vep->idle_txs);
-	TAILQ_INIT(&vep->rxs);
-	TAILQ_INIT(&vep->idle_rxs);
-	TAILQ_INIT(&vep->conns);
-	TAILQ_INIT(&vep->handles);
-	TAILQ_INIT(&vep->rma_ops);
 
 	pg_sz = getpagesize();
 
@@ -814,6 +818,70 @@ verbs_create_endpoint(cci_device_t *device,
 
 out:
 	/* TODO lots of clean up */
+	if (ep->priv) {
+		verbs_ep_t	*vep	= ep->priv;
+
+		if (vep->srq)
+			ibv_destroy_srq(vep->srq);
+
+		while (!TAILQ_EMPTY(&vep->rxs)) {
+			verbs_rx_t *rx = TAILQ_FIRST(&vep->rxs);
+			TAILQ_REMOVE(&vep->rxs, rx, gentry);
+			free(rx);
+		}
+
+		if (vep->rx_mr) {
+			ret = ibv_dereg_mr(vep->rx_mr);
+			if (ret)
+				debug(CCI_DB_WARN, "deregistering new endpoint rx_mr "
+					"failed with %s\n", strerror(ret));
+		}
+
+		if (vep->rx_buf)
+			free(vep->rx_buf);
+
+		while (!TAILQ_EMPTY(&vep->txs)) {
+			verbs_tx_t *tx = TAILQ_FIRST(&vep->txs);
+			TAILQ_REMOVE(&vep->txs, tx, gentry);
+			free(tx);
+		}
+
+		if (vep->tx_mr) {
+			ret = ibv_dereg_mr(vep->tx_mr);
+			if (ret)
+				debug(CCI_DB_WARN, "deregistering new endpoint tx_mr "
+					"failed with %s\n", strerror(ret));
+		}
+
+		if (vep->tx_buf)
+			free(vep->tx_buf);
+
+		if (vep->cq) {
+			ret = ibv_destroy_cq(vep->cq);
+			if (ret)
+				debug(CCI_DB_WARN, "destroying new endpoint cq "
+					"failed with %s\n", strerror(ret));
+		}
+
+		if (vep->pd) {
+			ret = ibv_dealloc_pd(vep->pd);
+			if (ret)
+				debug(CCI_DB_WARN, "deallocing new endpoint pd "
+					"failed with %s\n", strerror(ret));
+		}
+
+		if (vep->id_rc)
+			rdma_destroy_id(vep->id_rc);
+
+		if (vep->id_ud)
+			rdma_destroy_id(vep->id_ud);
+
+		if (vep->channel)
+			rdma_destroy_event_channel(vep->channel);
+
+		free(vep);
+		ep->priv = NULL;
+	}
 	return ret;
 }
 
@@ -847,15 +915,141 @@ verbs_reject(union cci_event *event)
 
 
 static int
+verbs_parse_uri(const char *uri, char **node, char **service)
+{
+	int	ret	= CCI_SUCCESS;
+	int	len	= strlen(VERBS_URI);
+	char	*ip	= NULL;
+	char	*port	= NULL;
+	char	*colon	= NULL;
+
+	CCI_ENTER;
+
+	if (0 == strncmp(VERBS_URI, uri, len)) {
+		ip = strdup(&uri[len]);
+	} else {
+		ret = CCI_EINVAL;
+		goto out;
+	}
+
+	colon = strchr(ip, ':');
+	if (colon) {
+		*colon = '\0';
+	} else {
+		ret = CCI_EINVAL;
+		goto out;
+	}
+
+	colon++;
+	port = colon;
+
+	*node = ip;
+	*service = port;
+
+out:
+	if (ret != CCI_SUCCESS) {
+		if (ip)
+			free(ip);
+	}
+	CCI_EXIT;
+	return ret;
+}
+
+static int
 verbs_connect(cci_endpoint_t *endpoint, char *server_uri,
                             void *data_ptr, uint32_t data_len,
                             cci_conn_attribute_t attribute,
                             void *context, int flags,
                             struct timeval *timeout)
 {
+	int			ret		= CCI_SUCCESS;
+	char			*node		= NULL;
+	char			*service	= NULL;
+	cci__ep_t		*ep		= NULL;
+	cci__conn_t		*conn		= NULL;
+	verbs_ep_t		*vep		= NULL;
+	verbs_conn_t		*vconn		= NULL;
+	struct rdma_addrinfo	hints, *res	= NULL;
+	struct ibv_qp_init_attr	attr;
+	struct rdma_conn_param	param;
+
 	CCI_ENTER;
+
+	ep = container_of(endpoint, cci__ep_t, endpoint);
+	vep = ep->priv;
+
+	conn = calloc(1, sizeof(*conn));
+	if (!conn) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	conn->priv = calloc(1, sizeof(*vconn));
+	if (!conn->priv) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	vconn = conn->priv;
+	vconn->conn = conn;
+
+	/* conn->tx_timeout = 0;  by default */
+
+	conn->connection.attribute = attribute;
+	conn->connection.endpoint = endpoint;
+
+	ret = verbs_parse_uri(server_uri, &node, &service);
+	if (ret)
+		goto out;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_qp_type = IBV_QPT_RC;
+	ret = rdma_getaddrinfo(node, service, &hints, &res);
+	if (ret == -1) {
+		ret = errno;
+		debug(CCI_DB_CONN, "rdma_getaddrinfo() returned %s",
+			strerror(ret));
+		goto out;
+	}
+
+	memset(&attr, 0, sizeof(attr));
+	attr.qp_type = IBV_QPT_RC;
+	attr.send_cq = vep->cq;
+	attr.recv_cq = vep->cq;
+	attr.srq = vep->srq;
+	attr.cap.max_send_wr = VERBS_EP_TX_CNT;
+	attr.cap.max_send_sge = 1;
+	attr.cap.max_recv_sge = 1;
+	ret = rdma_create_ep(&vconn->id, res, vep->pd, &attr);
+	if (ret == -1) {
+		ret = errno;
+		debug(CCI_DB_CONN, "rdma_create_ep() returned %s",
+			strerror(ret));
+		goto out;
+	}
+
+	ret = rdma_migrate_id(vconn->id, vep->channel);
+	if (ret == -1) {
+		ret = errno;
+		debug(CCI_DB_CONN, "rdma_migrate_id() returned %s",
+			strerror(ret));
+		goto out;
+	}
+
+	memset(&param, 0, sizeof(param));
+	param.srq = 1;
+	param.initiator_depth = param.responder_resources = 16;
+	param.rnr_retry_count = 7; /* infinite retry */
+	ret = rdma_connect(vconn->id, &param);
+
+	debug(CCI_DB_CONN, "connecting to %s %s\n",
+		node, service);
+
+out:
+	if (node)
+		free(node);
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 
