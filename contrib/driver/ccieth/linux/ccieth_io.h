@@ -55,7 +55,12 @@ struct ccieth_ioctl_return_event {
 #define CCIETH_IOCTL_RETURN_EVENT _IOR(CCIETH_IOCTL_MAGIC, 0x4, struct ccieth_ioctl_return_event)
 
 struct ccieth_ioctl_send_connect {
+	__u8 dest_addr[6];
+	__u8 pad1[2];
+	/* 8 */
 	__u32 dest_eid;
+	__u32 pad2;
+	/* 16 */
 };
 #define CCIETH_IOCTL_SEND_CONNECT _IOR(CCIETH_IOCTL_MAGIC, 0x5, struct ccieth_ioctl_send_connect)
 

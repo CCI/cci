@@ -390,6 +390,7 @@ static int eth_create_endpoint(cci_device_t *device,
   eth__dev_t *edev = _dev->priv;
   cci__ep_t *_ep;
   eth__ep_t *eep;
+  int eid;
   void *recvq;
   char *name;
   int fd;
@@ -421,12 +422,15 @@ static int eth_create_endpoint(cci_device_t *device,
     ret = errno;
     goto out_with_fd;
   }
+  eid = arg.id;
 
   ccieth_uri_sprintf(name, (const uint8_t *)&edev->addr.sll_addr, arg.id);
   *((char **)&(*endpoint)->name) = name;
 
   {
 	  struct ccieth_ioctl_send_connect arg;
+	  arg.dest_eid = eid;
+	  memcpy(&arg.dest_addr, &edev->addr.sll_addr, 6);
 	  ret = ioctl(fd, CCIETH_IOCTL_SEND_CONNECT, &arg);
 	  if (ret < 0)
 		  perror("send connect");

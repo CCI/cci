@@ -145,9 +145,11 @@ ccieth_send_connect(struct ccieth_endpoint *ep, const struct ccieth_ioctl_send_c
 	skb->dev = ep->ifp;
 
 	hdr = (struct ccieth_pkt_header *) skb_mac_header(skb);
-	memset(hdr, 0, 14); /* clear src and dst macs FIXME */
+	memcpy(&hdr->eth.h_dest, &arg->dest_addr, 6);
+	memset(&hdr->eth.h_dest, 0x12, 6);
+	memcpy(&hdr->eth.h_source, ep->ifp->dev_addr, 6);
 	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
-	hdr->endpoint_id = ep->id;
+	hdr->endpoint_id = arg->dest_eid;
 	hdr->type = 0; /* FIXME */
         dev_queue_xmit(skb);
 	return 0;
