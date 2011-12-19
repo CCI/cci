@@ -95,31 +95,30 @@ ccieth_create_endpoint(struct ccieth_ioctl_create_endpoint *arg)
 	dev_hold(ifp);
 	rcu_read_unlock();
 
-	if (!idr_pre_get(&ccieth_ep_idr, GFP_KERNEL)) {
+	ep = kmalloc(sizeof(struct ccieth_endpoint), GFP_KERNEL);
+	if (!ep) {
 		err = -ENOMEM;
 		goto out_with_ifp;
+	}
+	ep->ifp = ifp;
+	ep->recvq = NULL;
+
+	if (!idr_pre_get(&ccieth_ep_idr, GFP_KERNEL)) {
+		err = -ENOMEM;
+		goto out_with_ep;
 	}
 	spin_lock(&ccieth_ep_idr_lock);
 	err = idr_get_new(&ccieth_ep_idr, ep, &id);
 	spin_unlock(&ccieth_ep_idr_lock);
 	if (err)
-		goto out_with_ifp;
+		goto out_with_ep;
 
-	ep = kmalloc(sizeof(struct ccieth_endpoint), GFP_KERNEL);
-	if (!ep) {
-		err = -ENOMEM;
-		goto out_with_id;
-	}
-	ep->ifp = ifp;
 	arg->id = ep->id = id;
-	ep->recvq = NULL;
 
 	return ep;
 
-out_with_id:
-	spin_lock(&ccieth_ep_idr_lock);
-	idr_remove(&ccieth_ep_idr, id);
-	spin_unlock(&ccieth_ep_idr_lock);
+out_with_ep:
+	kfree(ep);
 out_with_ifp:
 	dev_put(ifp);
 out:
