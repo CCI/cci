@@ -11,29 +11,14 @@
 #include <linux/netdevice.h>
 #include <linux/if_arp.h>
 #include <linux/pci.h>
-#include <linux/idr.h>
+#include <linux/spinlock.h>
 #include <linux/rcupdate.h>
 
 #include <ccieth_io.h>
 #include <ccieth_common.h>
 
-static struct idr ccieth_ep_idr;
+struct idr ccieth_ep_idr;
 static spinlock_t ccieth_ep_idr_lock;
-
-struct ccieth_endpoint {
-	struct net_device *ifp;
-	int id;
-	char * recvq;
-	__u32 last_busy_slot_offset; /* offset of the last filled slot.
-				      * its next_busy_offset must be -1.
-				      * it will be changed when a new free slot is used.
-				      */
-	__u32 last_free_slot_offset; /* offset of the last freed slot.
-				      * its next_free_offset must be -1.
-				      * it will be changed when a new busy slot is returned.
-				      */
-	__u32 first_free_slot_offset; /* offset of the next freed slot to use. */
-};
 
 /*
  * endpoint init:
