@@ -155,6 +155,8 @@ typedef struct verbs_rx {
 	struct ibv_wc		wc;		/* work completion */ /* FIXME need this? */
 	TAILQ_ENTRY(verbs_rx)	entry;		/* hangs on vep->idle_rxs */
 	TAILQ_ENTRY(verbs_rx)	gentry;		/* hangs on vep->rxs */
+	struct rdma_cm_id	*id;		/* id for conn req */
+	char			data[32];	/* inline conn req payload */
 } verbs_rx_t;
 
 typedef struct verbs_dev {
