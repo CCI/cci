@@ -445,6 +445,13 @@ static int eth_create_endpoint(cci_device_t *device,
   eep->recvq = recvq;
 
   *fdp = eep->fd = fd;
+
+  {
+	  cci_event_t * event;
+	  while (cci_get_event(*endpoint, &event) == -EAGAIN);
+	  printf("got event type %d\n", CCI_EVENT_CONNECT_REQUEST);
+	  cci_return_event(event);
+  }
   return CCI_SUCCESS;
 
  out_with_fd:
@@ -527,17 +534,49 @@ static int eth_arm_os_handle(cci_endpoint_t *endpoint, int flags)
 
 
 static int eth_get_event(cci_endpoint_t *endpoint,
-                         cci_event_t ** const event)
+                         cci_event_t ** const eventp)
 {
-    printf("In eth_get_event\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+	cci__ep_t *_ep = container_of(endpoint, cci__ep_t, endpoint);
+	eth__ep_t *eep = _ep->priv;
+	cci_event_t *event;
+	struct ccieth_ioctl_get_event ge;
+	int ret;
+
+	event = malloc(sizeof(*event));
+	if (!event)
+		return CCI_ENOMEM;
+
+	ret = ioctl(eep->fd, CCIETH_IOCTL_GET_EVENT, &ge);
+	if (ret < 0) {
+		if (errno == EAGAIN) {
+			printf("got no event\n");
+			goto out_with_event;
+		}
+		perror("get event");
+	}
+
+	switch (ge.type) {
+	case CCIETH_IOCTL_EVENT_CONNECT_REQUEST:
+		event->type = CCI_EVENT_CONNECT_REQUEST;
+		/* FIXME data */
+		break;
+	default:
+		printf("got invalid event type %d\n", ge.type);
+		goto out_with_event;
+	}
+	*eventp = event;
+	return CCI_SUCCESS;
+
+out_with_event:
+	free(event);
+	return CCI_EAGAIN;
 }
 
 
 static int eth_return_event(cci_event_t *event)
 {
-    printf("In eth_return_event\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+	free(event);
+	return 0;
 }
 
 

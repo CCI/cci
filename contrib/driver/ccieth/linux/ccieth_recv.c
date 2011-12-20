@@ -13,7 +13,17 @@ static int
 ccieth_recv_connect(struct net_device *ifp, struct ccieth_endpoint *ep,
 		    struct ccieth_pkt_header *hdr, struct sk_buff *skb)
 {
+	struct ccieth_endpoint_event *event;
 
+	event = kmalloc(sizeof(*event), GFP_KERNEL);
+	if (!event)
+		return -ENOMEM;
+
+	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_REQUEST;
+
+	spin_lock(&ep->event_list_lock);
+	list_add_tail(&event->list, &ep->event_list);
+	spin_unlock(&ep->event_list_lock);
 	return 0;
 }
 

@@ -51,12 +51,18 @@ static spinlock_t ccieth_ep_idr_lock;
 static void
 ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 {
+	struct ccieth_endpoint_event *event, *nevent;
+
 	spin_lock(&ccieth_ep_idr_lock);
 	idr_remove(&ccieth_ep_idr, ep->id);
 	spin_unlock(&ccieth_ep_idr_lock);
 	dev_put(ep->ifp);
 	if (ep->recvq) {
 		vfree(ep->recvq);
+	}
+	list_for_each_entry_safe(event, nevent, &ep->event_list, list) {
+		list_del(&event->list);
+		kfree(event);
 	}
 	kfree(ep);
 }
@@ -99,6 +105,9 @@ ccieth_create_endpoint(struct ccieth_ioctl_create_endpoint *arg)
 	if (err)
 		goto out_with_ep;
 
+	INIT_LIST_HEAD(&ep->event_list);
+	spin_lock_init(&ep->event_list_lock);
+
 	arg->id = ep->id = id;
 
 	return ep;
@@ -114,15 +123,28 @@ out:
 static int
 ccieth_get_event(struct ccieth_endpoint *ep, struct ccieth_ioctl_get_event *arg)
 {
+	struct ccieth_endpoint_event *event;
 
-	return -ENOSYS;
+	spin_lock(&ep->event_list_lock);
+	if (list_empty(&ep->event_list)) {
+		spin_unlock(&ep->event_list_lock);
+		return -EAGAIN;
+	}
+
+	event = list_first_entry(&ep->event_list, struct ccieth_endpoint_event, list);
+	list_del(&event->list);
+	spin_unlock(&ep->event_list_lock);
+
+	memcpy(arg, &event->event, sizeof(*arg));
+	kfree(event);
+	return 0;
 }
 
 static int
 ccieth_return_event(struct ccieth_endpoint *ep, const struct ccieth_ioctl_return_event *arg)
 {
-
-	return -ENOSYS;
+	/* FIXME: nothing to do for now */
+	return 0;
 }
 
 static int
@@ -321,6 +343,7 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		if (ret < 0)
 			return ret;
 
+		/* FIXME: copy directly from the event list to user-space */
 		ret = copy_to_user((__user void *)arg, &ge_arg, sizeof(ge_arg));
 		if (ret)
 			return -EFAULT;

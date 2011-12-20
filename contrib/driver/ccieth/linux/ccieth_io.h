@@ -77,4 +77,7 @@ struct ccieth_recvq_slot {
 	/* 16 */
 };
 
+/* FIXME: enforce matching with enum cci_event_type */
+#define CCIETH_IOCTL_EVENT_CONNECT_REQUEST 6
+
 #endif /* CCIETH_IO_H */
