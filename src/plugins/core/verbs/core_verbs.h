@@ -52,6 +52,7 @@ BEGIN_C_DECLS
 typedef enum verbs_msg_type {
 	VERBS_MSG_INVALID = 0,
 	VERBS_MSG_CONN_REQUEST,
+	VERBS_MSG_CONN_PAYLOAD,
 	VERBS_MSG_CONN_REPLY,
 	VERBS_MSG_DISCONNECT,
 	VERBS_MSG_SEND,
@@ -101,6 +102,20 @@ typedef enum verbs_msg_type {
       B is the cci_conn_attribute_t
       C is the payload length (the payload is the message)
       D is reserved
+ */
+
+/* Conn Payload
+
+    <------------ 32 bits ----------->
+    <----- 16b ----> <--- 12b -->  4b
+   +----------------+------------+----+
+   |        C       |      B     |  A |
+   +----------------+------------+----+
+
+   where:
+      A is VERBS_MSG_CONN_PAYLOAD
+      B is the payload length (the payload is the message)
+      C is reserved
  */
 
 /* Conn Reply
@@ -226,13 +241,29 @@ typedef struct verbs_ep {
 	TAILQ_HEAD(v_ops, verbs_rma_ops) rma_ops;	/* all rma ops */
 } verbs_ep_t;
 
+typedef enum verbs_conn_state {
+	VERBS_CONN_CLOSED	= -2,
+	VERBS_CONN_CLOSING	= -1,
+	VERBS_CONN_INIT		= 0,
+	VERBS_CONN_ACTIVE,
+	VERBS_CONN_PASSIVE,
+	VERBS_CONN_ESTABLISHED,
+} verbs_conn_state_t;
+
+typedef struct verbs_conn_request {
+	void				*context;	/* application context */
+	void				*ptr;		/* application payload */
+	uint32_t			len;		/* payload length */
+} verbs_conn_request_t;
+
 typedef struct verbs_conn {
 	cci__conn_t			*conn;		/* owning conn */
 	struct rdma_cm_id		*id;		/* peer info */
+	verbs_conn_state_t		state;		/* current state */
 	uint32_t			mss;		/* max send size */
 	uint32_t			max_tx_cnt;	/* max sends in flight */
-	verbs_tx_t			*tx;		/* for conn request */
 	TAILQ_ENTRY(verbs_conn)		entry;		/* hangs on vep->conns */
+	verbs_conn_request_t		*conn_req;	/* application conn req info */
 } verbs_conn_t;
 
 

@@ -333,6 +333,56 @@ out:
 	return ret;
 }
 
+static verbs_rx_t *
+verbs_get_rx_locked(verbs_ep_t *vep)
+{
+	verbs_rx_t	*rx	= NULL;
+
+	if (!TAILQ_EMPTY(&vep->idle_rxs)) {
+		rx = TAILQ_FIRST(&vep->idle_rxs);
+		TAILQ_REMOVE(&vep->idle_rxs, rx, entry);
+	}
+	return rx;
+}
+
+static verbs_rx_t *
+verbs_get_rx(cci__ep_t *ep)
+{
+	verbs_ep_t	*vep	= ep->priv;
+	verbs_rx_t	*rx	= NULL;
+
+	pthread_mutex_lock(&ep->lock);
+	rx = verbs_get_rx_locked(vep);
+	pthread_mutex_unlock(&ep->lock);
+
+	return rx;
+}
+
+static verbs_tx_t *
+verbs_get_tx_locked(verbs_ep_t *vep)
+{
+	verbs_tx_t	*tx	= NULL;
+
+	if (!TAILQ_EMPTY(&vep->idle_txs)) {
+		tx = TAILQ_FIRST(&vep->idle_txs);
+		TAILQ_REMOVE(&vep->idle_txs, tx, entry);
+	}
+	return tx;
+}
+
+static verbs_tx_t *
+verbs_get_tx(cci__ep_t *ep)
+{
+	verbs_ep_t	*vep	= ep->priv;
+	verbs_tx_t	*tx	= NULL;
+
+	pthread_mutex_lock(&ep->lock);
+	tx = verbs_get_tx_locked(vep);
+	pthread_mutex_unlock(&ep->lock);
+
+	return tx;
+}
+
 static int
 verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 {
@@ -943,6 +993,7 @@ verbs_accept(union cci_event *event,
 	conn->connection.attribute = event->request.attribute;
 	conn->connection.endpoint = endpoint;
 	vconn->id = rx->id;
+	vconn->id->context = conn;
 
 	ret = ibv_query_qp(vconn->id->qp, &attr, IBV_QP_PATH_MTU, &init);
 	if (ret == -1) {
@@ -1027,6 +1078,7 @@ verbs_connect(cci_endpoint_t *endpoint, char *server_uri,
 	cci__conn_t		*conn		= NULL;
 	verbs_ep_t		*vep		= NULL;
 	verbs_conn_t		*vconn		= NULL;
+	verbs_conn_request_t	*cr		= NULL;
 	struct rdma_addrinfo	hints, *res	= NULL;
 	struct ibv_qp_init_attr	attr;
 	struct rdma_conn_param	param;
@@ -1051,6 +1103,26 @@ verbs_connect(cci_endpoint_t *endpoint, char *server_uri,
 	}
 	vconn = conn->priv;
 	vconn->conn = conn;
+
+	if (context || data_len) {
+		cr = calloc(1, sizeof(*cr));
+		if (!cr) {
+			ret = CCI_ENOMEM;
+			goto out;
+		}
+		vconn->conn_req = cr;
+
+		cr->context = context;
+		if (data_len) {
+			cr->len = data_len;
+			cr->ptr = calloc(1, data_len);
+			if (!cr->ptr) {
+				ret = CCI_ENOMEM;
+				goto out;
+			}
+			memcpy(cr->ptr, data_ptr, data_len);
+		}
+	}
 
 	/* conn->tx_timeout = 0;  by default */
 
@@ -1095,6 +1167,8 @@ verbs_connect(cci_endpoint_t *endpoint, char *server_uri,
 			strerror(ret));
 		goto out;
 	}
+	vconn->id->context = conn;
+	vconn->state = VERBS_CONN_ACTIVE;
 
 	header = VERBS_MSG_CONN_REQUEST;
 	header |= (attribute & 0xF) << 4; /* magic number */
@@ -1117,6 +1191,10 @@ verbs_connect(cci_endpoint_t *endpoint, char *server_uri,
 		node, service);
 
 out:
+	/* TODO
+	 * if (ret)
+	 *	free memory
+	 */
 	if (node)
 		free(node);
 	CCI_EXIT;
@@ -1164,47 +1242,39 @@ verbs_arm_os_handle(cci_endpoint_t *endpoint, int flags)
 }
 
 static int
-verbs_get_cm_event(cci__ep_t *ep)
+verbs_ep_on_rnic(cci__ep_t *ep)
 {
-	int			ret	= CCI_EAGAIN;
-	int			ret2	= CCI_EAGAIN;
+	int		ret	= 0;
+	verbs_dev_t	*vdev	= ep->dev->priv;
+
+	if (vdev->context->device->node_type == IBV_NODE_RNIC)
+		ret = 1;
+	return ret;
+}
+
+static int
+verbs_handle_conn_request(cci__ep_t *ep, struct rdma_cm_event *cm_evt)
+{
+	int			ret	= CCI_SUCCESS;
 	verbs_ep_t		*vep	= ep->priv;
-	struct rdma_cm_event	*revt	= NULL;
 	verbs_rx_t		*rx	= NULL;
 	struct rdma_cm_id	*peer	= NULL;
 	struct ibv_qp_init_attr	attr;
 	struct rdma_conn_param	*param	= NULL;
 	uint32_t		header;
 	void			*ptr	= NULL;
+	uint32_t		len	= 0;
 
-	CCI_ENTER;
-
-	pthread_mutex_lock(&ep->lock);
-	if (ep->closing || !vep) {
-		pthread_mutex_unlock(&ep->lock);
-		goto out;
-	}
-
-	if (!TAILQ_EMPTY(&vep->idle_rxs)) {
-		rx = TAILQ_FIRST(&vep->idle_rxs);
-		TAILQ_REMOVE(&vep->idle_rxs, rx, entry);
-	}
-	pthread_mutex_unlock(&ep->lock);
-
+	rx = verbs_get_rx(ep);
 	if (!rx) {
 		debug(CCI_DB_INFO, "no rx buffers available on endpoint %s",
 			ep->endpoint.name);
+		ret = CCI_ENOBUFS;
 		goto out;
 	}
 
-	ret = rdma_get_cm_event(vep->channel, &revt);
-	if (ret == -1) {
-		ret = errno;
-		goto out;
-	}
-
-	peer = revt->id;
-	assert(revt->status == 0);
+	peer = cm_evt->id;
+	assert(cm_evt->status == 0);
 
 	memset(&attr, 0, sizeof(attr));
 	attr.qp_type = IBV_QPT_RC;
@@ -1218,40 +1288,37 @@ verbs_get_cm_event(cci__ep_t *ep)
 	ret = rdma_create_qp(peer, vep->pd, &attr);
 	if (ret == -1) {
 		ret = errno;
-		goto out_w_revt;
+		goto out;
 	}
 
-	param = &revt->param.conn;
+	param = &cm_evt->param.conn;
 	param->srq = 1;
 	param->qp_num = peer->qp->qp_num;
 
 	header = ntohl(*((uint32_t *)param->private_data));
-	debug(CCI_DB_WARN, "header is 0x%x", header);
 	ptr = (void *) param->private_data + sizeof(header);
 
 	ret = rdma_accept(peer, param);
 	if (ret == -1) {
 		ret = errno;
-		goto out_w_revt;
+		goto out;
 	}
 
+	len = (header >> 8) & 0xFFF;	/* magic number */
+	peer->context = &rx->evt;
+	rx->id = peer;
 	rx->evt.event.type = CCI_EVENT_CONNECT_REQUEST;
 	rx->evt.event.request.attribute = (header >> 4) & 0xF; /* magic number */
-	*((uint32_t *) &rx->evt.event.request.data_len) = (header >> 8) & 0xFF;
-	if (rx->evt.event.request.data_len) {
-		memcpy(rx->data, ptr, rx->evt.event.request.data_len);
-		*((void **) &rx->evt.event.request.data_ptr) = rx->data;
-	} else
-		*((void **) &rx->evt.event.request.data_ptr) = NULL;
+	*((uint32_t *) &rx->evt.event.request.data_len) = len;
+	*((void **) &rx->evt.event.request.data_ptr) = NULL; /* for now */
 
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
-	pthread_mutex_unlock(&ep->lock);
+	/* no payload, send up the event to the application */
+	if (!len) {
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
+		pthread_mutex_unlock(&ep->lock);
+	}
 
-out_w_revt:
-	ret2 = rdma_ack_cm_event(revt);
-	if (ret2 == -1 && ret == 0)
-		ret = errno;
 out:
 	if (ret) {
 		if (rx) {
@@ -1264,13 +1331,283 @@ out:
 	return ret;
 }
 
-static int
-verbs_get_cq_event(cci__ep_t *ep)
+
+static const char *
+verbs_conn_state_str(verbs_conn_state_t state)
 {
-	int	ret	= CCI_EAGAIN;
+	char *str;
+	switch (state) {
+		case VERBS_CONN_CLOSED:
+			str = "closed";
+		case VERBS_CONN_CLOSING:
+			str = "closing";
+		case VERBS_CONN_INIT:
+			str = "init";
+		case VERBS_CONN_ACTIVE:
+			str = "active";
+		case VERBS_CONN_PASSIVE:
+			str = "passive";
+		case VERBS_CONN_ESTABLISHED:
+			str = "established";
+	}
+	return str;
+}
+
+static int
+verbs_conn_accepted(cci__conn_t *conn, verbs_tx_t *tx)
+{
+	int		ret	= CCI_SUCCESS;
+	cci__ep_t	*ep	= tx->evt.ep;
+	verbs_ep_t	*vep	= ep->priv;
+	verbs_conn_t	*vconn	= conn->priv;
 
 	CCI_ENTER;
 
+	vconn->state = VERBS_CONN_ESTABLISHED;
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
+	pthread_mutex_unlock(&ep->lock);
+
+	/* if RNIC, the client must send the first message */
+	if (verbs_ep_on_rnic(ep)) {
+		uint32_t		header	= 0;
+		struct ibv_sge		list;
+		struct ibv_send_wr	wr, *bad_wr;
+
+		header = VERBS_MSG_CONN_PAYLOAD;
+		header = htonl(header);
+
+		list.addr = (uintptr_t) 0;
+		list.length = 0;
+		list.lkey = vep->tx_mr->lkey;
+
+		wr.wr_id = (uintptr_t) 0;
+		wr.sg_list = &list;
+		wr.num_sge = 1;
+		wr.opcode = IBV_WR_SEND_WITH_IMM;
+		wr.imm_data = header;
+		wr.send_flags = IBV_SEND_SIGNALED;
+
+		ret = ibv_post_send(vconn->id->qp, &wr, &bad_wr);
+		if (ret == -1) {
+			/* TODO now what? */
+			debug(CCI_DB_CONN, "unable to send connection request payload");
+		}
+	}
+
+	CCI_EXIT;
+	return ret;
+}
+
+static int
+verbs_conn_est_active(cci__ep_t *ep, struct rdma_cm_event *cm_evt)
+{
+	int			ret	= CCI_SUCCESS;
+	cci__conn_t		*conn	= NULL;
+	verbs_ep_t		*vep	= ep->priv;
+	verbs_conn_t		*vconn	= NULL;
+	verbs_conn_request_t	*cr	= NULL;
+	verbs_tx_t		*tx	= NULL;
+
+	CCI_ENTER;
+
+	conn = cm_evt->id->context;
+	vconn = conn->priv;
+	cr = vconn->conn_req;
+
+	tx = verbs_get_tx(ep);
+	if (!tx) {
+		ret = CCI_ENOBUFS;
+		goto out;
+	}
+
+	tx->evt.event.type = CCI_EVENT_CONNECT_ACCEPTED;
+	tx->evt.event.accepted.connection = &conn->connection;
+	if (cr)
+		tx->evt.event.accepted.context = cr->context;
+	else
+		tx->evt.event.accepted.context = NULL;
+
+	/* if application has a conn request payload, send it */
+	cr = vconn->conn_req;
+	if (cr && cr->len) {
+		uint32_t		header	= 0;
+		struct ibv_sge		list;
+		struct ibv_send_wr	wr, *bad_wr;
+
+		memcpy(tx->buffer, cr->ptr, cr->len);
+
+		header = VERBS_MSG_CONN_PAYLOAD;
+		header |= (cr->len & 0xFFF) << 4;	/* magic number */
+		header = htonl(header);
+
+		list.addr = (uintptr_t) tx->buffer;
+		list.length = cr->len;
+		list.lkey = vep->tx_mr->lkey;
+
+		wr.wr_id = (uintptr_t) tx;
+		wr.sg_list = &list;
+		wr.num_sge = 1;
+		wr.opcode = IBV_WR_SEND_WITH_IMM;
+		wr.imm_data = header;
+		wr.send_flags = IBV_SEND_SIGNALED;
+
+		ret = ibv_post_send(vconn->id->qp, &wr, &bad_wr);
+		if (ret == -1) {
+			/* TODO now what? */
+			debug(CCI_DB_CONN, "unable to send connection request payload");
+			goto out;
+		}
+	} else {
+		/* if no payload, signal CCI_EVENT_CONNECT_ACCEPTED */
+		verbs_conn_accepted(conn, tx);
+	}
+
+out:
+	CCI_EXIT;
+	return ret;
+}
+
+static int
+verbs_conn_est_passive(cci__ep_t *ep, struct rdma_cm_event *cm_evt)
+{
+	int		ret	= CCI_SUCCESS;
+	cci__conn_t	*conn	= NULL;
+	//verbs_ep_t	*vep	= ep->priv;
+	verbs_conn_t	*vconn	= NULL;
+
+	conn = cm_evt->id->context;
+	vconn = conn->priv;
+
+	CCI_ENTER;
+
+	CCI_EXIT;
+	return ret;
+}
+
+static int
+verbs_handle_conn_established(cci__ep_t *ep, struct rdma_cm_event *cm_evt)
+{
+	int		ret	= CCI_SUCCESS;
+	cci__conn_t	*conn	= NULL;
+	verbs_conn_t	*vconn	= NULL;
+
+	CCI_ENTER;
+
+	conn = cm_evt->id->context;
+	assert(conn);
+	vconn = conn->priv;
+	assert(vconn);
+	assert(vconn->state == VERBS_CONN_ACTIVE || vconn->state == VERBS_CONN_PASSIVE);
+
+	switch (vconn->state) {
+		case VERBS_CONN_ACTIVE:
+			ret = verbs_conn_est_active(ep, cm_evt);
+			break;
+		case VERBS_CONN_PASSIVE:
+			ret = verbs_conn_est_passive(ep, cm_evt);
+			break;
+		default:
+			debug(CCI_DB_INFO, "%s: incorrect conn state %s", __func__,
+				verbs_conn_state_str(vconn->state));
+			break;
+	}
+
+	CCI_EXIT;
+	return ret;
+}
+
+static int
+verbs_get_cm_event(cci__ep_t *ep)
+{
+	int			ret	= CCI_EAGAIN;
+	verbs_ep_t		*vep	= ep->priv;
+	struct rdma_cm_event	*cm_evt	= NULL;
+
+	CCI_ENTER;
+
+	pthread_mutex_lock(&ep->lock);
+	if (ep->closing || !vep) {
+		pthread_mutex_unlock(&ep->lock);
+		goto out;
+	}
+	pthread_mutex_unlock(&ep->lock);
+
+	ret = rdma_get_cm_event(vep->channel, &cm_evt);
+	if (ret == -1) {
+		ret = errno;
+		goto out;
+	}
+
+	switch (cm_evt->event) {
+		case RDMA_CM_EVENT_CONNECT_REQUEST:
+			ret = verbs_handle_conn_request(ep, cm_evt);
+			break;
+		case RDMA_CM_EVENT_ESTABLISHED:
+			ret = verbs_handle_conn_established(ep, cm_evt);
+			break;
+		default:
+			debug(CCI_DB_CONN, "ignoring %s event",
+				rdma_event_str(cm_evt->event));
+	}
+
+	ret = rdma_ack_cm_event(cm_evt);
+	if (ret == -1)
+		ret = errno;
+out:
+	CCI_EXIT;
+	return ret;
+}
+
+static int
+verbs_handle_recv(cci__ep_t *ep, struct ibv_wc wc)
+{
+	int		ret	= CCI_SUCCESS;
+	uint32_t	header	= 0;
+
+	CCI_ENTER;
+
+	header = ntohl(wc.imm_data);
+	debug(CCI_DB_INFO, "recv'd header 0x%x", header);
+
+	CCI_EXIT;
+	return ret;
+}
+
+#define VERBS_WC_CNT	8
+
+static int
+verbs_get_cq_event(cci__ep_t *ep)
+{
+	int		ret	= CCI_EAGAIN;
+	int		i	= 0;
+	int		found	= 0;
+	struct ibv_wc	wc[VERBS_WC_CNT];
+	verbs_ep_t	*vep	= ep->priv;
+
+	CCI_ENTER;
+
+	ret = ibv_poll_cq(vep->cq, VERBS_WC_CNT, wc);
+	if (ret == -1) {
+		ret = errno;
+		goto out;
+	}
+
+	found = ret;
+
+	for (i = 0; i < found; i++) {
+		if (wc[i].status != IBV_WC_SUCCESS) {
+			debug(CCI_DB_INFO, "wc returned with status %s",
+				ibv_wc_status_str(wc[i].status));
+			/* TODO do what? */
+		}
+		if (wc[i].opcode & IBV_WC_RECV) {
+			ret = verbs_handle_recv(ep, wc[i]);
+		}
+	}
+
+out:
 	CCI_EXIT;
 	return ret;
 }
