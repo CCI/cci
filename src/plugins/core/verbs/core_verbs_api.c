@@ -333,6 +333,7 @@ out:
 	return ret;
 }
 
+#if 0
 static verbs_rx_t *
 verbs_get_rx_locked(verbs_ep_t *vep)
 {
@@ -357,6 +358,7 @@ verbs_get_rx(cci__ep_t *ep)
 
 	return rx;
 }
+#endif
 
 static verbs_tx_t *
 verbs_get_tx_locked(verbs_ep_t *vep)
@@ -709,6 +711,8 @@ verbs_create_endpoint(cci_device_t *device,
 	TAILQ_INIT(&vep->rxs);
 	TAILQ_INIT(&vep->idle_rxs);
 	TAILQ_INIT(&vep->conns);
+	TAILQ_INIT(&vep->active);
+	TAILQ_INIT(&vep->passive);
 	TAILQ_INIT(&vep->handles);
 	TAILQ_INIT(&vep->rma_ops);
 
@@ -849,7 +853,7 @@ verbs_create_endpoint(cci_device_t *device,
 		rx->evt.ep = ep;
 		rx->offset = offset;
 		TAILQ_INSERT_TAIL(&vep->rxs, rx, gentry);
-		TAILQ_INSERT_TAIL(&vep->idle_rxs, rx, entry);
+		//TAILQ_INSERT_TAIL(&vep->idle_rxs, rx, entry);
 
 		memset(&list, 0, sizeof(list));
 		list.addr = (uintptr_t) vep->rx_buf + offset;
@@ -949,6 +953,58 @@ verbs_destroy_endpoint(cci_endpoint_t *endpoint)
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
+static const char *
+verbs_msg_type_str(verbs_msg_type_t msg_type)
+{
+	char *str;
+
+	switch (msg_type) {
+		case VERBS_MSG_CONN_REQUEST:
+			str = "conn_request";
+			break;
+		case VERBS_MSG_CONN_PAYLOAD:
+			str = "conn_payload";
+			break;
+		case VERBS_MSG_CONN_REPLY:
+			str = "conn_reply";
+			break;
+		case VERBS_MSG_DISCONNECT:
+			str = "disconnect";
+			break;
+		case VERBS_MSG_SEND:
+			str = "send";
+			break;
+		case VERBS_MSG_KEEPALIVE:
+			str = "keepalive";
+			break;
+		default:
+			str = "invalid";
+			break;
+	}
+	return str;
+}
+
+static int
+verbs_vconn_set_mss(verbs_conn_t *vconn)
+{
+	int			ret	= CCI_SUCCESS;
+	struct ibv_qp_attr	attr;
+	struct ibv_qp_init_attr	init;
+
+	CCI_ENTER;
+
+	ret = ibv_query_qp(vconn->id->qp, &attr, IBV_QP_PATH_MTU, &init);
+	if (ret == -1) {
+		/* FIXME do something here */
+		ret = errno;
+		goto out;
+	}
+	vconn->mss = verbs_mtu_val(attr.path_mtu);
+
+out:
+	CCI_EXIT;
+	return ret;
+}
 
 static int
 verbs_accept(union cci_event *event,
@@ -962,8 +1018,9 @@ verbs_accept(union cci_event *event,
 	verbs_conn_t	*vconn		= NULL;
 	verbs_rx_t	*rx		= NULL;
 	cci_endpoint_t	*endpoint	= NULL;
-	struct ibv_qp_attr	attr;
-	struct ibv_qp_init_attr	init;
+	struct ibv_sge	list;
+	struct ibv_send_wr wr, *bad_wr;
+	uint32_t	header		= 0;
 
 	CCI_ENTER;
 
@@ -973,41 +1030,45 @@ verbs_accept(union cci_event *event,
 	vep = ep->priv;
 	endpoint = &ep->endpoint;
 
-	conn = calloc(1, sizeof(*conn));
-	if (!conn) {
-		CCI_EXIT;
-		return CCI_ENOMEM;
-	}
-
-	conn->tx_timeout = ep->tx_timeout;
-	conn->priv = calloc(1, sizeof(*vconn));
-	if (!conn->priv) {
-		free(conn);
-		CCI_EXIT;
-		return CCI_ENOMEM;
-	}
-
+	conn = evt->conn;
 	vconn = conn->priv;
-	vconn->conn = conn;
 
-	conn->connection.attribute = event->request.attribute;
-	conn->connection.endpoint = endpoint;
-	vconn->id = rx->id;
-	vconn->id->context = conn;
-
-	ret = ibv_query_qp(vconn->id->qp, &attr, IBV_QP_PATH_MTU, &init);
-	if (ret == -1) {
-		/* FIXME do something here */
-		ret = errno;
+	ret = verbs_vconn_set_mss(vconn);
+	if (ret) {
+		/* TODO */
 		goto out;
 	}
-	conn->connection.max_send_size = attr.path_mtu;
+	conn->connection.max_send_size = vconn->mss;
+
+	header = VERBS_MSG_CONN_REPLY;
+	header |= (CCI_EVENT_CONNECT_ACCEPTED << 4);
+	header = htonl(header);
+
+	memset(&list, 0, sizeof(list));
+	list.addr = (uintptr_t) 0;
+	list.length = 0;
+	list.lkey = vep->tx_mr->lkey;
+
+	memset(&wr, 0, sizeof(wr));
+	wr.wr_id = (uintptr_t) 0;
+	wr.sg_list = &list;
+	wr.num_sge = 1;
+	wr.opcode = IBV_WR_SEND_WITH_IMM;
+	wr.imm_data = header;
+	wr.send_flags = IBV_SEND_SIGNALED;
+
+	ret = ibv_post_send(vconn->id->qp, &wr, &bad_wr);
+	if (ret == -1) {
+		/* TODO now what? */
+		debug(CCI_DB_CONN, "unable to send connection request payload");
+	}
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&vep->conns, vconn, entry);
 	pthread_mutex_unlock(&ep->lock);
 
 	*connection = &conn->connection;
+
 out:
 	CCI_EXIT;
 	return ret;
@@ -1083,7 +1144,6 @@ verbs_connect(cci_endpoint_t *endpoint, char *server_uri,
 	struct ibv_qp_init_attr	attr;
 	struct rdma_conn_param	param;
 	uint32_t		header		= 0;
-	char			data[32];
 
 	CCI_ENTER;
 
@@ -1113,6 +1173,7 @@ verbs_connect(cci_endpoint_t *endpoint, char *server_uri,
 		vconn->conn_req = cr;
 
 		cr->context = context;
+		cr->attr = attribute;
 		if (data_len) {
 			cr->len = data_len;
 			cr->ptr = calloc(1, data_len);
@@ -1171,21 +1232,26 @@ verbs_connect(cci_endpoint_t *endpoint, char *server_uri,
 	vconn->state = VERBS_CONN_ACTIVE;
 
 	header = VERBS_MSG_CONN_REQUEST;
-	header |= (attribute & 0xF) << 4; /* magic number */
-	header |= (data_len & 0xFF) << 8; /* magic number */
 	header = htonl(header);
 
-	memset(data, 0, sizeof(data));
-	memcpy(data, &header, sizeof(header));
-	memcpy(data + sizeof(header), data_ptr, data_len);
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_TAIL(&vep->active, vconn, temp);
+	pthread_mutex_unlock(&ep->lock);
 
 	memset(&param, 0, sizeof(param));
 	param.srq = 1;
 	param.initiator_depth = param.responder_resources = 16;
 	param.rnr_retry_count = 7; /* infinite retry */
-	param.private_data = &data;
-	param.private_data_len = sizeof(header) + data_len;
+	param.private_data = &header;
+	param.private_data_len = sizeof(header);
 	ret = rdma_connect(vconn->id, &param);
+	if (ret == -1) {
+		ret = errno;
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_REMOVE(&vep->active, vconn, temp);
+		pthread_mutex_unlock(&ep->lock);
+		goto out;
+	}
 
 	debug(CCI_DB_CONN, "connecting to %s %s\n",
 		node, service);
@@ -1241,37 +1307,20 @@ verbs_arm_os_handle(cci_endpoint_t *endpoint, int flags)
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
-static int
-verbs_ep_on_rnic(cci__ep_t *ep)
-{
-	int		ret	= 0;
-	verbs_dev_t	*vdev	= ep->dev->priv;
-
-	if (vdev->context->device->node_type == IBV_NODE_RNIC)
-		ret = 1;
-	return ret;
-}
-
+/* A peer is trying to connect. Always accept and let them send the full
+ * connect request as a regular message.
+ */
 static int
 verbs_handle_conn_request(cci__ep_t *ep, struct rdma_cm_event *cm_evt)
 {
 	int			ret	= CCI_SUCCESS;
 	verbs_ep_t		*vep	= ep->priv;
-	verbs_rx_t		*rx	= NULL;
+	cci__conn_t		*conn	= NULL;
+	verbs_conn_t		*vconn	= NULL;
 	struct rdma_cm_id	*peer	= NULL;
 	struct ibv_qp_init_attr	attr;
 	struct rdma_conn_param	*param	= NULL;
 	uint32_t		header;
-	void			*ptr	= NULL;
-	uint32_t		len	= 0;
-
-	rx = verbs_get_rx(ep);
-	if (!rx) {
-		debug(CCI_DB_INFO, "no rx buffers available on endpoint %s",
-			ep->endpoint.name);
-		ret = CCI_ENOBUFS;
-		goto out;
-	}
 
 	peer = cm_evt->id;
 	assert(cm_evt->status == 0);
@@ -1296,37 +1345,41 @@ verbs_handle_conn_request(cci__ep_t *ep, struct rdma_cm_event *cm_evt)
 	param->qp_num = peer->qp->qp_num;
 
 	header = ntohl(*((uint32_t *)param->private_data));
-	ptr = (void *) param->private_data + sizeof(header);
+	assert((header & 0xF) == VERBS_MSG_CONN_REQUEST);
+
+	conn = calloc(1, sizeof(*conn));
+	if (!conn) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	conn->priv = calloc(1, sizeof(*vconn));
+	if (!conn->priv) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	vconn = conn->priv;
+	vconn->conn = conn;
+	vconn->id = peer;
+	vconn->id->context = conn;
+	vconn->state = VERBS_CONN_PASSIVE;
+
+	conn->connection.endpoint = &ep->endpoint;
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_TAIL(&vep->passive, vconn, temp);
+	pthread_mutex_unlock(&ep->lock);
 
 	ret = rdma_accept(peer, param);
 	if (ret == -1) {
 		ret = errno;
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_REMOVE(&vep->passive, vconn, temp);
+		pthread_mutex_unlock(&ep->lock);
 		goto out;
 	}
 
-	len = (header >> 8) & 0xFFF;	/* magic number */
-	peer->context = &rx->evt;
-	rx->id = peer;
-	rx->evt.event.type = CCI_EVENT_CONNECT_REQUEST;
-	rx->evt.event.request.attribute = (header >> 4) & 0xF; /* magic number */
-	*((uint32_t *) &rx->evt.event.request.data_len) = len;
-	*((void **) &rx->evt.event.request.data_ptr) = NULL; /* for now */
-
-	/* no payload, send up the event to the application */
-	if (!len) {
-		pthread_mutex_lock(&ep->lock);
-		TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
-		pthread_mutex_unlock(&ep->lock);
-	}
-
 out:
-	if (ret) {
-		if (rx) {
-			pthread_mutex_lock(&ep->lock);
-			TAILQ_INSERT_HEAD(&vep->idle_rxs, rx, entry);
-			pthread_mutex_unlock(&ep->lock);
-		}
-	}
 	CCI_EXIT;
 	return ret;
 }
@@ -1354,53 +1407,6 @@ verbs_conn_state_str(verbs_conn_state_t state)
 }
 
 static int
-verbs_conn_accepted(cci__conn_t *conn, verbs_tx_t *tx)
-{
-	int		ret	= CCI_SUCCESS;
-	cci__ep_t	*ep	= tx->evt.ep;
-	verbs_ep_t	*vep	= ep->priv;
-	verbs_conn_t	*vconn	= conn->priv;
-
-	CCI_ENTER;
-
-	vconn->state = VERBS_CONN_ESTABLISHED;
-
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
-	pthread_mutex_unlock(&ep->lock);
-
-	/* if RNIC, the client must send the first message */
-	if (verbs_ep_on_rnic(ep)) {
-		uint32_t		header	= 0;
-		struct ibv_sge		list;
-		struct ibv_send_wr	wr, *bad_wr;
-
-		header = VERBS_MSG_CONN_PAYLOAD;
-		header = htonl(header);
-
-		list.addr = (uintptr_t) 0;
-		list.length = 0;
-		list.lkey = vep->tx_mr->lkey;
-
-		wr.wr_id = (uintptr_t) 0;
-		wr.sg_list = &list;
-		wr.num_sge = 1;
-		wr.opcode = IBV_WR_SEND_WITH_IMM;
-		wr.imm_data = header;
-		wr.send_flags = IBV_SEND_SIGNALED;
-
-		ret = ibv_post_send(vconn->id->qp, &wr, &bad_wr);
-		if (ret == -1) {
-			/* TODO now what? */
-			debug(CCI_DB_CONN, "unable to send connection request payload");
-		}
-	}
-
-	CCI_EXIT;
-	return ret;
-}
-
-static int
 verbs_conn_est_active(cci__ep_t *ep, struct rdma_cm_event *cm_evt)
 {
 	int			ret	= CCI_SUCCESS;
@@ -1409,6 +1415,9 @@ verbs_conn_est_active(cci__ep_t *ep, struct rdma_cm_event *cm_evt)
 	verbs_conn_t		*vconn	= NULL;
 	verbs_conn_request_t	*cr	= NULL;
 	verbs_tx_t		*tx	= NULL;
+	uint32_t		header	= 0;
+	struct ibv_sge		list;
+	struct ibv_send_wr	wr, *bad_wr;
 
 	CCI_ENTER;
 
@@ -1422,47 +1431,43 @@ verbs_conn_est_active(cci__ep_t *ep, struct rdma_cm_event *cm_evt)
 		goto out;
 	}
 
-	tx->evt.event.type = CCI_EVENT_CONNECT_ACCEPTED;
-	tx->evt.event.accepted.connection = &conn->connection;
-	if (cr)
-		tx->evt.event.accepted.context = cr->context;
-	else
-		tx->evt.event.accepted.context = NULL;
+	tx->evt.event.type = CCI_EVENT_NONE; /* never hand to application */
+	tx->evt.conn = conn;
 
 	/* if application has a conn request payload, send it */
-	cr = vconn->conn_req;
-	if (cr && cr->len) {
-		uint32_t		header	= 0;
-		struct ibv_sge		list;
-		struct ibv_send_wr	wr, *bad_wr;
-
+	if (cr && cr->len)
 		memcpy(tx->buffer, cr->ptr, cr->len);
 
-		header = VERBS_MSG_CONN_PAYLOAD;
-		header |= (cr->len & 0xFFF) << 4;	/* magic number */
-		header = htonl(header);
+	header = VERBS_MSG_CONN_PAYLOAD;
+	header |= (cr->attr & 0xF) << 4;	/* magic number */
+	header |= (cr->len & 0xFFF) << 8;	/* magic number */
+	header = htonl(header);
 
-		list.addr = (uintptr_t) tx->buffer;
-		list.length = cr->len;
-		list.lkey = vep->tx_mr->lkey;
+	memset(&list, 0, sizeof(list));
+	list.addr = (uintptr_t) tx->buffer;
+	list.length = cr->len;
+	list.lkey = vep->tx_mr->lkey;
 
-		wr.wr_id = (uintptr_t) tx;
-		wr.sg_list = &list;
-		wr.num_sge = 1;
-		wr.opcode = IBV_WR_SEND_WITH_IMM;
-		wr.imm_data = header;
-		wr.send_flags = IBV_SEND_SIGNALED;
+	memset(&wr, 0, sizeof(wr));
+	wr.wr_id = (uintptr_t) tx;
+	wr.sg_list = &list;
+	wr.num_sge = 1;
+	wr.opcode = IBV_WR_SEND_WITH_IMM;
+	wr.imm_data = header;
+	wr.send_flags = IBV_SEND_SIGNALED;
 
-		ret = ibv_post_send(vconn->id->qp, &wr, &bad_wr);
-		if (ret == -1) {
-			/* TODO now what? */
-			debug(CCI_DB_CONN, "unable to send connection request payload");
-			goto out;
-		}
+	ret = ibv_post_send(vconn->id->qp, &wr, &bad_wr);
+	if (ret == -1) {
+		/* TODO now what? */
+		debug(CCI_DB_CONN, "unable to send connection request payload");
+		goto out;
+	}
+#if 0
 	} else {
 		/* if no payload, signal CCI_EVENT_CONNECT_ACCEPTED */
 		verbs_conn_accepted(conn, tx);
 	}
+#endif
 
 out:
 	CCI_EXIT;
@@ -1561,15 +1566,144 @@ out:
 }
 
 static int
+verbs_handle_conn_payload(cci__ep_t *ep, struct ibv_wc wc)
+{
+	int		ret		= CCI_SUCCESS;
+	uint32_t	header		= 0;
+	uint32_t	len		= 0;
+	cci__conn_t	*conn		= NULL;
+	verbs_conn_t	*vconn		= NULL;
+	verbs_conn_t	*vc		= NULL;
+	verbs_ep_t	*vep		= ep->priv;
+	verbs_rx_t	*rx		= NULL;
+
+	CCI_ENTER;
+
+	/* find the passive conn waiting for this message */
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_FOREACH(vc, &vep->passive, temp) {
+		if (vc->id->qp->qp_num == wc.qp_num) {
+			vconn = vc;
+			conn = vconn->conn;
+			assert(conn == vc->id->context);
+			TAILQ_REMOVE(&vep->passive, vconn, temp);
+			break;
+		}
+	}
+	pthread_mutex_unlock(&ep->lock);
+
+	if (!vconn) {
+		debug(CCI_DB_WARN, "%s: no conn found for message from qp_num %u",
+			__func__, wc.qp_num);
+		goto out;
+	}
+
+	header = ntohl(wc.imm_data);
+	conn->connection.attribute = (header >> 4) & 0xF;
+	len = (header >> 8) & 0xFFF;
+	if (len != wc.byte_len)
+		debug(CCI_DB_WARN, "%s: len %u != wc.byte_len %u",
+			__func__, len, wc.byte_len);
+
+	rx = (verbs_rx_t *) (uintptr_t) wc.wr_id;
+	rx->evt.conn = conn;
+	rx->evt.event.type = CCI_EVENT_CONNECT_REQUEST;
+	rx->evt.event.request.attribute = conn->connection.attribute;
+	*((uint32_t *) &rx->evt.event.request.data_len) = len;
+	if (len)
+		*((void **) &rx->evt.event.request.data_ptr) = vep->rx_buf + rx->offset;
+	else
+		*((void **) &rx->evt.event.request.data_ptr) = NULL;
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
+	pthread_mutex_unlock(&ep->lock);
+out:
+	CCI_EXIT;
+	return ret;
+}
+
+static int
+verbs_handle_conn_reply(cci__ep_t *ep, struct ibv_wc wc)
+{
+	int		ret		= CCI_SUCCESS;
+	uint32_t	header		= 0;
+	cci__conn_t	*conn		= NULL;
+	verbs_conn_t	*vconn		= NULL;
+	verbs_conn_t	*vc		= NULL;
+	verbs_ep_t	*vep		= ep->priv;
+	verbs_rx_t	*rx		= NULL;
+
+	CCI_ENTER;
+
+	/* find the active conn waiting for this message */
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_FOREACH(vc, &vep->active, temp) {
+		if (vc->id->qp->qp_num == wc.qp_num) {
+			vconn = vc;
+			conn = vconn->conn;
+			assert(conn == vc->id->context);
+			TAILQ_REMOVE(&vep->passive, vconn, temp);
+			break;
+		}
+	}
+	pthread_mutex_unlock(&ep->lock);
+
+	if (!vconn) {
+		debug(CCI_DB_WARN, "%s: no conn found for message from qp_num %u",
+			__func__, wc.qp_num);
+		goto out;
+	}
+
+	header = ntohl(wc.imm_data);
+
+	rx = (verbs_rx_t *) (uintptr_t) wc.wr_id;
+	rx->evt.event.type = (header >> 4) & 0xF;	/* magic number */
+	if (rx->evt.event.type == CCI_EVENT_CONNECT_ACCEPTED) {
+		rx->evt.event.accepted.context = vconn->conn_req ?
+			vconn->conn_req->context : NULL;
+		rx->evt.event.accepted.connection = &conn->connection;
+	} else if (rx->evt.event.type == CCI_EVENT_CONNECT_REJECTED) {
+		rx->evt.event.rejected.context = vconn->conn_req ?
+			vconn->conn_req->context : NULL;
+	} else {
+		debug(CCI_DB_WARN, "%s: invalid reply %u", __func__, rx->evt.event.type);
+	}
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
+	pthread_mutex_unlock(&ep->lock);
+
+out:
+	CCI_EXIT;
+	return ret;
+}
+
+static int
 verbs_handle_recv(cci__ep_t *ep, struct ibv_wc wc)
 {
-	int		ret	= CCI_SUCCESS;
-	uint32_t	header	= 0;
+	int			ret	= CCI_SUCCESS;
+	uint32_t		header	= 0;
+	verbs_msg_type_t	type	= 0;
 
 	CCI_ENTER;
 
 	header = ntohl(wc.imm_data);
 	debug(CCI_DB_INFO, "recv'd header 0x%x", header);
+	type = header & 0xF; /* magic number */
+
+	switch (type) {
+	case VERBS_MSG_CONN_PAYLOAD:
+		ret = verbs_handle_conn_payload(ep, wc);
+		break;
+	case VERBS_MSG_CONN_REPLY:
+		ret = verbs_handle_conn_reply(ep, wc);
+		break;
+	default:
+		debug(CCI_DB_INFO, "%s: ignoring %s msg",
+			__func__, verbs_msg_type_str(type));
+		break;
+	}
 
 	CCI_EXIT;
 	return ret;

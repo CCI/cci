@@ -171,7 +171,6 @@ typedef struct verbs_rx {
 	TAILQ_ENTRY(verbs_rx)	entry;		/* hangs on vep->idle_rxs */
 	TAILQ_ENTRY(verbs_rx)	gentry;		/* hangs on vep->rxs */
 	struct rdma_cm_id	*id;		/* id for conn req */
-	char			data[32];	/* inline conn req payload */
 } verbs_rx_t;
 
 typedef struct verbs_dev {
@@ -237,6 +236,8 @@ typedef struct verbs_ep {
 	struct ibv_srq			*srq;		/* shared recv queue */
 
 	TAILQ_HEAD(v_conns, verbs_conn)	conns;		/* all conns */
+	TAILQ_HEAD(v_active, verbs_conn) active;	/* active conns */
+	TAILQ_HEAD(v_passive, verbs_conn) passive;	/* passive conns */
 	TAILQ_HEAD(v_hdls, verbs_rma_handle) handles;	/* all rma registrations */
 	TAILQ_HEAD(v_ops, verbs_rma_ops) rma_ops;	/* all rma ops */
 } verbs_ep_t;
@@ -254,6 +255,7 @@ typedef struct verbs_conn_request {
 	void				*context;	/* application context */
 	void				*ptr;		/* application payload */
 	uint32_t			len;		/* payload length */
+	cci_conn_attribute_t		attr;		/* connection type */
 } verbs_conn_request_t;
 
 typedef struct verbs_conn {
@@ -263,6 +265,7 @@ typedef struct verbs_conn {
 	uint32_t			mss;		/* max send size */
 	uint32_t			max_tx_cnt;	/* max sends in flight */
 	TAILQ_ENTRY(verbs_conn)		entry;		/* hangs on vep->conns */
+	TAILQ_ENTRY(verbs_conn)		temp;		/* hangs on vep->active|passive */
 	verbs_conn_request_t		*conn_req;	/* application conn req info */
 } verbs_conn_t;
 
