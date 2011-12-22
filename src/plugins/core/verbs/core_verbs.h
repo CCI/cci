@@ -167,10 +167,7 @@ typedef struct verbs_tx {
 typedef struct verbs_rx {
 	cci__evt_t		evt;		/* associated event */
 	uint32_t		offset;		/* offset in vep->buffer */
-	struct ibv_wc		wc;		/* work completion */ /* FIXME need this? */
-	TAILQ_ENTRY(verbs_rx)	entry;		/* hangs on vep->idle_rxs */
-	TAILQ_ENTRY(verbs_rx)	gentry;		/* hangs on vep->rxs */
-	struct rdma_cm_id	*id;		/* id for conn req */
+	TAILQ_ENTRY(verbs_rx)	entry;		/* hangs on vep->rxs */
 } verbs_rx_t;
 
 typedef struct verbs_dev {

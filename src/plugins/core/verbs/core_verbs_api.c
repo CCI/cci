@@ -333,33 +333,6 @@ out:
 	return ret;
 }
 
-#if 0
-static verbs_rx_t *
-verbs_get_rx_locked(verbs_ep_t *vep)
-{
-	verbs_rx_t	*rx	= NULL;
-
-	if (!TAILQ_EMPTY(&vep->idle_rxs)) {
-		rx = TAILQ_FIRST(&vep->idle_rxs);
-		TAILQ_REMOVE(&vep->idle_rxs, rx, entry);
-	}
-	return rx;
-}
-
-static verbs_rx_t *
-verbs_get_rx(cci__ep_t *ep)
-{
-	verbs_ep_t	*vep	= ep->priv;
-	verbs_rx_t	*rx	= NULL;
-
-	pthread_mutex_lock(&ep->lock);
-	rx = verbs_get_rx_locked(vep);
-	pthread_mutex_unlock(&ep->lock);
-
-	return rx;
-}
-#endif
-
 static verbs_tx_t *
 verbs_get_tx_locked(verbs_ep_t *vep)
 {
@@ -669,6 +642,32 @@ verbs_free_devices(cci_device_t const **devices)
 	return CCI_SUCCESS;
 }
 
+static int
+verbs_post_rx(cci__ep_t *ep, verbs_rx_t *rx)
+{
+	int			ret	= CCI_SUCCESS;
+	verbs_ep_t		*vep	= ep->priv;
+	struct ibv_sge		list;
+	struct ibv_recv_wr	wr, *bad_wr;
+
+	CCI_ENTER;
+
+	memset(&list, 0, sizeof(list));
+	list.addr = (uintptr_t) vep->rx_buf + rx->offset;
+	list.length = ep->buffer_len;
+	list.lkey = vep->rx_mr->lkey;
+
+	memset(&wr, 0, sizeof(wr));
+	wr.wr_id = (uintptr_t) rx;
+	wr.sg_list = &list;
+	wr.num_sge = 1;
+
+	ret = ibv_post_srq_recv(vep->srq, &wr, &bad_wr);
+	if (ret == -1)
+		ret = errno;
+	CCI_EXIT;
+	return ret;
+}
 
 static int
 verbs_create_endpoint(cci_device_t *device,
@@ -709,7 +708,6 @@ verbs_create_endpoint(cci_device_t *device,
 	TAILQ_INIT(&vep->txs);
 	TAILQ_INIT(&vep->idle_txs);
 	TAILQ_INIT(&vep->rxs);
-	TAILQ_INIT(&vep->idle_rxs);
 	TAILQ_INIT(&vep->conns);
 	TAILQ_INIT(&vep->active);
 	TAILQ_INIT(&vep->passive);
@@ -840,8 +838,6 @@ verbs_create_endpoint(cci_device_t *device,
 
 	for (i = 0; i < VERBS_EP_RX_CNT; i++) {
 		uintptr_t		offset = i * ep->buffer_len;
-		struct ibv_sge		list;
-		struct ibv_recv_wr	wr, *bad_wr;
 		verbs_rx_t		*rx	= NULL;
 
 		rx = calloc(1, sizeof(*rx));
@@ -852,24 +848,11 @@ verbs_create_endpoint(cci_device_t *device,
 
 		rx->evt.ep = ep;
 		rx->offset = offset;
-		TAILQ_INSERT_TAIL(&vep->rxs, rx, gentry);
-		//TAILQ_INSERT_TAIL(&vep->idle_rxs, rx, entry);
+		TAILQ_INSERT_TAIL(&vep->rxs, rx, entry);
 
-		memset(&list, 0, sizeof(list));
-		list.addr = (uintptr_t) vep->rx_buf + offset;
-		list.length = ep->buffer_len;
-		list.lkey = vep->rx_mr->lkey;
-
-		memset(&wr, 0, sizeof(wr));
-		wr.wr_id = (uintptr_t) rx;
-		wr.sg_list = &list;
-		wr.num_sge = 1;
-
-		ret = ibv_post_srq_recv(vep->srq, &wr, &bad_wr);
-		if (ret == -1) {
-			ret = errno;
+		ret = verbs_post_rx(ep, rx);
+		if (ret)
 			goto out;
-		}
 	}
 
 	CCI_EXIT;
@@ -885,7 +868,7 @@ out:
 
 		while (!TAILQ_EMPTY(&vep->rxs)) {
 			verbs_rx_t *rx = TAILQ_FIRST(&vep->rxs);
-			TAILQ_REMOVE(&vep->rxs, rx, gentry);
+			TAILQ_REMOVE(&vep->rxs, rx, entry);
 			free(rx);
 		}
 
@@ -901,7 +884,7 @@ out:
 
 		while (!TAILQ_EMPTY(&vep->txs)) {
 			verbs_tx_t *tx = TAILQ_FIRST(&vep->txs);
-			TAILQ_REMOVE(&vep->txs, tx, gentry);
+			TAILQ_REMOVE(&vep->txs, tx, entry);
 			free(tx);
 		}
 
@@ -1462,13 +1445,6 @@ verbs_conn_est_active(cci__ep_t *ep, struct rdma_cm_event *cm_evt)
 		debug(CCI_DB_CONN, "unable to send connection request payload");
 		goto out;
 	}
-#if 0
-	} else {
-		/* if no payload, signal CCI_EVENT_CONNECT_ACCEPTED */
-		verbs_conn_accepted(conn, tx);
-	}
-#endif
-
 out:
 	CCI_EXIT;
 	return ret;
@@ -1478,12 +1454,6 @@ static int
 verbs_conn_est_passive(cci__ep_t *ep, struct rdma_cm_event *cm_evt)
 {
 	int		ret	= CCI_SUCCESS;
-	cci__conn_t	*conn	= NULL;
-	//verbs_ep_t	*vep	= ep->priv;
-	verbs_conn_t	*vconn	= NULL;
-
-	conn = cm_evt->id->context;
-	vconn = conn->priv;
 
 	CCI_ENTER;
 
@@ -1824,13 +1794,52 @@ verbs_get_event(cci_endpoint_t *endpoint,
 	return ret;
 }
 
+static int
+verbs_return_conn_request(cci_event_t *event)
+{
+	int		ret	= CCI_SUCCESS;
+	cci__evt_t	*evt	= container_of(event, cci__evt_t, event);
+	verbs_rx_t	*rx	= container_of(evt, verbs_rx_t, evt);
+	cci__conn_t	*conn	= evt->conn;
+	verbs_conn_t	*vconn	= conn->priv;
+	cci__ep_t	*ep	= evt->ep;
+
+	CCI_ENTER;
+
+	if (vconn->conn_req) {
+		if (vconn->conn_req->len) {
+			assert(vconn->conn_req->ptr);
+			free(vconn->conn_req->ptr);
+		}
+		free(vconn->conn_req);
+		vconn->conn_req = NULL;
+	}
+
+	ret = verbs_post_rx(ep, rx);
+
+	CCI_EXIT;
+	return ret;
+}
 
 static int
 verbs_return_event(cci_event_t *event)
 {
+	int		ret	= CCI_SUCCESS;
+
 	CCI_ENTER;
+
+	switch (event->type) {
+	case CCI_EVENT_CONNECT_REQUEST:
+		ret = verbs_return_conn_request(event);
+		break;
+	default:
+		debug(CCI_DB_WARN, "%s: ignoring %d event",
+			__func__, event->type);
+		break;
+	}
+
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 
