@@ -21,6 +21,13 @@
 struct idr ccieth_ep_idr;
 static spinlock_t ccieth_ep_idr_lock;
 
+static int ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
+{
+	struct ccieth_connection *conn = p;
+	kfree(conn);
+	return 0;
+}
+
 static void
 ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 {
@@ -34,6 +41,8 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 		list_del(&event->list);
 		kfree(event);
 	}
+	idr_for_each(&ep->connection_idr, ccieth_destroy_connection_idrforeach_cb, NULL);
+	idr_remove_all(&ep->connection_idr);
 	kfree(ep);
 }
 
@@ -76,6 +85,9 @@ ccieth_create_endpoint(struct ccieth_ioctl_create_endpoint *arg)
 
 	INIT_LIST_HEAD(&ep->event_list);
 	spin_lock_init(&ep->event_list_lock);
+
+	idr_init(&ep->connection_idr);
+	spin_lock_init(&ep->connection_idr_lock);
 
 	arg->id = ep->id = id;
 
