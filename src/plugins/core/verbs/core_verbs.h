@@ -229,7 +229,6 @@ typedef struct verbs_ep {
 	void				*rx_buf;	/* recv buffer */
 	struct ibv_mr			*rx_mr;		/* recv memory registration */
 	TAILQ_HEAD(v_rxs, verbs_rx)	rxs;		/* all rxs */
-	TAILQ_HEAD(v_rxsi, verbs_rx)	idle_rxs;	/* idle rxs */
 	struct ibv_srq			*srq;		/* shared recv queue */
 
 	TAILQ_HEAD(v_conns, verbs_conn)	conns;		/* all conns */
