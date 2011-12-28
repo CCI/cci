@@ -391,7 +391,6 @@ static int eth_create_endpoint(cci_device_t *device,
   cci__ep_t *_ep;
   eth__ep_t *eep;
   int eid;
-  void *recvq;
   char *name;
   int fd;
   int ret;
@@ -435,14 +434,6 @@ static int eth_create_endpoint(cci_device_t *device,
 	  if (ret < 0)
 		  perror("send connect");
   }
-
-  recvq = mmap(NULL, 4096*1024 /* FIXME */, PROT_READ, MAP_SHARED, fd, CCIETH_MMAP_RECVQ_OFFSET);
-  printf("recvq %p\n", recvq);
-  if (recvq == MAP_FAILED) {
-    ret = errno;
-    goto out_with_fd;
-  }
-  eep->recvq = recvq;
 
   *fdp = eep->fd = fd;
 
