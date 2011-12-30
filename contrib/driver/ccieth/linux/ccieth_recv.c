@@ -36,9 +36,9 @@ static int
 ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 	    struct net_device *orig_dev)
 {
-	union ccieth_pkt_header hdr;
+	union ccieth_pkt_header hdr, *hdrp;
 	struct ccieth_endpoint *ep;
-	int err;
+	int err = -EINVAL;
 
 	skb = skb_share_check(skb, GFP_ATOMIC);
 	if (unlikely(skb == NULL))
@@ -47,33 +47,30 @@ ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 	/* len doesn't include header */
 	skb_push(skb, ETH_HLEN);
 
-	/* extract common headers */
-	err = skb_copy_bits(skb, 0, &hdr.generic, sizeof(hdr.generic));
-	if (err)
+	/* get common headers */
+	hdrp = skb_header_pointer(skb, 0, sizeof(hdr.generic), &hdr.generic);
+	if (!hdrp)
 		goto out;
 
 	/* check endpoint is attached to this ifp */
 	rcu_read_lock();
-	ep = idr_find(&ccieth_ep_idr, ntohl(hdr.generic.dst_ep_id));
+	ep = idr_find(&ccieth_ep_idr, ntohl(hdrp->generic.dst_ep_id));
 	rcu_read_unlock();
 	if (!ep || ep->ifp != ifp) {
 		err = -EINVAL;
 		goto out;
 	}
 
-	printk("got a packet with ep %p type %d\n", ep, hdr.generic.type);
+	printk("got a packet with ep %p type %d\n", ep, hdrp->generic.type);
 
 	/* FIXME: take a ref on the endpoint, and change the destroy code to use kref if we can hot-remove interfaces */
 
-	switch (hdr.generic.type) {
+	switch (hdrp->generic.type) {
 	case CCIETH_PKT_CONNECT:
-		/* copy remaining size */
-		err = skb_copy_bits(skb,
-				    sizeof(hdr.generic),
-				    ((char*)&hdr) + sizeof(hdr.generic),
-				    sizeof(hdr.connect) - sizeof(hdr.generic));
-		if (!err)
-			err = ccieth_recv_connect(ifp, ep, &hdr.connect, skb);
+		/* copy entire header now */
+		hdrp = skb_header_pointer(skb, 0, sizeof(hdr.connect), &hdr.connect);
+		if (hdrp)
+			err = ccieth_recv_connect(ifp, ep, &hdrp->connect, skb);
 		break;
 	default:
 		err = -EINVAL;
