@@ -106,24 +106,22 @@ out:
 	return ERR_PTR(err);
 }
 
-static int
-ccieth_get_event(struct ccieth_endpoint *ep, struct ccieth_ioctl_get_event *arg)
+static struct ccieth_endpoint_event *
+ccieth_get_event(struct ccieth_endpoint *ep)
 {
 	struct ccieth_endpoint_event *event;
 
 	spin_lock(&ep->event_list_lock);
 	if (list_empty(&ep->event_list)) {
 		spin_unlock(&ep->event_list_lock);
-		return -EAGAIN;
+		return NULL;
 	}
 
 	event = list_first_entry(&ep->event_list, struct ccieth_endpoint_event, list);
 	list_del(&event->list);
 	spin_unlock(&ep->event_list_lock);
 
-	memcpy(arg, &event->event, sizeof(*arg));
-	kfree(event);
-	return 0;
+	return event;
 }
 
 static int
@@ -314,21 +312,26 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 	}
 
 	case CCIETH_IOCTL_GET_EVENT: {
-		struct ccieth_ioctl_get_event ge_arg;
+		struct ccieth_endpoint_event *event;
 		struct ccieth_endpoint *ep = file->private_data;
 
 		if (!ep)
 			return -EINVAL;
 
-		ret = ccieth_get_event(ep, &ge_arg);
-		if (ret < 0)
-			return ret;
+		event = ccieth_get_event(ep);
+		if (!event)
+			return -EAGAIN;
 
-		/* FIXME: copy directly from the event list to user-space */
-		ret = copy_to_user((__user void *)arg, &ge_arg, sizeof(ge_arg));
+		ret = copy_to_user((__user void *)arg, &event->event, sizeof(event->event));
 		if (ret)
 			return -EFAULT;
 
+		ret = copy_to_user(((__user void *) arg)+sizeof(struct ccieth_ioctl_get_event),
+				   event+1, event->event.data_length);
+		if (ret)
+			return -EFAULT;
+
+		kfree(event);
 		return 0;
 	}
 

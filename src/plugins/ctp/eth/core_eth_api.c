@@ -447,8 +447,14 @@ static int eth_create_endpoint(cci_device_t *device,
 
   {
 	  cci_event_t * event;
+	  struct cci_event_connect_request * cr_event;
 	  while (cci_get_event(*endpoint, &event) == -EAGAIN);
-	  printf("got event type %d\n", CCI_EVENT_CONNECT_REQUEST);
+	  printf("got event type %d\n", event->type);
+	  if (event->type == CCI_EVENT_CONNECT_REQUEST) {
+		  cr_event = (void*) event;
+		  if (cr_event->data_len)
+			  printf("got data len %d data %s\n", cr_event->data_len, cr_event->data_ptr);
+	  }
 	  cci_return_event(event);
   }
   return CCI_SUCCESS;
@@ -538,6 +544,7 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 	cci__ep_t *_ep = container_of(endpoint, cci__ep_t, endpoint);
 	eth__ep_t *eep = _ep->priv;
 	cci_event_t *event;
+	char data[1024]; /* FIXME */
 	struct ccieth_ioctl_get_event ge;
 	int ret;
 
@@ -555,10 +562,13 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 	}
 
 	switch (ge.type) {
-	case CCIETH_IOCTL_EVENT_CONNECT_REQUEST:
+	case CCIETH_IOCTL_EVENT_CONNECT_REQUEST: {
+		struct cci_event_connect_request * cr_event = (void*) event;
 		event->type = CCI_EVENT_CONNECT_REQUEST;
-		/* FIXME data */
+		cr_event->data_len = ge.data_length;
+		cr_event->data_ptr = ge.data_length ? &ge + 1 : NULL;
 		break;
+	}
 	default:
 		printf("got invalid event type %d\n", ge.type);
 		goto out_with_event;
