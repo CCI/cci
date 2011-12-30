@@ -8,17 +8,28 @@
 
 #define ETH_P_CCI 0x86df
 
-struct ccieth_pkt_header {
-	struct ethhdr eth;
-	u8 type;
-	u8 pad1;
-	/* 16 */
-	u32 endpoint_id;
-	u32 pad2;
-	/* 24 */
-	u32 src_ep_id;
-	u32 src_conn_id;
-	/* 32 */
+union ccieth_pkt_header {
+	struct ccieth_pkt_header_generic {
+		struct ethhdr eth;
+		__u8 type;
+		__u8 pad1;
+		/* 16 */
+		__be32 dst_ep_id;
+	} generic;
+	struct ccieth_pkt_header_connect {
+		struct ethhdr eth;
+		__u8 type;
+		__u8 pad1;
+		/* 16 */
+		__be32 dst_ep_id;
+		__be32 attributes;
+		/* 24 */
+		__be32 src_ep_id;
+		__be32 src_conn_id;
+		/* 32 */
+		__be32 data_len;
+		__u8 data[0];
+	} connect;
 };
 
 enum ccieth_pkt_type {

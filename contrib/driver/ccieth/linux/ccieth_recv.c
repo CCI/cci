@@ -11,12 +11,14 @@
 
 static int
 ccieth_recv_connect(struct net_device *ifp, struct ccieth_endpoint *ep,
-		    struct ccieth_pkt_header *hdr, struct sk_buff *skb)
+		    struct ccieth_pkt_header_connect *hdr, struct sk_buff *skb)
 {
 	struct ccieth_endpoint_event *event;
+	__u32 src_ep_id = ntohl(hdr->src_ep_id);
+	__u32 src_conn_id = ntohl(hdr->src_conn_id);
 
 	printk("got conn request from eid %d conn id %d\n",
-	       hdr->src_ep_id, hdr->src_conn_id);
+	       src_ep_id, src_conn_id);
 
 	event = kmalloc(sizeof(*event), GFP_KERNEL);
 	if (!event)
@@ -34,7 +36,7 @@ static int
 ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 	    struct net_device *orig_dev)
 {
-	struct ccieth_pkt_header hdr;
+	union ccieth_pkt_header hdr;
 	struct ccieth_endpoint *ep;
 	int err;
 
@@ -46,26 +48,32 @@ ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 	skb_push(skb, ETH_HLEN);
 
 	/* extract common headers */
-	err = skb_copy_bits(skb, 0, &hdr, sizeof(hdr));
+	err = skb_copy_bits(skb, 0, &hdr.generic, sizeof(hdr.generic));
 	if (err)
 		goto out;
 
 	/* check endpoint is attached to this ifp */
 	rcu_read_lock();
-	ep = idr_find(&ccieth_ep_idr, hdr.endpoint_id);
+	ep = idr_find(&ccieth_ep_idr, ntohl(hdr.generic.dst_ep_id));
 	rcu_read_unlock();
 	if (!ep || ep->ifp != ifp) {
 		err = -EINVAL;
 		goto out;
 	}
 
-	printk("got a packet with ep %p type %d\n", ep, hdr.type);
+	printk("got a packet with ep %p type %d\n", ep, hdr.generic.type);
 
 	/* FIXME: take a ref on the endpoint, and change the destroy code to use kref if we can hot-remove interfaces */
 
-	switch (hdr.type) {
+	switch (hdr.generic.type) {
 	case CCIETH_PKT_CONNECT:
-		err = ccieth_recv_connect(ifp, ep, &hdr, skb);
+		/* copy remaining size */
+		err = skb_copy_bits(skb,
+				    sizeof(hdr.generic),
+				    ((char*)&hdr) + sizeof(hdr.generic),
+				    sizeof(hdr.connect) - sizeof(hdr.generic));
+		if (!err)
+			err = ccieth_recv_connect(ifp, ep, &hdr.connect, skb);
 		break;
 	default:
 		err = -EINVAL;

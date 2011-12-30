@@ -137,7 +137,7 @@ static int
 ccieth_send_connect(struct ccieth_endpoint *ep, struct ccieth_ioctl_send_connect *arg)
 {
 	struct sk_buff *skb;
-	struct ccieth_pkt_header *hdr;
+	struct ccieth_pkt_header_connect *hdr;
 	struct ccieth_connection *conn;
 	int err;
 
@@ -169,14 +169,16 @@ ccieth_send_connect(struct ccieth_endpoint *ep, struct ccieth_ioctl_send_connect
 	skb_put(skb, ETH_ZLEN);
 	skb->dev = ep->ifp;
 
-	hdr = (struct ccieth_pkt_header *) skb_mac_header(skb);
+	hdr = (struct ccieth_pkt_header_connect *) skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
 	memcpy(&hdr->eth.h_source, ep->ifp->dev_addr, 6);
 	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
-	hdr->endpoint_id = conn->dest_eid;
-	hdr->src_ep_id = ep->id;
-	hdr->src_conn_id = conn->id;
 	hdr->type = CCIETH_PKT_CONNECT;
+	hdr->dst_ep_id = htonl(conn->dest_eid);
+	hdr->attributes = htonl(0); /* FIXME */
+	hdr->src_ep_id = htonl(ep->id);
+	hdr->src_conn_id = htonl(conn->id);
+	/* FIXME: data */
 
         dev_queue_xmit(skb);
 
