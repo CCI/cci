@@ -16,6 +16,9 @@ struct ccieth_pkt_header {
 	u32 endpoint_id;
 	u32 pad2;
 	/* 24 */
+	u32 src_ep_id;
+	u32 src_conn_id;
+	/* 32 */
 };
 
 enum ccieth_pkt_type {

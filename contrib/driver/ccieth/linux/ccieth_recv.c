@@ -15,6 +15,9 @@ ccieth_recv_connect(struct net_device *ifp, struct ccieth_endpoint *ep,
 {
 	struct ccieth_endpoint_event *event;
 
+	printk("got conn request from eid %d conn id %d\n",
+	       hdr->src_ep_id, hdr->src_conn_id);
+
 	event = kmalloc(sizeof(*event), GFP_KERNEL);
 	if (!event)
 		return -ENOMEM;

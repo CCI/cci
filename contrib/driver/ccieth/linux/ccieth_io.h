@@ -59,10 +59,10 @@ struct ccieth_ioctl_send_connect {
 	__u8 pad1[2];
 	/* 8 */
 	__u32 dest_eid;
-	__u32 pad2;
+	__u32 conn_id;
 	/* 16 */
 };
-#define CCIETH_IOCTL_SEND_CONNECT _IOR(CCIETH_IOCTL_MAGIC, 0x5, struct ccieth_ioctl_send_connect)
+#define CCIETH_IOCTL_SEND_CONNECT _IOWR(CCIETH_IOCTL_MAGIC, 0x5, struct ccieth_ioctl_send_connect)
 
 /* FIXME: enforce matching with enum cci_event_type */
 #define CCIETH_IOCTL_EVENT_CONNECT_REQUEST 6

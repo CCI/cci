@@ -24,6 +24,8 @@ static spinlock_t ccieth_ep_idr_lock;
 static int ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 {
 	struct ccieth_connection *conn = p;
+	int *destroyed_conn = data;
+	(*destroyed_conn)++;
 	kfree(conn);
 	return 0;
 }
@@ -32,6 +34,7 @@ static void
 ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 {
 	struct ccieth_endpoint_event *event, *nevent;
+	int destroyed_conn = 0;
 
 	spin_lock(&ccieth_ep_idr_lock);
 	idr_remove(&ccieth_ep_idr, ep->id);
@@ -41,7 +44,9 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 		list_del(&event->list);
 		kfree(event);
 	}
-	idr_for_each(&ep->connection_idr, ccieth_destroy_connection_idrforeach_cb, NULL);
+	idr_for_each(&ep->connection_idr, ccieth_destroy_connection_idrforeach_cb,
+		     &destroyed_conn);
+	printk("destroyed %d connections on endpoint destroy\n", destroyed_conn);
 	idr_remove_all(&ep->connection_idr);
 	kfree(ep);
 }
@@ -129,18 +134,35 @@ ccieth_return_event(struct ccieth_endpoint *ep, const struct ccieth_ioctl_return
 }
 
 static int
-ccieth_send_connect(struct ccieth_endpoint *ep, const struct ccieth_ioctl_send_connect *arg)
+ccieth_send_connect(struct ccieth_endpoint *ep, struct ccieth_ioctl_send_connect *arg)
 {
 	struct sk_buff *skb;
 	struct ccieth_pkt_header *hdr;
+	struct ccieth_connection *conn;
 	int err;
 
-        skb = alloc_skb(ETH_ZLEN, GFP_KERNEL);
-	if (!skb) {
-		err = -ENOMEM;
+	err = -ENOMEM;
+	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
+	if (!conn)
 		goto out;
-	}
-		
+	err = idr_pre_get(&ep->connection_idr, GFP_KERNEL);
+	if (!err)
+		goto out_with_conn;
+
+        skb = alloc_skb(ETH_ZLEN, GFP_KERNEL);
+	if (!skb)
+		goto out_with_conn;
+
+	conn->status = CCIETH_CONNECTION_REQUESTED;
+	memcpy(&conn->dest_addr, &arg->dest_addr, 6);
+	conn->dest_eid = arg->dest_eid;
+
+	spin_lock(&ep->connection_idr_lock);
+	err = idr_get_new(&ep->connection_idr, conn, &conn->id);
+	spin_unlock(&ep->connection_idr_lock);
+	if (err < 0)
+		goto out_with_skb;
+
 	skb_reset_mac_header(skb);
 	skb_reset_network_header(skb);
 	skb->protocol = __constant_htons(ETH_P_CCI);
@@ -148,15 +170,24 @@ ccieth_send_connect(struct ccieth_endpoint *ep, const struct ccieth_ioctl_send_c
 	skb->dev = ep->ifp;
 
 	hdr = (struct ccieth_pkt_header *) skb_mac_header(skb);
-	memcpy(&hdr->eth.h_dest, &arg->dest_addr, 6);
-	memset(&hdr->eth.h_dest, 0x12, 6);
+	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
 	memcpy(&hdr->eth.h_source, ep->ifp->dev_addr, 6);
 	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
-	hdr->endpoint_id = arg->dest_eid;
+	hdr->endpoint_id = conn->dest_eid;
+	hdr->src_ep_id = ep->id;
+	hdr->src_conn_id = conn->id;
 	hdr->type = CCIETH_PKT_CONNECT;
+
         dev_queue_xmit(skb);
+
+	arg->conn_id = conn->id;
+
 	return 0;
 
+out_with_skb:
+	kfree_skb(skb);
+out_with_conn:
+	kfree(conn);
 out:
 	return err;
 }
@@ -315,6 +346,10 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		ret = ccieth_send_connect(ep, &sc_arg);
 		if (ret < 0)
 			return ret;
+
+		ret = copy_to_user((__user void *)arg, &sc_arg, sizeof(sc_arg));
+		if (ret)
+			return -EFAULT;
 
 		return 0;
 	}
