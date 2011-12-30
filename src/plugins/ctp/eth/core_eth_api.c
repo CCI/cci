@@ -428,8 +428,16 @@ static int eth_create_endpoint(cci_device_t *device,
 
   {
 	  struct ccieth_ioctl_send_connect arg;
-	  arg.dest_eid = eid;
+	  char data[] = "hello world!";
 	  memcpy(&arg.dest_addr, &edev->addr.sll_addr, 6);
+	  arg.dest_eid = eid;
+	  arg.data_len = strlen(data)+1;
+	  arg.data_ptr = (uintptr_t) data;
+	  arg.attributes = 0;
+	  arg.flags = 0;
+	  arg.context = (uintptr_t) 0xdeadbeef;
+	  arg.timeout_sec = -1ULL;
+	  arg.timeout_usec = -1;
 	  ret = ioctl(fd, CCIETH_IOCTL_SEND_CONNECT, &arg);
 	  if (ret < 0)
 		  perror("send connect");

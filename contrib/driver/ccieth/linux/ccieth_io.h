@@ -59,8 +59,20 @@ struct ccieth_ioctl_send_connect {
 	__u8 pad1[2];
 	/* 8 */
 	__u32 dest_eid;
-	__u32 conn_id;
+	__u32 data_len;
 	/* 16 */
+	__u64 data_ptr;
+	/* 24 */
+	__u32 attributes;
+	__u32 flags;
+	/* 32 */
+	__u64 context;
+	/* 40 */
+	__u64 timeout_sec;
+	/* 48 */
+	__u32 timeout_usec;
+	__u32 conn_id; /* output */
+	/* 56 */
 };
 #define CCIETH_IOCTL_SEND_CONNECT _IOWR(CCIETH_IOCTL_MAGIC, 0x5, struct ccieth_ioctl_send_connect)
 

@@ -16,15 +16,26 @@ ccieth_recv_connect(struct net_device *ifp, struct ccieth_endpoint *ep,
 	struct ccieth_endpoint_event *event;
 	__u32 src_ep_id = ntohl(hdr->src_ep_id);
 	__u32 src_conn_id = ntohl(hdr->src_conn_id);
+	__u32 data_len = ntohl(hdr->data_len);
+	int err;
 
 	printk("got conn request from eid %d conn id %d\n",
 	       src_ep_id, src_conn_id);
 
-	event = kmalloc(sizeof(*event), GFP_KERNEL);
+	/* FIXME: check data_len <= MTU */
+
+	event = kmalloc(sizeof(*event) + data_len, GFP_KERNEL);
 	if (!event)
 		return -ENOMEM;
 
 	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_REQUEST;
+	event->event.data_length = data_len;
+
+	err = skb_copy_bits(skb, sizeof(*hdr), event+1, data_len);
+	if (err < 0) {
+		kfree(event);
+		return -ENOMEM;
+	}
 
 	spin_lock(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);

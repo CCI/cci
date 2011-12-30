@@ -139,6 +139,7 @@ ccieth_send_connect(struct ccieth_endpoint *ep, struct ccieth_ioctl_send_connect
 	struct sk_buff *skb;
 	struct ccieth_pkt_header_connect *hdr;
 	struct ccieth_connection *conn;
+	size_t skblen;
 	int err;
 
 	err = -ENOMEM;
@@ -149,7 +150,12 @@ ccieth_send_connect(struct ccieth_endpoint *ep, struct ccieth_ioctl_send_connect
 	if (!err)
 		goto out_with_conn;
 
-        skb = alloc_skb(ETH_ZLEN, GFP_KERNEL);
+	/* FIXME: check data_len <= MTU */
+
+	skblen = sizeof(*hdr) + arg->data_len;
+	if (skblen < ETH_ZLEN)
+		skblen = ETH_ZLEN;
+        skb = alloc_skb(skblen, GFP_KERNEL);
 	if (!skb)
 		goto out_with_conn;
 
@@ -178,7 +184,13 @@ ccieth_send_connect(struct ccieth_endpoint *ep, struct ccieth_ioctl_send_connect
 	hdr->attributes = htonl(0); /* FIXME */
 	hdr->src_ep_id = htonl(ep->id);
 	hdr->src_conn_id = htonl(conn->id);
-	/* FIXME: data */
+
+	hdr->data_len = htonl(arg->data_len);
+	err = copy_from_user(&hdr->data, (const void *)(uintptr_t) arg->data_ptr, arg->data_len);
+	if (err) {
+		err = -EFAULT;
+		goto out_with_connid;
+	}
 
         dev_queue_xmit(skb);
 
@@ -186,6 +198,10 @@ ccieth_send_connect(struct ccieth_endpoint *ep, struct ccieth_ioctl_send_connect
 
 	return 0;
 
+out_with_connid:
+	spin_lock(&ep->connection_idr_lock);
+	idr_remove(&ep->connection_idr, conn->id);
+	spin_unlock(&ep->connection_idr_lock);
 out_with_skb:
 	kfree_skb(skb);
 out_with_conn:
