@@ -17,6 +17,7 @@ union ccieth_pkt_header {
 		__be32 dst_ep_id;
 	} generic;
 	struct ccieth_pkt_header_connect {
+		/* FIXME: mss? */
 		struct ethhdr eth;
 		__u8 type;
 		__u8 pad1;

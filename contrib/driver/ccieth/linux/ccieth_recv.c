@@ -22,7 +22,8 @@ ccieth_recv_connect(struct net_device *ifp, struct ccieth_endpoint *ep,
 	printk("got conn request from eid %d conn id %d\n",
 	       src_ep_id, src_conn_id);
 
-	/* FIXME: check data_len <= MTU */
+	if (data_len >= ep->max_send_size)
+		return -EINVAL;
 
 	event = kmalloc(sizeof(*event) + data_len, GFP_KERNEL);
 	if (!event)

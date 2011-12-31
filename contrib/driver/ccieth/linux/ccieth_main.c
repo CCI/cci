@@ -94,6 +94,8 @@ ccieth_create_endpoint(struct ccieth_ioctl_create_endpoint *arg)
 	idr_init(&ep->connection_idr);
 	spin_lock_init(&ep->connection_idr_lock);
 
+	ep->max_send_size = ifp->mtu >= 9000 ? 8192 : 1024;
+
 	arg->id = ep->id = id;
 
 	return ep;
@@ -140,6 +142,10 @@ ccieth_send_connect(struct ccieth_endpoint *ep, struct ccieth_ioctl_send_connect
 	size_t skblen;
 	int err;
 
+	err = -EINVAL;
+	if (arg->data_len >= ep->max_send_size)
+		goto out;
+
 	err = -ENOMEM;
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
@@ -147,8 +153,6 @@ ccieth_send_connect(struct ccieth_endpoint *ep, struct ccieth_ioctl_send_connect
 	err = idr_pre_get(&ep->connection_idr, GFP_KERNEL);
 	if (!err)
 		goto out_with_conn;
-
-	/* FIXME: check data_len <= MTU */
 
 	skblen = sizeof(*hdr) + arg->data_len;
 	if (skblen < ETH_ZLEN)
@@ -253,10 +257,7 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		if (ifp) {
 			struct device *dev = ifp->dev.parent;
 
-			if (ifp->mtu == 9000)
-				gi_arg.max_send_size = 8192;
-			else if (ifp->mtu == 1500)
-				gi_arg.max_send_size = 1024;
+			gi_arg.max_send_size = ifp->mtu >= 9000 ? 8192 : 1024;
 
 			if (dev && dev->bus == &pci_bus_type) {
 				struct pci_dev *pdev = to_pci_dev(dev);

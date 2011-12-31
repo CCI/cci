@@ -14,6 +14,7 @@
 
 struct ccieth_endpoint {
 	struct net_device *ifp;
+	int max_send_size;
 	int id;
 
 	struct list_head event_list;
