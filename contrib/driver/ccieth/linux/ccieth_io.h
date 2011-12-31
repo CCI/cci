@@ -45,10 +45,19 @@ struct ccieth_ioctl_get_event {
 	/* 8 */
 	union {
 		struct {
+			/* FIXME: mss? */
 			__u32 conn_id;
 			__u32 attribute;
 			/* 16 */
 		} connect;
+		struct {
+			/* FIXME: mss? */
+			__u32 conn_id;
+			__u32 attribute;
+			/* 16 */
+			__u64 context;
+			/* 24 */
+		} accept;
 	};
 };
 #define CCIETH_IOCTL_GET_EVENT _IOW(CCIETH_IOCTL_MAGIC, 0x3, struct ccieth_ioctl_get_event)
@@ -87,6 +96,7 @@ struct ccieth_ioctl_accept {
 #define CCIETH_IOCTL_ACCEPT _IOR(CCIETH_IOCTL_MAGIC, 0x6, struct ccieth_ioctl_accept)
 
 /* FIXME: enforce matching with enum cci_event_type */
+#define CCIETH_IOCTL_EVENT_CONNECT_ACCEPTED 3
 #define CCIETH_IOCTL_EVENT_CONNECT_REQUEST 6
 
 #endif /* CCIETH_IO_H */

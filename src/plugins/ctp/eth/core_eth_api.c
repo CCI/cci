@@ -460,6 +460,18 @@ static int eth_create_endpoint(cci_device_t *device,
 	  cci_accept(event, &connection);
 	  cci_return_event(event);
   }
+
+  {
+	  cci_event_t * event;
+	  struct cci_event_connect_accepted * cr_event;
+	  while (cci_get_event(*endpoint, &event) == -EAGAIN);
+	  printf("got event type %d\n", event->type);
+	  if (event->type == CCI_EVENT_CONNECT_ACCEPTED) {
+		  cr_event = (void*) event;
+		  printf("got conn %p\n", cr_event->connection);
+	  }
+	  cci_return_event(event);	  
+  }
   return CCI_SUCCESS;
 
  out_with_fd:
@@ -513,7 +525,7 @@ static int eth_accept(union cci_event *event,
 	_conn->connection.max_send_size = 1024; /* FIXME */
 	_conn->connection.endpoint = &_ep->endpoint;
 	_conn->connection.attribute = ge->connect.attribute;
-	_conn->connection.context = NULL; /* FIXME */
+	_conn->connection.context = NULL;
 
 	*connection = &_conn->connection;
 	return CCI_SUCCESS;
@@ -605,6 +617,28 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 		cr_event->data_len = ge->data_length;
 		cr_event->data_ptr = ge->data_length ? data : NULL;
 		cr_event->attribute = ge->connect.attribute;
+		break;
+	}
+	case CCIETH_IOCTL_EVENT_CONNECT_ACCEPTED: {
+		struct cci_event_connect_accepted * ac_event = (void*) event;
+		cci__conn_t *_conn;
+		eth__conn_t *econn;
+
+		_conn = malloc(sizeof(*_conn) + sizeof(*econn));
+		if (!_conn)
+			return CCI_ENOMEM;
+		econn = (void*) (_conn+1);
+		_conn->priv = econn;
+		econn->id = ge->accept.conn_id;
+
+		_conn->connection.max_send_size = 1024; /* FIXME */
+		_conn->connection.endpoint = endpoint;
+		_conn->connection.attribute = ge->accept.attribute;
+		_conn->connection.context = (void*)(uintptr_t) ge->accept.context;
+
+		event->type = CCI_EVENT_CONNECT_ACCEPTED;
+		ac_event->context = NULL; /* FIXME */
+		ac_event->connection = &_conn->connection;
 		break;
 	}
 	default:
