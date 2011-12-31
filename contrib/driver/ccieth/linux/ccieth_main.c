@@ -183,7 +183,7 @@ ccieth_send_connect(struct ccieth_endpoint *ep, struct ccieth_ioctl_send_connect
 	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
 	hdr->type = CCIETH_PKT_CONNECT;
 	hdr->dst_ep_id = htonl(conn->dest_eid);
-	hdr->attributes = htonl(0); /* FIXME */
+	hdr->attribute = arg->attribute;
 	hdr->src_ep_id = htonl(ep->id);
 	hdr->src_conn_id = htonl(conn->id);
 

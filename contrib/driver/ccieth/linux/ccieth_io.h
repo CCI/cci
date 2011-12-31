@@ -41,11 +41,13 @@ struct ccieth_ioctl_get_event {
 	__u8 type;
 	__u8 pad1;
 	__u16 data_length;
-	__u32 data_offset;
-	/* 8 */
-	__u32 event_offset;	/* FIXME: not needed when passing events through the mmap'ed recvq */
-	__u32 pad2;
-	/* 16 */
+	/* 4 */
+	union {
+		struct {
+			__u32 attribute;
+			/* 8 */
+		} connect;
+	};
 };
 #define CCIETH_IOCTL_GET_EVENT _IOW(CCIETH_IOCTL_MAGIC, 0x3, struct ccieth_ioctl_get_event)
 
@@ -63,7 +65,8 @@ struct ccieth_ioctl_send_connect {
 	/* 16 */
 	__u64 data_ptr;
 	/* 24 */
-	__u32 attributes;
+	__u8 attribute;
+	__u8 pad2[3];
 	__u32 flags;
 	/* 32 */
 	__u64 context;

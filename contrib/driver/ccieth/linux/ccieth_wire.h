@@ -20,15 +20,14 @@ union ccieth_pkt_header {
 		/* FIXME: mss? */
 		struct ethhdr eth;
 		__u8 type;
-		__u8 pad1;
+		__u8 attribute;
 		/* 16 */
 		__be32 dst_ep_id;
-		__be32 attributes;
-		/* 24 */
 		__be32 src_ep_id;
+		/* 24 */
 		__be32 src_conn_id;
-		/* 32 */
 		__be32 data_len;
+		/* 32 */
 		__u8 data[0];
 	} connect;
 };

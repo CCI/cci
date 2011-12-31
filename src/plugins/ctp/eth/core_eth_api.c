@@ -433,7 +433,7 @@ static int eth_create_endpoint(cci_device_t *device,
 	  arg.dest_eid = eid;
 	  arg.data_len = strlen(data)+1;
 	  arg.data_ptr = (uintptr_t) data;
-	  arg.attributes = 0;
+	  arg.attribute = 123;
 	  arg.flags = 0;
 	  arg.context = (uintptr_t) 0xdeadbeef;
 	  arg.timeout_sec = -1ULL;
@@ -454,6 +454,7 @@ static int eth_create_endpoint(cci_device_t *device,
 		  cr_event = (void*) event;
 		  if (cr_event->data_len)
 			  printf("got data len %d data %s\n", cr_event->data_len, cr_event->data_ptr);
+		  printf("got attr %d\n", (int) cr_event->attribute);
 	  }
 	  cci_return_event(event);
   }
@@ -569,6 +570,7 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 		event->type = CCI_EVENT_CONNECT_REQUEST;
 		cr_event->data_len = ge->data_length;
 		cr_event->data_ptr = ge->data_length ? data : NULL;
+		cr_event->attribute = ge->connect.attribute;
 		break;
 	}
 	default:

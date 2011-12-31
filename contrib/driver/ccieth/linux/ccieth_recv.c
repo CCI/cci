@@ -31,12 +31,15 @@ ccieth_recv_connect(struct net_device *ifp, struct ccieth_endpoint *ep,
 
 	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_REQUEST;
 	event->event.data_length = data_len;
+	event->event.connect.attribute = hdr->attribute;
 
 	err = skb_copy_bits(skb, sizeof(*hdr), event+1, data_len);
 	if (err < 0) {
 		kfree(event);
 		return -ENOMEM;
 	}
+
+	/* FIXME: create a connection and pass its id in the event */
 
 	spin_lock(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
