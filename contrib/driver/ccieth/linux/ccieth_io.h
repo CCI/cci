@@ -41,11 +41,13 @@ struct ccieth_ioctl_get_event {
 	__u8 type;
 	__u8 pad1;
 	__u16 data_length;
-	/* 4 */
+	__u32 pad2;
+	/* 8 */
 	union {
 		struct {
+			__u32 conn_id;
 			__u32 attribute;
-			/* 8 */
+			/* 16 */
 		} connect;
 	};
 };

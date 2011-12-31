@@ -14,6 +14,7 @@ ccieth_recv_connect(struct net_device *ifp, struct ccieth_endpoint *ep,
 		    struct ccieth_pkt_header_connect *hdr, struct sk_buff *skb)
 {
 	struct ccieth_endpoint_event *event;
+	struct ccieth_connection *conn;
 	__u32 src_ep_id = ntohl(hdr->src_ep_id);
 	__u32 src_conn_id = ntohl(hdr->src_conn_id);
 	__u32 data_len = ntohl(hdr->data_len);
@@ -22,29 +23,59 @@ ccieth_recv_connect(struct net_device *ifp, struct ccieth_endpoint *ep,
 	printk("got conn request from eid %d conn id %d\n",
 	       src_ep_id, src_conn_id);
 
+	err = -EINVAL;
 	if (data_len >= ep->max_send_size)
-		return -EINVAL;
+		goto out;
 
+	/* setup the event */
+	err = -ENOMEM;
 	event = kmalloc(sizeof(*event) + data_len, GFP_KERNEL);
 	if (!event)
-		return -ENOMEM;
-
+		goto out;
 	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_REQUEST;
 	event->event.data_length = data_len;
 	event->event.connect.attribute = hdr->attribute;
 
+	err = -EINVAL;
 	err = skb_copy_bits(skb, sizeof(*hdr), event+1, data_len);
+	if (err < 0)
+		goto out_with_event;
+
+	/* setup the connection */
+	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
+	if (!conn)
+		goto out_with_event;
+	conn->status = CCIETH_CONNECTION_RECEIVED;
+	memcpy(&conn->dest_addr, &hdr->eth.h_source, 6);
+	conn->dest_eid = ntohl(hdr->src_ep_id);
+	conn->dest_id = ntohl(hdr->src_conn_id);
+retry:
+	spin_lock(&ep->connection_idr_lock);
+	/* FIXME: idr_for_each() to check for duplicates */
+	err = idr_get_new(&ep->connection_idr, conn, &conn->id);
+	spin_unlock(&ep->connection_idr_lock);
 	if (err < 0) {
-		kfree(event);
-		return -ENOMEM;
+		if (err == -EAGAIN) {
+			if (idr_pre_get(&ep->connection_idr, GFP_KERNEL) > 0)
+				goto retry;
+			err = -ENOMEM;
+		}
+		goto out_with_conn;
 	}
 
-	/* FIXME: create a connection and pass its id in the event */
-
+	/* finalize and notify the event */
+	event->event.connect.conn_id = conn->id;
 	spin_lock(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock(&ep->event_list_lock);
 	return 0;
+
+out_with_conn:
+	kfree(conn);
+out_with_event:
+	kfree(event);
+out:
+	return err;
 }
 
 static int

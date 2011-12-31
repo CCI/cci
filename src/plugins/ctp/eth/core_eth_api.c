@@ -571,6 +571,7 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 		cr_event->data_len = ge->data_length;
 		cr_event->data_ptr = ge->data_length ? data : NULL;
 		cr_event->attribute = ge->connect.attribute;
+		printf("conn id %d\n", ge->connect.conn_id);
 		break;
 	}
 	default:
