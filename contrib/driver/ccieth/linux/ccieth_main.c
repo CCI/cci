@@ -214,6 +214,67 @@ out:
 }
 
 static int
+ccieth_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_accept *arg)
+{
+	struct sk_buff *skb;
+	struct ccieth_pkt_header_accept *hdr;
+	struct ccieth_connection *conn;
+	size_t skblen;
+	int err;
+
+	/* allocate and initialize the skb */
+	skblen = sizeof(*hdr);
+	if (skblen < ETH_ZLEN)
+		skblen = ETH_ZLEN;
+	err = -ENOMEM;
+        skb = alloc_skb(skblen, GFP_KERNEL);
+	if (!skb)
+		goto out;
+	skb_reset_mac_header(skb);
+	skb_reset_network_header(skb);
+	skb->protocol = __constant_htons(ETH_P_CCI);
+	skb_put(skb, ETH_ZLEN);
+	skb->dev = ep->ifp;
+
+	/* update the connection now that we can't fail anywhere else */
+	err = -EINVAL;
+	rcu_read_lock();
+	conn = idr_find(&ep->connection_idr, arg->conn_id);
+	/* FIXME: take a reference */
+	rcu_read_unlock();
+	if (!conn)
+		goto out_with_skb;
+
+	if (cmpxchg(&conn->status, CCIETH_CONNECTION_RECEIVED, CCIETH_CONNECTION_READY)
+	    != CCIETH_CONNECTION_RECEIVED)
+		goto out_with_conn;
+
+	/* fill headers */
+	hdr = (struct ccieth_pkt_header_accept *) skb_mac_header(skb);
+	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
+	memcpy(&hdr->eth.h_source, ep->ifp->dev_addr, 6);
+	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
+	hdr->type = CCIETH_PKT_ACCEPT;
+	hdr->dst_ep_id = htonl(conn->dest_eid);
+	hdr->dst_conn_id = htonl(conn->dest_id);
+	hdr->src_ep_id = htonl(ep->id);
+	hdr->src_conn_id = htonl(conn->id);
+
+	/* FIXME: release ref */
+
+        dev_queue_xmit(skb);
+
+	return 0;
+
+out_with_conn:
+	/* FIXME: release ref */
+out_with_skb:
+	kfree(skb);
+out:
+	return err;
+}
+
+static int
 ccieth_miscdev_open(struct inode *inode, struct file *file)
 {
 	file->private_data = NULL;
@@ -373,6 +434,24 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		ret = copy_to_user((__user void *)arg, &sc_arg, sizeof(sc_arg));
 		if (ret)
 			return -EFAULT;
+
+		return 0;
+	}
+
+	case CCIETH_IOCTL_ACCEPT: {
+		struct ccieth_ioctl_accept ac_arg;
+		struct ccieth_endpoint *ep = file->private_data;
+
+		if (!ep)
+			return -EINVAL;
+
+		ret = copy_from_user(&ac_arg, (__user void *)arg, sizeof(ac_arg));
+		if (ret)
+			return -EFAULT;
+
+		ret = ccieth_accept(ep, &ac_arg);
+		if (ret < 0)
+			return ret;
 
 		return 0;
 	}

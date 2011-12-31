@@ -446,6 +446,7 @@ static int eth_create_endpoint(cci_device_t *device,
   *fdp = eep->fd = fd;
 
   {
+	  cci_connection_t * connection;
 	  cci_event_t * event;
 	  struct cci_event_connect_request * cr_event;
 	  while (cci_get_event(*endpoint, &event) == -EAGAIN);
@@ -456,6 +457,7 @@ static int eth_create_endpoint(cci_device_t *device,
 			  printf("got data len %d data %s\n", cr_event->data_len, cr_event->data_ptr);
 		  printf("got attr %d\n", (int) cr_event->attribute);
 	  }
+	  cci_accept(event, &connection);
 	  cci_return_event(event);
   }
   return CCI_SUCCESS;
@@ -484,8 +486,22 @@ static int eth_destroy_endpoint(cci_endpoint_t *endpoint)
 static int eth_accept(union cci_event *event,
                       cci_connection_t **connection)
 {
-    printf("In eth_accept\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+	cci__evt_t *_ev = container_of(event, cci__evt_t, event);
+	cci__ep_t *_ep = _ev->ep;
+	eth__ep_t *eep = _ep->priv;
+	struct ccieth_ioctl_get_event *ge = (void*) (_ev + 1);
+	__u32 conn_id = ge->connect.conn_id;
+	struct ccieth_ioctl_accept ac;
+	int err;
+
+	ac.conn_id = conn_id;
+
+	err = ioctl(eep->fd, CCIETH_IOCTL_ACCEPT, &ac);
+	if (err < 0) {
+		perror("accept");
+	}
+
+	return CCI_SUCCESS;
 }
 
 
@@ -544,15 +560,18 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 {
 	cci__ep_t *_ep = container_of(endpoint, cci__ep_t, endpoint);
 	eth__ep_t *eep = _ep->priv;
+	cci__evt_t *_ev;
 	cci_event_t *event;
 	struct ccieth_ioctl_get_event *ge;
 	char *data;
 	int ret;
 
-	event = malloc(sizeof(*event) + sizeof(*ge) + _ep->dev->device.max_send_size);
-	if (!event)
+	_ev = malloc(sizeof(*_ev) + sizeof(*ge) + _ep->dev->device.max_send_size);
+	if (!_ev)
 		return CCI_ENOMEM;
-	ge = (void*) (event + 1);
+	_ev->ep = _ep;
+	event = &_ev->event;
+	ge = (void*) (_ev + 1);
 	data = (void*) (ge + 1);
 
 	ret = ioctl(eep->fd, CCIETH_IOCTL_GET_EVENT, ge);
@@ -571,7 +590,6 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 		cr_event->data_len = ge->data_length;
 		cr_event->data_ptr = ge->data_length ? data : NULL;
 		cr_event->attribute = ge->connect.attribute;
-		printf("conn id %d\n", ge->connect.conn_id);
 		break;
 	}
 	default:

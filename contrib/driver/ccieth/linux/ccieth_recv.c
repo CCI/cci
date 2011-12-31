@@ -79,6 +79,24 @@ out:
 }
 
 static int
+ccieth_recv_accept(struct net_device *ifp, struct ccieth_endpoint *ep,
+		    struct ccieth_pkt_header_accept *hdr)
+{
+	struct ccieth_endpoint_event *event;
+	struct ccieth_connection *conn;
+	__u32 src_ep_id = ntohl(hdr->src_ep_id);
+	__u32 src_conn_id = ntohl(hdr->src_conn_id);
+	__u32 dst_ep_id = ntohl(hdr->dst_ep_id);
+	__u32 dst_conn_id = ntohl(hdr->dst_conn_id);
+	int err;
+
+	printk("got conn accept from eid %d conn id %d to %d %d\n",
+	       src_ep_id, src_conn_id, dst_ep_id, dst_conn_id);
+
+	return 0;
+}
+
+static int
 ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 	    struct net_device *orig_dev)
 {
@@ -117,6 +135,12 @@ ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 		hdrp = skb_header_pointer(skb, 0, sizeof(hdr.connect), &hdr.connect);
 		if (hdrp)
 			err = ccieth_recv_connect(ifp, ep, &hdrp->connect, skb);
+		break;
+	case CCIETH_PKT_ACCEPT:
+		/* copy entire header now */
+		hdrp = skb_header_pointer(skb, 0, sizeof(hdr.accept), &hdr.accept);
+		if (hdrp)
+			err = ccieth_recv_accept(ifp, ep, &hdrp->accept);
 		break;
 	default:
 		err = -EINVAL;

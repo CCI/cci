@@ -81,6 +81,11 @@ struct ccieth_ioctl_send_connect {
 };
 #define CCIETH_IOCTL_SEND_CONNECT _IOWR(CCIETH_IOCTL_MAGIC, 0x5, struct ccieth_ioctl_send_connect)
 
+struct ccieth_ioctl_accept {
+	__u32 conn_id;
+};
+#define CCIETH_IOCTL_ACCEPT _IOR(CCIETH_IOCTL_MAGIC, 0x6, struct ccieth_ioctl_accept)
+
 /* FIXME: enforce matching with enum cci_event_type */
 #define CCIETH_IOCTL_EVENT_CONNECT_REQUEST 6
 
