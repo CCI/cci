@@ -374,10 +374,10 @@ ccieth_uri_sprintf(char *name, const uint8_t *addr, uint32_t id)
 }
 
 static int
-ccieth_uri_sscanf(const char *name, uint8_t *addr, uint32_t id)
+ccieth_uri_sscanf(const char *name, uint8_t *addr, uint32_t *id)
 {
   return sscanf(name, "eth://%02x:%02x:%02x:%02x:%02x:%02x:%08x",
-		&addr[0], &addr[1], &addr[2], &addr[3], &addr[4], &addr[5], &id) == 7 ? 0 : -1;
+		&addr[0], &addr[1], &addr[2], &addr[3], &addr[4], &addr[5], id) == 7 ? 0 : -1;
 }
 
 static int eth_create_endpoint(cci_device_t *device,
