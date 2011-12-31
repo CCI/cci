@@ -445,6 +445,7 @@ static int eth_create_endpoint(cci_device_t *device,
 		  printf("got attr %d\n", cr_event->attribute);
 	  }
 	  cci_accept(event, &connection);
+	  printf("accepted conn %p attr %d mss %d\n", connection, connection->attribute, connection->max_send_size);
 	  cci_return_event(event);
   }
 
@@ -457,7 +458,7 @@ static int eth_create_endpoint(cci_device_t *device,
 	  if (event->type == CCI_EVENT_CONNECT_ACCEPTED) {
 		  cr_event = (void*) event;
 		  connection = cr_event->connection;
-		  printf("got conn %p attr %d context %p\n", connection, connection->attribute, connection->context);
+		  printf("got conn %p attr %d context %p mss %d\n", connection, connection->attribute, connection->context, connection->max_send_size);
 	  }
 	  cci_return_event(event);	  
   }
@@ -505,13 +506,14 @@ static int eth_accept(union cci_event *event,
 	econn->id = conn_id;
 
 	ac.conn_id = conn_id;
+	ac.max_send_size = ge->connect.max_send_size;
 	err = ioctl(eep->fd, CCIETH_IOCTL_ACCEPT, &ac);
 	if (err < 0) {
 		free(_conn);
 		return errno;
 	}
 
-	_conn->connection.max_send_size = 1024; /* FIXME */
+	_conn->connection.max_send_size = ge->connect.max_send_size;
 	_conn->connection.endpoint = &_ep->endpoint;
 	_conn->connection.attribute = ge->connect.attribute;
 	_conn->connection.context = NULL;
@@ -638,7 +640,7 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 		_conn->priv = econn;
 		econn->id = ge->accept.conn_id;
 
-		_conn->connection.max_send_size = 1024; /* FIXME */
+		_conn->connection.max_send_size = ge->accept.max_send_size;
 		_conn->connection.endpoint = endpoint;
 		_conn->connection.attribute = ge->accept.attribute;
 		_conn->connection.context = (void*)(uintptr_t) ge->accept.context;

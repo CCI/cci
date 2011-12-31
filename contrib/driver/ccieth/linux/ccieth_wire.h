@@ -17,7 +17,6 @@ union ccieth_pkt_header {
 		__be32 dst_ep_id;
 	} generic;
 	struct ccieth_pkt_header_connect {
-		/* FIXME: mss? */
 		struct ethhdr eth;
 		__u8 type;
 		__u8 attribute;
@@ -26,12 +25,12 @@ union ccieth_pkt_header {
 		__be32 src_ep_id;
 		/* 24 */
 		__be32 src_conn_id;
-		__be32 data_len;
+		__be32 max_send_size;
 		/* 32 */
+		__be32 data_len;
 		__u8 data[0];
 	} connect;
 	struct ccieth_pkt_header_accept {
-		/* FIXME: mss? */
 		struct ethhdr eth;
 		__u8 type;
 		__u8 pad1;
@@ -42,6 +41,7 @@ union ccieth_pkt_header {
 		__be32 src_ep_id; /* not really required? */
 		__be32 src_conn_id;
 		/* 32 */
+		__be32 max_send_size;
 	} accept;
 };
 

@@ -45,18 +45,18 @@ struct ccieth_ioctl_get_event {
 	/* 8 */
 	union {
 		struct {
-			/* FIXME: mss? */
 			__u32 conn_id;
 			__u32 attribute;
 			/* 16 */
+			__u32 max_send_size;
 		} connect;
 		struct {
-			/* FIXME: mss? */
 			__u32 conn_id;
 			__u32 attribute;
 			/* 16 */
 			__u64 context;
 			/* 24 */
+			__u32 max_send_size;
 		} accept;
 	};
 };
@@ -92,6 +92,7 @@ struct ccieth_ioctl_send_connect {
 
 struct ccieth_ioctl_accept {
 	__u32 conn_id;
+	__u32 max_send_size;
 };
 #define CCIETH_IOCTL_ACCEPT _IOR(CCIETH_IOCTL_MAGIC, 0x6, struct ccieth_ioctl_accept)
 

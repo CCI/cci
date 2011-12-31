@@ -169,6 +169,7 @@ ccieth_send_connect(struct ccieth_endpoint *ep, struct ccieth_ioctl_send_connect
 	hdr->dst_ep_id = htonl(arg->dest_eid);
 	hdr->attribute = arg->attribute;
 	hdr->src_ep_id = htonl(ep->id);
+	hdr->max_send_size = htonl(ep->max_send_size);
 	hdr->data_len = htonl(arg->data_len);
 	err = copy_from_user(&hdr->data, (const void *)(uintptr_t) arg->data_ptr, arg->data_len);
 	if (err) {
@@ -250,6 +251,7 @@ ccieth_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_accept *arg)
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_RECEIVED, CCIETH_CONNECTION_READY)
 	    != CCIETH_CONNECTION_RECEIVED)
 		goto out_with_conn;
+	conn->max_send_size = arg->max_send_size;
 
 	/* fill headers */
 	hdr = (struct ccieth_pkt_header_accept *) skb_mac_header(skb);
@@ -261,6 +263,7 @@ ccieth_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_accept *arg)
 	hdr->dst_conn_id = htonl(conn->dest_id);
 	hdr->src_ep_id = htonl(ep->id);
 	hdr->src_conn_id = htonl(conn->id);
+	hdr->max_send_size = htonl(conn->max_send_size);
 
 	/* FIXME: release ref */
 

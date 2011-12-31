@@ -18,6 +18,7 @@ ccieth_recv_connect(struct net_device *ifp, struct ccieth_endpoint *ep,
 	__u32 src_ep_id = ntohl(hdr->src_ep_id);
 	__u32 src_conn_id = ntohl(hdr->src_conn_id);
 	__u32 data_len = ntohl(hdr->data_len);
+	__u32 src_max_send_size = ntohl(hdr->max_send_size);
 	int err;
 
 	printk("got conn request from eid %d conn id %d\n",
@@ -35,6 +36,7 @@ ccieth_recv_connect(struct net_device *ifp, struct ccieth_endpoint *ep,
 	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_REQUEST;
 	event->event.data_length = data_len;
 	event->event.connect.attribute = hdr->attribute;
+	event->event.connect.max_send_size = src_max_send_size < ep->max_send_size ? src_max_send_size : ep->max_send_size;
 
 	err = -EINVAL;
 	err = skb_copy_bits(skb, sizeof(*hdr), event+1, data_len);
@@ -88,6 +90,7 @@ ccieth_recv_accept(struct net_device *ifp, struct ccieth_endpoint *ep,
 	__u32 src_ep_id = ntohl(hdr->src_ep_id);
 	__u32 dst_conn_id = ntohl(hdr->dst_conn_id);
 	__u32 dst_ep_id = ntohl(hdr->dst_ep_id);
+	__u32 max_send_size = ntohl(hdr->max_send_size);
 	int err;
 
 	printk("got conn accept from eid %d conn id %d to %d %d\n",
@@ -115,11 +118,13 @@ ccieth_recv_accept(struct net_device *ifp, struct ccieth_endpoint *ep,
 		goto out_with_conn;
 
 	conn->dest_id = src_conn_id;
+	conn->max_send_size = max_send_size;
 	/* FIXME: release ref */
 
 	/* finalize and notify the event */
 	event->event.accept.attribute = conn->attribute;
 	event->event.accept.context = conn->context;
+	event->event.accept.max_send_size = max_send_size;
 	spin_lock(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock(&ep->event_list_lock);
