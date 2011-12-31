@@ -426,24 +426,11 @@ static int eth_create_endpoint(cci_device_t *device,
   ccieth_uri_sprintf(name, (const uint8_t *)&edev->addr.sll_addr, arg.id);
   *((char **)&(*endpoint)->name) = name;
 
-  {
-	  struct ccieth_ioctl_send_connect arg;
-	  char data[] = "hello world!";
-	  memcpy(&arg.dest_addr, &edev->addr.sll_addr, 6);
-	  arg.dest_eid = eid;
-	  arg.data_len = strlen(data)+1;
-	  arg.data_ptr = (uintptr_t) data;
-	  arg.attribute = 123;
-	  arg.flags = 0;
-	  arg.context = (uintptr_t) 0xdeadbeef;
-	  arg.timeout_sec = -1ULL;
-	  arg.timeout_usec = -1;
-	  ret = ioctl(fd, CCIETH_IOCTL_SEND_CONNECT, &arg);
-	  if (ret < 0)
-		  perror("send connect");
-  }
-
   *fdp = eep->fd = fd;
+
+  {
+	  cci_connect(*endpoint, name, "hello world!", 13, 123, (void*)0xdeadbeef, 0, NULL);
+  }
 
   {
 	  cci_connection_t * connection;
@@ -547,8 +534,26 @@ static int eth_connect(cci_endpoint_t *endpoint, char *server_uri,
                        void *context, int flags,
                        struct timeval *timeout)
 {
-    printf("In eth_connect\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
+	eth__ep_t *eep = ep->priv;
+	struct ccieth_ioctl_send_connect arg;
+	int ret;
+
+	if (ccieth_uri_sscanf(server_uri, (uint8_t*) &arg.dest_addr, &arg.dest_eid) < 0)
+		return CCI_EINVAL;
+
+	arg.data_len = data_len;
+	arg.data_ptr = (uintptr_t) data_ptr;
+	arg.attribute = attribute;
+	arg.flags = flags;
+	arg.context = (uintptr_t) context;
+	arg.timeout_sec = timeout ? timeout->tv_sec : -1ULL;
+	arg.timeout_usec = timeout ? timeout->tv_usec : -1;
+	ret = ioctl(eep->fd, CCIETH_IOCTL_SEND_CONNECT, &arg);
+	if (ret < 0)
+		return errno;
+
+	return CCI_SUCCESS;
 }
 
 
