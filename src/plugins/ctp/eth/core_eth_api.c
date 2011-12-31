@@ -455,7 +455,7 @@ static int eth_create_endpoint(cci_device_t *device,
 		  cr_event = (void*) event;
 		  if (cr_event->data_len)
 			  printf("got data len %d data %s\n", cr_event->data_len, cr_event->data_ptr);
-		  printf("got attr %d\n", (int) cr_event->attribute);
+		  printf("got attr %d\n", cr_event->attribute);
 	  }
 	  cci_accept(event, &connection);
 	  cci_return_event(event);
@@ -464,11 +464,13 @@ static int eth_create_endpoint(cci_device_t *device,
   {
 	  cci_event_t * event;
 	  struct cci_event_connect_accepted * cr_event;
+	  cci_connection_t *connection;
 	  while (cci_get_event(*endpoint, &event) == -EAGAIN);
 	  printf("got event type %d\n", event->type);
 	  if (event->type == CCI_EVENT_CONNECT_ACCEPTED) {
 		  cr_event = (void*) event;
-		  printf("got conn %p\n", cr_event->connection);
+		  connection = cr_event->connection;
+		  printf("got conn %p attr %d context %p\n", connection, connection->attribute, connection->context);
 	  }
 	  cci_return_event(event);	  
   }

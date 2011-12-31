@@ -100,8 +100,6 @@ ccieth_recv_accept(struct net_device *ifp, struct ccieth_endpoint *ep,
 		goto out;
 	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_ACCEPTED;
 	event->event.accept.conn_id = dst_conn_id;
-	event->event.accept.attribute = 0; /* FIXME */
-	event->event.accept.context = 0; /* FIXME */
 
 	/* find the connection and update it */
 	err = -EINVAL;
@@ -119,7 +117,9 @@ ccieth_recv_accept(struct net_device *ifp, struct ccieth_endpoint *ep,
 	conn->dest_id = src_conn_id;
 	/* FIXME: release ref */
 
-	/* notify the event */
+	/* finalize and notify the event */
+	event->event.accept.attribute = conn->attribute;
+	event->event.accept.context = conn->context;
 	spin_lock(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock(&ep->event_list_lock);

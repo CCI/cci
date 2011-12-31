@@ -65,6 +65,9 @@ struct ccieth_connection {
 	int id; /* always valid */ /* FIXME keep in network order too? */
 	enum ccieth_connection_status status;
 
+	__u8 attribute;
+	uintptr_t context;
+
 	/* dest fields are valid when status RECEIVED, READY or REJECTED */
 	/* FIXME: store in network order? */
 	int dest_id;

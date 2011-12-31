@@ -184,6 +184,8 @@ ccieth_send_connect(struct ccieth_endpoint *ep, struct ccieth_ioctl_send_connect
 	conn->status = CCIETH_CONNECTION_REQUESTED;
 	memcpy(&conn->dest_addr, &arg->dest_addr, 6);
 	conn->dest_eid = arg->dest_eid;
+	conn->attribute = arg->attribute;
+	conn->context = arg->context;
 	/* now that nothing else can fail, get a connection id */
 retry:
 	spin_lock(&ep->connection_idr_lock);
