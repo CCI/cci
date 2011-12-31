@@ -492,15 +492,30 @@ static int eth_accept(union cci_event *event,
 	struct ccieth_ioctl_get_event *ge = (void*) (_ev + 1);
 	__u32 conn_id = ge->connect.conn_id;
 	struct ccieth_ioctl_accept ac;
+	cci__conn_t *_conn;
+	eth__conn_t *econn;
 	int err;
 
-	ac.conn_id = conn_id;
+	_conn = malloc(sizeof(*_conn) + sizeof(*econn));
+	if (!_conn)
+		return CCI_ENOMEM;
+	econn = (void*) (_conn+1);
+	_conn->priv = econn;
+	econn->id = conn_id;
 
+	ac.conn_id = conn_id;
 	err = ioctl(eep->fd, CCIETH_IOCTL_ACCEPT, &ac);
 	if (err < 0) {
-		perror("accept");
+		free(_conn);
+		return errno;
 	}
 
+	_conn->connection.max_send_size = 1024; /* FIXME */
+	_conn->connection.endpoint = &_ep->endpoint;
+	_conn->connection.attribute = ge->connect.attribute;
+	_conn->connection.context = NULL; /* FIXME */
+
+	*connection = &_conn->connection;
 	return CCI_SUCCESS;
 }
 

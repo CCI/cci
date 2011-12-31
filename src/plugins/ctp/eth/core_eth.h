@@ -22,6 +22,10 @@ typedef struct eth__ep {
   int fd;
 } eth__ep_t;
 
+typedef struct eth__conn {
+	int id;
+} eth__conn_t;
+
 int cci_core_eth_post_load(cci_plugin_t *me);
 int cci_core_eth_pre_unload(cci_plugin_t *me);
 
