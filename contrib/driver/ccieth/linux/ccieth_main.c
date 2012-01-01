@@ -1,7 +1,7 @@
 /*
  * CCI over Ethernet
  *
- * Copyright © 2011 Inria.  All rights reserved.
+ * Copyright © 2011-2012 Inria.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -158,7 +158,7 @@ ccieth_send_connect(struct ccieth_endpoint *ep, struct ccieth_ioctl_send_connect
 	skb_reset_mac_header(skb);
 	skb_reset_network_header(skb);
 	skb->protocol = __constant_htons(ETH_P_CCI);
-	skb_put(skb, ETH_ZLEN);
+	skb_put(skb, skblen);
 	skb->dev = ep->ifp;
 	/* setup as much as possible of the skb
 	 * so that things don't fail later once the connection is hashed
@@ -238,7 +238,7 @@ ccieth_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_accept *arg)
 	skb_reset_mac_header(skb);
 	skb_reset_network_header(skb);
 	skb->protocol = __constant_htons(ETH_P_CCI);
-	skb_put(skb, ETH_ZLEN);
+	skb_put(skb, skblen);
 	skb->dev = ep->ifp;
 
 	/* update the connection now that we can't fail anywhere else */
