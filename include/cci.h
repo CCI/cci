@@ -770,7 +770,7 @@ CCI_DECLSPEC int cci_connect(cci_endpoint_t *endpoint, char *server_uri,
   both local and remote side will get a DISCONNECTED communication error
   if sends are initiated on  this connection.
 
-  \param[in] connection	Connection to sever.
+  \param[in] connection	Connection to server.
 
   \return CCI_SUCCESS   The connection's resources have been released.
   \return CCI_EINVAL    Connection is NULL.
