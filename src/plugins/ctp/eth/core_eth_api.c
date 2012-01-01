@@ -142,12 +142,11 @@ static int eth__get_device_info(cci__dev_t *_dev, struct ifaddrs *addr)
   struct sockaddr_ll *lladdr = (struct sockaddr_ll*) addr->ifa_addr;
 
   _dev->is_up = (addr->ifa_flags & IFF_UP != 0);
-    
+
   fd = open("/dev/ccieth", O_RDONLY);
   if (fd < 0)
     return -1;
 
-  /* FIXME: rather use the ethtool interface (get_settings for speed), and SIOCGIFMTU */
   memcpy(&arg.addr, &lladdr->sll_addr, 6);
 
   ret = ioctl(fd, CCIETH_IOCTL_GET_INFO, &arg);
@@ -159,13 +158,12 @@ static int eth__get_device_info(cci__dev_t *_dev, struct ifaddrs *addr)
   printf("max %d rate %lld pci %04x:%02x:%02x.%01x\n",
 	 arg.max_send_size, arg.rate, arg.pci_domain, arg.pci_bus, arg.pci_dev, arg.pci_func);
 
-  /* FIXME get those from the driver */
-  device->max_send_size = 1024;
-  device->rate = 10000000000ULL;
-  device->pci.domain = -1;
-  device->pci.bus = -1;
-  device->pci.dev = -1;
-  device->pci.func = -1;
+  device->max_send_size = arg.max_send_size;
+  device->rate = arg.rate;
+  device->pci.domain = arg.pci_domain;
+  device->pci.bus = arg.pci_bus;
+  device->pci.dev = arg.pci_dev;
+  device->pci.func = arg.pci_func;
 
   return 0;
 }
