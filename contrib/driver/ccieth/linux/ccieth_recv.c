@@ -11,6 +11,20 @@
 #include <ccieth_common.h>
 #include <ccieth_wire.h>
 
+static int ccieth_recv_connect_idrforeach_cb(int id, void *p, void *data)
+{
+	struct ccieth_connection *conn = p, *new = data;
+	/* return -EBUSY in case of duplicate incoming connect.
+	 * it may even already be accepted or rejcted.
+	 */
+	if (conn->status != CCIETH_CONNECTION_REQUESTED /* so that dest_id is valid */
+	    && !memcmp(&conn->dest_addr, &new->dest_addr, 6)
+	    && conn->dest_eid == new->dest_eid
+	    && conn->dest_id == new->dest_id)
+		return -EBUSY;
+	return 0;
+}
+
 static int
 ccieth_recv_connect(struct net_device *ifp, struct ccieth_endpoint *ep,
 		    struct ccieth_pkt_header_connect *hdr, struct sk_buff *skb)
@@ -55,8 +69,11 @@ ccieth_recv_connect(struct net_device *ifp, struct ccieth_endpoint *ep,
 	conn->dest_id = ntohl(hdr->src_conn_id);
 retry:
 	spin_lock(&ep->connection_idr_lock);
-	/* FIXME: idr_for_each() to check for duplicates */
-	err = idr_get_new(&ep->connection_idr, conn, &conn->id);
+	/* check for duplicates */
+	err = idr_for_each(&ep->connection_idr, ccieth_recv_connect_idrforeach_cb, conn);
+	if (err != -EBUSY)
+		/* if no duplicates, try to add new connection */
+		err = idr_get_new(&ep->connection_idr, conn, &conn->id);
 	spin_unlock(&ep->connection_idr_lock);
 	if (err < 0) {
 		if (err == -EAGAIN) {
