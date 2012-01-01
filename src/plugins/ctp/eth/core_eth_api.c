@@ -646,7 +646,7 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 		_conn->connection.context = (void*)(uintptr_t) ge->accept.context;
 
 		event->type = CCI_EVENT_CONNECT_ACCEPTED;
-		ac_event->context = NULL; /* FIXME */
+		ac_event->context = (void*)(uintptr_t) ge->accept.context;
 		ac_event->connection = &_conn->connection;
 		break;
 	}
