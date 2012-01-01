@@ -1,6 +1,8 @@
 /*
  * CCI over Ethernet
- * Copyright © INRIA 2011
+ *
+ * Copyright © 2011 Inria.  All rights reserved.
+ * $COPYRIGHT$
  */
 
 #ifndef CCIETH_WIRE_H

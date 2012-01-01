@@ -1,3 +1,8 @@
+#
+# Copyright © 2011 Inria.  All rights reserved.
+# $COPYRIGHT$
+#
+
 AC_INIT(ccieth,
 	0.0.1,
 	[http://www.cci-forum.org],

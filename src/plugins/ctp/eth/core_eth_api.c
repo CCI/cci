@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
- * Copyright (c) 2011 INRIA.  All rights reserved.
+ * Copyright © 2011 Inria.  All rights reserved.
  * $COPYRIGHT$
  */
 
