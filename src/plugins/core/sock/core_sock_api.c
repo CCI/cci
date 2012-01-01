@@ -53,6 +53,7 @@ static int sock_create_endpoint(cci_device_t *device,
                                     cci_os_handle_t *fd);
 static int sock_destroy_endpoint(cci_endpoint_t *endpoint);
 static int sock_accept(union cci_event *event,
+                       void *context,
                            cci_connection_t **connection);
 static int sock_reject(union cci_event *conn_req);
 static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
@@ -769,6 +770,7 @@ static uint8_t sock_ip_hash(in_addr_t ip, uint16_t port)
 }
 
 static int sock_accept(union cci_event *event,
+                       void *context,
                            cci_connection_t **connection)
 {
     uint8_t         a;
@@ -843,6 +845,7 @@ static int sock_accept(union cci_event *event,
 
     conn->connection.attribute = (enum cci_conn_attribute)a;
     conn->connection.endpoint = endpoint;
+    conn->connection.context = context;
     conn->connection.max_send_size = dev->device.max_send_size;
 
     hs = (sock_handshake_t *) (rx->buffer + (uintptr_t) sizeof(sock_header_r_t));

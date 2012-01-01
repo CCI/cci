@@ -41,6 +41,7 @@ static int verbs_create_endpoint(cci_device_t *device,
                                     cci_os_handle_t *fd);
 static int verbs_destroy_endpoint(cci_endpoint_t *endpoint);
 static int verbs_accept(union cci_event *event,
+                        void *context,
                            cci_connection_t **connection);
 static int verbs_reject(union cci_event *event);
 static int verbs_connect(cci_endpoint_t *endpoint, char *server_uri,
@@ -829,6 +830,7 @@ verbs_destroy_endpoint(cci_endpoint_t *endpoint)
 
 static int
 verbs_accept(union cci_event *event,
+             void *context,
                            cci_connection_t **connection)
 {
 	CCI_ENTER;

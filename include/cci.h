@@ -4,6 +4,7 @@
  * Copyright (c) 2010-2011 Qlogic Corporation.  All rights reserved.
  * Copyright (c) 2010-2011 UT-Battelle, LLC.  All rights reserved.
  * Copyright (c) 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -667,6 +668,8 @@ union cci_event;
 
   \param[in] conn_req		A connection request event previously returned by
 				cci_get_event().
+  \param[in] context		Cookie to be used to identify the connection in
+				incoming events.
   \param[in,out] connection	Connection pointer to a connection request structure.
 
   \return CCI_SUCCESS   The connection has been established.
@@ -680,6 +683,7 @@ union cci_event;
   \ingroup connection
 */
 CCI_DECLSPEC int cci_accept(union cci_event *conn_req,
+                            void *context,
                             cci_connection_t **connection);
 
 /*!
@@ -740,7 +744,8 @@ CCI_DECLSPEC int cci_reject(union cci_event *conn_req);
   \param[in] attribute	Attributes of the requested connection (reliability,
                         ordering, multicast, etc).
   \param[in] context	Cookie to be used to identify the completion through
-                        a connect accepted, rejected, or timedout event.
+                        a connect accepted, rejected, or timedout event, and
+                        used to identify the connection in incoming events.
   \param[in] flags      Currently unused.
   \param[in] timeout	NULL means forever.
 

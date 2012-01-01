@@ -18,7 +18,8 @@
 
 
 int cci_accept(union cci_event *conn_req,
+               void *context,
                cci_connection_t **connection)
 {
-    return cci_core->accept(conn_req, connection);
+    return cci_core->accept(conn_req, context, connection);
 }

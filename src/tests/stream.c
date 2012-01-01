@@ -166,7 +166,7 @@ static void poll_events(void)
 		break;
 	case CCI_EVENT_CONNECT_REQUEST:{
 			ready = 1;
-			cci_accept(event, &connection);
+			cci_accept(event, NULL, &connection);
 
 			buffer = calloc(1, connection->max_send_size);
 			if (!buffer) {
