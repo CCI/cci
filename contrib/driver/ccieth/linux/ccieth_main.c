@@ -136,10 +136,10 @@ ccieth_return_event(struct ccieth_endpoint *ep, const struct ccieth_ioctl_return
 }
 
 static int
-ccieth_send_connect(struct ccieth_endpoint *ep, struct ccieth_ioctl_send_connect *arg)
+ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_request *arg)
 {
 	struct sk_buff *skb;
-	struct ccieth_pkt_header_connect *hdr;
+	struct ccieth_pkt_header_connect_request *hdr;
 	struct ccieth_connection *conn;
 	size_t skblen;
 	int err;
@@ -163,11 +163,11 @@ ccieth_send_connect(struct ccieth_endpoint *ep, struct ccieth_ioctl_send_connect
 	/* setup as much as possible of the skb
 	 * so that things don't fail later once the connection is hashed
 	 */
-	hdr = (struct ccieth_pkt_header_connect *) skb_mac_header(skb);
+	hdr = (struct ccieth_pkt_header_connect_request *) skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &arg->dest_addr, 6);
 	memcpy(&hdr->eth.h_source, ep->ifp->dev_addr, 6);
 	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
-	hdr->type = CCIETH_PKT_CONNECT;
+	hdr->type = CCIETH_PKT_CONNECT_REQUEST;
 	hdr->dst_ep_id = htonl(arg->dest_eid);
 	hdr->attribute = arg->attribute;
 	hdr->src_ep_id = htonl(ep->id);
@@ -219,10 +219,10 @@ out:
 }
 
 static int
-ccieth_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_accept *arg)
+ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_accept *arg)
 {
 	struct sk_buff *skb;
-	struct ccieth_pkt_header_accept *hdr;
+	struct ccieth_pkt_header_connect_accept *hdr;
 	struct ccieth_connection *conn;
 	size_t skblen;
 	int err;
@@ -256,11 +256,11 @@ ccieth_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_accept *arg)
 	conn->max_send_size = arg->max_send_size;
 
 	/* fill headers */
-	hdr = (struct ccieth_pkt_header_accept *) skb_mac_header(skb);
+	hdr = (struct ccieth_pkt_header_connect_accept *) skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
 	memcpy(&hdr->eth.h_source, ep->ifp->dev_addr, 6);
 	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
-	hdr->type = CCIETH_PKT_ACCEPT;
+	hdr->type = CCIETH_PKT_CONNECT_ACCEPT;
 	hdr->dst_ep_id = htonl(conn->dest_eid);
 	hdr->dst_conn_id = htonl(conn->dest_id);
 	hdr->src_ep_id = htonl(ep->id);
@@ -423,8 +423,8 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		return 0;
 	}
 
-	case CCIETH_IOCTL_SEND_CONNECT: {
-		struct ccieth_ioctl_send_connect sc_arg;
+	case CCIETH_IOCTL_CONNECT_REQUEST: {
+		struct ccieth_ioctl_connect_request sc_arg;
 		struct ccieth_endpoint *ep = file->private_data;
 
 		if (!ep)
@@ -434,7 +434,7 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		if (ret)
 			return -EFAULT;
 
-		ret = ccieth_send_connect(ep, &sc_arg);
+		ret = ccieth_connect_request(ep, &sc_arg);
 		if (ret < 0)
 			return ret;
 
@@ -445,8 +445,8 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		return 0;
 	}
 
-	case CCIETH_IOCTL_ACCEPT: {
-		struct ccieth_ioctl_accept ac_arg;
+	case CCIETH_IOCTL_CONNECT_ACCEPT: {
+		struct ccieth_ioctl_connect_accept ac_arg;
 		struct ccieth_endpoint *ep = file->private_data;
 
 		if (!ep)
@@ -456,7 +456,7 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		if (ret)
 			return -EFAULT;
 
-		ret = ccieth_accept(ep, &ac_arg);
+		ret = ccieth_connect_accept(ep, &ac_arg);
 		if (ret < 0)
 			return ret;
 

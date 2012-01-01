@@ -1,7 +1,7 @@
 /*
  * CCI over Ethernet
  *
- * Copyright © 2011 Inria.  All rights reserved.
+ * Copyright © 2011-2012 Inria.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -18,7 +18,7 @@ union ccieth_pkt_header {
 		/* 16 */
 		__be32 dst_ep_id;
 	} generic;
-	struct ccieth_pkt_header_connect {
+	struct ccieth_pkt_header_connect_request {
 		struct ethhdr eth;
 		__u8 type;
 		__u8 attribute;
@@ -32,7 +32,7 @@ union ccieth_pkt_header {
 		__be32 data_len;
 		__u8 data[0];
 	} connect;
-	struct ccieth_pkt_header_accept {
+	struct ccieth_pkt_header_connect_accept {
 		struct ethhdr eth;
 		__u8 type;
 		__u8 pad1;
@@ -48,8 +48,8 @@ union ccieth_pkt_header {
 };
 
 enum ccieth_pkt_type {
-	CCIETH_PKT_CONNECT,
-	CCIETH_PKT_ACCEPT,
+	CCIETH_PKT_CONNECT_REQUEST,
+	CCIETH_PKT_CONNECT_ACCEPT,
 };
 
 #endif /* CCIETH_WIRE_H */

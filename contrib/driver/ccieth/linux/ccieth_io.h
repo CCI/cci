@@ -1,7 +1,7 @@
 /*
  * CCI over Ethernet
  *
- * Copyright © 2011 Inria.  All rights reserved.
+ * Copyright © 2011-2012 Inria.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -51,7 +51,7 @@ struct ccieth_ioctl_get_event {
 			__u32 attribute;
 			/* 16 */
 			__u32 max_send_size;
-		} connect;
+		} connect_request;
 		struct {
 			__u32 conn_id;
 			__u32 attribute;
@@ -59,7 +59,7 @@ struct ccieth_ioctl_get_event {
 			__u64 context;
 			/* 24 */
 			__u32 max_send_size;
-		} accept;
+		} connect_accepted;
 	};
 };
 #define CCIETH_IOCTL_GET_EVENT _IOW(CCIETH_IOCTL_MAGIC, 0x3, struct ccieth_ioctl_get_event)
@@ -69,7 +69,7 @@ struct ccieth_ioctl_return_event {
 };
 #define CCIETH_IOCTL_RETURN_EVENT _IOR(CCIETH_IOCTL_MAGIC, 0x4, struct ccieth_ioctl_return_event)
 
-struct ccieth_ioctl_send_connect {
+struct ccieth_ioctl_connect_request {
 	__u8 dest_addr[6];
 	__u8 pad1[2];
 	/* 8 */
@@ -90,13 +90,13 @@ struct ccieth_ioctl_send_connect {
 	__u32 conn_id; /* output */
 	/* 56 */
 };
-#define CCIETH_IOCTL_SEND_CONNECT _IOWR(CCIETH_IOCTL_MAGIC, 0x5, struct ccieth_ioctl_send_connect)
+#define CCIETH_IOCTL_CONNECT_REQUEST _IOWR(CCIETH_IOCTL_MAGIC, 0x5, struct ccieth_ioctl_connect_request)
 
-struct ccieth_ioctl_accept {
+struct ccieth_ioctl_connect_accept {
 	__u32 conn_id;
 	__u32 max_send_size;
 };
-#define CCIETH_IOCTL_ACCEPT _IOR(CCIETH_IOCTL_MAGIC, 0x6, struct ccieth_ioctl_accept)
+#define CCIETH_IOCTL_CONNECT_ACCEPT _IOR(CCIETH_IOCTL_MAGIC, 0x6, struct ccieth_ioctl_connect_accept)
 
 /* FIXME: enforce matching with enum cci_event_type */
 #define CCIETH_IOCTL_EVENT_CONNECT_ACCEPTED 3
