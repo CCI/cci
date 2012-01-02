@@ -1,0 +1,9 @@
+#
+# Copyright © 2011-2012 Inria.  All rights reserved.
+# $COPYRIGHT$
+#
+
+ccflags-y = -I@abs_top_builddir@
+
+obj-m += ccieth.o
+ccieth-y = ccieth_main.o ccieth_recv.o

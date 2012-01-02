@@ -8,7 +8,6 @@ AC_INIT(ccieth,
 	[http://www.cci-forum.org],
 	ccieth)
 AC_CONFIG_SRCDIR(ccieth_main.c)
-AC_CONFIG_LINKS(Kbuild:Kbuild)
 AC_CONFIG_LINKS(ccieth_main.c:ccieth_main.c)
 AC_CONFIG_LINKS(ccieth_recv.c:ccieth_recv.c)
 AC_CONFIG_LINKS(ccieth_common.h:ccieth_common.h)
@@ -25,4 +24,4 @@ AC_ARG_WITH(linux-build,
 	    linux_build_path="/lib/modules/${linux_uts_release}/build")
 AC_SUBST(CCIETH_LINUX_BUILD_PATH, $linux_build_path)
 
-AC_OUTPUT(Makefile)
+AC_OUTPUT(Makefile Kbuild)

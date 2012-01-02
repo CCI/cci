@@ -1,7 +1,0 @@
-#
-# Copyright © 2011 Inria.  All rights reserved.
-# $COPYRIGHT$
-#
-
-obj-m += ccieth.o
-ccieth-y = ccieth_main.o ccieth_recv.o
