@@ -1,10 +1,12 @@
 #
-# Copyright © 2011 Inria.  All rights reserved.
+# Copyright © 2011-2012 Inria.  All rights reserved.
 # $COPYRIGHT$
 #
 
+CCIETH_LINUX_BUILD_PATH	=	@CCIETH_LINUX_BUILD_PATH@
+
 all:
-	make -C /lib/modules/`uname -r`/build M=`pwd`
+	make -C $(CCIETH_LINUX_BUILD_PATH) M=`pwd`
 
 clean:
-	make -C /lib/modules/`uname -r`/build M=`pwd` clean
+	make -C $(CCIETH_LINUX_BUILD_PATH) M=`pwd` clean
