@@ -1,7 +1,7 @@
 /*
  * CCI over Ethernet
  *
- * Copyright © 2011 Inria.  All rights reserved.
+ * Copyright © 2011-2012 Inria.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -69,7 +69,7 @@ struct ccieth_connection {
 
 	__u8 attribute;
 	__u32 max_send_size;
-	uintptr_t context;
+	__u64 user_conn_id;
 
 	/* dest fields are valid when status RECEIVED, READY or REJECTED */
 	/* FIXME: store in network order? */

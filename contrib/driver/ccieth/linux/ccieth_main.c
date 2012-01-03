@@ -188,7 +188,7 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	memcpy(&conn->dest_addr, &arg->dest_addr, 6);
 	conn->dest_eid = arg->dest_eid;
 	conn->attribute = arg->attribute;
-	conn->context = arg->context;
+	conn->user_conn_id = arg->user_conn_id;
 	/* now that nothing else can fail, get a connection id */
 retry:
 	spin_lock(&ep->connection_idr_lock);
@@ -254,6 +254,7 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	    != CCIETH_CONNECTION_RECEIVED)
 		goto out_with_conn;
 	conn->max_send_size = arg->max_send_size;
+	conn->user_conn_id = arg->user_conn_id;
 
 	/* fill headers */
 	hdr = (struct ccieth_pkt_header_connect_accept *) skb_mac_header(skb);
@@ -308,7 +309,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	if (!event)
 		goto out_with_conn;
 	event->event.type = CCIETH_IOCTL_EVENT_SEND;
-	event->event.send.conn_id = arg->conn_id;
+	event->event.send.user_conn_id = conn->user_conn_id;
 	event->event.send.context = arg->context;
 
 	/* allocate and initialize the skb */

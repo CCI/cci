@@ -142,8 +142,8 @@ ccieth_recv_connect_accept(struct net_device *ifp, struct ccieth_endpoint *ep,
 
 	/* finalize and notify the event */
 	event->event.connect_accepted.attribute = conn->attribute;
-	event->event.connect_accepted.context = conn->context;
 	event->event.connect_accepted.max_send_size = max_send_size;
+	event->event.connect_accepted.user_conn_id = conn->user_conn_id;
 	spin_lock(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock(&ep->event_list_lock);
@@ -198,7 +198,7 @@ ccieth_recv_msg(struct net_device *ifp, struct ccieth_endpoint *ep,
 		goto out_with_event;
 
 	/* finalize and notify the event */
-	event->event.recv.conn_id = conn->id;
+	event->event.recv.user_conn_id = conn->user_conn_id;
 	/* FIXME: release ref */
 	spin_lock(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);

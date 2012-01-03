@@ -528,6 +528,7 @@ static int eth_accept(union cci_event *event,
 	econn->id = conn_id;
 
 	ac.conn_id = conn_id;
+	ac.user_conn_id = (uintptr_t) _conn;
 	ac.max_send_size = ge->connect_request.max_send_size;
 	err = ioctl(eep->fd, CCIETH_IOCTL_CONNECT_ACCEPT, &ac);
 	if (err < 0) {
@@ -560,22 +561,34 @@ static int eth_connect(cci_endpoint_t *endpoint, char *server_uri,
 {
 	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
 	eth__ep_t *eep = ep->priv;
+	cci__conn_t *_conn;
+	eth__conn_t *econn;
 	struct ccieth_ioctl_connect_request arg;
 	int ret;
 
 	if (ccieth_uri_sscanf(server_uri, (uint8_t*) &arg.dest_addr, &arg.dest_eid) < 0)
 		return CCI_EINVAL;
 
+	_conn = malloc(sizeof(*_conn) + sizeof(*econn));
+	if (!_conn)
+		return CCI_ENOMEM;
+	econn = (void*) (_conn+1);
+	_conn->priv = econn;
+	_conn->connection.endpoint = endpoint;
+	_conn->connection.context = context;
+
 	arg.data_len = data_len;
 	arg.data_ptr = (uintptr_t) data_ptr;
 	arg.attribute = attribute;
 	arg.flags = flags;
-	arg.context = (uintptr_t) context;
+	arg.user_conn_id = (uintptr_t) _conn;
 	arg.timeout_sec = timeout ? timeout->tv_sec : -1ULL;
 	arg.timeout_usec = timeout ? timeout->tv_usec : -1;
 	ret = ioctl(eep->fd, CCIETH_IOCTL_CONNECT_REQUEST, &arg);
-	if (ret < 0)
+	if (ret < 0) {
+		free(_conn);
 		return errno;
+	}
 
 	return CCI_SUCCESS;
 }
@@ -643,14 +656,14 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 	case CCIETH_IOCTL_EVENT_SEND:
 		event->type = CCI_EVENT_SEND;
 		event->send.status = ge->send.status;
-		event->send.connection = NULL; /* FIXME */
 		event->send.context = (void*)(uintptr_t) ge->send.context;
+		event->send.connection = &((cci__conn_t*)(uintptr_t) ge->send.user_conn_id)->connection;
 		break;
 	case CCIETH_IOCTL_EVENT_RECV:
 		event->type = CCI_EVENT_RECV;
 		*((uint32_t *) &event->recv.len) = ge->data_length;
 		*((void **) &event->recv.ptr) = ge->data_length ? data : NULL;
-		event->recv.connection = NULL; /* FIXME */
+		event->recv.connection = &((cci__conn_t*)(uintptr_t) ge->recv.user_conn_id)->connection;
 		break;
 	case CCIETH_IOCTL_EVENT_CONNECT_REQUEST:
 		event->type = CCI_EVENT_CONNECT_REQUEST;
@@ -659,23 +672,15 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 		event->request.attribute = ge->connect_request.attribute;
 		break;
 	case CCIETH_IOCTL_EVENT_CONNECT_ACCEPTED: {
-		cci__conn_t *_conn;
-		eth__conn_t *econn;
+		cci__conn_t *_conn = (void*)(uintptr_t) ge->connect_accepted.user_conn_id;
+		eth__conn_t *econn = (void*) (_conn+1);
 
-		_conn = malloc(sizeof(*_conn) + sizeof(*econn));
-		if (!_conn)
-			return CCI_ENOMEM;
-		econn = (void*) (_conn+1);
-		_conn->priv = econn;
 		econn->id = ge->connect_accepted.conn_id;
-
 		_conn->connection.max_send_size = ge->connect_accepted.max_send_size;
-		_conn->connection.endpoint = endpoint;
 		_conn->connection.attribute = ge->connect_accepted.attribute;
-		_conn->connection.context = (void*)(uintptr_t) ge->connect_accepted.context;
 
 		event->type = CCI_EVENT_CONNECT_ACCEPTED;
-		event->accepted.context = (void*)(uintptr_t) ge->connect_accepted.context;
+		event->accepted.context = _conn->connection.context;
 		event->accepted.connection = &_conn->connection;
 		break;
 	}
