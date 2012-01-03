@@ -616,6 +616,18 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 	}
 
 	switch (ge->type) {
+	case CCIETH_IOCTL_EVENT_SEND:
+		event->type = CCI_EVENT_SEND;
+		event->send.status = ge->send.status;
+		event->send.connection = NULL; /* FIXME */
+		event->send.context = (void*)(uintptr_t) ge->send.context;
+		break;
+	case CCIETH_IOCTL_EVENT_RECV:
+		event->type = CCI_EVENT_RECV;
+		*((uint32_t *) &event->recv.len) = ge->data_length;
+		*((void **) &event->recv.ptr) = ge->data_length ? data : NULL;
+		event->recv.connection = NULL; /* FIXME */
+		break;
 	case CCIETH_IOCTL_EVENT_CONNECT_REQUEST:
 		event->type = CCI_EVENT_CONNECT_REQUEST;
 		event->request.data_len = ge->data_length;
@@ -667,8 +679,29 @@ static int eth_send(cci_connection_t *connection,
                     void *msg_ptr, uint32_t msg_len,
                     void *context, int flags)
 {
-    printf("In eth_send\n");
-    return CCI_ERR_NOT_IMPLEMENTED;
+	cci__conn_t *_conn = container_of(connection, cci__conn_t, connection);
+	eth__conn_t *econn = _conn->priv;
+	cci_endpoint_t *endpoint = connection->endpoint;
+	cci__ep_t *_ep = container_of(endpoint, cci__ep_t, endpoint);
+	eth__ep_t *eep = _ep->priv;
+	struct ccieth_ioctl_msg arg;
+	int ret;
+
+	arg.conn_id = econn->id;
+	arg.msg_ptr = (uintptr_t) msg_ptr;
+	arg.msg_len = msg_len;
+	arg.context = (uintptr_t) context;
+	arg.flags = flags;
+
+	ret = ioctl(eep->fd, CCIETH_IOCTL_MSG, &arg);
+	if (ret < 0) {
+		perror("send");
+		return errno;
+	}
+
+	/* FIXME: implement flags */
+
+	return CCI_SUCCESS;
 }
 
 

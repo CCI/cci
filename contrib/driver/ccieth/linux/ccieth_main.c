@@ -282,6 +282,88 @@ out:
 }
 
 static int
+ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
+{
+	struct sk_buff *skb;
+	struct ccieth_pkt_header_msg *hdr;
+	struct ccieth_connection *conn;
+	struct ccieth_endpoint_event *event;
+	size_t skblen;
+	int err;
+
+	err = -EINVAL;
+	if (arg->msg_len > ep->max_send_size)
+		goto out;
+
+	rcu_read_lock();
+	conn = idr_find(&ep->connection_idr, arg->conn_id);
+	/* FIXME: take a reference */
+	rcu_read_unlock();
+	if (!conn)
+		goto out;
+
+	/* setup the event */
+	err = -ENOMEM;
+	event = kmalloc(sizeof(*event), GFP_KERNEL);
+	if (!event)
+		goto out_with_conn;
+	event->event.type = CCIETH_IOCTL_EVENT_SEND;
+	event->event.send.conn_id = arg->conn_id;
+	event->event.send.context = arg->context;
+
+	/* allocate and initialize the skb */
+	skblen = sizeof(*hdr) + arg->msg_len;
+	if (skblen < ETH_ZLEN)
+		skblen = ETH_ZLEN;
+        skb = alloc_skb(skblen, GFP_KERNEL);
+	if (!skb)
+		goto out_with_event;
+	skb_reset_mac_header(skb);
+	skb_reset_network_header(skb);
+	skb->protocol = __constant_htons(ETH_P_CCI);
+	skb_put(skb, skblen);
+	skb->dev = ep->ifp;
+
+	/* fill headers */
+	hdr = (struct ccieth_pkt_header_msg *) skb_mac_header(skb);
+	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
+	memcpy(&hdr->eth.h_source, ep->ifp->dev_addr, 6);
+	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
+	hdr->type = CCIETH_PKT_MSG;
+	hdr->dst_ep_id = htonl(conn->dest_eid);
+	hdr->dst_conn_id = htonl(conn->dest_id);
+	hdr->msg_len = htonl(arg->msg_len);
+	err = copy_from_user(&hdr->msg, (const void *)(uintptr_t) arg->msg_ptr, arg->msg_len);
+	if (err) {
+		err = -EFAULT;
+		goto out_with_skb;
+	}
+
+	/* FIXME: implement flags */
+
+	/* FIXME: release ref */
+
+        dev_queue_xmit(skb);
+
+	/* finalize and notify the event */
+	event->event.send.status = 0;
+	spin_lock(&ep->event_list_lock);
+	list_add_tail(&event->list, &ep->event_list);
+	spin_unlock(&ep->event_list_lock);
+
+	return 0;
+
+out_with_skb:
+	kfree_skb(skb);
+out_with_event:
+	kfree(event);
+out_with_conn:
+	/* FIXME release ref */
+out:
+	return err;
+}
+
+static int
 ccieth_miscdev_open(struct inode *inode, struct file *file)
 {
 	file->private_data = NULL;
@@ -457,6 +539,24 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 			return -EFAULT;
 
 		ret = ccieth_connect_accept(ep, &ac_arg);
+		if (ret < 0)
+			return ret;
+
+		return 0;
+	}
+
+	case CCIETH_IOCTL_MSG: {
+		struct ccieth_ioctl_msg ms_arg;
+		struct ccieth_endpoint *ep = file->private_data;
+
+		if (!ep)
+			return -EINVAL;
+
+		ret = copy_from_user(&ms_arg, (__user void *)arg, sizeof(ms_arg));
+		if (ret)
+			return -EFAULT;
+
+		ret = ccieth_msg(ep, &ms_arg);
 		if (ret < 0)
 			return ret;
 

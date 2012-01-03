@@ -45,11 +45,23 @@ union ccieth_pkt_header {
 		/* 32 */
 		__be32 max_send_size;
 	} connect_accept;
+	struct ccieth_pkt_header_msg {
+		struct ethhdr eth;
+		__u8 type;
+		__u8 pad1;
+		/* 16 */
+		__be32 dst_ep_id;
+		__be32 dst_conn_id;
+		/* 24 */
+		__be32 msg_len;
+		__u8 msg[0];
+	} msg;
 };
 
 enum ccieth_pkt_type {
 	CCIETH_PKT_CONNECT_REQUEST,
 	CCIETH_PKT_CONNECT_ACCEPT,
+	CCIETH_PKT_MSG,
 };
 
 #endif /* CCIETH_WIRE_H */

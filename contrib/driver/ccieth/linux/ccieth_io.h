@@ -48,6 +48,16 @@ struct ccieth_ioctl_get_event {
 	union {
 		struct {
 			__u32 conn_id;
+			__u32 status;
+			/* 16 */
+			__u64 context;
+			/* 24 */
+		} send;
+		struct {
+			__u32 conn_id;
+		} recv;
+		struct {
+			__u32 conn_id;
 			__u32 attribute;
 			/* 16 */
 			__u32 max_send_size;
@@ -98,7 +108,21 @@ struct ccieth_ioctl_connect_accept {
 };
 #define CCIETH_IOCTL_CONNECT_ACCEPT _IOR(CCIETH_IOCTL_MAGIC, 0x6, struct ccieth_ioctl_connect_accept)
 
+struct ccieth_ioctl_msg {
+	__u32 conn_id;
+	__u32 msg_len;
+	/* 8 */
+	__u64 msg_ptr;
+	/* 16 */
+	__u64 context;
+	/* 24 */
+	__u32 flags;
+};
+#define CCIETH_IOCTL_MSG _IOR(CCIETH_IOCTL_MAGIC, 0x7, struct ccieth_ioctl_msg)
+
 /* FIXME: enforce matching with enum cci_event_type */
+#define CCIETH_IOCTL_EVENT_SEND 1
+#define CCIETH_IOCTL_EVENT_RECV 2
 #define CCIETH_IOCTL_EVENT_CONNECT_ACCEPTED 3
 #define CCIETH_IOCTL_EVENT_CONNECT_REQUEST 6
 

@@ -158,6 +158,60 @@ out:
 }
 
 static int
+ccieth_recv_msg(struct net_device *ifp, struct ccieth_endpoint *ep,
+		struct ccieth_pkt_header_msg *hdr, struct sk_buff *skb)
+{
+	struct ccieth_endpoint_event *event;
+	struct ccieth_connection *conn;
+	__u32 dst_ep_id = ntohl(hdr->dst_ep_id);
+	__u32 dst_conn_id = ntohl(hdr->dst_conn_id);
+	__u32 msg_len = ntohl(hdr->msg_len);
+	int err;
+
+	printk("got msg len %d to eid %d conn id %d\n",
+	       msg_len, dst_ep_id, dst_conn_id);
+
+	err = -EINVAL;
+	if (msg_len > ep->max_send_size)
+		goto out;
+
+	/* setup the event */
+	err = -ENOMEM;
+	event = kmalloc(sizeof(*event) + msg_len, GFP_KERNEL);
+	if (!event)
+		goto out;
+	event->event.type = CCIETH_IOCTL_EVENT_RECV;
+	event->event.data_length = msg_len;
+
+	err = -EINVAL;
+	err = skb_copy_bits(skb, sizeof(*hdr), event+1, msg_len);
+	if (err < 0)
+		goto out_with_event;
+
+	/* find the connection and update it */
+	err = -EINVAL;
+	rcu_read_lock();
+	conn = idr_find(&ep->connection_idr, dst_conn_id);
+	/* FIXME: take a reference */
+	rcu_read_unlock();
+	if (!conn)
+		goto out_with_event;
+
+	/* finalize and notify the event */
+	event->event.recv.conn_id = conn->id;
+	/* FIXME: release ref */
+	spin_lock(&ep->event_list_lock);
+	list_add_tail(&event->list, &ep->event_list);
+	spin_unlock(&ep->event_list_lock);
+	return 0;
+
+out_with_event:
+	kfree(event);
+out:
+	return err;
+}
+
+static int
 ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 	    struct net_device *orig_dev)
 {
@@ -202,6 +256,12 @@ ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 		hdrp = skb_header_pointer(skb, 0, sizeof(hdr.connect_accept), &hdr.connect_accept);
 		if (hdrp)
 			err = ccieth_recv_connect_accept(ifp, ep, &hdrp->connect_accept);
+		break;
+	case CCIETH_PKT_MSG:
+		/* copy entire header now */
+		hdrp = skb_header_pointer(skb, 0, sizeof(hdr.msg), &hdr.msg);
+		if (hdrp)
+			err = ccieth_recv_msg(ifp, ep, &hdrp->msg, skb);
 		break;
 	default:
 		err = -EINVAL;
