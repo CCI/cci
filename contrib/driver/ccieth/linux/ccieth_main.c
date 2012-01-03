@@ -276,7 +276,7 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 out_with_conn:
 	/* FIXME: release ref */
 out_with_skb:
-	kfree(skb);
+	kfree_skb(skb);
 out:
 	return err;
 }
