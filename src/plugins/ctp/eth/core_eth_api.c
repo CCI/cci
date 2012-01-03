@@ -150,8 +150,10 @@ static int eth__get_device_info(cci__dev_t *_dev, struct ifaddrs *addr)
   memcpy(&arg.addr, &lladdr->sll_addr, 6);
 
   ret = ioctl(fd, CCIETH_IOCTL_GET_INFO, &arg);
-  if (ret < 0)
+  if (ret < 0) {
+    perror("ioctl get info");
     return -1;
+  }
 
   close(fd);
 
@@ -416,6 +418,7 @@ static int eth_create_endpoint(cci_device_t *device,
   memcpy(&arg.addr, &edev->addr.sll_addr, 6);
   ret = ioctl(fd, CCIETH_IOCTL_CREATE_ENDPOINT, &arg);
   if (ret < 0) {
+    perror("ioctl create endpoint");
     ret = errno;
     goto out_with_fd;
   }
@@ -532,6 +535,7 @@ static int eth_accept(union cci_event *event,
 	ac.max_send_size = ge->connect_request.max_send_size;
 	err = ioctl(eep->fd, CCIETH_IOCTL_CONNECT_ACCEPT, &ac);
 	if (err < 0) {
+		perror("ioctl connect accept");
 		free(_conn);
 		return errno;
 	}
@@ -586,6 +590,7 @@ static int eth_connect(cci_endpoint_t *endpoint, char *server_uri,
 	arg.timeout_usec = timeout ? timeout->tv_usec : -1;
 	ret = ioctl(eep->fd, CCIETH_IOCTL_CONNECT_REQUEST, &arg);
 	if (ret < 0) {
+		perror("ioctl connect request");
 		free(_conn);
 		return errno;
 	}
@@ -649,7 +654,7 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 	if (ret < 0) {
 		if (errno == EAGAIN)
 			goto out_with_event;
-		perror("get event");
+		perror("ioctl get event");
 	}
 
 	switch (ge->type) {
@@ -724,7 +729,7 @@ static int eth_send(cci_connection_t *connection,
 
 	ret = ioctl(eep->fd, CCIETH_IOCTL_MSG, &arg);
 	if (ret < 0) {
-		perror("send");
+		perror("ioctl send");
 		return errno;
 	}
 
