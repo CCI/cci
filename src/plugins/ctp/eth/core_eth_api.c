@@ -34,6 +34,7 @@ static int eth_create_endpoint(cci_device_t *device,
                                cci_os_handle_t *fd);
 static int eth_destroy_endpoint(cci_endpoint_t *endpoint);
 static int eth_accept(union cci_event *event,
+                      void *context,
                       cci_connection_t **connection);
 static int eth_reject(union cci_event *event);
 static int eth_connect(cci_endpoint_t *endpoint, char *server_uri,
@@ -452,11 +453,12 @@ static int eth_create_endpoint(cci_device_t *device,
 		  printf("got attr %d\n",
 			 event->request.attribute);
 	  }
-	  ret = cci_accept(event, &sconn);
+	  ret = cci_accept(event, (void*)0xfedcba98, &sconn);
 	  assert(ret == CCI_SUCCESS);
 	  printf("accepted conn %p attr %d mss %d\n",
 		 sconn, sconn->attribute, sconn->max_send_size);
 	  assert(sconn->endpoint == *endpoint);
+	  assert(sconn->context == (void*)0xfedcba98);
 	  ret = cci_return_event(event);
 	  assert(ret == CCI_SUCCESS);
 
@@ -531,6 +533,7 @@ static int eth_destroy_endpoint(cci_endpoint_t *endpoint)
 
 
 static int eth_accept(union cci_event *event,
+                      void *context,
                       cci_connection_t **connection)
 {
 	cci__evt_t *_ev = container_of(event, cci__evt_t, event);
@@ -563,7 +566,7 @@ static int eth_accept(union cci_event *event,
 	_conn->connection.max_send_size = ge->connect_request.max_send_size;
 	_conn->connection.endpoint = &_ep->endpoint;
 	_conn->connection.attribute = ge->connect_request.attribute;
-	_conn->connection.context = NULL;
+	_conn->connection.context = context;
 
 	*connection = &_conn->connection;
 	return CCI_SUCCESS;
