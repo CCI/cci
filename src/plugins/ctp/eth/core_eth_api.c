@@ -12,6 +12,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <fcntl.h>
+#include <assert.h>
 
 #include "../contrib/driver/ccieth/linux/ccieth_io.h"
 
@@ -432,14 +433,17 @@ static int eth_create_endpoint(cci_device_t *device,
   {
 	  /* debugging */
 
-	  cci_connection_t * connection;
+	  cci_connection_t *sconn, *cconn;
 	  cci_event_t * event;
+	  cci_status_t ret;
 
 	  /* connect */
-	  cci_connect(*endpoint, name, "hello world!", 13, 123, (void*)0xdeadbeef, 0, NULL);
+	  ret = cci_connect(*endpoint, name, "hello world!", 13, 123, (void*)0xdeadbeef, 0, NULL);
+	  assert(ret == CCI_SUCCESS);
 
 	  /* handle connect request and accept it */
-	  while (cci_get_event(*endpoint, &event) == -EAGAIN);
+	  while ((ret = cci_get_event(*endpoint, &event)) == -EAGAIN);
+	  assert(ret == CCI_SUCCESS);
 	  printf("got event type %d\n", event->type);
 	  if (event->type == CCI_EVENT_CONNECT_REQUEST) {
 		  if (event->request.data_len)
@@ -448,45 +452,61 @@ static int eth_create_endpoint(cci_device_t *device,
 		  printf("got attr %d\n",
 			 event->request.attribute);
 	  }
-	  cci_accept(event, &connection);
+	  ret = cci_accept(event, &sconn);
+	  assert(ret == CCI_SUCCESS);
 	  printf("accepted conn %p attr %d mss %d\n",
-		 connection, connection->attribute, connection->max_send_size);
-	  cci_return_event(event);
+		 sconn, sconn->attribute, sconn->max_send_size);
+	  assert(sconn->endpoint == *endpoint);
+	  ret = cci_return_event(event);
+	  assert(ret == CCI_SUCCESS);
 
 	  /* handle connect accepted */
-	  while (cci_get_event(*endpoint, &event) == -EAGAIN);
+	  while ((ret = cci_get_event(*endpoint, &event)) == -EAGAIN);
+	  assert(ret == CCI_SUCCESS);
 	  printf("got event type %d\n", event->type);
 	  if (event->type == CCI_EVENT_CONNECT_ACCEPTED) {
-		  connection = event->accepted.connection;
+		  cconn = event->accepted.connection;
 		  printf("got conn %p attr %d context %p mss %d\n",
-			 connection, connection->attribute, connection->context, connection->max_send_size);
+			 cconn, cconn->attribute, cconn->context, cconn->max_send_size);
+		  assert(cconn->endpoint == *endpoint);
+		  assert(cconn->context == (void*)0xdeadbeef);
+		  assert(event->accepted.context == (void*)0xdeadbeef);
 	  }
-	  cci_return_event(event);
+	  ret = cci_return_event(event);
+	  assert(ret == CCI_SUCCESS);
 
 	  /* send msg */
-	  cci_send(connection, "bye world!", 11, (void*)0x012345678, 0);
+	  ret = cci_send(cconn, "bye world!", 11, (void*)0x012345678, 0);
+	  assert(ret == CCI_SUCCESS);
 	  printf("send 11 bytes\n");
 
 	  /* handle msg */
-	  while (cci_get_event(*endpoint, &event) == -EAGAIN);
+	  while ((ret = cci_get_event(*endpoint, &event)) == -EAGAIN);
+	  assert(ret == CCI_SUCCESS);
 	  printf("got event type %d\n", event->type);
 	  if (event->type == CCI_EVENT_RECV) {
 		  printf("got msg len %d data %s\n",
 			 event->recv.len, event->recv.ptr);
+		  assert(event->recv.connection == sconn);
 	  }
-	  cci_return_event(event);
+	  ret = cci_return_event(event);
+	  assert(ret == CCI_SUCCESS);
 
 	  /* handle send completion */
-	  while (cci_get_event(*endpoint, &event) == -EAGAIN);
+	  while ((ret = cci_get_event(*endpoint, &event)) == -EAGAIN);
+	  assert(ret == CCI_SUCCESS);
 	  printf("got event type %d\n", event->type);
 	  if (event->type == CCI_EVENT_SEND) {
 		  printf("got send completion context %llx\n", event->send.context);
+		  assert(event->send.connection == cconn);
+		  assert(event->send.context == (void*)0x012345678);
 	  }
-	  cci_return_event(event);
+	  ret = cci_return_event(event);
+	  assert(ret == CCI_SUCCESS);
 
 	  /* end of debugging */
   }
-	  
+
   return CCI_SUCCESS;
 
  out_with_fd:
