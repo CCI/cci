@@ -618,16 +618,13 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 	}
 
 	switch (ge->type) {
-	case CCIETH_IOCTL_EVENT_CONNECT_REQUEST: {
-		struct cci_event_connect_request * cr_event = (void*) event;
+	case CCIETH_IOCTL_EVENT_CONNECT_REQUEST:
 		event->type = CCI_EVENT_CONNECT_REQUEST;
-		cr_event->data_len = ge->data_length;
-		cr_event->data_ptr = ge->data_length ? data : NULL;
-		cr_event->attribute = ge->connect_request.attribute;
+		event->request.data_len = ge->data_length;
+		event->request.data_ptr = ge->data_length ? data : NULL;
+		event->request.attribute = ge->connect_request.attribute;
 		break;
-	}
 	case CCIETH_IOCTL_EVENT_CONNECT_ACCEPTED: {
-		struct cci_event_connect_accepted * ac_event = (void*) event;
 		cci__conn_t *_conn;
 		eth__conn_t *econn;
 
@@ -644,8 +641,8 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 		_conn->connection.context = (void*)(uintptr_t) ge->connect_accepted.context;
 
 		event->type = CCI_EVENT_CONNECT_ACCEPTED;
-		ac_event->context = (void*)(uintptr_t) ge->connect_accepted.context;
-		ac_event->connection = &_conn->connection;
+		event->accepted.context = (void*)(uintptr_t) ge->connect_accepted.context;
+		event->accepted.connection = &_conn->connection;
 		break;
 	}
 	default:
