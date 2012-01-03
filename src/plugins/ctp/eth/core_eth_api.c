@@ -610,10 +610,8 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 
 	ret = ioctl(eep->fd, CCIETH_IOCTL_GET_EVENT, ge);
 	if (ret < 0) {
-		if (errno == EAGAIN) {
-			printf("got no event\n");
+		if (errno == EAGAIN)
 			goto out_with_event;
-		}
 		perror("get event");
 	}
 
