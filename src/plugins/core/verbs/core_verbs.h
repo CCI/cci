@@ -56,6 +56,8 @@ typedef enum verbs_msg_type {
 	VERBS_MSG_CONN_REPLY,
 	VERBS_MSG_DISCONNECT,
 	VERBS_MSG_SEND,
+	VERBS_MSG_RMA_REMOTE_REQUEST,
+	VERBS_MSG_RMA_REMOTE_REPLY,
 	VERBS_MSG_KEEPALIVE,
 	VERBS_MSG_TYPE_MAX,
 } verbs_msg_type_t;
@@ -133,6 +135,35 @@ typedef enum verbs_msg_type {
       D is reserved
  */
 
+/* RMA Remote Handle Request
+
+    <----------- 32 bits ----------->
+    <---------- 28b ----------->  4b
+   +----------------------------+----+
+   |             B              |  A |
+   +----------------------------+----+
+
+   where A is VERBS_MSG_RMA_REMOTE_REQUEST and B is unused.
+
+   The payload is the uint64_t remote handle.
+ */
+
+/* RMA Remote Handle Reply
+
+    <----------- 32 bits ----------->
+    <---------- 28b ----------->  4b
+   +----------------------------+----+
+   |             B              |  A |
+   +----------------------------+----+
+
+   where A is VERBS_MSG_RMA_REMOTE_REPLY and B is unused.
+
+   The payload is:
+
+       uint64_t remote_addr
+       uint32_t rkey
+ */
+
 /* Keepalive
 
     <----------- 32 bits ----------->
@@ -144,11 +175,23 @@ typedef enum verbs_msg_type {
    where A is VERBS_MSG_KEEPALIVE and B is unused.
  */
 
-#define VERBS_DEFAULT_MSS	(IBV_MTU_2048)
+/* Set some driver defaults */
 #define VERBS_EP_RX_CNT		(1024)		/* default SRQ size */
 #define VERBS_EP_TX_CNT		(128)		/* default send count */
 #define VERBS_EP_CQ_CNT		(2048)		/* default CQ count */
-#define VERBS_PROG_TIME_US	(10000)		/* try to progress every N microseconds */
+#define VERBS_PROG_TIME_US	(50000)		/* try to progress every N microseconds */
+
+/* RMA Remote Cache
+ *
+ * Verbs needs 96 bits of info to post an RDMA (remote_addr and rkey). Since the
+ * CCI remote handle is a uint64_t, we need to use a rendezvous to obtain the
+ * remote_addr and rkey for a given handle. We can cache the most recently used
+ * remote handle information on a LRU list attached to the local RMA handle. Each
+ * RMA remote uses 36 bytes on a 64-bit machine. There is a scaling trade-off
+ * in order to avoid additional rendezvous round-trips since the memory usage
+ * will be up to (number of connections * size of LRU list * 36 bytes).
+ */
+#define VERBS_RMA_REMOTE_SIZE	(4)		/* size of LRU list of RMA remote handles */
 
 /* Data structures */
 
@@ -188,12 +231,19 @@ extern volatile verbs_globals_t	*vglobals;
 typedef struct verbs_rma_handle {
 	struct ibv_mr		*mr;		/* memory registration */
 	cci__ep_t		*ep;		/* owning endpoint */
-	uint64_t		len;		/* registered length */
-	void			*start;		/* application buffer */
+	//uint64_t		len;		/* registered length */
+	//void			*start;		/* application buffer */
 	TAILQ_ENTRY(verbs_rma_handle)	entry;	/* hang on vep->handles */
 	uint32_t		refcnt;		/* reference count */
 	TAILQ_HEAD(s_rma_ops, verbs_rma_op) rma_ops;	/* list of all rma_ops */
-} verbs_rma_handle;
+} verbs_rma_handle_t;
+
+typedef struct verbs_rma_remote {
+	TAILQ_ENTRY(verbs_rma_remote) entry;	/* hang on local RMA handle */
+	uint64_t		remote_handle;	/* the remote handle */
+	uint64_t		remote_addr;	/* the remote address */
+	uint32_t		rkey;		/* the remote key */
+} verbs_rma_remote_t;
 
 typedef struct verbs_rma_op {
 	cci__evt_t		evt;		/* completion event */
@@ -204,12 +254,14 @@ typedef struct verbs_rma_op {
 	uint64_t		remote_handle;
 	uint64_t		remote_offset;
 
+	verbs_rma_remote_t	*remote;
+
 	uint64_t		len;
 	cci_status_t		status;
 	void			*context;
 	int			flags;
 	verbs_tx_t		*tx;
-	uint16_t		msg_len;
+	uint32_t		msg_len;
 	char			*msg_ptr;
 } verbs_rma_op_t;
 
@@ -235,7 +287,7 @@ typedef struct verbs_ep {
 	TAILQ_HEAD(v_active, verbs_conn) active;	/* active conns */
 	TAILQ_HEAD(v_passive, verbs_conn) passive;	/* passive conns */
 	TAILQ_HEAD(v_hdls, verbs_rma_handle) handles;	/* all rma registrations */
-	TAILQ_HEAD(v_ops, verbs_rma_ops) rma_ops;	/* all rma ops */
+	TAILQ_HEAD(v_ops, verbs_rma_op) rma_ops;	/* all rma ops */
 } verbs_ep_t;
 
 typedef enum verbs_conn_state {
@@ -260,6 +312,8 @@ typedef struct verbs_conn {
 	verbs_conn_state_t		state;		/* current state */
 	uint32_t			mss;		/* max send size */
 	uint32_t			max_tx_cnt;	/* max sends in flight */
+	uint32_t			num_remotes;	/* number of cached remotes */
+	TAILQ_HEAD(s_rems, verbs_rma_remote) remotes;	/* LRU list of remote handles */
 	TAILQ_ENTRY(verbs_conn)		entry;		/* hangs on vep->conns */
 	TAILQ_ENTRY(verbs_conn)		temp;		/* hangs on vep->active|passive */
 	verbs_conn_request_t		*conn_req;	/* application conn req info */
