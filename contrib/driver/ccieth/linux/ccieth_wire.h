@@ -31,7 +31,7 @@ union ccieth_pkt_header {
 		/* 32 */
 		__be32 data_len;
 		__u8 data[0];
-	} connect;
+	} connect_request;
 	struct ccieth_pkt_header_connect_accept {
 		struct ethhdr eth;
 		__u8 type;
@@ -44,7 +44,7 @@ union ccieth_pkt_header {
 		__be32 src_conn_id;
 		/* 32 */
 		__be32 max_send_size;
-	} accept;
+	} connect_accept;
 };
 
 enum ccieth_pkt_type {

@@ -193,15 +193,15 @@ ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 	switch (hdrp->generic.type) {
 	case CCIETH_PKT_CONNECT_REQUEST:
 		/* copy entire header now */
-		hdrp = skb_header_pointer(skb, 0, sizeof(hdr.connect), &hdr.connect);
+		hdrp = skb_header_pointer(skb, 0, sizeof(hdr.connect_request), &hdr.connect_request);
 		if (hdrp)
-			err = ccieth_recv_connect_request(ifp, ep, &hdrp->connect, skb);
+			err = ccieth_recv_connect_request(ifp, ep, &hdrp->connect_request, skb);
 		break;
 	case CCIETH_PKT_CONNECT_ACCEPT:
 		/* copy entire header now */
-		hdrp = skb_header_pointer(skb, 0, sizeof(hdr.accept), &hdr.accept);
+		hdrp = skb_header_pointer(skb, 0, sizeof(hdr.connect_accept), &hdr.connect_accept);
 		if (hdrp)
-			err = ccieth_recv_connect_accept(ifp, ep, &hdrp->accept);
+			err = ccieth_recv_connect_accept(ifp, ep, &hdrp->connect_accept);
 		break;
 	default:
 		err = -EINVAL;
