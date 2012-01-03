@@ -30,7 +30,7 @@ static int mx_unbind(cci_service_t *service, cci_device_t *device);
 static int mx_get_conn_req(cci_service_t *service, 
                                  cci_conn_req_t **conn_req);
 static int mx_accept(cci_conn_req_t *conn_req, 
-                           cci_endpoint_t *endpoint, 
+                     void *context,
                            cci_connection_t **connection);
 static int mx_reject(cci_conn_req_t *conn_req);
 static int mx_connect(cci_endpoint_t *endpoint, char *server_uri, 
@@ -195,7 +195,7 @@ static int mx_get_conn_req(cci_service_t *service,
 
 
 static int mx_accept(cci_conn_req_t *conn_req, 
-                           cci_endpoint_t *endpoint, 
+                     void *context,
                            cci_connection_t **connection)
 {
     printf("In mx_accept\n");

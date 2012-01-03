@@ -312,7 +312,7 @@ do_server()
             accept = 1;
             ready = 1;
             opts = *((options_t *)event->request.data_ptr);
-            ret = cci_accept(event, &connection);
+            ret = cci_accept(event, NULL, &connection);
             check_return("cci_accept", ret, 1);
 
 	    ret = cci_return_event(event);

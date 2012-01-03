@@ -161,6 +161,7 @@ static int         gni_destroy_endpoint(
     cci_endpoint_t *            endpoint );
 static int         gni_accept(
     union cci_event *           conn_req,
+    void *                      context,
     cci_connection_t **         connection );
 static int         gni_reject(
     union cci_event *           conn_req );
@@ -1248,6 +1249,7 @@ static int gni_destroy_endpoint(  cci_endpoint_t *       endpoint ) {
 
 static int gni_accept(
     union cci_event *           event,
+    void *                      context,
     cci_connection_t **         connection ) {
 
     cci_device_t const *        device;
@@ -1292,6 +1294,7 @@ static int gni_accept(
 
     conn->tx_timeout=ep->tx_timeout;         // timeout presently unused
     conn->connection.endpoint=endpoint;
+    conn->connection.context=context;
     gconn->status=GNI_CONN_FAILED;
     gconn->conn=conn;                        // point back to conn
     conn->priv=gconn;

@@ -122,6 +122,7 @@ static int portals_create_endpoint(  cci_device_t         *device,
                                      cci_os_handle_t      *fd );
 static int portals_destroy_endpoint( cci_endpoint_t       *endpoint );
 static int portals_accept(           union cci_event      *event,
+                                     void                 *context,
                                      cci_connection_t     **connection );
 static int portals_reject(           union cci_event      *event );
 static int portals_connect(          cci_endpoint_t       *endpoint,
@@ -1175,6 +1176,7 @@ static int portals_destroy_endpoint(cci_endpoint_t *endpoint)
 
 static int portals_accept(
     union cci_event        *event,
+    void                   *context,
     cci_connection_t       **connection ) {
 
     int             ret;
@@ -1242,6 +1244,7 @@ static int portals_accept(
 
     conn->connection.attribute = event->request.attribute;
     conn->connection.endpoint = endpoint;
+    conn->connection.context = context;
     conn->connection.max_send_size = dev->device.max_send_size;
 
     pconn->idp = rx->pevent.initiator;

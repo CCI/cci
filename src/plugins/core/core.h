@@ -40,6 +40,7 @@ typedef int (*cci_create_endpoint_fn_t)(cci_device_t *device,
                                         cci_os_handle_t *fd);
 typedef int (*cci_destroy_endpoint_fn_t)(cci_endpoint_t *endpoint);
 typedef int (*cci_accept_fn_t)(union cci_event *conn_req,
+                               void *context,
                                cci_connection_t **connection);
 typedef int (*cci_reject_fn_t)(union cci_event *conn_req);
 typedef int (*cci_connect_fn_t)(cci_endpoint_t *endpoint, char *server_uri,
