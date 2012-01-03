@@ -41,7 +41,7 @@ ccieth_recv_connect_request(struct net_device *ifp, struct ccieth_endpoint *ep,
 	       src_ep_id, src_conn_id);
 
 	err = -EINVAL;
-	if (data_len >= ep->max_send_size)
+	if (data_len > ep->max_send_size)
 		goto out;
 
 	/* setup the event */

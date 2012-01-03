@@ -145,7 +145,7 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	int err;
 
 	err = -EINVAL;
-	if (arg->data_len >= ep->max_send_size)
+	if (arg->data_len > ep->max_send_size)
 		goto out;
 
 	/* allocate and initialize the skb */
