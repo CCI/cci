@@ -148,18 +148,27 @@ typedef enum verbs_msg_type {
    The payload is the uint64_t remote handle.
  */
 
+typedef struct verbs_rma_addr_rkey {
+	uint64_t	remote_handle;	/* the CCI remote handle */
+	uint64_t	remote_addr;	/* the Verbs remote address */
+	uint32_t	rkey;		/* the Verbs rkey */
+} verbs_rma_addr_rkey_t;
+
 /* RMA Remote Handle Reply
 
     <----------- 32 bits ----------->
-    <---------- 28b ----------->  4b
-   +----------------------------+----+
-   |             B              |  A |
-   +----------------------------+----+
+    <---------- 27b ----------> 1  4b
+   +---------------------------+-+----+
+   |             C             |B|  A |
+   +---------------------------+-+----+
 
-   where A is VERBS_MSG_RMA_REMOTE_REPLY and B is unused.
+   where A is VERBS_MSG_RMA_REMOTE_REPLY
+   B is 0 for ERR_NOT_FOUND and 1 for SUCCESS
+   C is unused
 
    The payload is:
 
+       uint64_t remote_handle
        uint64_t remote_addr
        uint32_t rkey
  */
@@ -229,10 +238,9 @@ typedef struct verbs_globals {
 extern volatile verbs_globals_t	*vglobals;
 
 typedef struct verbs_rma_handle {
+	uint64_t		handle;		/* CCI RMA handle */
 	struct ibv_mr		*mr;		/* memory registration */
 	cci__ep_t		*ep;		/* owning endpoint */
-	//uint64_t		len;		/* registered length */
-	//void			*start;		/* application buffer */
 	TAILQ_ENTRY(verbs_rma_handle)	entry;	/* hang on vep->handles */
 	uint32_t		refcnt;		/* reference count */
 	TAILQ_HEAD(s_rma_ops, verbs_rma_op) rma_ops;	/* list of all rma_ops */
@@ -240,9 +248,7 @@ typedef struct verbs_rma_handle {
 
 typedef struct verbs_rma_remote {
 	TAILQ_ENTRY(verbs_rma_remote) entry;	/* hang on local RMA handle */
-	uint64_t		remote_handle;	/* the remote handle */
-	uint64_t		remote_addr;	/* the remote address */
-	uint32_t		rkey;		/* the remote key */
+	verbs_rma_addr_rkey_t	info;		/* handle, addr, and rkey */
 } verbs_rma_remote_t;
 
 typedef struct verbs_rma_op {
@@ -254,7 +260,8 @@ typedef struct verbs_rma_op {
 	uint64_t		remote_handle;
 	uint64_t		remote_offset;
 
-	verbs_rma_remote_t	*remote;
+	uint64_t		remote_addr;
+	uint32_t		rkey;
 
 	uint64_t		len;
 	cci_status_t		status;
@@ -314,6 +321,7 @@ typedef struct verbs_conn {
 	uint32_t			max_tx_cnt;	/* max sends in flight */
 	uint32_t			num_remotes;	/* number of cached remotes */
 	TAILQ_HEAD(s_rems, verbs_rma_remote) remotes;	/* LRU list of remote handles */
+	TAILQ_HEAD(w_ops, verbs_rma_op) rma_ops;	/* rma ops waiting on remotes */
 	TAILQ_ENTRY(verbs_conn)		entry;		/* hangs on vep->conns */
 	TAILQ_ENTRY(verbs_conn)		temp;		/* hangs on vep->active|passive */
 	verbs_conn_request_t		*conn_req;	/* application conn req info */
