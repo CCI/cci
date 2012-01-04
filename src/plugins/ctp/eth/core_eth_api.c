@@ -14,7 +14,7 @@
 #include <fcntl.h>
 #include <assert.h>
 
-#include "../contrib/driver/ccieth/linux/ccieth_io.h"
+#include "ccieth_io.h"
 
 #include "cci.h"
 #include "plugins/core/core.h"

@@ -11,3 +11,5 @@ cci_core_eth_la_SOURCES = \
         core_eth.h \
         core_eth_module.c \
         core_eth_api.c
+
+AM_CPPFLAGS = -I@abs_top_srcdir@/contrib/driver/ccieth/linux
