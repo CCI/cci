@@ -82,7 +82,7 @@ struct ccieth_connection {
 
 extern struct idr ccieth_ep_idr;
 
-extern void ccieth_recv_init(void);
-extern void ccieth_recv_exit(void);
+extern int ccieth_net_init(void);
+extern void ccieth_net_exit(void);
 
 #endif /* CCIETH_COMMON_H */

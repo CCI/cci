@@ -597,14 +597,18 @@ ccieth_init(void)
 	idr_init(&ccieth_ep_idr);
 	spin_lock_init(&ccieth_ep_idr_lock);
 
-	ret = misc_register(&ccieth_miscdev);
+	ret = ccieth_net_init();
 	if (ret < 0)
 		goto out;
 
-	ccieth_recv_init();
+	ret = misc_register(&ccieth_miscdev);
+	if (ret < 0)
+		goto out_with_net;
 
 	return 0;
 
+out_with_net:
+	ccieth_net_exit();
 out:
 	return ret;
 }
@@ -612,8 +616,8 @@ out:
 void
 ccieth_exit(void)
 {
-	ccieth_recv_exit();
 	misc_deregister(&ccieth_miscdev);
+	ccieth_net_exit();
 	idr_destroy(&ccieth_ep_idr);
 }
 

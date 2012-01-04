@@ -280,14 +280,46 @@ struct packet_type ccieth_pt = {
 	.func = ccieth_recv,
 };
 
-void
-ccieth_recv_init(void)
+static int
+ccieth_netdevice_notifier_cb(struct notifier_block *unused,
+			     unsigned long event, void *ptr)
 {
+	switch (event) {
+	case NETDEV_CHANGEMTU:
+		/* if ccieth max_send_size becomes smaller, close endpoints and connections? */
+	case NETDEV_CHANGEADDR:
+	case NETDEV_UNREGISTER:
+		/* close endpoints and connections */
+		printk("ccieth notifier event %ld\n", event);
+	}		
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block ccieth_netdevice_notifier = {
+        .notifier_call = ccieth_netdevice_notifier_cb,
+};
+
+int
+ccieth_net_init(void)
+{
+	int ret;
+
+        ret = register_netdevice_notifier(&ccieth_netdevice_notifier);
+        if (ret < 0)
+                goto out;
+
 	dev_add_pack(&ccieth_pt);
+
+	return 0;
+
+out:
+	return ret;
 }
 
 void
-ccieth_recv_exit(void)
+ccieth_net_exit(void)
 {
 	dev_remove_pack(&ccieth_pt);
+	unregister_netdevice_notifier(&ccieth_netdevice_notifier);
 }
