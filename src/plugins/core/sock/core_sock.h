@@ -644,6 +644,78 @@ sock_pack_rma_write(sock_rma_header_t *write, uint16_t data_len,
     sock_pack_rma_handle_offset(&write->remote, remote_handle, remote_offset);
 }
 
+/* RMA read request
+
+    <---------- 32 bits ---------->
+    <- 8 -> <- 8 -> <---- 16 ----->
+   +-------+-----------------------+
+   | type  |   a   |   data_len    |
+   +-------+-----------------------+
+   |            peer id            |
+   +-------------------------------+
+
+   +-------------------------------+
+   |              seq              |
+   +-------------------------------+
+   |           timestamp           |
+   +-------------------------------+
+
+   +-------------------------------+
+   |     local handle (0 - 31)     |
+   +-------------------------------+
+   |     local handle (32 - 63)    |
+   +-------------------------------+
+   |     local offset (0 - 31)     |
+   +-------------------------------+
+   |     local offset (32 - 63)    |
+   +-------------------------------+
+   |     remote handle (0 - 31)    |
+   +-------------------------------+
+   |     remote handle (32 - 63)   |
+   +-------------------------------+
+   |     remote offset (0 - 31)    |
+   +-------------------------------+
+   |     remote offset (32 - 63)   |
+   +-------------------------------+
+
+   +-------------------------------+
+   |        context (0 - 31)       |
+   +-------------------------------+
+   |        context (32 - 64)      |
+   +-------------------------------+
+   a = unused
+   local handle: cci_rma() caller's handle (stays same for each packet)
+   local offset: offset into the local handle (changes for each packet)
+   remote handle: passive peer's handle (stays same for each packet)
+   remote offset: offset into the remote handle (changes for each packet)
+ */
+
+static inline void
+sock_pack_rma_read(sock_rma_header_t *read, uint16_t data_len,
+                    uint32_t peer_id, uint32_t seq, uint32_t ts,
+                    uint64_t local_handle, uint64_t local_offset,
+                    uint64_t remote_handle, uint64_t remote_offset)
+{
+    sock_pack_header(&read->header_r.header, SOCK_MSG_RMA_READ_REQUEST,
+                     0, data_len, peer_id);
+    sock_pack_seq_ts(&read->header_r.seq_ts, seq, ts);
+    sock_pack_rma_handle_offset(&read->local, local_handle, local_offset);
+    sock_pack_rma_handle_offset(&read->remote, remote_handle, remote_offset);
+}
+
+/***
+ * FIXME Describe packet format
+ */
+
+static inline void
+sock_pack_rma_write_done(sock_rma_header_t *write, uint32_t peer_id,
+                         uint32_t seq, uint32_t ts)
+{
+    sock_pack_header(&write->header_r.header, SOCK_MSG_RMA_WRITE_DONE,
+                     0, 0, peer_id);
+    sock_pack_seq_ts(&write->header_r.seq_ts, seq, ts);
+}
+
 /************* Windowing and Acking *******************/
 
 
@@ -958,6 +1030,12 @@ typedef struct sock_conn {
 
     /*! Flag to know if the receiver is ready or not */
     uint32_t rnr;
+
+    /*! Array of RMA contextes (used for RMA reads) */
+    void **rma_contexts;
+
+    /*! Current size of the array of RMA contexts */
+    uint32_t max_rma_contexts;
 } sock_conn_t;
 
 /* Only call if holding the ep->lock and sconn->acks is not empty

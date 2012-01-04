@@ -118,6 +118,9 @@ poll_events(void)
             break;
         case CCI_EVENT_RECV:
         {
+            if (!is_server && opts.method != AM
+                           && event->recv.ptr == (void*)1)
+                count++;
             if (!ready) {
                 ready = 1;
                 if (opts.method != AM && !is_server) {
