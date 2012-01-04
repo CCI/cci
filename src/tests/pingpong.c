@@ -119,8 +119,16 @@ poll_events(void)
         case CCI_EVENT_RECV:
         {
             if (!is_server && opts.method != AM
-                           && event->recv.ptr == (void*)1)
+                           && event->recv.ptr == (void*)1) {
                 count++;
+                if (count < warmup + iters) {
+                    ret = cci_rma(connection, rmt_comp_msg, rmt_comp_len,
+                                      local_rma_handle, 0,
+                                      opts.server_rma_handle, 0,
+                                      current_size, (void*)1, opts.flags);
+                        check_return("cci_rma", ret, 1);
+                    }
+            }
             if (!ready) {
                 ready = 1;
                 if (opts.method != AM && !is_server) {
