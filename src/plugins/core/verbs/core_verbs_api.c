@@ -1721,7 +1721,7 @@ verbs_handle_rma_remote_request(cci__ep_t *ep, struct ibv_wc wc)
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_FOREACH(h, &vep->handles, entry) {
-		if (h->handle == request) {
+		if ((uintptr_t)h == request) {
 			handle = h;
 			break;
 		}
@@ -1788,7 +1788,7 @@ verbs_handle_rma_remote_reply(cci__ep_t *ep, struct ibv_wc wc)
 			goto out;
 		}
 
-		memcpy(remote, vep->rx_buf + rx->offset, sizeof(*remote));
+		memcpy(&remote->info, vep->rx_buf + rx->offset, sizeof(remote->info));
 		remote->info.remote_handle = verbs_ntohll(remote->info.remote_handle);
 		remote->info.remote_addr = verbs_ntohll(remote->info.remote_addr);
 		remote->info.rkey = ntohl(remote->info.rkey);
@@ -2015,9 +2015,6 @@ verbs_get_cq_event(cci__ep_t *ep)
 	found = ret;
 
 	for (i = 0; i < found; i++) {
-		debug(CCI_DB_ALL, "%s: imm flag set: %s imm_data 0x%x",
-			__func__, wc[i].wc_flags & IBV_WC_WITH_IMM ? "yes" : "no",
-			ntohl(wc[i].imm_data));
 		if (wc[i].status != IBV_WC_SUCCESS) {
 			debug(CCI_DB_INFO, "%s wc returned with status %s",
 				wc[i].opcode & IBV_WC_RECV ? "recv" : "send",

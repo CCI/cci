@@ -238,7 +238,6 @@ typedef struct verbs_globals {
 extern volatile verbs_globals_t	*vglobals;
 
 typedef struct verbs_rma_handle {
-	uint64_t		handle;		/* CCI RMA handle */
 	struct ibv_mr		*mr;		/* memory registration */
 	cci__ep_t		*ep;		/* owning endpoint */
 	TAILQ_ENTRY(verbs_rma_handle)	entry;	/* hang on vep->handles */
