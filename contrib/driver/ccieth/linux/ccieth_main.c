@@ -207,6 +207,11 @@ retry:
 	hdr->src_conn_id = htonl(conn->id);
         dev_queue_xmit(skb);
 
+	/* FIXME: setup timer to min(timeout, retransmit)
+	 * if timeout expired, destroy conn and return timedout event
+	 * if retransmit expired, resend skb (cache the above one), reset timer
+	 */
+
 	arg->conn_id = conn->id;
 	return 0;
 
