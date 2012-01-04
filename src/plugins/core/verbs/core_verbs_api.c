@@ -2027,6 +2027,8 @@ verbs_get_cq_event(cci__ep_t *ep)
 			ret = verbs_handle_send_completion(ep, wc[i]);
 		} else if (wc[i].opcode == IBV_WC_RDMA_WRITE) {
 			ret = verbs_handle_rma_write_completion(ep, wc[i]);
+		} else if (wc[i].opcode == IBV_WC_RDMA_READ) {
+			ret = verbs_handle_rma_write_completion(ep, wc[i]);
 		} else {
 			debug(CCI_DB_ALL, "%s: missed opcode %u status %s wr_id 0x%"PRIx64,
 				__func__, wc[i].opcode, ibv_wc_status_str(wc[i].status),
