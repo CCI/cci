@@ -52,7 +52,7 @@ BEGIN_C_DECLS
 #define GNI_MAX_EP_ID         (GNI_BLOCK_SIZE * GNI_NUM_BLOCKS)
 #define GNI_EP_BITS           (32)
 #define GNI_EP_SHIFT          (32)
-#define GNI_PROG_TIME_US      (2000000)      // progress delay micro-sec
+#define GNI_PROG_TIME_US      (10)           // progress delay micro-sec
 
 #define GNI_EP_MATCH          ((uint64_t)0)
 #define GNI_EP_IGNORE         (~((uint64_t)0))
