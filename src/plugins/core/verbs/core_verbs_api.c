@@ -266,11 +266,15 @@ verbs_find_rdma_devices(struct ibv_context **contexts, int count, struct ifaddrs
 				!(tmp->ifa_flags & IFF_LOOPBACK)) {
 				ret = verbs_ifa_to_context(c, tmp->ifa_addr);
 				if (!ret) {
+					int len = sizeof(struct sockaddr);
 					addrs[i].ifa_name = strdup(tmp->ifa_name);
 					addrs[i].ifa_flags = tmp->ifa_flags;
-					addrs[i].ifa_addr = tmp->ifa_addr;
-					addrs[i].ifa_netmask = tmp->ifa_netmask;
-					addrs[i].ifa_broadaddr = tmp->ifa_broadaddr;
+					addrs[i].ifa_addr = calloc(1, len);
+					memcpy(addrs[i].ifa_addr,tmp->ifa_addr, len);
+					addrs[i].ifa_netmask = calloc(1, len);
+					memcpy(addrs[i].ifa_netmask, tmp->ifa_netmask, len);
+					addrs[i].ifa_broadaddr = calloc(1, len);
+					memcpy(addrs[i].ifa_broadaddr, tmp->ifa_broadaddr, len);
 					i++;
 					break;
 				}
@@ -944,7 +948,6 @@ verbs_vconn_set_mss(verbs_conn_t *vconn)
 
 	ret = ibv_query_qp(vconn->id->qp, &attr, IBV_QP_PATH_MTU, &init);
 	if (ret == -1) {
-		/* FIXME do something here */
 		ret = errno;
 		goto out;
 	}
@@ -1920,23 +1923,7 @@ verbs_complete_send_msg(cci__ep_t *ep, struct ibv_wc wc)
 
 	CCI_ENTER;
 
-	if (wc.status != IBV_WC_SUCCESS) {
-		uint32_t status	= 0;
-
-		switch (wc.status) {
-		case IBV_WC_RETRY_EXC_ERR:
-			status = CCI_ETIMEDOUT;	/* FIXME: is this correct? */
-			break;
-		case IBV_WC_RNR_RETRY_EXC_ERR:
-			status = CCI_ERR_RNR;	/* FIXME: is this correct? */
-			break;
-		default:
-			debug(CCI_DB_MSG, "%s: send completed with %s",
-				__func__, ibv_wc_status_str(wc.status));
-			status = CCI_ERROR;
-		}
-		tx->evt.event.send.status = status;
-	}
+	tx->evt.event.send.status = verbs_wc_to_cci_status(wc.status);
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
 	pthread_mutex_unlock(&ep->lock);
@@ -1993,8 +1980,13 @@ verbs_handle_rma_completion(cci__ep_t *ep, struct ibv_wc wc)
 {
 	int		ret	= CCI_SUCCESS;
 	verbs_rma_op_t	*rma_op	= (verbs_rma_op_t *)(uintptr_t) wc.wr_id;
+	verbs_ep_t	*vep	= ep->priv;
 
 	CCI_ENTER;
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_REMOVE(&vep->rma_ops, rma_op, entry);
+	pthread_mutex_unlock(&ep->lock);
 
 	rma_op->status = verbs_wc_to_cci_status(wc.status);
 	if (rma_op->msg_len == 0 || rma_op->status != CCI_SUCCESS) {
@@ -2016,6 +2008,9 @@ queue:
 			rma_op->status = ret;
 			goto queue;
 		}
+		/* we will pass the tx completion to the app,
+		 * free the rma_op now */
+		free(rma_op);
 	}
 
 	CCI_EXIT;
