@@ -23,6 +23,9 @@
 struct idr ccieth_ep_idr;
 static spinlock_t ccieth_ep_idr_lock;
 
+/* called either at the end of an ioctl or at endpoint close,
+ * never in restricted context, may sleep
+ */
 void
 __ccieth_connection_lastkref(struct kref *kref)
 {
@@ -50,7 +53,9 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 	idr_remove(&ccieth_ep_idr, ep->id);
 	spin_unlock(&ccieth_ep_idr_lock);
 
-	/* FIXME synchronize_net() */
+	/* the network cannot start new receive handlers now, but some may be running */
+	synchronize_net();
+	/* all receive handlers are gone now */
 
 	cancel_work_sync(&ep->recv_connect_request_work);
 	skb_queue_purge(&ep->recv_connect_request_queue);
@@ -64,10 +69,15 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 		list_del(&event->list);
 		kfree(event);
 	}
+
 	idr_for_each(&ep->connection_idr, ccieth_destroy_connection_idrforeach_cb,
 		     &destroyed_conn);
 	printk("destroyed %d connections on endpoint destroy\n", destroyed_conn);
+	/* new ioctls cannot access connections anymore now */
 	idr_remove_all(&ep->connection_idr);
+	/* the last reference will actually destroy each connection */
+
+	/* FIXME: split this for the notifier so that we only free(ep) when the last connection is destroyed */
 	kfree(ep);
 }
 

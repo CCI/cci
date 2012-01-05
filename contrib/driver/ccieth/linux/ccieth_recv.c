@@ -235,9 +235,6 @@ ccieth_recv_connect_accept(struct net_device *ifp, struct sk_buff *skb)
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
 	if (!conn)
                 goto out_with_event;
-	kref_get(&conn->refcount);
-
-	rcu_read_unlock();
 
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REQUESTED, CCIETH_CONNECTION_READY)
 	    != CCIETH_CONNECTION_REQUESTED)
@@ -252,7 +249,7 @@ ccieth_recv_connect_accept(struct net_device *ifp, struct sk_buff *skb)
 	event->event.connect_accepted.max_send_size = max_send_size;
 	event->event.connect_accepted.user_conn_id = conn->user_conn_id;
 
-	kref_put(&conn->refcount, __ccieth_connection_lastkref);
+	rcu_read_unlock();
 
 	spin_lock(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
@@ -262,7 +259,7 @@ ccieth_recv_connect_accept(struct net_device *ifp, struct sk_buff *skb)
 	return 0;
 
 out_with_conn:
-	kref_put(&conn->refcount, __ccieth_connection_lastkref);
+	/* nothing */
 out_with_event:
 	spin_lock(&ep->free_event_list_lock);
 	list_add_tail(&event->list, &ep->free_event_list);
@@ -334,14 +331,11 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
 	if (!conn)
 		goto out_with_event;
-	kref_get(&conn->refcount);
-
-	rcu_read_unlock();
 
 	/* finalize and notify the event */
 	event->event.recv.user_conn_id = conn->user_conn_id;
 
-	kref_put(&conn->refcount, __ccieth_connection_lastkref);
+	rcu_read_unlock();
 
 	spin_lock(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
