@@ -167,10 +167,8 @@ ccieth_recv_connect_accept(struct net_device *ifp, struct sk_buff *skb)
 	/* find endpoint and check that it's attached to this ifp */
 	rcu_read_lock();
 	ep = idr_find(&ccieth_ep_idr, dst_ep_id);
-	/* FIXME: keep rcu locked until conn is acquired */
-	rcu_read_unlock();
 	if (!ep || ep->ifp != ifp)
-		goto out;
+		goto out_with_rculock;
 
 	/* get an event */
 	spin_lock(&ep->free_event_list_lock);
@@ -178,7 +176,7 @@ ccieth_recv_connect_accept(struct net_device *ifp, struct sk_buff *skb)
 		err = -ENOMEM;
 		spin_unlock(&ep->free_event_list_lock);
 		printk("ccieth: no event slot for connect accepted\n");
-		goto out;
+		goto out_with_rculock;
 	}
 	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
 	list_del(&event->list);
@@ -189,14 +187,11 @@ ccieth_recv_connect_accept(struct net_device *ifp, struct sk_buff *skb)
 	event->event.connect_accepted.conn_id = dst_conn_id;
 
 	/* find the connection and update it */
-	err = -EINVAL;
-	rcu_read_lock();
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
-	if (!conn) {
-		rcu_read_unlock();
+	if (!conn)
                 goto out_with_event;
-	}
 	kref_get(&conn->refcount);
+
 	rcu_read_unlock();
 
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REQUESTED, CCIETH_CONNECTION_READY)
@@ -227,6 +222,8 @@ out_with_event:
 	spin_lock(&ep->free_event_list_lock);
 	list_add_tail(&event->list, &ep->free_event_list);
 	spin_unlock(&ep->free_event_list_lock);
+out_with_rculock:
+	rcu_read_unlock();
 out:
 	dev_kfree_skb(skb);
 	return err;
@@ -257,17 +254,16 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 	printk("got msg len %d to eid %d conn id %d\n",
 	       msg_len, dst_ep_id, dst_conn_id);
 
-	/* find endpoint and check that it's attached to this ifp */
 	rcu_read_lock();
+
+	/* find endpoint and check that it's attached to this ifp */
 	ep = idr_find(&ccieth_ep_idr, dst_ep_id);
-	/* FIXME: keep rcu locked until conn is acquired */
-	rcu_read_unlock();
 	if (!ep || ep->ifp != ifp)
-		goto out;
+		goto out_with_rculock;
 
 	/* check msg length */
 	if (msg_len > ep->max_send_size)
-		goto out;
+		goto out_with_rculock;
 
 	/* get an event */
 	spin_lock(&ep->free_event_list_lock);
@@ -275,7 +271,7 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 		err = -ENOMEM;
 		spin_unlock(&ep->free_event_list_lock);
 		printk("ccieth: no event slot for msg\n");
-		goto out;
+		goto out_with_rculock;
 	}
 	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
 	list_del(&event->list);
@@ -285,20 +281,16 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 	event->event.type = CCIETH_IOCTL_EVENT_RECV;
 	event->event.data_length = msg_len;
 
-	err = -EINVAL;
 	err = skb_copy_bits(skb, sizeof(*hdr), event+1, msg_len);
 	if (err < 0)
 		goto out_with_event;
 
-	/* find the connection and update it */
-	err = -EINVAL;
-	rcu_read_lock();
+	/* find the connection */
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
-	if (!conn) {
-		rcu_read_unlock();
+	if (!conn)
 		goto out_with_event;
-	}
 	kref_get(&conn->refcount);
+
 	rcu_read_unlock();
 
 	/* finalize and notify the event */
@@ -317,6 +309,8 @@ out_with_event:
 	spin_lock(&ep->free_event_list_lock);
 	list_add_tail(&event->list, &ep->free_event_list);
 	spin_unlock(&ep->free_event_list_lock);
+out_with_rculock:
+	rcu_read_unlock();
 out:
 	dev_kfree_skb(skb);
 	return err;
