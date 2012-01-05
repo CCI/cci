@@ -26,27 +26,21 @@ static int ccieth_recv_connect_idrforeach_cb(int id, void *p, void *data)
 }
 
 static int
-ccieth_recv_connect_request(struct net_device *ifp, struct sk_buff *skb)
+ccieth__recv_connect_request(struct ccieth_endpoint *ep, 
+			     struct sk_buff *skb,
+			     struct ccieth_pkt_header_connect_request *hdr)
 {
-	struct ccieth_pkt_header_connect_request _hdr, *hdr;
-	struct ccieth_endpoint *ep;
 	struct ccieth_endpoint_event *event;
 	struct ccieth_connection *conn;
 	__u32 src_ep_id;
-	__u32 dst_ep_id;
 	__u32 src_conn_id;
 	__u32 data_len;
 	__u32 src_max_send_size;
 	int err;
 
-	/* copy the entire header */
-	err = -EINVAL;
-	hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
-	if (!hdr)
-		goto out;
+	printk("processing queued connect request skb %p\n", skb);
 
 	src_ep_id = ntohl(hdr->src_ep_id);
-	dst_ep_id = ntohl(hdr->dst_ep_id);
 	src_conn_id = ntohl(hdr->src_conn_id);
 	data_len = ntohl(hdr->data_len);
 	src_max_send_size = ntohl(hdr->max_send_size);
@@ -54,15 +48,8 @@ ccieth_recv_connect_request(struct net_device *ifp, struct sk_buff *skb)
 	printk("got conn request from eid %d conn id %d\n",
 	       src_ep_id, src_conn_id);
 
-	/* find endpoint and check that it's attached to this ifp */
-	rcu_read_lock();
-	ep = idr_find(&ccieth_ep_idr, dst_ep_id);
-	/* FIXME: keep rcu locked until conn is acquired */
-	rcu_read_unlock();
-	if (!ep || ep->ifp != ifp)
-		goto out;
-
 	/* check msg length */
+	err = -EINVAL;
 	if (data_len > ep->max_send_size)
 		goto out;
 
@@ -84,7 +71,6 @@ ccieth_recv_connect_request(struct net_device *ifp, struct sk_buff *skb)
 	event->event.connect_request.attribute = hdr->attribute;
 	event->event.connect_request.max_send_size = src_max_send_size < ep->max_send_size ? src_max_send_size : ep->max_send_size;
 
-	err = -EINVAL;
 	err = skb_copy_bits(skb, sizeof(*hdr), event+1, data_len);
 	if (err < 0)
 		goto out_with_event;
@@ -130,6 +116,65 @@ out_with_event:
 	spin_lock(&ep->free_event_list_lock);
 	list_add_tail(&event->list, &ep->free_event_list);
 	spin_unlock(&ep->free_event_list_lock);
+out:
+	dev_kfree_skb(skb);
+	return err;
+}
+
+void
+ccieth_recv_connect_request_workfunc(struct work_struct *work)
+{
+	struct ccieth_endpoint *ep = container_of(work, struct ccieth_endpoint, recv_connect_request_work);
+	struct sk_buff *skb;
+
+	printk("dequeueing queued connect request skbs\n");
+
+	while ((skb = skb_dequeue(&ep->recv_connect_request_queue)) != NULL) {
+		struct ccieth_pkt_header_connect_request _hdr, *hdr;
+		int err;
+
+		/* copy the entire header */
+		hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
+		BUG_ON(!hdr); /* would have faild in ccieth_recv_connect_request() before schedule_work() */
+
+		err = ccieth__recv_connect_request(ep, skb, hdr);
+		if (err && err != -EINVAL) {
+			/* not enough memory or events, other skbuffs will fail the same, drop everything for now */
+			skb_queue_purge(&ep->recv_connect_request_queue);
+			return;
+		}
+	}
+}
+
+static int
+ccieth_recv_connect_request(struct net_device *ifp, struct sk_buff *skb)
+{
+	struct ccieth_endpoint *ep;
+	__be32 dst_ep_id_n, *dst_ep_id_n_p;
+	int err;
+
+	/* copy the entire header */
+	err = -EINVAL;
+	dst_ep_id_n_p = skb_header_pointer(skb, offsetof(struct ccieth_pkt_header_generic, dst_ep_id), sizeof(dst_ep_id_n), &dst_ep_id_n);
+	if (!dst_ep_id_n_p)
+		goto out;
+
+	rcu_read_lock();
+
+	/* find endpoint and check that it's attached to this ifp */
+	ep = idr_find(&ccieth_ep_idr, ntohl(*dst_ep_id_n_p));
+	if (!ep || ep->ifp != ifp)
+		goto out_with_rculock;
+
+	printk("queueing connect request skb %p\n", skb);
+	skb_queue_tail(&ep->recv_connect_request_queue, skb);
+	schedule_work(&ep->recv_connect_request_work);
+
+	rcu_read_unlock();
+	return 0;
+
+out_with_rculock:
+	rcu_read_unlock();
 out:
 	dev_kfree_skb(skb);
 	return err;

@@ -12,6 +12,7 @@
 #include <linux/spinlock.h>
 #include <linux/list.h>
 #include <linux/kref.h>
+#include <linux/workqueue.h>
 
 #include "ccieth_io.h"
 
@@ -27,6 +28,9 @@ struct ccieth_endpoint {
 	struct list_head free_event_list;
 	spinlock_t free_event_list_lock;
 
+	struct sk_buff_head recv_connect_request_queue;
+	struct work_struct recv_connect_request_work;
+	
 	struct idr connection_idr;
 	spinlock_t connection_idr_lock;
 };
@@ -95,5 +99,7 @@ extern int ccieth_net_init(void);
 extern void ccieth_net_exit(void);
 
 extern void __ccieth_connection_lastkref(struct kref *kref);
+
+extern void ccieth_recv_connect_request_workfunc(struct work_struct *work);
 
 #endif /* CCIETH_COMMON_H */

@@ -49,6 +49,12 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 	spin_lock(&ccieth_ep_idr_lock);
 	idr_remove(&ccieth_ep_idr, ep->id);
 	spin_unlock(&ccieth_ep_idr_lock);
+
+	/* FIXME synchronize_net() */
+
+	cancel_work_sync(&ep->recv_connect_request_work);
+	skb_queue_purge(&ep->recv_connect_request_queue);
+
 	dev_put(ep->ifp);
 	list_for_each_entry_safe(event, nevent, &ep->event_list, list) {
 		list_del(&event->list);
@@ -118,6 +124,9 @@ ccieth_create_endpoint(struct ccieth_ioctl_create_endpoint *arg)
 
 	idr_init(&ep->connection_idr);
 	spin_lock_init(&ep->connection_idr_lock);
+
+	skb_queue_head_init(&ep->recv_connect_request_queue);
+	INIT_WORK(&ep->recv_connect_request_work, ccieth_recv_connect_request_workfunc);
 
 	arg->id = ep->id = id;
 
