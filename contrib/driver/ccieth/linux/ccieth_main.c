@@ -23,12 +23,20 @@
 struct idr ccieth_ep_idr;
 static spinlock_t ccieth_ep_idr_lock;
 
+void
+__ccieth_connection_lastkref(struct kref *kref)
+{
+        struct ccieth_connection * conn = container_of(kref, struct ccieth_connection, refcount);
+	printk("destroying connection %p on last release\n", conn);
+	kfree(conn);
+}
+
 static int ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 {
 	struct ccieth_connection *conn = p;
 	int *destroyed_conn = data;
+	kref_put(&conn->refcount, __ccieth_connection_lastkref);
 	(*destroyed_conn)++;
-	kfree(conn);
 	return 0;
 }
 
@@ -184,6 +192,7 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out_with_skb;
+	kref_init(&conn->refcount);
 	conn->status = CCIETH_CONNECTION_REQUESTED;
 	memcpy(&conn->dest_addr, &arg->dest_addr, 6);
 	conn->dest_eid = arg->dest_eid;
@@ -250,10 +259,12 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	err = -EINVAL;
 	rcu_read_lock();
 	conn = idr_find(&ep->connection_idr, arg->conn_id);
-	/* FIXME: take a reference */
-	rcu_read_unlock();
-	if (!conn)
+	if (!conn) {
+		rcu_read_unlock();
 		goto out_with_skb;
+	}
+	kref_get(&conn->refcount);
+	rcu_read_unlock();
 
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_RECEIVED, CCIETH_CONNECTION_READY)
 	    != CCIETH_CONNECTION_RECEIVED)
@@ -273,14 +284,14 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	hdr->src_conn_id = htonl(conn->id);
 	hdr->max_send_size = htonl(conn->max_send_size);
 
-	/* FIXME: release ref */
+	kref_put(&conn->refcount, __ccieth_connection_lastkref);
 
         dev_queue_xmit(skb);
 
 	return 0;
 
 out_with_conn:
-	/* FIXME: release ref */
+	kref_put(&conn->refcount, __ccieth_connection_lastkref);
 out_with_skb:
 	kfree_skb(skb);
 out:
@@ -303,10 +314,12 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 	rcu_read_lock();
 	conn = idr_find(&ep->connection_idr, arg->conn_id);
-	/* FIXME: take a reference */
-	rcu_read_unlock();
-	if (!conn)
+	if (!conn) {
+		rcu_read_unlock();
 		goto out;
+	}
+	kref_get(&conn->refcount);
+	rcu_read_unlock();
 
 	/* setup the event */
 	err = -ENOMEM;
@@ -347,7 +360,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 	/* FIXME: implement flags */
 
-	/* FIXME: release ref */
+	kref_put(&conn->refcount, __ccieth_connection_lastkref);
 
         dev_queue_xmit(skb);
 
@@ -364,7 +377,7 @@ out_with_skb:
 out_with_event:
 	kfree(event);
 out_with_conn:
-	/* FIXME release ref */
+	kref_put(&conn->refcount, __ccieth_connection_lastkref);
 out:
 	return err;
 }

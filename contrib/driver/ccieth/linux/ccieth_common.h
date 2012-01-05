@@ -11,6 +11,7 @@
 #include <linux/idr.h>
 #include <linux/spinlock.h>
 #include <linux/list.h>
+#include <linux/kref.h>
 
 #include "ccieth_io.h"
 
@@ -64,6 +65,10 @@ enum ccieth_connection_status {
 };
 
 struct ccieth_connection {
+	/* one reference is hold by the network, i.e. when accessible through the endpoint idr.
+	 * other references come from ioctls. */
+	struct kref refcount;
+
 	int id; /* always valid */ /* FIXME keep in network order too? */
 	enum ccieth_connection_status status;
 
@@ -84,5 +89,7 @@ extern struct idr ccieth_ep_idr;
 
 extern int ccieth_net_init(void);
 extern void ccieth_net_exit(void);
+
+extern void __ccieth_connection_lastkref(struct kref *kref);
 
 #endif /* CCIETH_COMMON_H */

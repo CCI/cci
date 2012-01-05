@@ -63,6 +63,7 @@ ccieth_recv_connect_request(struct net_device *ifp, struct ccieth_endpoint *ep,
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out_with_event;
+	kref_init(&conn->refcount);
 	conn->status = CCIETH_CONNECTION_RECEIVED;
 	memcpy(&conn->dest_addr, &hdr->eth.h_source, 6);
 	conn->dest_eid = ntohl(hdr->src_ep_id);
@@ -127,30 +128,35 @@ ccieth_recv_connect_accept(struct net_device *ifp, struct ccieth_endpoint *ep,
 	err = -EINVAL;
 	rcu_read_lock();
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
-	/* FIXME: take a reference */
+	if (!conn) {
+		rcu_read_unlock();
+                goto out_with_event;
+	}
+	kref_get(&conn->refcount);
 	rcu_read_unlock();
-	if (!conn)
-		goto out_with_event;
 
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REQUESTED, CCIETH_CONNECTION_READY)
 	    != CCIETH_CONNECTION_REQUESTED)
 		goto out_with_conn;
 
+	/* setup connection */
 	conn->dest_id = src_conn_id;
 	conn->max_send_size = max_send_size;
-	/* FIXME: release ref */
 
 	/* finalize and notify the event */
 	event->event.connect_accepted.attribute = conn->attribute;
 	event->event.connect_accepted.max_send_size = max_send_size;
 	event->event.connect_accepted.user_conn_id = conn->user_conn_id;
+
+	kref_put(&conn->refcount, __ccieth_connection_lastkref);
+
 	spin_lock(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock(&ep->event_list_lock);
 	return 0;
 
 out_with_conn:
-	/* FIXME: release ref */
+	kref_put(&conn->refcount, __ccieth_connection_lastkref);
 out_with_event:
 	kfree(event);
 out:
@@ -192,14 +198,18 @@ ccieth_recv_msg(struct net_device *ifp, struct ccieth_endpoint *ep,
 	err = -EINVAL;
 	rcu_read_lock();
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
-	/* FIXME: take a reference */
-	rcu_read_unlock();
-	if (!conn)
+	if (!conn) {
+		rcu_read_unlock();
 		goto out_with_event;
+	}
+	kref_get(&conn->refcount);
+	rcu_read_unlock();
 
 	/* finalize and notify the event */
 	event->event.recv.user_conn_id = conn->user_conn_id;
-	/* FIXME: release ref */
+
+	kref_put(&conn->refcount, __ccieth_connection_lastkref);
+
 	spin_lock(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock(&ep->event_list_lock);
