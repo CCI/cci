@@ -54,6 +54,10 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 		list_del(&event->list);
 		kfree(event);
 	}
+	list_for_each_entry_safe(event, nevent, &ep->free_event_list, list) {
+		list_del(&event->list);
+		kfree(event);
+	}
 	idr_for_each(&ep->connection_idr, ccieth_destroy_connection_idrforeach_cb,
 		     &destroyed_conn);
 	printk("destroyed %d connections on endpoint destroy\n", destroyed_conn);
@@ -66,7 +70,7 @@ ccieth_create_endpoint(struct ccieth_ioctl_create_endpoint *arg)
 {
 	struct ccieth_endpoint *ep;
 	struct net_device *ifp;
-	int id;
+	int id, i;
 	int err;
 
 	rcu_read_lock();
@@ -98,13 +102,22 @@ ccieth_create_endpoint(struct ccieth_ioctl_create_endpoint *arg)
 	if (err)
 		goto out_with_ep;
 
+	ep->max_send_size = ifp->mtu >= 9000 ? 8192 : 1024;
+
 	INIT_LIST_HEAD(&ep->event_list);
 	spin_lock_init(&ep->event_list_lock);
 
+	INIT_LIST_HEAD(&ep->free_event_list);
+	spin_lock_init(&ep->free_event_list_lock);
+	for(i=0; i<CCIETH_EVENT_SLOT_NR; i++) {
+		struct ccieth_endpoint_event *event = kmalloc(sizeof(*event) + ep->max_send_size, GFP_KERNEL);
+		if (!event)
+			break;
+		list_add_tail(&event->list, &ep->free_event_list);
+	}
+
 	idr_init(&ep->connection_idr);
 	spin_lock_init(&ep->connection_idr_lock);
-
-	ep->max_send_size = ifp->mtu >= 9000 ? 8192 : 1024;
 
 	arg->id = ep->id = id;
 
@@ -321,11 +334,19 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	kref_get(&conn->refcount);
 	rcu_read_unlock();
 
-	/* setup the event */
-	err = -ENOMEM;
-	event = kmalloc(sizeof(*event), GFP_KERNEL);
-	if (!event)
+	/* get an event */
+	spin_lock(&ep->free_event_list_lock);
+	if (list_empty(&ep->free_event_list)) {
+		err = -ENOMEM;
+		spin_unlock(&ep->free_event_list_lock);
+		printk("ccieth: no event slot for send\n");
 		goto out_with_conn;
+	}
+	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
+	list_del(&event->list);
+	spin_unlock(&ep->free_event_list_lock);
+
+	/* setup the event */
 	event->event.type = CCIETH_IOCTL_EVENT_SEND;
 	event->event.send.user_conn_id = conn->user_conn_id;
 	event->event.send.context = arg->context;
@@ -375,7 +396,9 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 out_with_skb:
 	kfree_skb(skb);
 out_with_event:
-	kfree(event);
+	spin_lock(&ep->free_event_list_lock);
+	list_add_tail(&event->list, &ep->free_event_list);
+	spin_unlock(&ep->free_event_list_lock);
 out_with_conn:
 	kref_put(&conn->refcount, __ccieth_connection_lastkref);
 out:
@@ -499,10 +522,14 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 
 		ret = copy_to_user(((__user void *) arg)+sizeof(struct ccieth_ioctl_get_event),
 				   event+1, event->event.data_length);
+
+		spin_lock(&ep->free_event_list_lock);
+		list_add_tail(&event->list, &ep->free_event_list);
+		spin_unlock(&ep->free_event_list_lock);
+
 		if (ret)
 			return -EFAULT;
 
-		kfree(event);
 		return 0;
 	}
 

@@ -15,6 +15,8 @@
 
 #include "ccieth_io.h"
 
+#define CCIETH_EVENT_SLOT_NR 64
+
 struct ccieth_endpoint {
 	struct net_device *ifp;
 	int max_send_size;
@@ -22,6 +24,8 @@ struct ccieth_endpoint {
 
 	struct list_head event_list;
 	spinlock_t event_list_lock;
+	struct list_head free_event_list;
+	spinlock_t free_event_list_lock;
 
 	struct idr connection_idr;
 	spinlock_t connection_idr_lock;

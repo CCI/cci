@@ -66,11 +66,19 @@ ccieth_recv_connect_request(struct net_device *ifp, struct sk_buff *skb)
 	if (data_len > ep->max_send_size)
 		goto out;
 
-	/* setup the event */
-	err = -ENOMEM;
-	event = kmalloc(sizeof(*event) + data_len, GFP_KERNEL);
-	if (!event)
+	/* get an event */
+	spin_lock(&ep->free_event_list_lock);
+	if (list_empty(&ep->free_event_list)) {
+		err = -ENOMEM;
+		spin_unlock(&ep->free_event_list_lock);
+		printk("ccieth: no event slot for connect request\n");
 		goto out;
+	}
+	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
+	list_del(&event->list);
+	spin_unlock(&ep->free_event_list_lock);
+
+	/* setup the event */
 	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_REQUEST;
 	event->event.data_length = data_len;
 	event->event.connect_request.attribute = hdr->attribute;
@@ -117,7 +125,9 @@ retry:
 out_with_conn:
 	kfree(conn);
 out_with_event:
-	kfree(event);
+	spin_lock(&ep->free_event_list_lock);
+	list_add_tail(&event->list, &ep->free_event_list);
+	spin_unlock(&ep->free_event_list_lock);
 out:
 	return err;
 }
@@ -159,11 +169,19 @@ ccieth_recv_connect_accept(struct net_device *ifp, struct sk_buff *skb)
 	if (!ep || ep->ifp != ifp)
 		goto out;
 
-	/* setup the event */
-	err = -ENOMEM;
-	event = kmalloc(sizeof(*event), GFP_KERNEL);
-	if (!event)
+	/* get an event */
+	spin_lock(&ep->free_event_list_lock);
+	if (list_empty(&ep->free_event_list)) {
+		err = -ENOMEM;
+		spin_unlock(&ep->free_event_list_lock);
+		printk("ccieth: no event slot for connect accepted\n");
 		goto out;
+	}
+	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
+	list_del(&event->list);
+	spin_unlock(&ep->free_event_list_lock);
+
+	/* setup the event */
 	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_ACCEPTED;
 	event->event.connect_accepted.conn_id = dst_conn_id;
 
@@ -201,7 +219,9 @@ ccieth_recv_connect_accept(struct net_device *ifp, struct sk_buff *skb)
 out_with_conn:
 	kref_put(&conn->refcount, __ccieth_connection_lastkref);
 out_with_event:
-	kfree(event);
+	spin_lock(&ep->free_event_list_lock);
+	list_add_tail(&event->list, &ep->free_event_list);
+	spin_unlock(&ep->free_event_list_lock);
 out:
 	return err;
 }
@@ -243,11 +263,19 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 	if (msg_len > ep->max_send_size)
 		goto out;
 
-	/* setup the event */
-	err = -ENOMEM;
-	event = kmalloc(sizeof(*event) + msg_len, GFP_KERNEL);
-	if (!event)
+	/* get an event */
+	spin_lock(&ep->free_event_list_lock);
+	if (list_empty(&ep->free_event_list)) {
+		err = -ENOMEM;
+		spin_unlock(&ep->free_event_list_lock);
+		printk("ccieth: no event slot for msg\n");
 		goto out;
+	}
+	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
+	list_del(&event->list);
+	spin_unlock(&ep->free_event_list_lock);
+
+	/* setup the event */
 	event->event.type = CCIETH_IOCTL_EVENT_RECV;
 	event->event.data_length = msg_len;
 
@@ -278,7 +306,9 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 	return 0;
 
 out_with_event:
-	kfree(event);
+	spin_lock(&ep->free_event_list_lock);
+	list_add_tail(&event->list, &ep->free_event_list);
+	spin_unlock(&ep->free_event_list_lock);
 out:
 	return err;
 }
