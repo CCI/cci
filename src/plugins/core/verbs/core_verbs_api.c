@@ -174,6 +174,40 @@ verbs_device_rate(struct ibv_port_attr attr)
 	return rate;
 }
 
+static cci_status_t
+verbs_wc_to_cci_status(enum ibv_wc_status wc_status)
+{
+	int	ret	= CCI_SUCCESS;
+
+	switch (wc_status) {
+		case IBV_WC_SUCCESS:
+			ret = CCI_SUCCESS;
+			break;
+		case IBV_WC_LOC_LEN_ERR:
+			ret = CCI_EMSGSIZE;
+			break;
+		case IBV_WC_LOC_PROT_ERR:
+		case IBV_WC_REM_ACCESS_ERR:
+			ret = CCI_ERR_RMA_HANDLE;
+			break;
+		case IBV_WC_REM_INV_REQ_ERR:
+		case IBV_WC_REM_OP_ERR:
+			ret = CCI_ERR_RMA_OP;
+			break;
+		case IBV_WC_RETRY_EXC_ERR:
+		case IBV_WC_RESP_TIMEOUT_ERR:
+			ret = CCI_ETIMEDOUT;
+			break;
+		case IBV_WC_RNR_RETRY_EXC_ERR:
+			ret = CCI_ERR_RNR;
+			break;
+		default:
+			ret = EIO;
+	}
+
+	return ret;
+}
+
 static int
 verbs_ifa_to_context(struct ibv_context *context, struct sockaddr *sa)
 {
@@ -507,9 +541,23 @@ out:
 static const char *
 verbs_strerror(enum cci_status status)
 {
+	char *str	= NULL;
+	char unknown[32];
+
 	CCI_ENTER;
+
+	switch (status) {
+		case EIO:
+			str = "";
+			break;
+		default:
+			memset(unknown, 0, sizeof(unknown));
+			sprintf(unknown, "unknown status %u", status);
+			str = unknown;
+	}
+
 	CCI_EXIT;
-	return NULL;
+	return str;
 }
 
 
@@ -1937,16 +1985,38 @@ verbs_complete_send(cci__ep_t *ep, struct ibv_wc wc)
 }
 
 static int
-verbs_handle_rma_write_completion(cci__ep_t *ep, struct ibv_wc wc)
+verbs_send_common(cci_connection_t *connection, struct iovec *iov, uint32_t iovcnt,
+		void *context, int flags, verbs_rma_op_t *rma_op);
+
+static int
+verbs_handle_rma_completion(cci__ep_t *ep, struct ibv_wc wc)
 {
 	int		ret	= CCI_SUCCESS;
 	verbs_rma_op_t	*rma_op	= (verbs_rma_op_t *)(uintptr_t) wc.wr_id;
 
 	CCI_ENTER;
 
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_TAIL(&ep->evts, &rma_op->evt, entry);
-	pthread_mutex_unlock(&ep->lock);
+	rma_op->status = verbs_wc_to_cci_status(wc.status);
+	if (rma_op->msg_len == 0 || rma_op->status != CCI_SUCCESS) {
+queue:
+		/* we are done, queue it for the app */
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_INSERT_TAIL(&ep->evts, &rma_op->evt, entry);
+		pthread_mutex_unlock(&ep->lock);
+	} else {
+		uint32_t	iovcnt	= 1;
+		struct iovec	iov;
+		cci__conn_t	*conn	= rma_op->evt.conn;
+
+		iov.iov_base = rma_op->msg_ptr;
+		iov.iov_len = rma_op->msg_len;
+		ret = verbs_send_common(&conn->connection, &iov, iovcnt,
+				rma_op->context, rma_op->flags, rma_op);
+		if (ret != CCI_SUCCESS) {
+			rma_op->status = ret;
+			goto queue;
+		}
+	}
 
 	CCI_EXIT;
 	return ret;
@@ -2023,16 +2093,21 @@ verbs_get_cq_event(cci__ep_t *ep)
 		}
 		if (wc[i].opcode & IBV_WC_RECV) {
 			ret = verbs_handle_recv(ep, wc[i]);
-		} else if (wc[i].opcode == IBV_WC_SEND) {
-			ret = verbs_handle_send_completion(ep, wc[i]);
-		} else if (wc[i].opcode == IBV_WC_RDMA_WRITE) {
-			ret = verbs_handle_rma_write_completion(ep, wc[i]);
-		} else if (wc[i].opcode == IBV_WC_RDMA_READ) {
-			ret = verbs_handle_rma_write_completion(ep, wc[i]);
 		} else {
-			debug(CCI_DB_ALL, "%s: missed opcode %u status %s wr_id 0x%"PRIx64,
-				__func__, wc[i].opcode, ibv_wc_status_str(wc[i].status),
-				wc[i].wr_id);
+			switch (wc[i].opcode) {
+			case IBV_WC_SEND:
+				ret = verbs_handle_send_completion(ep, wc[i]);
+				break;
+			case IBV_WC_RDMA_WRITE:
+			case IBV_WC_RDMA_READ:
+				ret = verbs_handle_rma_completion(ep, wc[i]);
+				break;
+			default:
+				debug(CCI_DB_ALL, "%s: missed opcode %u status %s wr_id 0x%"PRIx64,
+					__func__, wc[i].opcode, ibv_wc_status_str(wc[i].status),
+					wc[i].wr_id);
+				break;
+			}
 		}
 	}
 
@@ -2254,7 +2329,7 @@ verbs_send_common(cci_connection_t *connection, struct iovec *iov, uint32_t iovc
 	/* tx bookkeeping */
 	tx->msg_type = VERBS_MSG_SEND;
 	tx->flags = flags;
-	tx->rma_op = NULL; /* only set if RMA completion msg */
+	tx->rma_op = rma_op; /* only set if RMA completion msg */
 
 	/* setup generic CCI event */
 	tx->evt.conn = conn;
