@@ -26,21 +26,43 @@ static int ccieth_recv_connect_idrforeach_cb(int id, void *p, void *data)
 }
 
 static int
-ccieth_recv_connect_request(struct net_device *ifp, struct ccieth_endpoint *ep,
-			    struct ccieth_pkt_header_connect_request *hdr, struct sk_buff *skb)
+ccieth_recv_connect_request(struct net_device *ifp, struct sk_buff *skb)
 {
+	struct ccieth_pkt_header_connect_request _hdr, *hdr;
+	struct ccieth_endpoint *ep;
 	struct ccieth_endpoint_event *event;
 	struct ccieth_connection *conn;
-	__u32 src_ep_id = ntohl(hdr->src_ep_id);
-	__u32 src_conn_id = ntohl(hdr->src_conn_id);
-	__u32 data_len = ntohl(hdr->data_len);
-	__u32 src_max_send_size = ntohl(hdr->max_send_size);
+	__u32 src_ep_id;
+	__u32 dst_ep_id;
+	__u32 src_conn_id;
+	__u32 data_len;
+	__u32 src_max_send_size;
 	int err;
+
+	/* copy the entire header */
+	err = -EINVAL;
+	hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
+	if (!hdr)
+		goto out;
+
+	src_ep_id = ntohl(hdr->src_ep_id);
+	dst_ep_id = ntohl(hdr->dst_ep_id);
+	src_conn_id = ntohl(hdr->src_conn_id);
+	data_len = ntohl(hdr->data_len);
+	src_max_send_size = ntohl(hdr->max_send_size);
 
 	printk("got conn request from eid %d conn id %d\n",
 	       src_ep_id, src_conn_id);
 
-	err = -EINVAL;
+	/* find endpoint and check that it's attached to this ifp */
+	rcu_read_lock();
+	ep = idr_find(&ccieth_ep_idr, dst_ep_id);
+	/* FIXME: keep rcu locked until conn is acquired */
+	rcu_read_unlock();
+	if (!ep || ep->ifp != ifp)
+		goto out;
+
+	/* check msg length */
 	if (data_len > ep->max_send_size)
 		goto out;
 
@@ -101,20 +123,41 @@ out:
 }
 
 static int
-ccieth_recv_connect_accept(struct net_device *ifp, struct ccieth_endpoint *ep,
-			   struct ccieth_pkt_header_connect_accept *hdr)
+ccieth_recv_connect_accept(struct net_device *ifp, struct sk_buff *skb)
 {
+	struct ccieth_pkt_header_connect_accept _hdr, *hdr;
+	struct ccieth_endpoint *ep;
 	struct ccieth_endpoint_event *event;
 	struct ccieth_connection *conn;
-	__u32 src_conn_id = ntohl(hdr->src_conn_id);
-	__u32 src_ep_id = ntohl(hdr->src_ep_id);
-	__u32 dst_conn_id = ntohl(hdr->dst_conn_id);
-	__u32 dst_ep_id = ntohl(hdr->dst_ep_id);
-	__u32 max_send_size = ntohl(hdr->max_send_size);
+	__u32 src_conn_id;
+	__u32 src_ep_id;
+	__u32 dst_conn_id;
+	__u32 dst_ep_id;
+	__u32 max_send_size;
 	int err;
+
+	/* copy the entire header */
+	err = -EINVAL;
+	hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
+	if (!hdr)
+		goto out;
+
+	src_conn_id = ntohl(hdr->src_conn_id);
+	src_ep_id = ntohl(hdr->src_ep_id);
+	dst_conn_id = ntohl(hdr->dst_conn_id);
+	dst_ep_id = ntohl(hdr->dst_ep_id);
+	max_send_size = ntohl(hdr->max_send_size);
 
 	printk("got conn accept from eid %d conn id %d to %d %d\n",
 	       src_ep_id, src_conn_id, dst_ep_id, dst_conn_id);
+
+	/* find endpoint and check that it's attached to this ifp */
+	rcu_read_lock();
+	ep = idr_find(&ccieth_ep_idr, dst_ep_id);
+	/* FIXME: keep rcu locked until conn is acquired */
+	rcu_read_unlock();
+	if (!ep || ep->ifp != ifp)
+		goto out;
 
 	/* setup the event */
 	err = -ENOMEM;
@@ -164,20 +207,39 @@ out:
 }
 
 static int
-ccieth_recv_msg(struct net_device *ifp, struct ccieth_endpoint *ep,
-		struct ccieth_pkt_header_msg *hdr, struct sk_buff *skb)
+ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 {
+	struct ccieth_pkt_header_msg _hdr, *hdr;
+	struct ccieth_endpoint *ep;
 	struct ccieth_endpoint_event *event;
 	struct ccieth_connection *conn;
-	__u32 dst_ep_id = ntohl(hdr->dst_ep_id);
-	__u32 dst_conn_id = ntohl(hdr->dst_conn_id);
-	__u32 msg_len = ntohl(hdr->msg_len);
+	__u32 dst_ep_id;
+	__u32 dst_conn_id;
+	__u32 msg_len;
 	int err;
+
+	/* copy the entire header */
+	err = -EINVAL;
+	hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
+	if (!hdr)
+		goto out;
+
+	dst_ep_id = ntohl(hdr->dst_ep_id);
+	dst_conn_id = ntohl(hdr->dst_conn_id);
+	msg_len = ntohl(hdr->msg_len);
 
 	printk("got msg len %d to eid %d conn id %d\n",
 	       msg_len, dst_ep_id, dst_conn_id);
 
-	err = -EINVAL;
+	/* find endpoint and check that it's attached to this ifp */
+	rcu_read_lock();
+	ep = idr_find(&ccieth_ep_idr, dst_ep_id);
+	/* FIXME: keep rcu locked until conn is acquired */
+	rcu_read_unlock();
+	if (!ep || ep->ifp != ifp)
+		goto out;
+
+	/* check msg length */
 	if (msg_len > ep->max_send_size)
 		goto out;
 
@@ -225,8 +287,7 @@ static int
 ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 	    struct net_device *orig_dev)
 {
-	union ccieth_pkt_header hdr, *hdrp;
-	struct ccieth_endpoint *ep;
+	__u8 type, *typep;
 	int err = -EINVAL;
 
 	skb = skb_share_check(skb, GFP_ATOMIC);
@@ -236,49 +297,27 @@ ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 	/* len doesn't include header */
 	skb_push(skb, ETH_HLEN);
 
-	/* get common headers */
-	hdrp = skb_header_pointer(skb, 0, sizeof(hdr.generic), &hdr.generic);
-	if (!hdrp)
+	/* get type */
+	typep = skb_header_pointer(skb, offsetof(struct ccieth_pkt_header_generic, type), sizeof(type), &type);
+	if (!typep)
 		goto out;
 
-	/* check endpoint is attached to this ifp */
-	rcu_read_lock();
-	ep = idr_find(&ccieth_ep_idr, ntohl(hdrp->generic.dst_ep_id));
-	rcu_read_unlock();
-	if (!ep || ep->ifp != ifp) {
-		err = -EINVAL;
-		goto out;
-	}
+	printk("got a packet with type %d\n", *typep);
 
-	printk("got a packet with ep %p type %d\n", ep, hdrp->generic.type);
-
-	/* FIXME: take a ref on the endpoint, and change the destroy code to use kref if we can hot-remove interfaces */
-
-	switch (hdrp->generic.type) {
+	switch (*typep) {
 	case CCIETH_PKT_CONNECT_REQUEST:
-		/* copy entire header now */
-		hdrp = skb_header_pointer(skb, 0, sizeof(hdr.connect_request), &hdr.connect_request);
-		if (hdrp)
-			err = ccieth_recv_connect_request(ifp, ep, &hdrp->connect_request, skb);
+		err = ccieth_recv_connect_request(ifp, skb);
 		break;
 	case CCIETH_PKT_CONNECT_ACCEPT:
-		/* copy entire header now */
-		hdrp = skb_header_pointer(skb, 0, sizeof(hdr.connect_accept), &hdr.connect_accept);
-		if (hdrp)
-			err = ccieth_recv_connect_accept(ifp, ep, &hdrp->connect_accept);
+		err = ccieth_recv_connect_accept(ifp, skb);
 		break;
 	case CCIETH_PKT_MSG:
-		/* copy entire header now */
-		hdrp = skb_header_pointer(skb, 0, sizeof(hdr.msg), &hdr.msg);
-		if (hdrp)
-			err = ccieth_recv_msg(ifp, ep, &hdrp->msg, skb);
+		err = ccieth_recv_msg(ifp, skb);
 		break;
 	default:
 		err = -EINVAL;
 		break;
 	}
-
-	/* FIXME: release ref on endpoint */
 
 out:
 	dev_kfree_skb(skb);
