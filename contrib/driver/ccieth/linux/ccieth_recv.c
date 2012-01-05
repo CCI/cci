@@ -120,6 +120,8 @@ retry:
 	spin_lock(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock(&ep->event_list_lock);
+
+	dev_kfree_skb(skb);
 	return 0;
 
 out_with_conn:
@@ -129,6 +131,7 @@ out_with_event:
 	list_add_tail(&event->list, &ep->free_event_list);
 	spin_unlock(&ep->free_event_list_lock);
 out:
+	dev_kfree_skb(skb);
 	return err;
 }
 
@@ -214,6 +217,8 @@ ccieth_recv_connect_accept(struct net_device *ifp, struct sk_buff *skb)
 	spin_lock(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock(&ep->event_list_lock);
+
+	dev_kfree_skb(skb);
 	return 0;
 
 out_with_conn:
@@ -223,6 +228,7 @@ out_with_event:
 	list_add_tail(&event->list, &ep->free_event_list);
 	spin_unlock(&ep->free_event_list_lock);
 out:
+	dev_kfree_skb(skb);
 	return err;
 }
 
@@ -303,6 +309,8 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 	spin_lock(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock(&ep->event_list_lock);
+
+	dev_kfree_skb(skb);
 	return 0;
 
 out_with_event:
@@ -310,6 +318,7 @@ out_with_event:
 	list_add_tail(&event->list, &ep->free_event_list);
 	spin_unlock(&ep->free_event_list_lock);
 out:
+	dev_kfree_skb(skb);
 	return err;
 }
 
@@ -336,14 +345,11 @@ ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 
 	switch (*typep) {
 	case CCIETH_PKT_CONNECT_REQUEST:
-		err = ccieth_recv_connect_request(ifp, skb);
-		break;
+		return ccieth_recv_connect_request(ifp, skb);
 	case CCIETH_PKT_CONNECT_ACCEPT:
-		err = ccieth_recv_connect_accept(ifp, skb);
-		break;
+		return ccieth_recv_connect_accept(ifp, skb);
 	case CCIETH_PKT_MSG:
-		err = ccieth_recv_msg(ifp, skb);
-		break;
+		return ccieth_recv_msg(ifp, skb);
 	default:
 		err = -EINVAL;
 		break;
