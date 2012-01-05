@@ -2536,6 +2536,9 @@ static int sock_rma(cci_connection_t *connection,
         generate_context_id (sconn, context, &context_id);
         memcpy (read->data, &context_id, sizeof(uint64_t));
         tx->len += sizeof (uint64_t);
+        tx->msg_type = SOCK_MSG_SEND;
+        tx->flags = tx->flags | CCI_FLAG_SILENT;
+        tx->rma_op = NULL;
 
         /* Queuing the RMA_READ_REQUEST message */
         tx->state = SOCK_TX_QUEUED;
@@ -3448,10 +3451,11 @@ sock_handle_rma_read_request(sock_conn_t *sconn, sock_rx_t *rx, uint16_t data_le
     sock_tx_t           *tx             = NULL;
     sock_ep_t           *sep            = NULL;
     void                *context        = NULL;
+	/* GV FIXME Correctly deal with the message */
+    uint32_t            msg_len         = 0;
     void                *msg_ptr        = NULL;
     int                 flags           = 0;
     sock_rma_handle_t   *remote;
-    uint32_t            msg_len         = 0;
     uint64_t            msg_local_handle;
     uint64_t            msg_local_offset;
     uint64_t            msg_remote_handle;
@@ -3487,7 +3491,6 @@ sock_handle_rma_read_request(sock_conn_t *sconn, sock_rx_t *rx, uint16_t data_le
     sdev = dev->priv;
 
     flags |= CCI_FLAG_WRITE;
-    flags |= CCI_FLAG_BLOCKING;
 
     rc = sock_rma(connection,
                   msg_ptr, msg_len,
@@ -3506,6 +3509,9 @@ sock_handle_rma_read_request(sock_conn_t *sconn, sock_rx_t *rx, uint16_t data_le
 
     memset (tx->buffer, 0, sizeof(sock_rma_header_t));
     tx->state = SOCK_TX_QUEUED;
+    tx->flags = tx->flags | CCI_FLAG_SILENT;
+    tx->rma_op = NULL;
+    tx->evt.ep = ep;
     tx->evt.event.type = CCI_EVENT_SEND;
     tx->evt.event.send.connection = connection;
     tx->evt.conn = conn;
@@ -3516,6 +3522,8 @@ sock_handle_rma_read_request(sock_conn_t *sconn, sock_rx_t *rx, uint16_t data_le
     tx->len = sizeof (sock_rma_header_t);
     memcpy (write->data, &addr, sizeof (uint64_t));
     tx->len += sizeof (uint64_t);
+    tx->seq = sconn->seq;
+    tx->msg_type = SOCK_MSG_SEND;
     pthread_mutex_lock(&dev->lock);
     TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
     pthread_mutex_unlock(&dev->lock);
@@ -3632,9 +3640,6 @@ sock_handle_rma_write_done (sock_conn_t *sconn, sock_rx_t *rx, uint16_t len)
     *((uint32_t *) &event->recv.len) = len;
     lookup_contextid (sconn, context_id, &context);
     *((void **) &event->recv.ptr) = context;
-/* GV
-    *((void **) &event->recv.ptr) = (void *) &rma_hdr->data;
-*/
     event->recv.connection = &conn->connection;
 
     /* Q: Do we need to explicitely deal with the ack here? */
