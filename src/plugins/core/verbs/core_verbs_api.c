@@ -1620,6 +1620,7 @@ verbs_conn_est_active(cci__ep_t *ep, struct rdma_cm_event *cm_evt)
 	verbs_conn_request_t	*cr	= NULL;
 	verbs_tx_t		*tx	= NULL;
 	uint32_t		header	= 0;
+	uint32_t		len	= 0;
 
 	CCI_ENTER;
 
@@ -1640,15 +1641,17 @@ verbs_conn_est_active(cci__ep_t *ep, struct rdma_cm_event *cm_evt)
 	tx->evt.conn = conn;
 
 	/* if application has a conn request payload, send it */
-	if (cr && cr->len)
+	if (cr && cr->len) {
 		memcpy(tx->buffer, cr->ptr, cr->len);
+		len = cr->len;
+	}
 
 	header = VERBS_MSG_CONN_PAYLOAD;
-	header |= (cr->attr & 0xF) << 4;	/* magic number */
+	header |= (conn->connection.attribute & 0xF) << 4;	/* magic number */
 	if (cr && cr->len)
 		header |= (cr->len & 0xFFF) << 8;	/* magic number */
 
-	ret = verbs_post_send(conn, (uintptr_t) tx, tx->buffer, cr->len, header);
+	ret = verbs_post_send(conn, (uintptr_t) tx, tx->buffer, len, header);
 
 	if (cr) {
 		if (cr->ptr)
