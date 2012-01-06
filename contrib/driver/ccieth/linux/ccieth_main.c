@@ -75,6 +75,7 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 	printk("destroyed %d connections on endpoint destroy\n", destroyed_conn);
 	/* new ioctls cannot access connections anymore now */
 	idr_remove_all(&ep->connection_idr);
+	idr_destroy(&ep->connection_idr);
 	/* the last reference will actually destroy each connection */
 
 	/* FIXME: split this for the notifier so that we only free(ep) when the last connection is destroyed */
