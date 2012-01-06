@@ -81,10 +81,11 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 	kfree(ep);
 }
 
-static struct ccieth_endpoint *
-ccieth_create_endpoint(struct ccieth_ioctl_create_endpoint *arg)
+static int
+ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *arg)
 {
-	struct ccieth_endpoint *ep;
+	struct ccieth_endpoint_event *event, *nevent;
+	struct ccieth_endpoint *ep, **epp;
 	struct net_device *ifp;
 	int id, i;
 	int err;
@@ -107,26 +108,14 @@ ccieth_create_endpoint(struct ccieth_ioctl_create_endpoint *arg)
 		goto out_with_ifp;
 	}
 	ep->ifp = ifp;
-
-	if (!idr_pre_get(&ccieth_ep_idr, GFP_KERNEL)) {
-		err = -ENOMEM;
-		goto out_with_ep;
-	}
-	spin_lock(&ccieth_ep_idr_lock);
-	err = idr_get_new(&ccieth_ep_idr, ep, &id);
-	spin_unlock(&ccieth_ep_idr_lock);
-	if (err)
-		goto out_with_ep;
-
 	ep->max_send_size = ifp->mtu >= 9000 ? 8192 : 1024;
 
 	INIT_LIST_HEAD(&ep->event_list);
 	spin_lock_init(&ep->event_list_lock);
-
 	INIT_LIST_HEAD(&ep->free_event_list);
 	spin_lock_init(&ep->free_event_list_lock);
 	for(i=0; i<CCIETH_EVENT_SLOT_NR; i++) {
-		struct ccieth_endpoint_event *event = kmalloc(sizeof(*event) + ep->max_send_size, GFP_KERNEL);
+		event = kmalloc(sizeof(*event) + ep->max_send_size, GFP_KERNEL);
 		if (!event)
 			break;
 		list_add_tail(&event->list, &ep->free_event_list);
@@ -138,16 +127,44 @@ ccieth_create_endpoint(struct ccieth_ioctl_create_endpoint *arg)
 	skb_queue_head_init(&ep->recv_connect_request_queue);
 	INIT_WORK(&ep->recv_connect_request_work, ccieth_recv_connect_request_workfunc);
 
-	arg->id = ep->id = id;
+retry:
+	/* reserve an index without exposing the endpoint there yet
+	 * because it's id isn't ready yet */
+	spin_lock(&ccieth_ep_idr_lock);
+	err = idr_get_new(&ccieth_ep_idr, NULL, &id);
+	spin_unlock(&ccieth_ep_idr_lock);
+	if (err == -EAGAIN) {
+		if (idr_pre_get(&ccieth_ep_idr, GFP_KERNEL) > 0)
+			goto retry;
+		err = -ENOMEM;
+		goto out_with_events;
+	}
+	ep->id = arg->id = id;
 
-	return ep;
+	/* link the endpoint now that everything is ready */
+	epp = (struct ccieth_endpoint **)&file->private_data;
+	if (cmpxchg(epp, NULL, ep)) {
+		err = -EBUSY;
+		goto out_with_idr;
+	}
+	BUG_ON(idr_replace(&ccieth_ep_idr, ep, id) != NULL);
 
-out_with_ep:
+	return 0;
+
+out_with_idr:
+	spin_lock(&ccieth_ep_idr_lock);
+	idr_remove(&ccieth_ep_idr, id);
+	spin_unlock(&ccieth_ep_idr_lock);
+out_with_events:
+	list_for_each_entry_safe(event, nevent, &ep->free_event_list, list) {
+		list_del(&event->list);
+		kfree(event);
+	}
 	kfree(ep);
 out_with_ifp:
 	dev_put(ifp);
 out:
-	return ERR_PTR(err);
+	return err;
 }
 
 static struct ccieth_endpoint_event *
@@ -501,21 +518,14 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 
 	case CCIETH_IOCTL_CREATE_ENDPOINT: {
 		struct ccieth_ioctl_create_endpoint ce_arg;
-		struct ccieth_endpoint *ep, **epp;
 
 		ret = copy_from_user(&ce_arg, (const __user void *)arg, sizeof(ce_arg));
 		if (ret)
 			return -EFAULT;
 
-		ep = ccieth_create_endpoint(&ce_arg);
-		if (IS_ERR(ep))
-			return PTR_ERR(ep);
-
-		epp = (struct ccieth_endpoint **)&file->private_data;
-		if (cmpxchg(epp, NULL, ep)) {
-			ccieth_destroy_endpoint(ep);
-			return -EBUSY;
-		}
+		ret = ccieth_create_endpoint(file, &ce_arg);
+		if (ret < 0)
+			return ret;
 
 		ret = copy_to_user((__user void *)arg, &ce_arg, sizeof(ce_arg));
 		if (ret)
