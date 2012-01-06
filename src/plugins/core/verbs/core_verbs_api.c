@@ -1404,6 +1404,8 @@ out:
 	 * if (ret)
 	 *	free memory
 	 */
+	if (res)
+		rdma_freeaddrinfo(res);
 	if (node)
 		free(node);
 	CCI_EXIT;
