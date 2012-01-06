@@ -295,6 +295,11 @@ do_client()
     while (!done)
         poll_events();
 
+    if (opts.method != AM) {
+        ret = cci_rma_deregister(local_rma_handle);
+        check_return("cci_rma_deregister", ret, 1);
+    }
+
     printf("client done\n");
     sleep(1);
 
@@ -352,6 +357,11 @@ do_server()
 
     while (!done)
         poll_events();
+
+    if (opts.method != AM) {
+        ret = cci_rma_deregister(opts.server_rma_handle);
+        check_return("cci_rma_deregister", ret, 1);
+    }
 
 out:
     printf("server done\n");
