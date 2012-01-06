@@ -227,8 +227,8 @@ verbs_ifa_to_context(struct ibv_context *context, struct sockaddr *sa)
 	if (ret == 0) {
 		if (id->verbs != context)
 			ret = -1;
-		rdma_destroy_id(id);
 	}
+	rdma_destroy_id(id);
 
 out:
 	CCI_EXIT;
@@ -585,6 +585,8 @@ verbs_get_devices(cci_device_t const ***devices)
 static int
 verbs_free_devices(cci_device_t const **devices)
 {
+	int		ret	= CCI_SUCCESS;
+	int		i	= 0;
 	cci__dev_t	*dev	= NULL;
 
 	CCI_ENTER;
@@ -599,6 +601,22 @@ verbs_free_devices(cci_device_t const **devices)
 	pthread_mutex_unlock(&globals->lock);
 	/* TODO join progress thread */
 
+	for (i = 0; i < vglobals->count; i++) {
+		if (vglobals->ifaddrs[i].ifa_name)
+			free(vglobals->ifaddrs[i].ifa_name);
+		if (vglobals->ifaddrs[i].ifa_addr)
+			free(vglobals->ifaddrs[i].ifa_addr);
+		if (vglobals->ifaddrs[i].ifa_netmask)
+			free(vglobals->ifaddrs[i].ifa_netmask);
+		if (vglobals->ifaddrs[i].ifa_broadaddr)
+			free(vglobals->ifaddrs[i].ifa_broadaddr);
+	}
+	if (vglobals->ifaddrs)
+		free(vglobals->ifaddrs);
+
+	if (vglobals->contexts)
+		rdma_free_devices(vglobals->contexts);
+
 	pthread_mutex_lock(&globals->lock);
 	TAILQ_FOREACH(dev, &globals->devs, entry)
 		if (dev->priv)
@@ -607,9 +625,10 @@ verbs_free_devices(cci_device_t const **devices)
 
 	free(vglobals->devices);
 	free((void *)vglobals);
+	vglobals = NULL;
 
 	CCI_EXIT;
-	return CCI_SUCCESS;
+	return ret;
 }
 
 static int
@@ -764,6 +783,7 @@ verbs_create_endpoint(cci_device_t *device,
 	ret = posix_memalign((void **) &vep->tx_buf, pg_sz, len);
 	if (ret)
 		goto out;
+	memset(vep->tx_buf, 0, len); /* silence valgrind */
 
 	vep->tx_mr = ibv_reg_mr(vep->pd, vep->tx_buf, len, IBV_ACCESS_LOCAL_WRITE);
 	if (!vep->tx_mr) {
@@ -790,6 +810,7 @@ verbs_create_endpoint(cci_device_t *device,
 	ret = posix_memalign((void **) &vep->rx_buf, pg_sz, len);
 	if (ret)
 		goto out;
+	memset(vep->rx_buf, 0, len); /* silence valgrind */
 
 	vep->rx_mr = ibv_reg_mr(vep->pd, vep->rx_buf, len, IBV_ACCESS_LOCAL_WRITE);
 	if (!vep->rx_mr) {
@@ -854,7 +875,7 @@ out:
 
 		while (!TAILQ_EMPTY(&vep->txs)) {
 			verbs_tx_t *tx = TAILQ_FIRST(&vep->txs);
-			TAILQ_REMOVE(&vep->txs, tx, entry);
+			TAILQ_REMOVE(&vep->txs, tx, gentry);
 			free(tx);
 		}
 
@@ -871,14 +892,14 @@ out:
 		if (vep->cq) {
 			ret = ibv_destroy_cq(vep->cq);
 			if (ret)
-				debug(CCI_DB_WARN, "destroying new endpoint cq "
+				debug(CCI_DB_WARN, "destroying endpoint cq "
 					"failed with %s\n", strerror(ret));
 		}
 
 		if (vep->pd) {
 			ret = ibv_dealloc_pd(vep->pd);
 			if (ret)
-				debug(CCI_DB_WARN, "deallocing new endpoint pd "
+				debug(CCI_DB_WARN, "deallocing endpoint pd "
 					"failed with %s\n", strerror(ret));
 		}
 
@@ -901,9 +922,89 @@ out:
 static int
 verbs_destroy_endpoint(cci_endpoint_t *endpoint)
 {
+	int		ret	= CCI_SUCCESS;
+	cci__ep_t	*ep	= container_of(endpoint, cci__ep_t, endpoint);
+	verbs_ep_t	*vep	= ep->priv;
+
 	CCI_ENTER;
+
+	while (!TAILQ_EMPTY(&vep->conns)) {
+		cci__conn_t	*conn	= NULL;
+		verbs_conn_t	*vconn	= NULL;
+
+		vconn = TAILQ_FIRST(&vep->conns);
+		conn = vconn->conn;
+		verbs_disconnect(&conn->connection);
+	}
+
+	ep->priv = NULL;
+
+	if (vep->srq)
+		ibv_destroy_srq(vep->srq);
+
+	while (!TAILQ_EMPTY(&vep->rxs)) {
+		verbs_rx_t *rx = TAILQ_FIRST(&vep->rxs);
+		TAILQ_REMOVE(&vep->rxs, rx, entry);
+		free(rx);
+	}
+
+	if (vep->rx_mr) {
+		ret = ibv_dereg_mr(vep->rx_mr);
+		if (ret)
+			debug(CCI_DB_WARN, "deregistering endpoint rx_mr "
+				"failed with %s\n", strerror(ret));
+	}
+
+	if (vep->rx_buf)
+		free(vep->rx_buf);
+
+	while (!TAILQ_EMPTY(&vep->txs)) {
+		verbs_tx_t *tx = TAILQ_FIRST(&vep->txs);
+		TAILQ_REMOVE(&vep->txs, tx, gentry);
+		free(tx);
+	}
+
+	if (vep->tx_mr) {
+		ret = ibv_dereg_mr(vep->tx_mr);
+		if (ret)
+			debug(CCI_DB_WARN, "deregistering endpoint tx_mr "
+				"failed with %s\n", strerror(ret));
+	}
+
+	if (vep->tx_buf)
+		free(vep->tx_buf);
+
+	if (vep->cq) {
+		ret = ibv_destroy_cq(vep->cq);
+		if (ret)
+			debug(CCI_DB_WARN, "destroying endpoint cq "
+				"failed with %s\n", strerror(ret));
+	}
+
+	if (vep->pd) {
+		ret = ibv_dealloc_pd(vep->pd);
+		if (ret)
+			debug(CCI_DB_WARN, "deallocing endpoint pd "
+				"failed with %s\n", strerror(ret));
+	}
+
+	if (vep->id_rc)
+		rdma_destroy_id(vep->id_rc);
+
+	if (vep->id_ud)
+		rdma_destroy_id(vep->id_ud);
+
+	if (vep->channel)
+		rdma_destroy_event_channel(vep->channel);
+
+	free(vep);
+
+	if (ep->endpoint.name) {
+		free((char *)ep->endpoint.name);
+	}
+
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return CCI_SUCCESS;
 }
 
 static const char *
@@ -1258,9 +1359,38 @@ out:
 static int
 verbs_disconnect(cci_connection_t *connection)
 {
+	int		ret		= CCI_SUCCESS;
+	cci__conn_t	*conn		= container_of(connection, cci__conn_t, connection);
+	verbs_conn_t	*vconn		= conn->priv;
+	cci_endpoint_t	*endpoint	= connection->endpoint;
+	cci__ep_t	*ep		= container_of(endpoint, cci__ep_t, endpoint);
+	verbs_ep_t	*vep		= ep->priv;
+
 	CCI_ENTER;
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_REMOVE(&vep->conns, vconn, entry);
+	pthread_mutex_unlock(&ep->lock);
+
+	if (vconn->conn_req) {
+		if (vconn->conn_req->ptr)
+			free(vconn->conn_req->ptr);
+	}
+
+	ret = rdma_disconnect(vconn->id);
+	if (ret == -1) {
+		ret = errno;
+		debug(CCI_DB_WARN, "%s: rdma_disconnect() returned %s",
+			__func__, strerror(ret));
+	}
+
+	rdma_destroy_ep(vconn->id);
+
+	free(vconn);
+	free(conn);
+
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 
@@ -1984,9 +2114,6 @@ verbs_handle_rma_completion(cci__ep_t *ep, struct ibv_wc wc)
 
 	CCI_ENTER;
 
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_REMOVE(&vep->rma_ops, rma_op, entry);
-	pthread_mutex_unlock(&ep->lock);
 
 	rma_op->status = verbs_wc_to_cci_status(wc.status);
 	if (rma_op->msg_len == 0 || rma_op->status != CCI_SUCCESS) {
@@ -2010,6 +2137,9 @@ queue:
 		}
 		/* we will pass the tx completion to the app,
 		 * free the rma_op now */
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_REMOVE(&vep->rma_ops, rma_op, entry);
+		pthread_mutex_unlock(&ep->lock);
 		free(rma_op);
 	}
 
@@ -2070,6 +2200,8 @@ verbs_get_cq_event(cci__ep_t *ep)
 	verbs_ep_t	*vep	= ep->priv;
 
 	CCI_ENTER;
+
+	memset(wc, 0, sizeof(wc)); /* silence valgrind */
 
 	ret = ibv_poll_cq(vep->cq, VERBS_WC_CNT, wc);
 	if (ret == -1) {
@@ -2474,9 +2606,28 @@ verbs_rma_register(cci_endpoint_t *endpoint,
 static int
 verbs_rma_deregister(uint64_t rma_handle)
 {
+	int			ret	= CCI_SUCCESS;
+	verbs_rma_handle_t	*handle	= (verbs_rma_handle_t *)(uintptr_t)rma_handle;
+	cci__ep_t		*ep	= handle->ep;
+	verbs_ep_t		*vep	= ep->priv;
+
 	CCI_ENTER;
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_REMOVE(&vep->handles, handle, entry);
+	pthread_mutex_unlock(&ep->lock);
+
+	ret = ibv_dereg_mr(handle->mr);
+	if (ret == -1) {
+		ret = errno;
+		debug(CCI_DB_WARN, "%s: ibv_dereg_mr() returned %s",
+			__func__, strerror(ret));
+	}
+
+	free(handle);
+
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 static int

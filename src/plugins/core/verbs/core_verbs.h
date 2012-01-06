@@ -225,6 +225,7 @@ typedef struct verbs_rx {
 typedef struct verbs_dev {
 	struct ibv_context	*context;	/* device info and ops */
 	struct ifaddrs		*ifa;		/* device's interface addr */
+	int			count;		/* number of ifaddrs */
 	int			is_progressing;	/* being progressed? */
 } verbs_dev_t;
 
@@ -253,7 +254,7 @@ typedef struct verbs_rma_remote {
 typedef struct verbs_rma_op {
 	cci__evt_t		evt;		/* completion event */
 	TAILQ_ENTRY(verbs_rma_op)	entry;	/* vep->rmas */
-	TAILQ_ENTRY(verbs_rma_op)	hentry;	/* handle->rma_ops */
+	TAILQ_ENTRY(verbs_rma_op)	gentry;	/* handle->rma_ops */
 	uint64_t		local_handle;
 	uint64_t		local_offset;
 	uint64_t		remote_handle;
