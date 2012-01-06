@@ -892,14 +892,14 @@ out:
 		if (vep->cq) {
 			ret = ibv_destroy_cq(vep->cq);
 			if (ret)
-				debug(CCI_DB_WARN, "destroying endpoint cq "
+				debug(CCI_DB_WARN, "destroying new endpoint cq "
 					"failed with %s\n", strerror(ret));
 		}
 
 		if (vep->pd) {
 			ret = ibv_dealloc_pd(vep->pd);
 			if (ret)
-				debug(CCI_DB_WARN, "deallocing endpoint pd "
+				debug(CCI_DB_WARN, "deallocing new endpoint pd "
 					"failed with %s\n", strerror(ret));
 		}
 
@@ -918,6 +918,8 @@ out:
 	return ret;
 }
 
+static int
+verbs_get_cq_event(cci__ep_t *ep);
 
 static int
 verbs_destroy_endpoint(cci_endpoint_t *endpoint)
@@ -937,10 +939,23 @@ verbs_destroy_endpoint(cci_endpoint_t *endpoint)
 		verbs_disconnect(&conn->connection);
 	}
 
-	ep->priv = NULL;
+	if (vep->srq) {
+		do {
+			ret = ibv_destroy_srq(vep->srq);
+			if (ret == EBUSY)
+				verbs_get_cq_event(ep);
+		} while (ret == EBUSY);
+	}
 
-	if (vep->srq)
-		ibv_destroy_srq(vep->srq);
+	if (vep->cq) {
+		do {
+			ret = ibv_destroy_cq(vep->cq);
+			if (ret == EBUSY)
+				verbs_get_cq_event(ep);
+		} while (ret == EBUSY);
+	}
+
+	ep->priv = NULL;
 
 	while (!TAILQ_EMPTY(&vep->rxs)) {
 		verbs_rx_t *rx = TAILQ_FIRST(&vep->rxs);
@@ -974,19 +989,15 @@ verbs_destroy_endpoint(cci_endpoint_t *endpoint)
 	if (vep->tx_buf)
 		free(vep->tx_buf);
 
+#if 0
 	if (vep->cq) {
-		ret = ibv_destroy_cq(vep->cq);
-		if (ret)
-			debug(CCI_DB_WARN, "destroying endpoint cq "
-				"failed with %s\n", strerror(ret));
+		do {
+			ret = ibv_destroy_cq(vep->cq);
+			if (ret == EBUSY)
+				verbs_get_cq_event(ep);
+		} while (ret == EBUSY);
 	}
-
-	if (vep->pd) {
-		ret = ibv_dealloc_pd(vep->pd);
-		if (ret)
-			debug(CCI_DB_WARN, "deallocing endpoint pd "
-				"failed with %s\n", strerror(ret));
-	}
+#endif
 
 	if (vep->id_rc)
 		rdma_destroy_id(vep->id_rc);
@@ -996,6 +1007,12 @@ verbs_destroy_endpoint(cci_endpoint_t *endpoint)
 
 	if (vep->channel)
 		rdma_destroy_event_channel(vep->channel);
+
+	if (vep->pd) {
+		do {
+			ret = ibv_dealloc_pd(vep->pd);
+		} while (ret == EBUSY);
+	}
 
 	free(vep);
 
@@ -1171,6 +1188,7 @@ verbs_reject(union cci_event *event)
 	verbs_ep_t	*vep		= NULL;
 	verbs_conn_t	*vconn		= NULL;
 	verbs_rx_t	*rx		= NULL;
+	verbs_tx_t	*tx		= NULL;
 	cci_endpoint_t	*endpoint	= NULL;
 	uint32_t	header		= 0;
 
@@ -1185,13 +1203,20 @@ verbs_reject(union cci_event *event)
 	conn = evt->conn;
 	vconn = conn->priv;
 
+	tx = verbs_get_tx(ep);
+	if (tx) {
+		tx->msg_type = VERBS_MSG_CONN_REPLY;
+		tx->evt.conn = conn;
+		tx->evt.ep = ep;
+	}
+
 	vconn->state = VERBS_CONN_CLOSED;
 
 	/* send a reject rather than just disconnect so the client knows */
 	header = VERBS_MSG_CONN_REPLY;
 	header |= (CCI_EVENT_CONNECT_REJECTED << 4);
 
-	ret = verbs_post_send(conn, 0, NULL, 0, header);
+	ret = verbs_post_send(conn, (uintptr_t)tx, NULL, 0, header);
 
 	/* wait for send to complete before destorying the ep and conn */
 
@@ -2213,8 +2238,6 @@ verbs_handle_send_completion(cci__ep_t *ep, struct ibv_wc wc)
 	{
 		cci__conn_t	*conn	= tx->evt.conn;
 		verbs_conn_t	*vconn	= conn->priv;
-
-		debug(CCI_DB_CONN, "%s: send completed of conn_reply", __func__);
 
 		if (vconn->state == VERBS_CONN_CLOSED) {
 			rdma_disconnect(vconn->id);
