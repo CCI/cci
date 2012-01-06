@@ -52,7 +52,7 @@ BEGIN_C_DECLS
 #define GNI_MAX_EP_ID         (GNI_BLOCK_SIZE * GNI_NUM_BLOCKS)
 #define GNI_EP_BITS           (32)
 #define GNI_EP_SHIFT          (32)
-#define GNI_PROG_TIME_US      (10)           // progress delay micro-sec
+#define GNI_PROG_TIME_US      (1)            // progress delay micro-sec
 
 #define GNI_EP_MATCH          ((uint64_t)0)
 #define GNI_EP_IGNORE         (~((uint64_t)0))
@@ -166,7 +166,7 @@ typedef enum gni_msg_oob_type {
 }                               gni_msg_oob_type_t;
 
 typedef struct gni_rx {
-    cci__evt_t                  evt;         // associated event
+    cci__evt_t *                evt;         // associated event
     gni_msg_type_t              msg_type;    // message type
     gni_msg_oob_type_t          oob_type;    // oob type
     int32_t                     flags;       // CCI flags
@@ -176,21 +176,6 @@ typedef struct gni_rx {
     TAILQ_ENTRY(gni_rx)         gentry;      // Hangs on ep->rxs
     TAILQ_ENTRY(gni_rx)         entry;       // Hangs on ep->idle_rxs
 }                               gni_rx_t;
-
-typedef struct gni_tx {
-
-    cci__evt_t                  evt;         // associated event
-    gni_msg_type_t              msg_type;    // message type
-    gni_msg_oob_type_t          oob_type;    // oob type
-    int32_t                     flags;       // CCI flags
-    void *                      buffer;      // active msg buffer
-    uint16_t                    len;         // length of buffer
-    gni_ep_handle_t             ep_hndl;     // ep handle
-    TAILQ_ENTRY(gni_tx)         tentry;      // Hangs on ep->txs
-    TAILQ_ENTRY(gni_tx)         dentry;      // Hangs on ep->idle_txs
-                                             //          dev->queued
-                                             //          dev->pending
-}                               gni_tx_t;
 
 // GNI connection status
 typedef enum gni_conn_status {
@@ -226,15 +211,12 @@ typedef struct gni_ep {
     gni_mailbox_t               src_box;     // Local SMSG mailbox
     gni_mailbox_t               dst_box;     // Destination SMSG mailbox
     gni_ep_handle_t             ep_hndl;     // ep handle
-    void *                      txbuf;       // Large buffer for tx's
     void *                      rxbuf;       // Large buffer for rx's
+    TAILQ_HEAD(g_conns, gni_conn)
+                                gconns;      // List of all conns
     TAILQ_HEAD(g_evts, gni_evt) evts;        // List of all evts
-    TAILQ_HEAD(g_txs, gni_tx)   txs;         // List of all txs
-    TAILQ_HEAD(g_txsi, gni_tx)  idle_txs;    // List of idle txs
     TAILQ_HEAD(g_rxs, gni_rx)   rxs;         // List of all rxs
     TAILQ_HEAD(g_rxsi, gni_rx)  idle_rxs;    // List of idle rxs
-    TAILQ_HEAD(g_conns, gni_conn)
-                                conns;       // List of all conns
     TAILQ_HEAD(g_handles, gni_rma_handle)
                                 handles;     // List of RMA regions
     TAILQ_HEAD(g_ops, gni_rma_op)
