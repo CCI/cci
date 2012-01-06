@@ -231,7 +231,7 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	hdr->src_ep_id = htonl(ep->id);
 	hdr->max_send_size = htonl(ep->max_send_size);
 	hdr->data_len = htonl(arg->data_len);
-	err = copy_from_user(&hdr->data, (const void *)(uintptr_t) arg->data_ptr, arg->data_len);
+	err = copy_from_user(&hdr->data, (const void __user *)(uintptr_t) arg->data_ptr, arg->data_len);
 	if (err) {
 		err = -EFAULT;
 		goto out_with_skb;
@@ -410,7 +410,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	hdr->dst_ep_id = htonl(conn->dest_eid);
 	hdr->dst_conn_id = htonl(conn->dest_id);
 	hdr->msg_len = htonl(arg->msg_len);
-	err = copy_from_user(&hdr->msg, (const void *)(uintptr_t) arg->msg_ptr, arg->msg_len);
+	err = copy_from_user(&hdr->msg, (const void __user *)(uintptr_t) arg->msg_ptr, arg->msg_len);
 	if (err) {
 		err = -EFAULT;
 		goto out_with_skb;
@@ -659,7 +659,7 @@ ccieth_miscdev = {
 	.fops = &ccieth_miscdev_fops,
 };
 
-int
+static int
 ccieth_init(void)
 {
 	int ret;
@@ -683,7 +683,7 @@ out:
 	return ret;
 }
 
-void
+static void
 ccieth_exit(void)
 {
 	misc_deregister(&ccieth_miscdev);

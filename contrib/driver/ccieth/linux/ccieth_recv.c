@@ -393,7 +393,7 @@ out:
 	return err;
 }
 
-struct packet_type ccieth_pt = {
+static struct packet_type ccieth_pt = {
 	.type = __constant_htons(ETH_P_CCI),
 	.func = ccieth_recv,
 };
