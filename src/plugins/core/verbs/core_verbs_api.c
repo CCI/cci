@@ -1592,6 +1592,13 @@ verbs_conn_est_active(cci__ep_t *ep, struct rdma_cm_event *cm_evt)
 		header |= (cr->len & 0xFFF) << 8;	/* magic number */
 
 	ret = verbs_post_send(conn, (uintptr_t) tx, tx->buffer, cr->len, header);
+
+	if (cr) {
+		if (cr->ptr)
+			free(cr->ptr);
+		free(cr);
+	}
+	vconn->conn_req = NULL;
 out:
 	CCI_EXIT;
 	return ret;
