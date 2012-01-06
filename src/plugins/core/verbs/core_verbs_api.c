@@ -2256,6 +2256,16 @@ verbs_handle_send_completion(cci__ep_t *ep, struct ibv_wc wc)
 		debug(CCI_DB_CONN, "%s: send completed", __func__);
 		ret = verbs_complete_send(ep, wc);
 		break;
+	case VERBS_MSG_RMA_REMOTE_REQUEST:
+	case VERBS_MSG_RMA_REMOTE_REPLY:
+	{
+		verbs_ep_t	*vep	= ep->priv;
+
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_INSERT_HEAD(&vep->idle_txs, tx, entry);
+		pthread_mutex_unlock(&ep->lock);
+	}
+		break;
 	default:
 		debug(CCI_DB_INFO, "%s: ignoring %s msg",
 			__func__, verbs_msg_type_str(type));
@@ -2814,6 +2824,7 @@ verbs_conn_request_rma_remote(verbs_rma_op_t *rma_op, uint64_t remote_handle)
 	tx->len = sizeof(remote_handle);
 
 	memset(&tx->evt, 0, sizeof(cci__evt_t));
+	tx->evt.conn = conn;
 
 	/* in network byte order */
 	memcpy(tx->buffer, &handle, tx->len);
@@ -2823,7 +2834,7 @@ verbs_conn_request_rma_remote(verbs_rma_op_t *rma_op, uint64_t remote_handle)
 	TAILQ_INSERT_TAIL(&vconn->rma_ops, rma_op, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-	ret = verbs_post_send(conn, (uintptr_t) rma_op, tx->buffer, tx->len, header);
+	ret = verbs_post_send(conn, (uintptr_t) tx, tx->buffer, tx->len, header);
 
 	CCI_EXIT;
 	return ret;
