@@ -904,10 +904,10 @@ out:
 		}
 
 		if (vep->id_rc)
-			rdma_destroy_id(vep->id_rc);
+			rdma_destroy_ep(vep->id_rc);
 
 		if (vep->id_ud)
-			rdma_destroy_id(vep->id_ud);
+			rdma_destroy_ep(vep->id_ud);
 
 		if (vep->channel)
 			rdma_destroy_event_channel(vep->channel);
@@ -1164,9 +1164,39 @@ out:
 static int
 verbs_reject(union cci_event *event)
 {
+	int		ret	= CCI_SUCCESS;
+	cci__ep_t	*ep		= NULL;
+	cci__conn_t	*conn		= NULL;
+	cci__evt_t	*evt		= NULL;
+	verbs_ep_t	*vep		= NULL;
+	verbs_conn_t	*vconn		= NULL;
+	verbs_rx_t	*rx		= NULL;
+	cci_endpoint_t	*endpoint	= NULL;
+	uint32_t	header		= 0;
+
 	CCI_ENTER;
+
+	evt = container_of(event, cci__evt_t, event);
+	rx = container_of(evt, verbs_rx_t, evt);
+	ep = evt->ep;
+	vep = ep->priv;
+	endpoint = &ep->endpoint;
+
+	conn = evt->conn;
+	vconn = conn->priv;
+
+	vconn->state = VERBS_CONN_CLOSED;
+
+	/* send a reject rather than just disconnect so the client knows */
+	header = VERBS_MSG_CONN_REPLY;
+	header |= (CCI_EVENT_CONNECT_REJECTED << 4);
+
+	ret = verbs_post_send(conn, 0, NULL, 0, header);
+
+	/* wait for send to complete before destorying the ep and conn */
+
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 
@@ -1793,6 +1823,7 @@ verbs_handle_conn_reply(cci__ep_t *ep, struct ibv_wc wc)
 	} else if (rx->evt.event.type == CCI_EVENT_CONNECT_REJECTED) {
 		rx->evt.event.rejected.context = vconn->conn_req ?
 			vconn->conn_req->context : NULL;
+		rx->evt.conn = conn;
 	} else {
 		debug(CCI_DB_WARN, "%s: invalid reply %u", __func__, rx->evt.event.type);
 	}
@@ -2179,7 +2210,19 @@ verbs_handle_send_completion(cci__ep_t *ep, struct ibv_wc wc)
 		debug(CCI_DB_CONN, "%s: send completed of conn_payload", __func__);
 		break;
 	case VERBS_MSG_CONN_REPLY:
+	{
+		cci__conn_t	*conn	= tx->evt.conn;
+		verbs_conn_t	*vconn	= conn->priv;
+
 		debug(CCI_DB_CONN, "%s: send completed of conn_reply", __func__);
+
+		if (vconn->state == VERBS_CONN_CLOSED) {
+			rdma_disconnect(vconn->id);
+			rdma_destroy_ep(vconn->id);
+			free(vconn);
+			free(conn);
+		}
+	}
 		break;
 	case VERBS_MSG_SEND:
 		debug(CCI_DB_CONN, "%s: send completed", __func__);
@@ -2366,6 +2409,18 @@ verbs_return_event(cci_event_t *event)
 	case CCI_EVENT_CONNECT_REQUEST:
 		ret = verbs_return_conn_request(event);
 		break;
+	case CCI_EVENT_CONNECT_REJECTED:
+	{
+		cci__evt_t	*evt	= container_of(event, cci__evt_t, event);
+		cci__conn_t	*conn	= evt->conn;
+		verbs_conn_t	*vconn	= conn->priv;
+
+		rdma_disconnect(vconn->id);
+		rdma_destroy_ep(vconn->id);
+		free(vconn);
+		free(conn);
+	}
+	/* fall through */
 	case CCI_EVENT_CONNECT_ACCEPTED:
 	case CCI_EVENT_RECV:
 	{
