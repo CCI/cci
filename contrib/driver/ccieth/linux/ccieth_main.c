@@ -371,11 +371,24 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	if (arg->msg_len > ep->max_send_size)
 		goto out;
 
+	/* allocate and initialize the skb */
+	skblen = sizeof(*hdr) + arg->msg_len;
+	if (skblen < ETH_ZLEN)
+		skblen = ETH_ZLEN;
+        skb = alloc_skb(skblen, GFP_KERNEL);
+	if (!skb)
+		goto out;
+	skb_reset_mac_header(skb);
+	skb_reset_network_header(skb);
+	skb->protocol = __constant_htons(ETH_P_CCI);
+	skb_put(skb, skblen);
+	skb->dev = ep->ifp;
+
 	rcu_read_lock();
 	conn = idr_find(&ep->connection_idr, arg->conn_id);
 	if (!conn) {
 		rcu_read_unlock();
-		goto out;
+		goto out_with_skb;
 	}
 	kref_get(&conn->refcount);
 	rcu_read_unlock();
@@ -397,19 +410,6 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	event->event.send.user_conn_id = conn->user_conn_id;
 	event->event.send.context = arg->context;
 
-	/* allocate and initialize the skb */
-	skblen = sizeof(*hdr) + arg->msg_len;
-	if (skblen < ETH_ZLEN)
-		skblen = ETH_ZLEN;
-        skb = alloc_skb(skblen, GFP_KERNEL);
-	if (!skb)
-		goto out_with_event;
-	skb_reset_mac_header(skb);
-	skb_reset_network_header(skb);
-	skb->protocol = __constant_htons(ETH_P_CCI);
-	skb_put(skb, skblen);
-	skb->dev = ep->ifp;
-
 	/* fill headers */
 	hdr = (struct ccieth_pkt_header_msg *) skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
@@ -422,7 +422,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	err = copy_from_user(&hdr->msg, (const void __user *)(uintptr_t) arg->msg_ptr, arg->msg_len);
 	if (err) {
 		err = -EFAULT;
-		goto out_with_skb;
+		goto out_with_event;
 	}
 
 	/* FIXME: implement flags */
@@ -439,14 +439,14 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 	return 0;
 
-out_with_skb:
-	kfree_skb(skb);
 out_with_event:
 	spin_lock(&ep->free_event_list_lock);
 	list_add_tail(&event->list, &ep->free_event_list);
 	spin_unlock(&ep->free_event_list_lock);
 out_with_conn:
 	kref_put(&conn->refcount, __ccieth_connection_lastkref);
+out_with_skb:
+	kfree_skb(skb);
 out:
 	return err;
 }
