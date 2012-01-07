@@ -73,10 +73,6 @@ enum ccieth_connection_status {
 };
 
 struct ccieth_connection {
-	/* one reference is hold by the network, i.e. when accessible through the endpoint idr.
-	 * other references come from ioctls. */
-	struct kref refcount;
-
 	int id; /* always valid */ /* FIXME keep in network order too? */
 	enum ccieth_connection_status status;
 
@@ -91,6 +87,8 @@ struct ccieth_connection {
 	__u32 dest_eid;
 
 	/* FIXME: cache skb headers? */
+
+	struct rcu_head destroy_rcu_head;
 };
 
 extern struct idr ccieth_ep_idr;

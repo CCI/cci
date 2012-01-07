@@ -23,14 +23,12 @@
 struct idr ccieth_ep_idr;
 static spinlock_t ccieth_ep_idr_lock;
 
-/* called either at the end of an ioctl or at endpoint close,
- * never in restricted context, may sleep
- */
-void
-__ccieth_connection_lastkref(struct kref *kref)
+static void
+ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 {
-        struct ccieth_connection * conn = container_of(kref, struct ccieth_connection, refcount);
-	printk("destroying connection %p on last release\n", conn);
+        struct ccieth_connection *conn = container_of(rcu_head, struct ccieth_connection, destroy_rcu_head);
+	printk("destroying connection %p in rcu call\n", conn);
+	/* FIXME use kfree_rcu if we don't do anything else here */
 	kfree(conn);
 }
 
@@ -38,7 +36,7 @@ static int ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 {
 	struct ccieth_connection *conn = p;
 	int *destroyed_conn = data;
-	kref_put(&conn->refcount, __ccieth_connection_lastkref);
+	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
 	(*destroyed_conn)++;
 	return 0;
 }
@@ -258,7 +256,6 @@ retry:
 	}
 
 	/* initialize the connection */
-	kref_init(&conn->refcount);
 	conn->status = CCIETH_CONNECTION_REQUESTED;
 	memcpy(&conn->dest_addr, &arg->dest_addr, 6);
 	conn->dest_eid = arg->dest_eid;
@@ -314,20 +311,17 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	skb_put(skb, skblen);
 	skb->dev = ep->ifp;
 
+	rcu_read_lock();
+
 	/* update the connection now that we can't fail anywhere else */
 	err = -EINVAL;
-	rcu_read_lock();
 	conn = idr_find(&ep->connection_idr, arg->conn_id);
-	if (!conn) {
-		rcu_read_unlock();
-		goto out_with_skb;
-	}
-	kref_get(&conn->refcount);
-	rcu_read_unlock();
+	if (!conn)
+		goto out_with_rculock;
 
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_RECEIVED, CCIETH_CONNECTION_READY)
 	    != CCIETH_CONNECTION_RECEIVED)
-		goto out_with_conn;
+		goto out_with_rculock;
 	conn->max_send_size = arg->max_send_size;
 	conn->user_conn_id = arg->user_conn_id;
 
@@ -343,16 +337,14 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	hdr->src_conn_id = htonl(conn->id);
 	hdr->max_send_size = htonl(conn->max_send_size);
 
-	kref_put(&conn->refcount, __ccieth_connection_lastkref);
-
         dev_queue_xmit(skb);
 
+	rcu_read_unlock();
 	return 0;
 
-out_with_conn:
-	kref_put(&conn->refcount, __ccieth_connection_lastkref);
-out_with_skb:
+out_with_rculock:
 	kfree_skb(skb);
+	rcu_read_unlock();
 out:
 	return err;
 }
@@ -385,13 +377,11 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	skb->dev = ep->ifp;
 
 	rcu_read_lock();
+
+	/* find connection */
 	conn = idr_find(&ep->connection_idr, arg->conn_id);
-	if (!conn) {
-		rcu_read_unlock();
-		goto out_with_skb;
-	}
-	kref_get(&conn->refcount);
-	rcu_read_unlock();
+	if (!conn)
+		goto out_with_rculock;
 
 	/* get an event */
 	spin_lock(&ep->free_event_list_lock);
@@ -399,7 +389,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		err = -ENOMEM;
 		spin_unlock(&ep->free_event_list_lock);
 		printk("ccieth: no event slot for send\n");
-		goto out_with_conn;
+		goto out_with_rculock;
 	}
 	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
 	list_del(&event->list);
@@ -427,8 +417,6 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 	/* FIXME: implement flags */
 
-	kref_put(&conn->refcount, __ccieth_connection_lastkref);
-
         dev_queue_xmit(skb);
 
 	/* finalize and notify the event */
@@ -437,15 +425,15 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock(&ep->event_list_lock);
 
+	rcu_read_unlock();
 	return 0;
 
 out_with_event:
 	spin_lock(&ep->free_event_list_lock);
 	list_add_tail(&event->list, &ep->free_event_list);
 	spin_unlock(&ep->free_event_list_lock);
-out_with_conn:
-	kref_put(&conn->refcount, __ccieth_connection_lastkref);
-out_with_skb:
+out_with_rculock:
+	rcu_read_unlock();
 	kfree_skb(skb);
 out:
 	return err;
@@ -698,6 +686,7 @@ ccieth_exit(void)
 	misc_deregister(&ccieth_miscdev);
 	ccieth_net_exit();
 	idr_destroy(&ccieth_ep_idr);
+	rcu_barrier(); /* wait for rcu calls to be done */
 }
 
 module_init(ccieth_init);

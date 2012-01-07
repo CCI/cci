@@ -101,7 +101,6 @@ retry:
 	/* things cannot fail anymore now */
 
 	/* setup the connection */
-	kref_init(&conn->refcount);
 	conn->status = CCIETH_CONNECTION_RECEIVED;
 	memcpy(&conn->dest_addr, &hdr->eth.h_source, 6);
 	conn->dest_eid = ntohl(hdr->src_ep_id);
