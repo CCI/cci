@@ -19,7 +19,7 @@
 #define CCIETH_EVENT_SLOT_NR 64
 
 struct ccieth_endpoint {
-	struct net_device *ifp;
+	struct net_device __rcu *ifp;
 	__u8 addr[6];
 	int max_send_size;
 	int id;

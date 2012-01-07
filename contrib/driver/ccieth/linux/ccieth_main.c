@@ -106,7 +106,7 @@ ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *a
 		err = -ENOMEM;
 		goto out_with_ifp;
 	}
-	ep->ifp = ifp;
+	rcu_assign_pointer(ep->ifp, ifp);
 	memcpy(ep->addr, &ifp->dev_addr, 6);
 	ep->max_send_size = ccieth_max_send_size(ifp->mtu);
 
@@ -196,6 +196,7 @@ static int
 ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_request *arg)
 {
 	struct sk_buff *skb;
+	struct net_device *ifp;
 	struct ccieth_pkt_header_connect_request *hdr;
 	struct ccieth_connection *conn;
 	size_t skblen;
@@ -236,7 +237,6 @@ retry:
 	skb_reset_network_header(skb);
 	skb->protocol = __constant_htons(ETH_P_CCI);
 	skb_put(skb, skblen);
-	skb->dev = ep->ifp;
 	/* setup as much as possible of the skb
 	 * so that things don't fail later once the connection is hashed
 	 */
@@ -264,10 +264,20 @@ retry:
 	conn->user_conn_id = arg->user_conn_id;
 	conn->id = id;
 	idr_replace(&ep->connection_idr, conn, id);
-
-	/* finalize the skb and send it */
 	hdr->src_conn_id = htonl(id);
-        dev_queue_xmit(skb);
+
+	rcu_read_lock();
+
+	/* is the interface still available? */
+	ifp = rcu_dereference(ep->ifp);
+	if (!ifp) {
+		err = -ENODEV;
+		goto out_with_rculock;
+	}
+	skb->dev = ifp;
+	dev_queue_xmit(skb);
+
+	rcu_read_unlock();
 
 	/* FIXME: setup timer to min(timeout, retransmit)
 	 * if timeout expired, destroy conn and return timedout event
@@ -277,6 +287,8 @@ retry:
 	arg->conn_id = conn->id;
 	return 0;
 
+out_with_rculock:
+	rcu_read_unlock();
 out_with_skb:
 	kfree_skb(skb);
 out_with_conn_id:
@@ -293,6 +305,7 @@ static int
 ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_accept *arg)
 {
 	struct sk_buff *skb;
+	struct net_device *ifp;
 	struct ccieth_pkt_header_connect_accept *hdr;
 	struct ccieth_connection *conn;
 	size_t skblen;
@@ -310,9 +323,16 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	skb_reset_network_header(skb);
 	skb->protocol = __constant_htons(ETH_P_CCI);
 	skb_put(skb, skblen);
-	skb->dev = ep->ifp;
 
 	rcu_read_lock();
+
+	/* is the interface still available? */
+	ifp = rcu_dereference(ep->ifp);
+	if (!ifp) {
+		err = -ENODEV;
+		goto out_with_rculock;
+	}
+	skb->dev = ifp;
 
 	/* update the connection now that we can't fail anywhere else */
 	err = -EINVAL;
@@ -338,7 +358,7 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	hdr->src_conn_id = htonl(conn->id);
 	hdr->max_send_size = htonl(conn->max_send_size);
 
-        dev_queue_xmit(skb);
+	dev_queue_xmit(skb);
 
 	rcu_read_unlock();
 	return 0;
@@ -354,6 +374,7 @@ static int
 ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 {
 	struct sk_buff *skb;
+	struct net_device *ifp;
 	struct ccieth_pkt_header_msg *hdr;
 	struct ccieth_connection *conn;
 	struct ccieth_endpoint_event *event;
@@ -375,9 +396,16 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	skb_reset_network_header(skb);
 	skb->protocol = __constant_htons(ETH_P_CCI);
 	skb_put(skb, skblen);
-	skb->dev = ep->ifp;
 
 	rcu_read_lock();
+
+	/* is the interface still available? */
+	ifp = rcu_dereference(ep->ifp);
+	if (!ifp) {
+		err = -ENODEV;
+		goto out_with_rculock;
+	}
+	skb->dev = ifp;
 
 	/* find connection */
 	conn = idr_find(&ep->connection_idr, arg->conn_id);
@@ -418,7 +446,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 	/* FIXME: implement flags */
 
-        dev_queue_xmit(skb);
+	dev_queue_xmit(skb);
 
 	/* finalize and notify the event */
 	event->event.send.status = 0;
