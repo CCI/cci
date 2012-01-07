@@ -200,11 +200,31 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	struct ccieth_pkt_header_connect_request *hdr;
 	struct ccieth_connection *conn;
 	size_t skblen;
+	int id;
 	int err;
 
 	err = -EINVAL;
 	if (arg->data_len > ep->max_send_size)
 		goto out;
+
+	/* get a connection */
+	err = -ENOMEM;
+	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
+	if (!conn)
+		goto out;
+	/* get a connection id (only reserve it) */
+retry:
+	spin_lock(&ep->connection_idr_lock);
+	err = idr_get_new(&ep->connection_idr, NULL, &id);
+	spin_unlock(&ep->connection_idr_lock);
+	if (err < 0) {
+		if (err == -EAGAIN) {
+			if (idr_pre_get(&ep->connection_idr, GFP_KERNEL) > 0)
+				goto retry;
+			err = -ENOMEM;
+		}
+		goto out_with_conn;
+	}
 
 	/* allocate and initialize the skb */
 	skblen = sizeof(*hdr) + arg->data_len;
@@ -212,7 +232,7 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 		skblen = ETH_ZLEN;
         skb = alloc_skb(skblen, GFP_KERNEL);
 	if (!skb)
-		goto out;
+		goto out_with_conn_id;
 	skb_reset_mac_header(skb);
 	skb_reset_network_header(skb);
 	skb->protocol = __constant_htons(ETH_P_CCI);
@@ -237,33 +257,18 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 		goto out_with_skb;
 	}
 
-	/* allocate and initialize the connection before hashing it */
-	err = -ENOMEM;
-	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
-	if (!conn)
-		goto out_with_skb;
+	/* initialize the connection */
 	kref_init(&conn->refcount);
 	conn->status = CCIETH_CONNECTION_REQUESTED;
 	memcpy(&conn->dest_addr, &arg->dest_addr, 6);
 	conn->dest_eid = arg->dest_eid;
 	conn->attribute = arg->attribute;
 	conn->user_conn_id = arg->user_conn_id;
-	/* now that nothing else can fail, get a connection id */
-retry:
-	spin_lock(&ep->connection_idr_lock);
-	err = idr_get_new(&ep->connection_idr, conn, &conn->id);
-	spin_unlock(&ep->connection_idr_lock);
-	if (err < 0) {
-		if (err == -EAGAIN) {
-			if (idr_pre_get(&ep->connection_idr, GFP_KERNEL) > 0)
-				goto retry;
-			err = -ENOMEM;
-		}
-		goto out_with_conn;
-	}
+	conn->id = id;
+	idr_replace(&ep->connection_idr, conn, id);
 
 	/* finalize the skb and send it */
-	hdr->src_conn_id = htonl(conn->id);
+	hdr->src_conn_id = htonl(id);
         dev_queue_xmit(skb);
 
 	/* FIXME: setup timer to min(timeout, retransmit)
@@ -274,10 +279,14 @@ retry:
 	arg->conn_id = conn->id;
 	return 0;
 
-out_with_conn:
-	kfree(conn);
 out_with_skb:
 	kfree_skb(skb);
+out_with_conn_id:
+	spin_lock(&ep->connection_idr_lock);
+	idr_remove(&ep->connection_idr, id);
+	spin_unlock(&ep->connection_idr_lock);
+out_with_conn:
+	kfree(conn);
 out:
 	return err;
 }
