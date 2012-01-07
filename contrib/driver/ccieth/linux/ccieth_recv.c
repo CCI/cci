@@ -36,6 +36,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	__u32 src_conn_id;
 	__u32 data_len;
 	__u32 src_max_send_size;
+	int id;
 	int err;
 
 	printk("processing queued connect request skb %p\n", skb);
@@ -65,32 +66,19 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	list_del(&event->list);
 	spin_unlock(&ep->free_event_list_lock);
 
-	/* setup the event */
-	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_REQUEST;
-	event->event.data_length = data_len;
-	event->event.connect_request.attribute = hdr->attribute;
-	event->event.connect_request.max_send_size = src_max_send_size < ep->max_send_size ? src_max_send_size : ep->max_send_size;
-
-	err = skb_copy_bits(skb, sizeof(*hdr), event+1, data_len);
-	if (err < 0)
-		goto out_with_event;
-
-	/* setup the connection */
+	/* get a connection */
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out_with_event;
-	kref_init(&conn->refcount);
-	conn->status = CCIETH_CONNECTION_RECEIVED;
-	memcpy(&conn->dest_addr, &hdr->eth.h_source, 6);
-	conn->dest_eid = ntohl(hdr->src_ep_id);
-	conn->dest_id = ntohl(hdr->src_conn_id);
+
+	/* get a connection id (only reserve it for now) */
 retry:
 	spin_lock(&ep->connection_idr_lock);
 	/* check for duplicates */
 	err = idr_for_each(&ep->connection_idr, ccieth_recv_connect_idrforeach_cb, conn);
 	if (err != -EBUSY)
 		/* if no duplicates, try to add new connection */
-		err = idr_get_new(&ep->connection_idr, conn, &conn->id);
+		err = idr_get_new(&ep->connection_idr, NULL, &id);
 	spin_unlock(&ep->connection_idr_lock);
 	if (err < 0) {
 		if (err == -EAGAIN) {
@@ -101,8 +89,28 @@ retry:
 		goto out_with_conn;
 	}
 
+	/* setup the event */
+	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_REQUEST;
+	event->event.data_length = data_len;
+	event->event.connect_request.attribute = hdr->attribute;
+	event->event.connect_request.max_send_size = src_max_send_size < ep->max_send_size ? src_max_send_size : ep->max_send_size;
+	err = skb_copy_bits(skb, sizeof(*hdr), event+1, data_len);
+	if (err < 0)
+		goto out_with_conn_id;
+
+	/* things cannot fail anymore now */
+
+	/* setup the connection */
+	kref_init(&conn->refcount);
+	conn->status = CCIETH_CONNECTION_RECEIVED;
+	memcpy(&conn->dest_addr, &hdr->eth.h_source, 6);
+	conn->dest_eid = ntohl(hdr->src_ep_id);
+	conn->dest_id = ntohl(hdr->src_conn_id);
+	conn->id = id;
+	idr_replace(&ep->connection_idr, conn, id);
+
 	/* finalize and notify the event */
-	event->event.connect_request.conn_id = conn->id;
+	event->event.connect_request.conn_id = id;
 	spin_lock(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock(&ep->event_list_lock);
@@ -110,6 +118,10 @@ retry:
 	dev_kfree_skb(skb);
 	return 0;
 
+out_with_conn_id:
+	spin_lock(&ep->connection_idr_lock);
+	idr_remove(&ep->connection_idr, id);
+	spin_unlock(&ep->connection_idr_lock);	
 out_with_conn:
 	kfree(conn);
 out_with_event:
