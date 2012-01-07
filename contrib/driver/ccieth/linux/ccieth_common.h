@@ -34,6 +34,9 @@ struct ccieth_endpoint {
 
 	struct idr connection_idr;
 	spinlock_t connection_idr_lock;
+
+	struct rcu_head release_ifp_rcu_head;
+	struct net_device *release_ifp;
 };
 
 struct ccieth_endpoint_event {

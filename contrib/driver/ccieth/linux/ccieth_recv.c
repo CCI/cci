@@ -410,18 +410,64 @@ static struct packet_type ccieth_pt = {
 	.func = ccieth_recv,
 };
 
+static void
+ccieth_release_ifp_rcu(struct rcu_head *rcu_head)
+{
+	struct ccieth_endpoint *ep = container_of(rcu_head, struct ccieth_endpoint, release_ifp_rcu_head);
+	dev_put(ep->release_ifp);
+}
+
+struct ccieth_netdevice_notifier_cbdata {
+	struct net_device *ifp;
+	unsigned long event;
+};
+
+static int ccieth_netdevice_notifier_idrforeach_cb(int id, void *p, void *_data)
+{
+	struct ccieth_endpoint *ep = p;
+	struct ccieth_netdevice_notifier_cbdata *data = _data;
+	struct net_device *ifp = data->ifp;
+	unsigned long event = data->event;
+
+	if (!ep || ep->ifp != ifp)
+		return 0;
+
+	if (event == NETDEV_CHANGEMTU) {
+		if (ccieth_max_send_size(ifp->mtu) >= ep->max_send_size)
+			return 0;
+	} else if (event == NETDEV_CHANGEADDR) {
+		if (!memcmp(ifp->dev_addr, ep->addr, 6))
+			return 0;
+	}
+
+	if (cmpxchg(&ep->ifp, ifp, NULL) == ifp) {
+		ep->release_ifp = ifp;
+		call_rcu(&ep->release_ifp_rcu_head, ccieth_release_ifp_rcu);
+	}
+
+	return 0;
+}
+
 static int
 ccieth_netdevice_notifier_cb(struct notifier_block *unused,
 			     unsigned long event, void *ptr)
 {
+	struct ccieth_netdevice_notifier_cbdata data;
+
 	switch (event) {
 	case NETDEV_CHANGEMTU:
-		/* if ccieth max_send_size becomes smaller, close endpoints and connections? */
+		/* if ccieth max_send_size becomes smaller, ... */
 	case NETDEV_CHANGEADDR:
+		/* if address changes, ... */
 	case NETDEV_UNREGISTER:
 		/* close endpoints and connections */
 		printk("ccieth notifier event %ld\n", event);
-	}		
+		data.ifp = (struct net_device *) ptr;
+		data.event = event;
+		rcu_read_lock();
+		idr_for_each(&ccieth_ep_idr, ccieth_netdevice_notifier_idrforeach_cb, &data);
+		rcu_read_unlock();
+	}
 
 	return NOTIFY_DONE;
 }

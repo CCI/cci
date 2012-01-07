@@ -45,6 +45,7 @@ static void
 ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 {
 	struct ccieth_endpoint_event *event, *nevent;
+	struct net_device *ifp;
 	int destroyed_conn = 0;
 
 	spin_lock(&ccieth_ep_idr_lock);
@@ -58,7 +59,19 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 	cancel_work_sync(&ep->recv_connect_request_work);
 	skb_queue_purge(&ep->recv_connect_request_queue);
 
-	dev_put(ep->ifp);
+	/* release the interface, but make sure a netdevice notifier
+	 * isn't already doing it inside a call_rcu */
+	rcu_read_lock();
+	ifp = rcu_dereference(ep->ifp);
+	if (ifp && cmpxchg(&ep->ifp, ifp, NULL) == ifp) {
+		rcu_read_unlock();
+		dev_put(ifp);
+	} else {
+		rcu_read_unlock();
+		/* wait for the pending rcu_call() to finish */
+		rcu_barrier();
+	}
+
 	list_for_each_entry_safe(event, nevent, &ep->event_list, list) {
 		list_del(&event->list);
 		kfree(event);
