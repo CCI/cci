@@ -107,7 +107,7 @@ ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *a
 		goto out_with_ifp;
 	}
 	ep->ifp = ifp;
-	ep->max_send_size = ifp->mtu >= 9000 ? 8192 : 1024;
+	ep->max_send_size = ccieth_max_send_size(ifp->mtu);
 
 	INIT_LIST_HEAD(&ep->event_list);
 	spin_lock_init(&ep->event_list_lock);
@@ -484,7 +484,7 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		if (ifp) {
 			struct device *dev = ifp->dev.parent;
 
-			gi_arg.max_send_size = ifp->mtu >= 9000 ? 8192 : 1024;
+			gi_arg.max_send_size = ccieth_max_send_size(ifp->mtu);
 
 			if (dev && dev->bus == &pci_bus_type) {
 				struct pci_dev *pdev = to_pci_dev(dev);

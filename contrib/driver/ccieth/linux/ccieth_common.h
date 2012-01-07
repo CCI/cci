@@ -100,4 +100,10 @@ extern void __ccieth_connection_lastkref(struct kref *kref);
 
 extern void ccieth_recv_connect_request_workfunc(struct work_struct *work);
 
+static inline __u32
+ccieth_max_send_size(__u32 mtu)
+{
+	return mtu >= 9000 ? 8192 : 1024;
+}
+
 #endif /* CCIETH_COMMON_H */
