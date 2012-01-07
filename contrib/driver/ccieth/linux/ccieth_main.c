@@ -107,6 +107,7 @@ ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *a
 		goto out_with_ifp;
 	}
 	ep->ifp = ifp;
+	memcpy(ep->addr, &ifp->dev_addr, 6);
 	ep->max_send_size = ccieth_max_send_size(ifp->mtu);
 
 	INIT_LIST_HEAD(&ep->event_list);
@@ -241,7 +242,7 @@ retry:
 	 */
 	hdr = (struct ccieth_pkt_header_connect_request *) skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &arg->dest_addr, 6);
-	memcpy(&hdr->eth.h_source, ep->ifp->dev_addr, 6);
+	memcpy(&hdr->eth.h_source, ep->addr, 6);
 	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
 	hdr->type = CCIETH_PKT_CONNECT_REQUEST;
 	hdr->dst_ep_id = htonl(arg->dest_eid);
@@ -328,7 +329,7 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	/* fill headers */
 	hdr = (struct ccieth_pkt_header_connect_accept *) skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
-	memcpy(&hdr->eth.h_source, ep->ifp->dev_addr, 6);
+	memcpy(&hdr->eth.h_source, ep->addr, 6);
 	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
 	hdr->type = CCIETH_PKT_CONNECT_ACCEPT;
 	hdr->dst_ep_id = htonl(conn->dest_eid);
@@ -403,7 +404,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	/* fill headers */
 	hdr = (struct ccieth_pkt_header_msg *) skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
-	memcpy(&hdr->eth.h_source, ep->ifp->dev_addr, 6);
+	memcpy(&hdr->eth.h_source, ep->addr, 6);
 	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
 	hdr->type = CCIETH_PKT_MSG;
 	hdr->dst_ep_id = htonl(conn->dest_eid);

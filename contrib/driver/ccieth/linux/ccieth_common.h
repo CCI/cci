@@ -20,6 +20,7 @@
 
 struct ccieth_endpoint {
 	struct net_device *ifp;
+	__u8 addr[6];
 	int max_send_size;
 	int id;
 
@@ -30,7 +31,7 @@ struct ccieth_endpoint {
 
 	struct sk_buff_head recv_connect_request_queue;
 	struct work_struct recv_connect_request_work;
-	
+
 	struct idr connection_idr;
 	spinlock_t connection_idr_lock;
 };
