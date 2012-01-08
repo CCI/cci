@@ -341,7 +341,7 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 
 	/* find the connection */
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
-	if (!conn)
+	if (!conn || conn->status != CCIETH_CONNECTION_READY)
 		goto out_with_event;
 
 	/* finalize and notify the event */

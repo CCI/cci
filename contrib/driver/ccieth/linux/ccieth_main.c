@@ -422,7 +422,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 	/* find connection */
 	conn = idr_find(&ep->connection_idr, arg->conn_id);
-	if (!conn)
+	if (!conn || conn->status != CCIETH_CONNECTION_READY)
 		goto out_with_rculock;
 
 	/* get an event */
