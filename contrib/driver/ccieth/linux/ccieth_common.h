@@ -69,6 +69,7 @@ struct ccieth_endpoint_event {
 enum ccieth_connection_status {
 	/* status for both sides */
 	CCIETH_CONNECTION_READY,     /* accept sent or received */
+	CCIETH_CONNECTION_CLOSING,   /* timeout'ing, being disconnected, or endpoint being destroyed, already unhashed */
 	/* initiator side */
 	CCIETH_CONNECTION_REQUESTED, /* request sent */
 	/* target side */

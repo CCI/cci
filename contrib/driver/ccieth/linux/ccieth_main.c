@@ -35,7 +35,13 @@ ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 static int ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 {
 	struct ccieth_connection *conn = p;
+	enum ccieth_connection_status status = conn->status;
 	int *destroyed_conn = data;
+
+	if (cmpxchg(&conn->status, status, CCIETH_CONNECTION_CLOSING) != status)
+		/* somebody else is closing it */
+		return 0;
+
 	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
 	(*destroyed_conn)++;
 	return 0;
