@@ -71,6 +71,10 @@ struct ccieth_ioctl_get_event {
 			/* 24 */
 			__u32 max_send_size;
 		} connect_accepted;
+		struct {
+			__u64 user_conn_id;
+			/* 16 */
+		} connect_timedout;
 	};
 };
 #define CCIETH_IOCTL_GET_EVENT _IOW(CCIETH_IOCTL_MAGIC, 0x3, struct ccieth_ioctl_get_event)
@@ -128,6 +132,7 @@ struct ccieth_ioctl_msg {
 #define CCIETH_IOCTL_EVENT_SEND 1
 #define CCIETH_IOCTL_EVENT_RECV 2
 #define CCIETH_IOCTL_EVENT_CONNECT_ACCEPTED 3
+#define CCIETH_IOCTL_EVENT_CONNECT_TIMEDOUT 4
 #define CCIETH_IOCTL_EVENT_CONNECT_REQUEST 6
 
 #endif /* CCIETH_IO_H */

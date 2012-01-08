@@ -437,9 +437,40 @@ static int eth_create_endpoint(cci_device_t *device,
 	  cci_connection_t *sconn, *cconn;
 	  cci_event_t * event;
 	  cci_status_t ret;
+	  struct timeval tv;
 
 	  /* connect */
-	  ret = cci_connect(*endpoint, name, "hello world!", 13, 123, (void*)0xdeadbeef, 0, NULL);
+	  tv.tv_sec = 1;
+	  tv.tv_usec = 0;
+	  ret = cci_connect(*endpoint, name, "hello world!", 13, 123, (void*)0xdeadbeef, 0, &tv);
+	  assert(ret == CCI_SUCCESS);
+
+	  /* ignore connect request */
+	  while ((ret = cci_get_event(*endpoint, &event)) == CCI_EAGAIN);
+	  assert(ret == CCI_SUCCESS);
+	  printf("got event type %d\n", event->type);
+	  assert(event->type == CCI_EVENT_CONNECT_REQUEST);
+	  assert(event->request.data_len == 13);
+	  assert(!strcmp(event->request.data_ptr, "hello world!"));
+	  printf("got data len %d data %s\n",
+		 event->request.data_len, event->request.data_ptr);
+	  assert(event->request.attribute == 123);
+	  printf("got attr %d\n",
+		 event->request.attribute);
+
+	  /* handle timedout event */
+	  while ((ret = cci_get_event(*endpoint, &event)) == CCI_EAGAIN);
+	  assert(ret == CCI_SUCCESS);
+	  printf("got event type %d\n", event->type);
+	  assert(event->type == CCI_EVENT_CONNECT_TIMEDOUT);
+	  assert(event->conn_timedout.context == (void*)0xdeadbeef);
+	  ret = cci_return_event(event);
+	  assert(ret == CCI_SUCCESS);
+
+	  /* connect */
+	  tv.tv_sec = 1;
+	  tv.tv_usec = 0;
+	  ret = cci_connect(*endpoint, name, "hello world!", 13, 123, (void*)0xdeadbeef, 0, &tv);
 	  assert(ret == CCI_SUCCESS);
 
 	  /* handle connect request and accept it */
@@ -710,6 +741,16 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 		event->type = CCI_EVENT_CONNECT_ACCEPTED;
 		event->accepted.context = _conn->connection.context;
 		event->accepted.connection = &_conn->connection;
+		break;
+	}
+	case CCIETH_IOCTL_EVENT_CONNECT_TIMEDOUT: {
+		cci__conn_t *_conn = (void*)(uintptr_t) ge->connect_timedout.user_conn_id;
+		eth__conn_t *econn = (void*) (_conn+1);
+
+		event->type = CCI_EVENT_CONNECT_TIMEDOUT;
+		event->conn_timedout.context = _conn->connection.context;
+
+		free(_conn);
 		break;
 	}
 	default:

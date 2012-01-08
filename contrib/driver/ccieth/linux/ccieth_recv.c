@@ -101,6 +101,7 @@ retry:
 	/* things cannot fail anymore now */
 
 	/* setup the connection */
+	conn->ep = ep;
 	conn->status = CCIETH_CONNECTION_RECEIVED;
 	memcpy(&conn->dest_addr, &hdr->eth.h_source, 6);
 	conn->dest_eid = ntohl(hdr->src_ep_id);
@@ -251,6 +252,9 @@ ccieth_recv_connect_accept(struct net_device *ifp, struct sk_buff *skb)
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REQUESTED, CCIETH_CONNECTION_READY)
 	    != CCIETH_CONNECTION_REQUESTED)
 		goto out_with_conn;
+
+	/* FIXME */
+	del_timer_sync(&conn->timer);
 
 	/* setup connection */
 	conn->dest_id = src_conn_id;

@@ -15,6 +15,8 @@
 #include <linux/pci.h>
 #include <linux/spinlock.h>
 #include <linux/rcupdate.h>
+#include <linux/timer.h>
+#include <linux/jiffies.h>
 
 #include <ccieth_io.h>
 #include <ccieth_common.h>
@@ -41,6 +43,9 @@ static int ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 	if (cmpxchg(&conn->status, status, CCIETH_CONNECTION_CLOSING) != status)
 		/* somebody else is closing it */
 		return 0;
+
+	if (status == CCIETH_CONNECTION_REQUESTED)
+		del_timer_sync(&conn->timer);
 
 	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
 	(*destroyed_conn)++;
@@ -210,6 +215,42 @@ ccieth_return_event(struct ccieth_endpoint *ep, const struct ccieth_ioctl_return
 	return 0;
 }
 
+static void ccieth_connect_timer_hdlr(unsigned long data)
+{
+	struct ccieth_connection *conn = (void*) data;
+	struct ccieth_endpoint *ep = conn->ep;
+	struct ccieth_endpoint_event *event;
+	enum ccieth_connection_status status = conn->status;
+
+	if (cmpxchg(&conn->status, status, CCIETH_CONNECTION_CLOSING) != status)
+		/* somebody else is closing it */
+		return;
+
+	/* get an event */
+	spin_lock(&ep->free_event_list_lock);
+	if (list_empty(&ep->free_event_list)) {
+		spin_unlock(&ep->free_event_list_lock);
+		printk("ccieth: no event slot for connect timedout\n");
+		/* FIXME: reschedule timeout */
+		return;
+	}
+	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
+	list_del(&event->list);
+	spin_unlock(&ep->free_event_list_lock);
+
+	spin_lock(&ep->connection_idr_lock);
+	idr_remove(&ep->connection_idr, conn->id);
+	spin_unlock(&ep->connection_idr_lock);
+
+	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_TIMEDOUT;
+	event->event.connect_timedout.user_conn_id = conn->user_conn_id;
+	spin_lock(&ep->event_list_lock);
+	list_add_tail(&event->list, &ep->event_list);
+	spin_unlock(&ep->event_list_lock);
+
+	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
+}
+
 static int
 ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_request *arg)
 {
@@ -275,6 +316,7 @@ retry:
 	}
 
 	/* initialize the connection */
+	conn->ep = ep;
 	conn->status = CCIETH_CONNECTION_REQUESTED;
 	memcpy(&conn->dest_addr, &arg->dest_addr, 6);
 	conn->dest_eid = arg->dest_eid;
@@ -297,10 +339,11 @@ retry:
 
 	rcu_read_unlock();
 
-	/* FIXME: setup timer to min(timeout, retransmit)
-	 * if timeout expired, destroy conn and return timedout event
-	 * if retransmit expired, resend skb (cache the above one), reset timer
-	 */
+	setup_timer(&conn->timer, ccieth_connect_timer_hdlr, (unsigned long) conn);
+	if (arg->timeout_sec != -1ULL || arg->timeout_usec != -1) {
+		__u64 msecs = arg->timeout_sec * 1000 + arg->timeout_usec / 1000;
+		mod_timer(&conn->timer, jiffies + msecs_to_jiffies(msecs));
+	}
 
 	arg->conn_id = conn->id;
 	return 0;

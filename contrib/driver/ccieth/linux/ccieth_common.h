@@ -80,10 +80,13 @@ enum ccieth_connection_status {
 struct ccieth_connection {
 	int id; /* always valid */ /* FIXME keep in network order too? */
 	enum ccieth_connection_status status;
+	struct ccieth_endpoint *ep;
 
 	__u8 attribute;
 	__u32 max_send_size;
 	__u64 user_conn_id;
+
+	struct timer_list timer;
 
 	/* dest fields are valid when status RECEIVED, READY or REJECTED */
 	/* FIXME: store in network order? */
