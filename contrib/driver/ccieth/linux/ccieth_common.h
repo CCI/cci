@@ -30,8 +30,8 @@ struct ccieth_endpoint {
 	struct list_head free_event_list;
 	spinlock_t free_event_list_lock;
 
-	struct sk_buff_head recv_connect_request_queue;
-	struct work_struct recv_connect_request_work;
+	struct sk_buff_head deferred_recv_queue;
+	struct work_struct deferred_recv_work;
 
 	/* modified by ioctl and deferred network handler, does not need _bh() */
 	struct idr connection_idr;
@@ -108,7 +108,7 @@ extern void ccieth_net_exit(void);
 
 extern void __ccieth_connection_lastkref(struct kref *kref);
 
-extern void ccieth_recv_connect_request_workfunc(struct work_struct *work);
+extern void ccieth_deferred_recv_workfunc(struct work_struct *work);
 
 static inline __u32
 ccieth_max_send_size(__u32 mtu)

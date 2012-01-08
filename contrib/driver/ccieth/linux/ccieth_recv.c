@@ -134,32 +134,50 @@ out:
 }
 
 void
-ccieth_recv_connect_request_workfunc(struct work_struct *work)
+ccieth_deferred_recv_workfunc(struct work_struct *work)
 {
-	struct ccieth_endpoint *ep = container_of(work, struct ccieth_endpoint, recv_connect_request_work);
+	struct ccieth_endpoint *ep = container_of(work, struct ccieth_endpoint, deferred_recv_work);
 	struct sk_buff *skb;
 
-	printk("dequeueing queued connect request skbs\n");
+	printk("dequeueing queued skbs\n");
 
-	while ((skb = skb_dequeue(&ep->recv_connect_request_queue)) != NULL) {
-		struct ccieth_pkt_header_connect_request _hdr, *hdr;
+	while ((skb = skb_dequeue(&ep->deferred_recv_queue)) != NULL) {
+		__u8 type, *typep;
 		int err;
 
-		/* copy the entire header */
-		hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
-		BUG_ON(!hdr); /* would have faild in ccieth_recv_connect_request() before schedule_work() */
+		/* get type */
+		typep = skb_header_pointer(skb, offsetof(struct ccieth_pkt_header_generic, type), sizeof(type), &type);
+		if (!typep) {
+			dev_kfree_skb(skb);
+			continue;
+		}
 
-		err = ccieth__recv_connect_request(ep, skb, hdr);
+		switch (*typep) {
+		case CCIETH_PKT_CONNECT_REQUEST: {
+			struct ccieth_pkt_header_connect_request _hdr, *hdr;
+			/* copy the entire header */
+			hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
+			if (!hdr) {
+				dev_kfree_skb(skb);
+				continue;
+			}
+			err = ccieth__recv_connect_request(ep, skb, hdr);
+			break;
+		}
+		default:
+			BUG();
+		}
+
 		if (err && err != -EINVAL) {
 			/* not enough memory or events, other skbuffs will fail the same, drop everything for now */
-			skb_queue_purge(&ep->recv_connect_request_queue);
+			skb_queue_purge(&ep->deferred_recv_queue);
 			return;
 		}
 	}
 }
 
 static int
-ccieth_recv_connect_request(struct net_device *ifp, struct sk_buff *skb)
+ccieth_defer_recv(struct net_device *ifp, struct sk_buff *skb)
 {
 	struct ccieth_endpoint *ep;
 	__be32 dst_ep_id_n, *dst_ep_id_n_p;
@@ -178,9 +196,9 @@ ccieth_recv_connect_request(struct net_device *ifp, struct sk_buff *skb)
 	if (!ep || ep->ifp != ifp)
 		goto out_with_rculock;
 
-	printk("queueing connect request skb %p\n", skb);
-	skb_queue_tail(&ep->recv_connect_request_queue, skb);
-	schedule_work(&ep->recv_connect_request_work);
+	printk("queueing skb %p\n", skb);
+	skb_queue_tail(&ep->deferred_recv_queue, skb);
+	schedule_work(&ep->deferred_recv_work);
 
 	rcu_read_unlock();
 	return 0;
@@ -394,7 +412,7 @@ ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 
 	switch (*typep) {
 	case CCIETH_PKT_CONNECT_REQUEST:
-		return ccieth_recv_connect_request(ifp, skb);
+		return ccieth_defer_recv(ifp, skb);
 	case CCIETH_PKT_CONNECT_ACCEPT:
 		return ccieth_recv_connect_accept(ifp, skb);
 	case CCIETH_PKT_MSG:

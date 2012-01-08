@@ -67,8 +67,8 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 	synchronize_net();
 	/* all receive handlers are gone now */
 
-	cancel_work_sync(&ep->recv_connect_request_work);
-	skb_queue_purge(&ep->recv_connect_request_queue);
+	cancel_work_sync(&ep->deferred_recv_work);
+	skb_queue_purge(&ep->deferred_recv_queue);
 	/* pending network work is gone as well now */
 
 	/* release the interface, but make sure a netdevice notifier
@@ -147,8 +147,8 @@ ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *a
 	idr_init(&ep->connection_idr);
 	spin_lock_init(&ep->connection_idr_lock);
 
-	skb_queue_head_init(&ep->recv_connect_request_queue);
-	INIT_WORK(&ep->recv_connect_request_work, ccieth_recv_connect_request_workfunc);
+	skb_queue_head_init(&ep->deferred_recv_queue);
+	INIT_WORK(&ep->deferred_recv_work, ccieth_deferred_recv_workfunc);
 
 retry:
 	/* reserve an index without exposing the endpoint there yet
