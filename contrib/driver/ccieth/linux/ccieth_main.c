@@ -64,6 +64,7 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 
 	cancel_work_sync(&ep->recv_connect_request_work);
 	skb_queue_purge(&ep->recv_connect_request_queue);
+	/* pending network work is gone as well now */
 
 	/* release the interface, but make sure a netdevice notifier
 	 * isn't already doing it inside a call_rcu */
@@ -78,6 +79,8 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 		rcu_barrier();
 	}
 
+	/* we're safe now */
+
 	list_for_each_entry_safe(event, nevent, &ep->event_list, list) {
 		list_del(&event->list);
 		kfree(event);
@@ -90,12 +93,8 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 	idr_for_each(&ep->connection_idr, ccieth_destroy_connection_idrforeach_cb,
 		     &destroyed_conn);
 	printk("destroyed %d connections on endpoint destroy\n", destroyed_conn);
-	/* new ioctls cannot access connections anymore now */
 	idr_remove_all(&ep->connection_idr);
 	idr_destroy(&ep->connection_idr);
-	/* the last reference will actually destroy each connection */
-
-	/* FIXME: split this for the notifier so that we only free(ep) when the last connection is destroyed */
 	kfree(ep);
 }
 
