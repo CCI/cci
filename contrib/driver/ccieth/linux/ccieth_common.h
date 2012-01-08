@@ -24,6 +24,7 @@ struct ccieth_endpoint {
 	int max_send_size;
 	int id;
 
+	/* modified by both ioctl and network receive handler, needs _bh() */
 	struct list_head event_list;
 	spinlock_t event_list_lock;
 	struct list_head free_event_list;
@@ -32,6 +33,7 @@ struct ccieth_endpoint {
 	struct sk_buff_head recv_connect_request_queue;
 	struct work_struct recv_connect_request_work;
 
+	/* modified by ioctl and deferred network handler, does not need _bh() */
 	struct idr connection_idr;
 	spinlock_t connection_idr_lock;
 

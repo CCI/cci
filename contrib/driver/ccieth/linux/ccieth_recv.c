@@ -55,16 +55,16 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 		goto out;
 
 	/* get an event */
-	spin_lock(&ep->free_event_list_lock);
+	spin_lock_bh(&ep->free_event_list_lock);
 	if (list_empty(&ep->free_event_list)) {
 		err = -ENOMEM;
-		spin_unlock(&ep->free_event_list_lock);
+		spin_unlock_bh(&ep->free_event_list_lock);
 		printk("ccieth: no event slot for connect request\n");
 		goto out;
 	}
 	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
 	list_del(&event->list);
-	spin_unlock(&ep->free_event_list_lock);
+	spin_unlock_bh(&ep->free_event_list_lock);
 
 	/* get a connection */
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
@@ -111,9 +111,9 @@ retry:
 
 	/* finalize and notify the event */
 	event->event.connect_request.conn_id = id;
-	spin_lock(&ep->event_list_lock);
+	spin_lock_bh(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
-	spin_unlock(&ep->event_list_lock);
+	spin_unlock_bh(&ep->event_list_lock);
 
 	dev_kfree_skb(skb);
 	return 0;
@@ -125,9 +125,9 @@ out_with_conn_id:
 out_with_conn:
 	kfree(conn);
 out_with_event:
-	spin_lock(&ep->free_event_list_lock);
+	spin_lock_bh(&ep->free_event_list_lock);
 	list_add_tail(&event->list, &ep->free_event_list);
-	spin_unlock(&ep->free_event_list_lock);
+	spin_unlock_bh(&ep->free_event_list_lock);
 out:
 	dev_kfree_skb(skb);
 	return err;
@@ -229,16 +229,16 @@ ccieth_recv_connect_accept(struct net_device *ifp, struct sk_buff *skb)
 		goto out_with_rculock;
 
 	/* get an event */
-	spin_lock(&ep->free_event_list_lock);
+	spin_lock_bh(&ep->free_event_list_lock);
 	if (list_empty(&ep->free_event_list)) {
 		err = -ENOMEM;
-		spin_unlock(&ep->free_event_list_lock);
+		spin_unlock_bh(&ep->free_event_list_lock);
 		printk("ccieth: no event slot for connect accepted\n");
 		goto out_with_rculock;
 	}
 	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
 	list_del(&event->list);
-	spin_unlock(&ep->free_event_list_lock);
+	spin_unlock_bh(&ep->free_event_list_lock);
 
 	/* setup the event */
 	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_ACCEPTED;
@@ -265,9 +265,9 @@ ccieth_recv_connect_accept(struct net_device *ifp, struct sk_buff *skb)
 	event->event.connect_accepted.max_send_size = max_send_size;
 	event->event.connect_accepted.user_conn_id = conn->user_conn_id;
 
-	spin_lock(&ep->event_list_lock);
+	spin_lock_bh(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
-	spin_unlock(&ep->event_list_lock);
+	spin_unlock_bh(&ep->event_list_lock);
 
 	rcu_read_unlock();
 
@@ -277,9 +277,9 @@ ccieth_recv_connect_accept(struct net_device *ifp, struct sk_buff *skb)
 out_with_conn:
 	/* nothing */
 out_with_event:
-	spin_lock(&ep->free_event_list_lock);
+	spin_lock_bh(&ep->free_event_list_lock);
 	list_add_tail(&event->list, &ep->free_event_list);
-	spin_unlock(&ep->free_event_list_lock);
+	spin_unlock_bh(&ep->free_event_list_lock);
 out_with_rculock:
 	rcu_read_unlock();
 out:
@@ -324,16 +324,16 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 		goto out_with_rculock;
 
 	/* get an event */
-	spin_lock(&ep->free_event_list_lock);
+	spin_lock_bh(&ep->free_event_list_lock);
 	if (list_empty(&ep->free_event_list)) {
 		err = -ENOMEM;
-		spin_unlock(&ep->free_event_list_lock);
+		spin_unlock_bh(&ep->free_event_list_lock);
 		printk("ccieth: no event slot for msg\n");
 		goto out_with_rculock;
 	}
 	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
 	list_del(&event->list);
-	spin_unlock(&ep->free_event_list_lock);
+	spin_unlock_bh(&ep->free_event_list_lock);
 
 	/* setup the event */
 	event->event.type = CCIETH_IOCTL_EVENT_RECV;
@@ -351,9 +351,9 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 	/* finalize and notify the event */
 	event->event.recv.user_conn_id = conn->user_conn_id;
 
-	spin_lock(&ep->event_list_lock);
+	spin_lock_bh(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
-	spin_unlock(&ep->event_list_lock);
+	spin_unlock_bh(&ep->event_list_lock);
 
 	rcu_read_unlock();
 
@@ -361,9 +361,9 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 	return 0;
 
 out_with_event:
-	spin_lock(&ep->free_event_list_lock);
+	spin_lock_bh(&ep->free_event_list_lock);
 	list_add_tail(&event->list, &ep->free_event_list);
-	spin_unlock(&ep->free_event_list_lock);
+	spin_unlock_bh(&ep->free_event_list_lock);
 out_with_rculock:
 	rcu_read_unlock();
 out:

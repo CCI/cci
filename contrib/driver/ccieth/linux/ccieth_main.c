@@ -195,15 +195,15 @@ ccieth_get_event(struct ccieth_endpoint *ep)
 {
 	struct ccieth_endpoint_event *event;
 
-	spin_lock(&ep->event_list_lock);
+	spin_lock_bh(&ep->event_list_lock);
 	if (list_empty(&ep->event_list)) {
-		spin_unlock(&ep->event_list_lock);
+		spin_unlock_bh(&ep->event_list_lock);
 		return NULL;
 	}
 
 	event = list_first_entry(&ep->event_list, struct ccieth_endpoint_event, list);
 	list_del(&event->list);
-	spin_unlock(&ep->event_list_lock);
+	spin_unlock_bh(&ep->event_list_lock);
 
 	return event;
 }
@@ -227,16 +227,16 @@ static void ccieth_connect_timer_hdlr(unsigned long data)
 		return;
 
 	/* get an event */
-	spin_lock(&ep->free_event_list_lock);
+	spin_lock_bh(&ep->free_event_list_lock);
 	if (list_empty(&ep->free_event_list)) {
-		spin_unlock(&ep->free_event_list_lock);
+		spin_unlock_bh(&ep->free_event_list_lock);
 		printk("ccieth: no event slot for connect timedout\n");
 		/* FIXME: reschedule timeout */
 		return;
 	}
 	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
 	list_del(&event->list);
-	spin_unlock(&ep->free_event_list_lock);
+	spin_unlock_bh(&ep->free_event_list_lock);
 
 	spin_lock(&ep->connection_idr_lock);
 	idr_remove(&ep->connection_idr, conn->id);
@@ -244,9 +244,9 @@ static void ccieth_connect_timer_hdlr(unsigned long data)
 
 	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_TIMEDOUT;
 	event->event.connect_timedout.user_conn_id = conn->user_conn_id;
-	spin_lock(&ep->event_list_lock);
+	spin_lock_bh(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
-	spin_unlock(&ep->event_list_lock);
+	spin_unlock_bh(&ep->event_list_lock);
 
 	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
 }
@@ -474,16 +474,16 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		goto out_with_rculock;
 
 	/* get an event */
-	spin_lock(&ep->free_event_list_lock);
+	spin_lock_bh(&ep->free_event_list_lock);
 	if (list_empty(&ep->free_event_list)) {
 		err = -ENOMEM;
-		spin_unlock(&ep->free_event_list_lock);
+		spin_unlock_bh(&ep->free_event_list_lock);
 		printk("ccieth: no event slot for send\n");
 		goto out_with_rculock;
 	}
 	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
 	list_del(&event->list);
-	spin_unlock(&ep->free_event_list_lock);
+	spin_unlock_bh(&ep->free_event_list_lock);
 
 	/* setup the event */
 	event->event.type = CCIETH_IOCTL_EVENT_SEND;
@@ -511,17 +511,17 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 	/* finalize and notify the event */
 	event->event.send.status = 0;
-	spin_lock(&ep->event_list_lock);
+	spin_lock_bh(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
-	spin_unlock(&ep->event_list_lock);
+	spin_unlock_bh(&ep->event_list_lock);
 
 	rcu_read_unlock();
 	return 0;
 
 out_with_event:
-	spin_lock(&ep->free_event_list_lock);
+	spin_lock_bh(&ep->free_event_list_lock);
 	list_add_tail(&event->list, &ep->free_event_list);
-	spin_unlock(&ep->free_event_list_lock);
+	spin_unlock_bh(&ep->free_event_list_lock);
 out_with_rculock:
 	rcu_read_unlock();
 	kfree_skb(skb);
@@ -640,9 +640,9 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		ret = copy_to_user(((__user void *) arg)+sizeof(struct ccieth_ioctl_get_event),
 				   event+1, event->event.data_length);
 
-		spin_lock(&ep->free_event_list_lock);
+		spin_lock_bh(&ep->free_event_list_lock);
 		list_add_tail(&event->list, &ep->free_event_list);
-		spin_unlock(&ep->free_event_list_lock);
+		spin_unlock_bh(&ep->free_event_list_lock);
 
 		if (ret)
 			return -EFAULT;
