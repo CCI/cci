@@ -443,16 +443,17 @@ static int eth_create_endpoint(cci_device_t *device,
 	  assert(ret == CCI_SUCCESS);
 
 	  /* handle connect request and accept it */
-	  while ((ret = cci_get_event(*endpoint, &event)) == -EAGAIN);
+	  while ((ret = cci_get_event(*endpoint, &event)) == CCI_EAGAIN);
 	  assert(ret == CCI_SUCCESS);
 	  printf("got event type %d\n", event->type);
-	  if (event->type == CCI_EVENT_CONNECT_REQUEST) {
-		  if (event->request.data_len)
-			  printf("got data len %d data %s\n",
-				 event->request.data_len, event->request.data_ptr);
-		  printf("got attr %d\n",
-			 event->request.attribute);
-	  }
+	  assert(event->type == CCI_EVENT_CONNECT_REQUEST);
+	  assert(event->request.data_len == 13);
+	  assert(!strcmp(event->request.data_ptr, "hello world!"));
+	  printf("got data len %d data %s\n",
+		 event->request.data_len, event->request.data_ptr);
+	  assert(event->request.attribute == 123);
+	  printf("got attr %d\n",
+		 event->request.attribute);
 	  ret = cci_accept(event, (void*)0xfedcba98, &sconn);
 	  assert(ret == CCI_SUCCESS);
 	  printf("accepted conn %p attr %d mss %d\n",
@@ -463,17 +464,16 @@ static int eth_create_endpoint(cci_device_t *device,
 	  assert(ret == CCI_SUCCESS);
 
 	  /* handle connect accepted */
-	  while ((ret = cci_get_event(*endpoint, &event)) == -EAGAIN);
+	  while ((ret = cci_get_event(*endpoint, &event)) == CCI_EAGAIN);
 	  assert(ret == CCI_SUCCESS);
 	  printf("got event type %d\n", event->type);
-	  if (event->type == CCI_EVENT_CONNECT_ACCEPTED) {
-		  cconn = event->accepted.connection;
-		  printf("got conn %p attr %d context %p mss %d\n",
-			 cconn, cconn->attribute, cconn->context, cconn->max_send_size);
-		  assert(cconn->endpoint == *endpoint);
-		  assert(cconn->context == (void*)0xdeadbeef);
-		  assert(event->accepted.context == (void*)0xdeadbeef);
-	  }
+	  assert(event->type == CCI_EVENT_CONNECT_ACCEPTED);
+	  cconn = event->accepted.connection;
+	  printf("got conn %p attr %d context %p mss %d\n",
+		 cconn, cconn->attribute, cconn->context, cconn->max_send_size);
+	  assert(cconn->endpoint == *endpoint);
+	  assert(cconn->context == (void*)0xdeadbeef);
+	  assert(event->accepted.context == (void*)0xdeadbeef);
 	  ret = cci_return_event(event);
 	  assert(ret == CCI_SUCCESS);
 
@@ -483,26 +483,26 @@ static int eth_create_endpoint(cci_device_t *device,
 	  printf("send 11 bytes\n");
 
 	  /* handle msg */
-	  while ((ret = cci_get_event(*endpoint, &event)) == -EAGAIN);
+	  while ((ret = cci_get_event(*endpoint, &event)) == CCI_EAGAIN);
 	  assert(ret == CCI_SUCCESS);
 	  printf("got event type %d\n", event->type);
-	  if (event->type == CCI_EVENT_RECV) {
-		  printf("got msg len %d data %s\n",
-			 event->recv.len, event->recv.ptr);
-		  assert(event->recv.connection == sconn);
-	  }
+	  assert(event->type == CCI_EVENT_RECV);
+	  assert(event->recv.len == 11);
+	  assert(!strcmp(event->recv.ptr, "bye world!"));
+	  printf("got msg len %d data %s\n",
+		 event->recv.len, event->recv.ptr);
+	  assert(event->recv.connection == sconn);
 	  ret = cci_return_event(event);
 	  assert(ret == CCI_SUCCESS);
 
 	  /* handle send completion */
-	  while ((ret = cci_get_event(*endpoint, &event)) == -EAGAIN);
+	  while ((ret = cci_get_event(*endpoint, &event)) == CCI_EAGAIN);
 	  assert(ret == CCI_SUCCESS);
 	  printf("got event type %d\n", event->type);
-	  if (event->type == CCI_EVENT_SEND) {
-		  printf("got send completion context %llx\n", event->send.context);
-		  assert(event->send.connection == cconn);
-		  assert(event->send.context == (void*)0x012345678);
-	  }
+	  assert(event->type == CCI_EVENT_SEND);
+	  printf("got send completion context %llx\n", event->send.context);
+	  assert(event->send.connection == cconn);
+	  assert(event->send.context == (void*)0x012345678);
 	  ret = cci_return_event(event);
 	  assert(ret == CCI_SUCCESS);
 
