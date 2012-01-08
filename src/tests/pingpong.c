@@ -315,7 +315,7 @@ do_server()
         cci_event_t *event;
 
         ret = cci_get_event(endpoint, &event);
-        if (ret == 0 && event) {
+        if (ret == CCI_SUCCESS) {
             int len;
 
 	    if (accept) {
