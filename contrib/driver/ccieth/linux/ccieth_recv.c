@@ -133,6 +133,91 @@ out:
 	return err;
 }
 
+static int
+ccieth__recv_connect_accept(struct ccieth_endpoint *ep, 
+			    struct sk_buff *skb,
+			    struct ccieth_pkt_header_connect_accept *hdr)
+{
+	struct ccieth_endpoint_event *event;
+	struct ccieth_connection *conn;
+	__u32 src_conn_id;
+	__u32 src_ep_id;
+	__u32 dst_conn_id;
+	__u32 dst_ep_id;
+	__u32 max_send_size;
+	int err;
+
+	printk("processing queued connect accept skb %p\n", skb);
+
+	src_conn_id = ntohl(hdr->src_conn_id);
+	src_ep_id = ntohl(hdr->src_ep_id);
+	dst_conn_id = ntohl(hdr->dst_conn_id);
+	dst_ep_id = ntohl(hdr->dst_ep_id);
+	max_send_size = ntohl(hdr->max_send_size);
+
+	printk("got conn accept from eid %d conn id %d to %d %d\n",
+	       src_ep_id, src_conn_id, dst_ep_id, dst_conn_id);
+
+	rcu_read_lock();
+
+	/* get an event */
+	spin_lock_bh(&ep->free_event_list_lock);
+	if (list_empty(&ep->free_event_list)) {
+		err = -ENOMEM;
+		spin_unlock_bh(&ep->free_event_list_lock);
+		printk("ccieth: no event slot for connect accepted\n");
+		goto out_with_rculock;
+	}
+	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
+	list_del(&event->list);
+	spin_unlock_bh(&ep->free_event_list_lock);
+
+	/* setup the event */
+	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_ACCEPTED;
+	event->event.connect_accepted.conn_id = dst_conn_id;
+
+	/* find the connection and update it */
+	conn = idr_find(&ep->connection_idr, dst_conn_id);
+	if (!conn)
+                goto out_with_event;
+
+	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REQUESTED, CCIETH_CONNECTION_READY)
+	    != CCIETH_CONNECTION_REQUESTED)
+		goto out_with_conn;
+
+	/* destroy timedout event timer */
+	del_timer_sync(&conn->timer);
+
+	/* setup connection */
+	conn->dest_id = src_conn_id;
+	conn->max_send_size = max_send_size;
+
+	/* finalize and notify the event */
+	event->event.connect_accepted.attribute = conn->attribute;
+	event->event.connect_accepted.max_send_size = max_send_size;
+	event->event.connect_accepted.user_conn_id = conn->user_conn_id;
+
+	spin_lock_bh(&ep->event_list_lock);
+	list_add_tail(&event->list, &ep->event_list);
+	spin_unlock_bh(&ep->event_list_lock);
+
+	rcu_read_unlock();
+
+	dev_kfree_skb(skb);
+	return 0;
+
+out_with_conn:
+	/* nothing */
+out_with_event:
+	spin_lock_bh(&ep->free_event_list_lock);
+	list_add_tail(&event->list, &ep->free_event_list);
+	spin_unlock_bh(&ep->free_event_list_lock);
+out_with_rculock:
+	rcu_read_unlock();
+	dev_kfree_skb(skb);
+	return err;
+}
+
 void
 ccieth_deferred_recv_workfunc(struct work_struct *work)
 {
@@ -164,6 +249,17 @@ ccieth_deferred_recv_workfunc(struct work_struct *work)
 			err = ccieth__recv_connect_request(ep, skb, hdr);
 			break;
 		}
+		case CCIETH_PKT_CONNECT_ACCEPT: {
+			struct ccieth_pkt_header_connect_accept _hdr, *hdr;
+			/* copy the entire header */
+			hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
+			if (!hdr) {
+				dev_kfree_skb(skb);
+				continue;
+			}
+			err = ccieth__recv_connect_accept(ep, skb, hdr);
+			break;
+		}			
 		default:
 			BUG();
 		}
@@ -203,101 +299,6 @@ ccieth_defer_recv(struct net_device *ifp, struct sk_buff *skb)
 	rcu_read_unlock();
 	return 0;
 
-out_with_rculock:
-	rcu_read_unlock();
-out:
-	dev_kfree_skb(skb);
-	return err;
-}
-
-static int
-ccieth_recv_connect_accept(struct net_device *ifp, struct sk_buff *skb)
-{
-	struct ccieth_pkt_header_connect_accept _hdr, *hdr;
-	struct ccieth_endpoint *ep;
-	struct ccieth_endpoint_event *event;
-	struct ccieth_connection *conn;
-	__u32 src_conn_id;
-	__u32 src_ep_id;
-	__u32 dst_conn_id;
-	__u32 dst_ep_id;
-	__u32 max_send_size;
-	int err;
-
-	/* copy the entire header */
-	err = -EINVAL;
-	hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
-	if (!hdr)
-		goto out;
-
-	src_conn_id = ntohl(hdr->src_conn_id);
-	src_ep_id = ntohl(hdr->src_ep_id);
-	dst_conn_id = ntohl(hdr->dst_conn_id);
-	dst_ep_id = ntohl(hdr->dst_ep_id);
-	max_send_size = ntohl(hdr->max_send_size);
-
-	printk("got conn accept from eid %d conn id %d to %d %d\n",
-	       src_ep_id, src_conn_id, dst_ep_id, dst_conn_id);
-
-	rcu_read_lock();
-
-	/* find endpoint and check that it's attached to this ifp */
-	ep = idr_find(&ccieth_ep_idr, dst_ep_id);
-	if (!ep || ep->ifp != ifp)
-		goto out_with_rculock;
-
-	/* get an event */
-	spin_lock_bh(&ep->free_event_list_lock);
-	if (list_empty(&ep->free_event_list)) {
-		err = -ENOMEM;
-		spin_unlock_bh(&ep->free_event_list_lock);
-		printk("ccieth: no event slot for connect accepted\n");
-		goto out_with_rculock;
-	}
-	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
-	list_del(&event->list);
-	spin_unlock_bh(&ep->free_event_list_lock);
-
-	/* setup the event */
-	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_ACCEPTED;
-	event->event.connect_accepted.conn_id = dst_conn_id;
-
-	/* find the connection and update it */
-	conn = idr_find(&ep->connection_idr, dst_conn_id);
-	if (!conn)
-                goto out_with_event;
-
-	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REQUESTED, CCIETH_CONNECTION_READY)
-	    != CCIETH_CONNECTION_REQUESTED)
-		goto out_with_conn;
-
-	/* FIXME */
-	del_timer_sync(&conn->timer);
-
-	/* setup connection */
-	conn->dest_id = src_conn_id;
-	conn->max_send_size = max_send_size;
-
-	/* finalize and notify the event */
-	event->event.connect_accepted.attribute = conn->attribute;
-	event->event.connect_accepted.max_send_size = max_send_size;
-	event->event.connect_accepted.user_conn_id = conn->user_conn_id;
-
-	spin_lock_bh(&ep->event_list_lock);
-	list_add_tail(&event->list, &ep->event_list);
-	spin_unlock_bh(&ep->event_list_lock);
-
-	rcu_read_unlock();
-
-	dev_kfree_skb(skb);
-	return 0;
-
-out_with_conn:
-	/* nothing */
-out_with_event:
-	spin_lock_bh(&ep->free_event_list_lock);
-	list_add_tail(&event->list, &ep->free_event_list);
-	spin_unlock_bh(&ep->free_event_list_lock);
 out_with_rculock:
 	rcu_read_unlock();
 out:
@@ -412,9 +413,8 @@ ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 
 	switch (*typep) {
 	case CCIETH_PKT_CONNECT_REQUEST:
-		return ccieth_defer_recv(ifp, skb);
 	case CCIETH_PKT_CONNECT_ACCEPT:
-		return ccieth_recv_connect_accept(ifp, skb);
+		return ccieth_defer_recv(ifp, skb);
 	case CCIETH_PKT_MSG:
 		return ccieth_recv_msg(ifp, skb);
 	default:
