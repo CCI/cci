@@ -104,8 +104,8 @@ retry:
 	conn->ep = ep;
 	conn->status = CCIETH_CONNECTION_RECEIVED;
 	memcpy(&conn->dest_addr, &hdr->eth.h_source, 6);
-	conn->dest_eid = ntohl(hdr->src_ep_id);
-	conn->dest_id = ntohl(hdr->src_conn_id);
+	conn->dest_eid = src_ep_id;
+	conn->dest_id = src_conn_id;
 	conn->id = id;
 	idr_replace(&ep->connection_idr, conn, id);
 
