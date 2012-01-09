@@ -29,7 +29,9 @@ union ccieth_pkt_header {
 		__be32 src_conn_id;
 		__be32 max_send_size;
 		/* 32 */
+		__be32 req_seqnum;
 		__be32 data_len;
+		/* 40 */
 		__u8 data[0];
 	} connect_request;
 	struct ccieth_pkt_header_connect_accept {
@@ -44,6 +46,8 @@ union ccieth_pkt_header {
 		__be32 src_conn_id;
 		/* 32 */
 		__be32 max_send_size;
+		__be32 req_seqnum;
+		/* 40 */
 	} connect_accept;
 	struct ccieth_pkt_header_msg {
 		struct ethhdr eth;

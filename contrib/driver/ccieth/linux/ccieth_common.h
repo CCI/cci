@@ -37,6 +37,7 @@ struct ccieth_endpoint {
 	/* modified by ioctl and deferred network handler, does not need _bh() */
 	struct idr connection_idr;
 	spinlock_t connection_idr_lock;
+	atomic_t connection_req_seqnum;
 
 	struct rcu_head release_ifp_rcu_head;
 	struct net_device *release_ifp;
@@ -88,6 +89,7 @@ struct ccieth_connection {
 	struct ccieth_endpoint *ep;
 
 	__u8 attribute;
+	__u32 req_seqnum;
 	__u32 max_send_size;
 	__u64 user_conn_id;
 

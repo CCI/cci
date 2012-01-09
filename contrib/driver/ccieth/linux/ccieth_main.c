@@ -146,6 +146,7 @@ ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *a
 
 	idr_init(&ep->connection_idr);
 	spin_lock_init(&ep->connection_idr_lock);
+	atomic_set(&ep->connection_req_seqnum, jiffies); /* a bit of random just for fun */
 
 	skb_queue_head_init(&ep->deferred_recv_queue);
 	INIT_WORK(&ep->deferred_recv_work, ccieth_deferred_recv_workfunc);
@@ -292,6 +293,7 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	struct ccieth_pkt_header_connect_request *hdr;
 	struct ccieth_connection *conn;
 	unsigned long now, next;
+	__u32 req_seqnum = atomic_inc_return(&ep->connection_req_seqnum);
 	size_t skblen;
 	int id;
 	int err;
@@ -344,6 +346,7 @@ retry:
 	hdr->attribute = arg->attribute;
 	hdr->src_ep_id = htonl(ep->id);
 	hdr->max_send_size = htonl(ep->max_send_size);
+	hdr->req_seqnum = htonl(req_seqnum);
 	hdr->data_len = htonl(arg->data_len);
 	err = copy_from_user(&hdr->data, (const void __user *)(uintptr_t) arg->data_ptr, arg->data_len);
 	if (err) {
@@ -353,6 +356,7 @@ retry:
 
 	/* initialize the connection */
 	conn->ep = ep;
+	conn->req_seqnum = req_seqnum;
 	conn->status = CCIETH_CONNECTION_REQUESTED;
 	memcpy(&conn->dest_addr, &arg->dest_addr, 6);
 	conn->dest_eid = arg->dest_eid;
@@ -468,6 +472,7 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	hdr->src_ep_id = htonl(ep->id);
 	hdr->src_conn_id = htonl(conn->id);
 	hdr->max_send_size = htonl(conn->max_send_size);
+	hdr->req_seqnum = htonl(conn->req_seqnum);
 
 	dev_queue_xmit(skb);
 

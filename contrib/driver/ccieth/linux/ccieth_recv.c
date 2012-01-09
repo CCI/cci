@@ -20,7 +20,8 @@ static int ccieth_recv_connect_idrforeach_cb(int id, void *p, void *data)
 	if (conn->status != CCIETH_CONNECTION_REQUESTED /* so that dest_id is valid */
 	    && !memcmp(&conn->dest_addr, &new->dest_addr, 6)
 	    && conn->dest_eid == new->dest_eid
-	    && conn->dest_id == new->dest_id)
+	    && conn->dest_id == new->dest_id
+	    && conn->req_seqnum == new->req_seqnum)
 		return -EBUSY;
 	return 0;
 }
@@ -36,6 +37,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	__u32 src_conn_id;
 	__u32 data_len;
 	__u32 src_max_send_size;
+	__u32 req_seqnum;
 	int id;
 	int err;
 
@@ -45,9 +47,10 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	src_conn_id = ntohl(hdr->src_conn_id);
 	data_len = ntohl(hdr->data_len);
 	src_max_send_size = ntohl(hdr->max_send_size);
+	req_seqnum = ntohl(hdr->req_seqnum);
 
-	printk("got conn request from eid %d conn id %d\n",
-	       src_ep_id, src_conn_id);
+	printk("got conn request from eid %d conn id %d seqnum %d\n",
+	       src_ep_id, src_conn_id, req_seqnum);
 
 	/* check msg length */
 	err = -EINVAL;
@@ -78,6 +81,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	memcpy(&conn->dest_addr, &hdr->eth.h_source, 6);
 	conn->dest_eid = src_ep_id;
 	conn->dest_id = src_conn_id;
+	conn->req_seqnum = req_seqnum;
 
 	/* get a connection id (only reserve it for now) */
 retry:
@@ -146,6 +150,7 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	__u32 dst_conn_id;
 	__u32 dst_ep_id;
 	__u32 max_send_size;
+	__u32 req_seqnum;
 	int err;
 
 	printk("processing queued connect accept skb %p\n", skb);
@@ -155,9 +160,10 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	dst_conn_id = ntohl(hdr->dst_conn_id);
 	dst_ep_id = ntohl(hdr->dst_ep_id);
 	max_send_size = ntohl(hdr->max_send_size);
+	req_seqnum = ntohl(hdr->req_seqnum);
 
-	printk("got conn accept from eid %d conn id %d to %d %d\n",
-	       src_ep_id, src_conn_id, dst_ep_id, dst_conn_id);
+	printk("got conn accept from eid %d conn id %d seqnum %d to %d %d\n",
+	       src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
 
 	rcu_read_lock();
 
@@ -179,7 +185,7 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 
 	/* find the connection and update it */
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
-	if (!conn)
+	if (!conn || conn->req_seqnum != req_seqnum)
                 goto out_with_event;
 
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REQUESTED, CCIETH_CONNECTION_READY)
