@@ -71,6 +71,13 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	if (!conn)
 		goto out_with_event;
 
+	/* setup the connection so that we can check for duplicates before inserting */
+	conn->ep = ep;
+	conn->status = CCIETH_CONNECTION_RECEIVED;
+	memcpy(&conn->dest_addr, &hdr->eth.h_source, 6);
+	conn->dest_eid = src_ep_id;
+	conn->dest_id = src_conn_id;
+
 	/* get a connection id (only reserve it for now) */
 retry:
 	spin_lock(&ep->connection_idr_lock);
@@ -98,14 +105,7 @@ retry:
 	if (err < 0)
 		goto out_with_conn_id;
 
-	/* things cannot fail anymore now */
-
-	/* setup the connection */
-	conn->ep = ep;
-	conn->status = CCIETH_CONNECTION_RECEIVED;
-	memcpy(&conn->dest_addr, &hdr->eth.h_source, 6);
-	conn->dest_eid = src_ep_id;
-	conn->dest_id = src_conn_id;
+	/* things cannot fail anymore now, insert the connection for real */
 	conn->id = id;
 	idr_replace(&ep->connection_idr, conn, id);
 
