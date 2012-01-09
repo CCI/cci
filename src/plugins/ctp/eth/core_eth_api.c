@@ -440,7 +440,7 @@ static int eth_create_endpoint(cci_device_t *device,
 	  struct timeval tv;
 
 	  /* connect */
-	  tv.tv_sec = 1;
+	  tv.tv_sec = 3; /* so that we get some resends */
 	  tv.tv_usec = 0;
 	  ret = cci_connect(*endpoint, name, "hello world!", 13, 123, (void*)0xdeadbeef, 0, &tv);
 	  assert(ret == CCI_SUCCESS);

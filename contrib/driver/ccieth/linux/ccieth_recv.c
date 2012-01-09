@@ -70,6 +70,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out_with_event;
+	conn->skb = NULL;
 
 	/* setup the connection so that we can check for duplicates before inserting */
 	conn->ep = ep;

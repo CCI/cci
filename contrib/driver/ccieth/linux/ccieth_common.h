@@ -10,6 +10,7 @@
 
 #include <linux/idr.h>
 #include <linux/spinlock.h>
+#include <linux/skbuff.h>
 #include <linux/list.h>
 #include <linux/kref.h>
 #include <linux/workqueue.h>
@@ -79,6 +80,8 @@ enum ccieth_connection_status {
 	CCIETH_CONNECTION_REJECTED,  /* reject sent and not acked yet */
 };
 
+#define CCIETH_CONNECT_RESEND_DELAY (HZ)
+
 struct ccieth_connection {
 	int id; /* always valid */ /* FIXME keep in network order too? */
 	enum ccieth_connection_status status;
@@ -88,7 +91,9 @@ struct ccieth_connection {
 	__u32 max_send_size;
 	__u64 user_conn_id;
 
+	unsigned long expire; /* in jiffies */
 	struct timer_list timer;
+	struct sk_buff *skb;
 
 	/* dest fields are valid when status RECEIVED, READY or REJECTED */
 	/* FIXME: store in network order? */

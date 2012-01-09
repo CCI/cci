@@ -30,7 +30,7 @@ ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 {
         struct ccieth_connection *conn = container_of(rcu_head, struct ccieth_connection, destroy_rcu_head);
 	printk("destroying connection %p in rcu call\n", conn);
-	/* FIXME use kfree_rcu if we don't do anything else here */
+	kfree_skb(conn->skb);
 	kfree(conn);
 }
 
@@ -221,6 +221,38 @@ static void ccieth_connect_timer_hdlr(unsigned long data)
 	struct ccieth_endpoint *ep = conn->ep;
 	struct ccieth_endpoint_event *event;
 	enum ccieth_connection_status status = conn->status;
+	struct sk_buff *skb;
+	unsigned long now = jiffies;
+
+	if (status != CCIETH_CONNECTION_REQUESTED)
+		return;
+
+	if (now < conn->expire)  {
+		/* resend request */
+		unsigned long next;
+		next = now + CCIETH_CONNECT_RESEND_DELAY;
+		if (next > conn->expire)
+			next = conn->expire;
+		mod_timer(&conn->timer, next);
+
+		skb = skb_clone(conn->skb, GFP_ATOMIC);
+		if (skb) {
+			struct net_device *ifp;
+			rcu_read_lock();
+			/* is the interface still available? */
+			ifp = rcu_dereference(ep->ifp);
+			if (ifp) {
+				skb->dev = ifp;
+				dev_queue_xmit(skb);
+			} else {
+				kfree_skb(skb);
+			}
+			rcu_read_unlock();
+		}
+		return;
+	}
+
+	/* connect timeout */
 
 	if (cmpxchg(&conn->status, status, CCIETH_CONNECTION_CLOSING) != status)
 		/* somebody else is closing it */
@@ -242,6 +274,7 @@ static void ccieth_connect_timer_hdlr(unsigned long data)
 	idr_remove(&ep->connection_idr, conn->id);
 	spin_unlock(&ep->connection_idr_lock);
 
+	printk("delivering connection %p timeout\n", conn);
 	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_TIMEDOUT;
 	event->event.connect_timedout.user_conn_id = conn->user_conn_id;
 	spin_lock_bh(&ep->event_list_lock);
@@ -254,10 +287,11 @@ static void ccieth_connect_timer_hdlr(unsigned long data)
 static int
 ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_request *arg)
 {
-	struct sk_buff *skb;
+	struct sk_buff *skb, *skb2;
 	struct net_device *ifp;
 	struct ccieth_pkt_header_connect_request *hdr;
 	struct ccieth_connection *conn;
+	unsigned long now, next;
 	size_t skblen;
 	int id;
 	int err;
@@ -271,6 +305,8 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out;
+	conn->skb = NULL;
+
 	/* get a connection id (only reserve it) */
 retry:
 	spin_lock(&ep->connection_idr_lock);
@@ -326,30 +362,44 @@ retry:
 	idr_replace(&ep->connection_idr, conn, id);
 	hdr->src_conn_id = htonl(id);
 
-	rcu_read_lock();
-
-	/* is the interface still available? */
-	ifp = rcu_dereference(ep->ifp);
-	if (!ifp) {
-		err = -ENODEV;
-		goto out_with_rculock;
+	/* keep the current skb cached in the connection,
+	 * and try to send a clone. if we can't, we'll resend later.
+	 */
+	conn->skb = skb;
+	skb2 = skb_clone(skb, GFP_KERNEL);
+	if (skb2) {
+		rcu_read_lock();
+		/* is the interface still available? */
+		ifp = rcu_dereference(ep->ifp);
+		if (!ifp) {
+			err = -ENODEV;
+			goto out_with_rculock;
+		}
+		skb2->dev = ifp;
+		dev_queue_xmit(skb2);
+		rcu_read_unlock();
 	}
-	skb->dev = ifp;
-	dev_queue_xmit(skb);
 
-	rcu_read_unlock();
-
+	/* setup resend or timeout timer */
 	setup_timer(&conn->timer, ccieth_connect_timer_hdlr, (unsigned long) conn);
+	now = jiffies;
 	if (arg->timeout_sec != -1ULL || arg->timeout_usec != -1) {
 		__u64 msecs = arg->timeout_sec * 1000 + arg->timeout_usec / 1000;
-		mod_timer(&conn->timer, jiffies + msecs_to_jiffies(msecs));
+		conn->expire = now + msecs_to_jiffies(msecs);
+	} else {
+		conn->expire = -1; /* that's MAX_LONG now */
 	}
+	next = now + CCIETH_CONNECT_RESEND_DELAY;
+	if (next > conn->expire)
+		next = conn->expire;
+	mod_timer(&conn->timer, next);
 
 	arg->conn_id = conn->id;
 	return 0;
 
 out_with_rculock:
 	rcu_read_unlock();
+	kfree_skb(skb2);
 out_with_skb:
 	kfree_skb(skb);
 out_with_conn_id:
