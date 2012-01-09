@@ -75,6 +75,10 @@ struct ccieth_ioctl_get_event {
 			__u64 user_conn_id;
 			/* 16 */
 		} connect_timedout;
+		struct {
+			__u64 user_conn_id;
+			/* 16 */
+		} connect_rejected;
 	};
 };
 #define CCIETH_IOCTL_GET_EVENT _IOW(CCIETH_IOCTL_MAGIC, 0x3, struct ccieth_ioctl_get_event)
@@ -116,6 +120,11 @@ struct ccieth_ioctl_connect_accept {
 };
 #define CCIETH_IOCTL_CONNECT_ACCEPT _IOR(CCIETH_IOCTL_MAGIC, 0x6, struct ccieth_ioctl_connect_accept)
 
+struct ccieth_ioctl_connect_reject {
+	__u32 conn_id;
+};
+#define CCIETH_IOCTL_CONNECT_REJECT _IOR(CCIETH_IOCTL_MAGIC, 0x7, struct ccieth_ioctl_connect_reject)
+
 struct ccieth_ioctl_msg {
 	__u32 conn_id;
 	__u32 msg_len;
@@ -126,13 +135,14 @@ struct ccieth_ioctl_msg {
 	/* 24 */
 	__u32 flags;
 };
-#define CCIETH_IOCTL_MSG _IOR(CCIETH_IOCTL_MAGIC, 0x7, struct ccieth_ioctl_msg)
+#define CCIETH_IOCTL_MSG _IOR(CCIETH_IOCTL_MAGIC, 0x8, struct ccieth_ioctl_msg)
 
 /* FIXME: enforce matching with enum cci_event_type */
 #define CCIETH_IOCTL_EVENT_SEND 1
 #define CCIETH_IOCTL_EVENT_RECV 2
 #define CCIETH_IOCTL_EVENT_CONNECT_ACCEPTED 3
 #define CCIETH_IOCTL_EVENT_CONNECT_TIMEDOUT 4
+#define CCIETH_IOCTL_EVENT_CONNECT_REJECTED 5
 #define CCIETH_IOCTL_EVENT_CONNECT_REQUEST 6
 #define CCIETH_IOCTL_EVENT_DEVICE_FAILED 8
 

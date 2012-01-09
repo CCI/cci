@@ -225,6 +225,84 @@ out_with_rculock:
 	return err;
 }
 
+static int
+ccieth__recv_connect_reject(struct ccieth_endpoint *ep, 
+			    struct sk_buff *skb,
+			    struct ccieth_pkt_header_connect_reject *hdr)
+{
+	struct ccieth_endpoint_event *event;
+	struct ccieth_connection *conn;
+	__u32 src_conn_id;
+	__u32 src_ep_id;
+	__u32 dst_conn_id;
+	__u32 dst_ep_id;
+	__u32 req_seqnum;
+	int err;
+
+	printk("processing queued connect reject skb %p\n", skb);
+
+	src_conn_id = ntohl(hdr->src_conn_id);
+	src_ep_id = ntohl(hdr->src_ep_id);
+	dst_conn_id = ntohl(hdr->dst_conn_id);
+	dst_ep_id = ntohl(hdr->dst_ep_id);
+	req_seqnum = ntohl(hdr->req_seqnum);
+
+	printk("got conn reject from eid %d conn id %d seqnum %d to %d %d\n",
+	       src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
+
+	/* get an event */
+	spin_lock_bh(&ep->free_event_list_lock);
+	if (list_empty(&ep->free_event_list)) {
+		err = -ENOMEM;
+		spin_unlock_bh(&ep->free_event_list_lock);
+		printk("ccieth: no event slot for connect reject\n");
+		goto out;
+	}
+	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
+	list_del(&event->list);
+	spin_unlock_bh(&ep->free_event_list_lock);
+
+	/* find the connection and remove it */
+	spin_lock(&ep->connection_idr_lock);
+	conn = idr_find(&ep->connection_idr, dst_conn_id);
+	if (!conn || conn->req_seqnum != req_seqnum) {
+		spin_unlock(&ep->connection_idr_lock);
+		goto out_with_event;
+	}
+	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REQUESTED, CCIETH_CONNECTION_CLOSING)
+	    != CCIETH_CONNECTION_REQUESTED) {
+		spin_unlock(&ep->connection_idr_lock);
+		goto out_with_conn;
+	}
+	idr_remove(&ep->connection_idr, dst_conn_id);
+	spin_unlock(&ep->connection_idr_lock);
+
+	/* setup the event */
+	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_REJECTED;
+	event->event.connect_rejected.user_conn_id = conn->user_conn_id;
+
+	/* destroy timedout event timer and connection */
+	del_timer_sync(&conn->timer);
+	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
+
+	spin_lock_bh(&ep->event_list_lock);
+	list_add_tail(&event->list, &ep->event_list);
+	spin_unlock_bh(&ep->event_list_lock);
+
+	dev_kfree_skb(skb);
+	return 0;
+
+out_with_conn:
+	/* nothing */
+out_with_event:
+	spin_lock_bh(&ep->free_event_list_lock);
+	list_add_tail(&event->list, &ep->free_event_list);
+	spin_unlock_bh(&ep->free_event_list_lock);
+out:
+	dev_kfree_skb(skb);
+	return err;
+}
+
 void
 ccieth_deferred_recv_workfunc(struct work_struct *work)
 {
@@ -266,7 +344,18 @@ ccieth_deferred_recv_workfunc(struct work_struct *work)
 			}
 			err = ccieth__recv_connect_accept(ep, skb, hdr);
 			break;
-		}			
+		}
+		case CCIETH_PKT_CONNECT_REJECT: {
+			struct ccieth_pkt_header_connect_reject _hdr, *hdr;
+			/* copy the entire header */
+			hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
+			if (!hdr) {
+				dev_kfree_skb(skb);
+				continue;
+			}
+			err = ccieth__recv_connect_reject(ep, skb, hdr);
+			break;
+		}
 		default:
 			BUG();
 		}
@@ -421,6 +510,8 @@ ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 	switch (*typep) {
 	case CCIETH_PKT_CONNECT_REQUEST:
 	case CCIETH_PKT_CONNECT_ACCEPT:
+	case CCIETH_PKT_CONNECT_REJECT:
+		/* FIXME always ack REJECT */
 		return ccieth_defer_recv(ifp, skb);
 	case CCIETH_PKT_MSG:
 		return ccieth_recv_msg(ifp, skb);

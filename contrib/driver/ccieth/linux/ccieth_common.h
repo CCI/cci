@@ -118,6 +118,8 @@ extern struct idr ccieth_ep_idr;
 extern int ccieth_net_init(void);
 extern void ccieth_net_exit(void);
 
+extern void ccieth_destroy_connection_rcu(struct rcu_head *rcu_head);
+
 extern void ccieth_deferred_recv_workfunc(struct work_struct *work);
 
 static inline __u32

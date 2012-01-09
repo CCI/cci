@@ -49,6 +49,21 @@ union ccieth_pkt_header {
 		__be32 req_seqnum;
 		/* 40 */
 	} connect_accept;
+	struct ccieth_pkt_header_connect_reject {
+		struct ethhdr eth;
+		__u8 type;
+		__u8 pad1;
+		/* 16 */
+		__be32 dst_ep_id;
+		__be32 dst_conn_id;
+		/* 24 */
+		__be32 src_ep_id; /* not really required? */
+		__be32 src_conn_id;
+		/* 32 */
+		__be32 req_seqnum;
+		__be32 pad2;
+		/* 40 */
+	} connect_reject;
 	struct ccieth_pkt_header_msg {
 		struct ethhdr eth;
 		__u8 type;
@@ -65,6 +80,7 @@ union ccieth_pkt_header {
 enum ccieth_pkt_type {
 	CCIETH_PKT_CONNECT_REQUEST,
 	CCIETH_PKT_CONNECT_ACCEPT,
+	CCIETH_PKT_CONNECT_REJECT,
 	CCIETH_PKT_MSG,
 };
 

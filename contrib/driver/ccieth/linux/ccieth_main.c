@@ -25,7 +25,7 @@
 struct idr ccieth_ep_idr;
 static spinlock_t ccieth_ep_idr_lock;
 
-static void
+void
 ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 {
         struct ccieth_connection *conn = container_of(rcu_head, struct ccieth_connection, destroy_rcu_head);
@@ -499,6 +499,75 @@ out:
 }
 
 static int
+ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_reject *arg)
+{
+	struct sk_buff *skb;
+	struct net_device *ifp;
+	struct ccieth_pkt_header_connect_reject *hdr;
+	struct ccieth_connection *conn;
+	size_t skblen;
+	int err;
+
+	/* allocate and initialize the skb */
+	skblen = sizeof(*hdr);
+	if (skblen < ETH_ZLEN)
+		skblen = ETH_ZLEN;
+	err = -ENOMEM;
+        skb = alloc_skb(skblen, GFP_KERNEL);
+	if (!skb)
+		goto out;
+	skb_reset_mac_header(skb);
+	skb_reset_network_header(skb);
+	skb->protocol = __constant_htons(ETH_P_CCI);
+	skb_put(skb, skblen);
+
+	rcu_read_lock();
+
+	/* is the interface still available? */
+	ifp = rcu_dereference(ep->ifp);
+	if (!ifp) {
+		err = -ENODEV;
+		goto out_with_rculock;
+	}
+	skb->dev = ifp;
+
+	/* update the connection now that we can't fail anywhere else */
+	err = -EINVAL;
+	conn = idr_find(&ep->connection_idr, arg->conn_id);
+	if (!conn)
+		goto out_with_rculock;
+
+	if (cmpxchg(&conn->status, CCIETH_CONNECTION_RECEIVED, CCIETH_CONNECTION_REJECTED)
+	    != CCIETH_CONNECTION_RECEIVED)
+		goto out_with_rculock;
+
+	/* fill headers */
+	hdr = (struct ccieth_pkt_header_connect_reject *) skb_mac_header(skb);
+	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
+	memcpy(&hdr->eth.h_source, ep->addr, 6);
+	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
+	hdr->type = CCIETH_PKT_CONNECT_REJECT;
+	hdr->dst_ep_id = htonl(conn->dest_eid);
+	hdr->dst_conn_id = htonl(conn->dest_id);
+	hdr->src_ep_id = htonl(ep->id);
+	hdr->src_conn_id = htonl(conn->id);
+	hdr->req_seqnum = htonl(conn->req_seqnum);
+
+	/* FIXME: cache and resend until acked */
+
+	dev_queue_xmit(skb);
+
+	rcu_read_unlock();
+	return 0;
+
+out_with_rculock:
+	kfree_skb(skb);
+	rcu_read_unlock();
+out:
+	return err;
+}
+
+static int
 ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 {
 	struct sk_buff *skb;
@@ -766,6 +835,24 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 			return -EFAULT;
 
 		ret = ccieth_connect_accept(ep, &ac_arg);
+		if (ret < 0)
+			return ret;
+
+		return 0;
+	}
+
+	case CCIETH_IOCTL_CONNECT_REJECT: {
+		struct ccieth_ioctl_connect_reject rj_arg;
+		struct ccieth_endpoint *ep = file->private_data;
+
+		if (!ep)
+			return -EINVAL;
+
+		ret = copy_from_user(&rj_arg, (__user void *)arg, sizeof(rj_arg));
+		if (ret)
+			return -EFAULT;
+
+		ret = ccieth_connect_reject(ep, &rj_arg);
 		if (ret < 0)
 			return ret;
 
