@@ -154,6 +154,8 @@ ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *a
 		list_add_tail(&event->list, &ep->free_event_list);
 	}
 
+	ep->embedded_event.destructor = NULL;
+
 	idr_init(&ep->connection_idr);
 	spin_lock_init(&ep->connection_idr_lock);
 	atomic_set(&ep->connection_req_seqnum, jiffies); /* a bit of random just for fun */

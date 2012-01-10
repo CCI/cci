@@ -19,6 +19,14 @@
 
 #define CCIETH_EVENT_SLOT_NR 64
 
+struct ccieth_endpoint;
+
+struct ccieth_endpoint_event {
+	struct list_head list;
+	struct ccieth_ioctl_get_event event;
+	void (*destructor)(struct ccieth_endpoint *, struct ccieth_endpoint_event *);
+};
+
 struct ccieth_endpoint {
 	struct net_device __rcu *ifp;
 	__u8 addr[6];
@@ -41,12 +49,8 @@ struct ccieth_endpoint {
 
 	struct rcu_head release_ifp_rcu_head;
 	struct net_device *release_ifp;
-};
 
-struct ccieth_endpoint_event {
-	struct list_head list;
-	struct ccieth_ioctl_get_event event;
-	void (*destructor)(struct ccieth_endpoint *, struct ccieth_endpoint_event *);
+	struct ccieth_endpoint_event embedded_event;
 };
 
 /* connection status automata:
