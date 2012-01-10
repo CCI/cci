@@ -753,6 +753,10 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 		free(_conn);
 		break;
 	}
+	case CCIETH_IOCTL_EVENT_DEVICE_FAILED:
+		event->type = CCI_EVENT_ENDPOINT_DEVICE_FAILED;
+		event->dev_failed.endpoint = endpoint;
+		break;
 	default:
 		printf("got invalid event type %d\n", ge->type);
 		goto out_with_event;

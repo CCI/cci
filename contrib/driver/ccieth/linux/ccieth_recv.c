@@ -472,6 +472,11 @@ static int ccieth_netdevice_notifier_idrforeach_cb(int id, void *p, void *_data)
 	if (cmpxchg(&ep->ifp, ifp, NULL) == ifp) {
 		ep->release_ifp = ifp;
 		call_rcu(&ep->release_ifp_rcu_head, ccieth_release_ifp_rcu);
+
+		ep->embedded_event.event.type = CCIETH_IOCTL_EVENT_DEVICE_FAILED;
+		spin_lock_bh(&ep->event_list_lock);
+		list_add_tail(&ep->embedded_event.list, &ep->event_list);
+		spin_unlock_bh(&ep->event_list_lock);
 	}
 
 	return 0;
