@@ -10,3 +10,4 @@ cci_core_verbs_la_SOURCES = \
         core_verbs.h \
         core_verbs_module.c \
         core_verbs_api.c
+cci_core_verbs_la_LIBADD = $(core_verbs_LIBS)
