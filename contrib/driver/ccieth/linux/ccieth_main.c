@@ -699,11 +699,9 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 			return -EAGAIN;
 
 		ret = copy_to_user((__user void *)arg, &event->event, sizeof(event->event));
-		if (ret)
-			return -EFAULT;
-
-		ret = copy_to_user(((__user void *) arg)+sizeof(struct ccieth_ioctl_get_event),
-				   event+1, event->event.data_length);
+		if (!ret)
+			ret = copy_to_user(((__user void *) arg)+sizeof(struct ccieth_ioctl_get_event),
+					   event+1, event->event.data_length);
 
 		if (event->destructor)
 			event->destructor(ep, event);
