@@ -46,6 +46,7 @@ struct ccieth_endpoint {
 struct ccieth_endpoint_event {
 	struct list_head list;
 	struct ccieth_ioctl_get_event event;
+	void (*destructor)(struct ccieth_endpoint *, struct ccieth_endpoint_event *);
 };
 
 /* connection status automata:

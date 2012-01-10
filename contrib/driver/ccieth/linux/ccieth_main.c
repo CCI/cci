@@ -103,6 +103,15 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 	kfree(ep);
 }
 
+static void
+ccieth_event_destructor_recycle(struct ccieth_endpoint *ep,
+				struct ccieth_endpoint_event *event)
+{
+	spin_lock_bh(&ep->free_event_list_lock);
+	list_add_tail(&event->list, &ep->free_event_list);
+	spin_unlock_bh(&ep->free_event_list_lock);
+}
+
 static int
 ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *arg)
 {
@@ -141,6 +150,7 @@ ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *a
 		event = kmalloc(sizeof(*event) + ep->max_send_size, GFP_KERNEL);
 		if (!event)
 			break;
+		event->destructor = ccieth_event_destructor_recycle;
 		list_add_tail(&event->list, &ep->free_event_list);
 	}
 
@@ -695,9 +705,8 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		ret = copy_to_user(((__user void *) arg)+sizeof(struct ccieth_ioctl_get_event),
 				   event+1, event->event.data_length);
 
-		spin_lock_bh(&ep->free_event_list_lock);
-		list_add_tail(&event->list, &ep->free_event_list);
-		spin_unlock_bh(&ep->free_event_list_lock);
+		if (event->destructor)
+			event->destructor(ep, event);
 
 		if (ret)
 			return -EFAULT;
