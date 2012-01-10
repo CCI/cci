@@ -989,16 +989,6 @@ verbs_destroy_endpoint(cci_endpoint_t *endpoint)
 	if (vep->tx_buf)
 		free(vep->tx_buf);
 
-#if 0
-	if (vep->cq) {
-		do {
-			ret = ibv_destroy_cq(vep->cq);
-			if (ret == EBUSY)
-				verbs_get_cq_event(ep);
-		} while (ret == EBUSY);
-	}
-#endif
-
 	if (vep->id_rc)
 		rdma_destroy_id(vep->id_rc);
 
@@ -1216,7 +1206,7 @@ verbs_reject(union cci_event *event)
 	header = VERBS_MSG_CONN_REPLY;
 	header |= (CCI_EVENT_CONNECT_REJECTED << 4);
 
-	ret = verbs_post_send(conn, (uintptr_t)tx, NULL, 0, header);
+	ret = verbs_post_send(conn, (uintptr_t) tx, NULL, 0, header);
 
 	/* wait for send to complete before destorying the ep and conn */
 
@@ -2143,15 +2133,12 @@ verbs_complete_send(cci__ep_t *ep, struct ibv_wc wc)
 	if (tx)
 		type = tx->msg_type;
 
-	//debug(CCI_DB_ALL, "%s: imm set %u", __func__, wc.wc_flags & IBV_WC_WITH_IMM);
 	switch (type) {
 	case VERBS_MSG_SEND:
 		ret = verbs_complete_send_msg(ep, wc);
 		break;
 	case VERBS_MSG_CONN_REQUEST:
-		break;
 	case VERBS_MSG_CONN_PAYLOAD:
-		break;
 	case VERBS_MSG_CONN_REPLY:
 		break;
 	default:
@@ -2219,23 +2206,14 @@ static int
 verbs_handle_send_completion(cci__ep_t *ep, struct ibv_wc wc)
 {
 	int			ret	= CCI_SUCCESS;
-	uint32_t		header	= 0;
-	verbs_msg_type_t	type	= 0;
 	verbs_tx_t		*tx	= (verbs_tx_t *) (uintptr_t) wc.wr_id;
 
 	CCI_ENTER;
 
-	//debug(CCI_DB_ALL, "%s: imm set %u", __func__, IBV_WC_WITH_IMM & wc.wc_flags);
-	header = ntohl(wc.imm_data);
-	type = header & 0xF; /* magic number */
-#if 0
-	debug(CCI_DB_ALL, "%s: completing %s send header 0x%x msg_type %s", __func__,
-		verbs_msg_type_str(type), header, tx ? verbs_msg_type_str(tx->msg_type): "null");
-#endif
-	if (tx)
-		type = tx->msg_type;
+	if (!tx)
+		goto out;
 
-	switch (type) {
+	switch (tx->msg_type) {
 	case VERBS_MSG_CONN_PAYLOAD:
 		debug(CCI_DB_CONN, "%s: send completed of conn_payload", __func__);
 		break;
@@ -2272,6 +2250,7 @@ verbs_handle_send_completion(cci__ep_t *ep, struct ibv_wc wc)
 		break;
 	}
 
+out:
 	CCI_EXIT;
 	return ret;
 }
@@ -2762,37 +2741,6 @@ verbs_conn_get_remote(verbs_rma_op_t *rma_op, uint64_t remote_handle)
 	CCI_EXIT;
 	return ret;
 }
-
-#if 0
-typedef union verbs_u64 {
-	uint64_t	ull;
-	uint32_t	ul[2];
-} verbs_u64_t;
-
-static uint64_t
-verbs_ntohll(uint64_t val)
-{
-	verbs_u64_t	net = { .ull = val };
-	verbs_u64_t	host;
-
-	host.ul[0] = ntohl(net.ul[1]);
-	host.ul[1] = ntohl(net.ul[0]);
-
-	return host.ull;
-}
-
-static uint64_t
-verbs_htonll(uint64_t val)
-{
-	verbs_u64_t	host = { .ull = val };
-	verbs_u64_t	net;
-
-	net.ul[0] = htonl(host.ul[1]);
-	net.ul[1] = htonl(host.ul[0]);
-
-	return net.ull;
-}
-#endif
 
 static int
 verbs_conn_request_rma_remote(verbs_rma_op_t *rma_op, uint64_t remote_handle)
