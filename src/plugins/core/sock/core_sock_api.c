@@ -2055,12 +2055,12 @@ static int sock_sendv(cci_connection_t *connection,
     if (!is_reliable) {
         tx->last_attempt_us = 0ULL;
         tx->timeout_us = 0ULL;
+        /* If the connection is not reliable, it cannot be a RMA operation */
         tx->rma_op = NULL;
     } else {
-        /* GV: not sure last_attempt_us and rma_op are correctly set here */
+        /* GV: not sure last_attempt_us is correctly set here */
         tx->last_attempt_us = 0ULL;
         tx->timeout_us = sock_get_usecs() + SOCK_EP_TX_TIMEOUT_SEC * 1000000;
-        tx->rma_op = NULL;
     }
 
     /* setup generic CCI event */
@@ -3149,7 +3149,6 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
                   from);
             /* simply ack this msg and cleanup */
             memset(&hdr, 0, sizeof(hdr));
-            /* GV Trying to fix the conn_ack issue */
             sock_pack_conn_ack(&hdr.header, sconn->peer_id);
             ret = sock_sendto(sep->sock, &hdr, len, sin);
             if (ret != len) {
@@ -3272,7 +3271,6 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
 
             /* simply ack this msg and cleanup */
             memset(&hdr, 0, sizeof(hdr));
-            /* GV try to fix the conn_ack issue */
             sock_pack_conn_ack(&hdr.header, sconn->peer_id);
             ret = sock_sendto(sep->sock, &hdr, len, sin);
             if (ret != len) {
@@ -3331,7 +3329,6 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
     tx->rma_op = NULL;
 
     hdr_r = tx->buffer;
-    /* GV trying to fix the conn_ack pb */
     sock_pack_conn_ack(&hdr_r->header, sconn->peer_id);
     sconn->last_ack_ts = sock_get_usecs();
     /* the conn_ack acks the server's seq in the timestamp */
@@ -3353,6 +3350,21 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
     return;
 }
 
+/*
+ * First of all, remember that on the server side, we always receive a conn_ack
+ * for both an accepted and a rejected connection (in the context of a reliable
+ * connection). Therefore, the conn_ack follows a conn_reply that was either
+ * a CCI_EVENT_CONNECT_ACCEPTED or a CCI_EVENT_CONNECT_REJECTED. When receiving
+ * the conn_reply, we quere the conn_ack, we check the "context" (accept or
+ * reject) and generate an event to the server application.
+ * Therefore, when receiving a CONN_ACK, we have to:
+ * - find the corresponding CONN_REPLY TX and "release" it (the TX is also used
+ *   to know the context of the conn_reply (i.e., accept or reject),
+ * - if the connection is accepted, return an event to the server app with the 
+ *   ID of the remote peer,
+ * - if the connection is rejected, return an event to the app specifying that
+ *   no ID has assigned to the remote peer.
+ */ 
 static void
 sock_handle_conn_ack(sock_conn_t *sconn,
                            sock_rx_t *rx,
@@ -3380,14 +3392,9 @@ sock_handle_conn_ack(sock_conn_t *sconn,
     dev = ep->dev;
     sdev = dev->priv;
 
-/* GV Trying to fix the conn_ack pb
-    assert(peer_id == sconn->peer_id);
-*/
-/* GV TO TEST
+    /* we check whether the connection ack match the id associated to the
+       connection */
     assert(peer_id == sconn->id);
-*/
-
-    /* TODO handle ack */
 
     hdr_r = rx->buffer;
     sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
@@ -3413,7 +3420,37 @@ sock_handle_conn_ack(sock_conn_t *sconn,
         debug((CCI_DB_MSG|CCI_DB_CONN), "received conn_ack and no matching tx "
               "(seq %u ack %u)", seq, ts); //FIXME
     } else {
+        sock_header_t *hdr  = NULL;
+        sock_msg_type_t type;
+        uint8_t a;
+        uint16_t b;
+        uint32_t c;
+        cci__evt_t *evt;
+        cci_event_t *event;
+
+        hdr = (sock_header_t *) tx->buffer;
+        sock_parse_header (hdr, &type, &a, &b, &c);
+        if (a == CCI_EVENT_CONNECT_ACCEPTED) {
+            /* We generate an event to the app for the notification
+               of the final connect accept */
+            evt = &rx->evt;
+            event = (cci_event_t *) &evt->event;
+            evt->event.type = CCI_EVENT_CONNECT_ACCEPTED; /* for now */
+            *((uint32_t *) &event->recv.len) = sizeof (uint32_t);
+            *((void **) &event->recv.ptr) = &(sconn->id);
+            event->recv.connection = &conn->connection;
+        } else {
+            /* We generate an event to the app for the notification
+               of the rejection */
+            evt = &rx->evt;
+            event = (cci_event_t *) &evt->event;
+            evt->event.type = CCI_EVENT_CONNECT_REJECTED; 
+            *((uint32_t *) &event->recv.len) = 0;
+            *((void **) &event->recv.ptr) = NULL;
+            event->recv.connection = &conn->connection;
+        }
         pthread_mutex_lock(&ep->lock);
+        TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
         TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
         pthread_mutex_unlock(&ep->lock);
     }

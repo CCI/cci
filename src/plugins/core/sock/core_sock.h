@@ -374,7 +374,7 @@ sock_pack_conn_request(sock_header_t *header, cci_conn_attribute_t attr,
    I use this ID when sending to this peer.
    The accepting peer will send his id back in the payload (length 4)
 
-   reply: CCI_EVENT_CONNECT_[SUCCESS|REJECTED]
+   reply: CCI_EVENT_CONNECT_[ACCEPTED|REJECTED]
    mss: max app payload (user header and user data)
  */
 
