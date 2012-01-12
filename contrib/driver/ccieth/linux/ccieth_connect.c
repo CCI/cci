@@ -492,9 +492,6 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	    != CCIETH_CONNECTION_REQUESTED)
 		goto out_with_conn;
 
-	/* destroy timedout event timer */
-	del_timer_sync(&conn->timer);
-
 	/* setup connection */
 	conn->dest_id = src_conn_id;
 	conn->max_send_size = max_send_size;
