@@ -6,4 +6,4 @@
 ccflags-y = -I@abs_top_builddir@
 
 obj-m += ccieth.o
-ccieth-y = ccieth_main.o ccieth_recv.o
+ccieth-y = ccieth_main.o ccieth_recv.o ccieth_connect.o

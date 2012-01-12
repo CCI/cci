@@ -39,8 +39,8 @@ struct ccieth_endpoint {
 	struct list_head free_event_list;
 	spinlock_t free_event_list_lock;
 
-	struct sk_buff_head deferred_recv_queue;
-	struct work_struct deferred_recv_work;
+	struct sk_buff_head deferred_connect_recv_queue;
+	struct work_struct deferred_connect_recv_work;
 
 	/* modified by ioctl and deferred network handler, does not need _bh() */
 	struct idr connection_idr;
@@ -118,9 +118,12 @@ extern struct idr ccieth_ep_idr;
 extern int ccieth_net_init(void);
 extern void ccieth_net_exit(void);
 
-extern void ccieth_destroy_connection_rcu(struct rcu_head *rcu_head);
-
-extern void ccieth_deferred_recv_workfunc(struct work_struct *work);
+extern int ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data);
+extern int ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_request *arg);
+extern int ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_accept *arg);
+extern int ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_reject *arg);
+extern void ccieth_deferred_connect_recv_workfunc(struct work_struct *work);
+extern int ccieth_defer_connect_recv(struct net_device *ifp, struct sk_buff *skb);
 
 static inline __u32
 ccieth_max_send_size(__u32 mtu)
