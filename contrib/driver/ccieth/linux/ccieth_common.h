@@ -111,6 +111,8 @@ struct ccieth_connection {
 	/* FIXME: cache skb headers? */
 
 	struct rcu_head destroy_rcu_head;
+
+	struct ccieth_endpoint_event embedded_event;
 };
 
 extern struct idr ccieth_ep_idr;

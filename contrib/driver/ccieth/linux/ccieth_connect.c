@@ -55,12 +55,20 @@ static int ccieth_recv_connect_idrforeach_cb(int id, void *p, void *data)
 	return 0;
 }
 
+static void
+ccieth_connection_event_destructor(struct ccieth_endpoint *ep,
+				   struct ccieth_endpoint_event *event)
+{
+	struct ccieth_connection *conn = container_of(event, struct ccieth_connection, embedded_event);
+	/* the event was enqueued from ccieth_connect_timer_hdlr, while rcu readers may exist */
+	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
+}
+
 static
 void ccieth_connect_timer_hdlr(unsigned long data)
 {
 	struct ccieth_connection *conn = (void*) data;
 	struct ccieth_endpoint *ep = conn->ep;
-	struct ccieth_endpoint_event *event;
 	enum ccieth_connection_status status = conn->status;
 	struct sk_buff *skb;
 	unsigned long now = jiffies;
@@ -99,30 +107,19 @@ void ccieth_connect_timer_hdlr(unsigned long data)
 		/* somebody else is closing it */
 		return;
 
-	/* get an event */
-	spin_lock_bh(&ep->free_event_list_lock);
-	if (list_empty(&ep->free_event_list)) {
-		spin_unlock_bh(&ep->free_event_list_lock);
-		printk("ccieth: no event slot for connect timedout\n");
-		/* FIXME: reschedule timeout */
-		return;
-	}
-	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
-	list_del(&event->list);
-	spin_unlock_bh(&ep->free_event_list_lock);
-
 	spin_lock(&ep->connection_idr_lock);
 	idr_remove(&ep->connection_idr, conn->id);
 	spin_unlock(&ep->connection_idr_lock);
 
 	printk("delivering connection %p timeout\n", conn);
-	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_TIMEDOUT;
-	event->event.connect_timedout.user_conn_id = conn->user_conn_id;
-	spin_lock_bh(&ep->event_list_lock);
-	list_add_tail(&event->list, &ep->event_list);
-	spin_unlock_bh(&ep->event_list_lock);
+	conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECT_TIMEDOUT;
+	conn->embedded_event.event.connect_timedout.user_conn_id = conn->user_conn_id;
+	conn->embedded_event.destructor = ccieth_connection_event_destructor;
 
-	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
+	spin_lock_bh(&ep->event_list_lock);
+	list_add_tail(&conn->embedded_event.list, &ep->event_list);
+	spin_unlock_bh(&ep->event_list_lock);
+	/* don't use conn anymore, the event destructor will destroy it after RCU grace period */
 }
 
 int
