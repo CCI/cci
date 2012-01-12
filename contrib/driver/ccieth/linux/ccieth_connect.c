@@ -12,6 +12,11 @@
 #include <ccieth_common.h>
 #include <ccieth_wire.h>
 
+static int
+ccieth_connect_ack(struct ccieth_endpoint *ep, __u32 src_conn_id,
+		   __u8 dst_addr[6],  __u32 dst_ep_id, __u32 dst_conn_id,
+		   __u32 req_seqnum);
+
 static void
 ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 {
@@ -76,7 +81,7 @@ void ccieth_connect_timer_hdlr(unsigned long data)
 	if (status != CCIETH_CONNECTION_REQUESTED)
 		return;
 
-	if (now < conn->expire)  {
+	if (now < conn->expire && conn->need_ack) {
 		/* resend request */
 		unsigned long next;
 		next = now + CCIETH_CONNECT_RESEND_DELAY;
@@ -98,6 +103,11 @@ void ccieth_connect_timer_hdlr(unsigned long data)
 			}
 			rcu_read_unlock();
 		}
+		return;
+
+	} else if (now < conn->expire) {
+		/* only keep the expire timer, no need to resend anymore */
+		mod_timer(&conn->timer, conn->expire);
 		return;
 	}
 
@@ -145,6 +155,8 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	if (!conn)
 		goto out;
 	conn->skb = NULL;
+	conn->need_ack = 1;
+	setup_timer(&conn->timer, ccieth_connect_timer_hdlr, (unsigned long) conn);
 
 	/* get a connection id (only reserve it) */
 retry:
@@ -222,7 +234,6 @@ retry:
 	}
 
 	/* setup resend or timeout timer */
-	setup_timer(&conn->timer, ccieth_connect_timer_hdlr, (unsigned long) conn);
 	now = jiffies;
 	if (arg->timeout_sec != -1ULL || arg->timeout_usec != -1) {
 		__u64 msecs = arg->timeout_sec * 1000 + arg->timeout_usec / 1000;
@@ -279,6 +290,9 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	printk("got conn request from eid %d conn id %d seqnum %d\n",
 	       src_ep_id, src_conn_id, req_seqnum);
 
+	ccieth_connect_ack(ep, -1,
+			   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum);
+
 	/* check msg length */
 	err = -EINVAL;
 	if (data_len > ep->max_send_size)
@@ -301,6 +315,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	if (!conn)
 		goto out_with_event;
 	conn->skb = NULL;
+	conn->need_ack = 0;
 
 	/* setup the connection so that we can check for duplicates before inserting */
 	conn->ep = ep;
@@ -462,6 +477,9 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	printk("got conn accept from eid %d conn id %d seqnum %d to %d %d\n",
 	       src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
 
+	ccieth_connect_ack(ep, dst_conn_id,
+			   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum);
+
 	rcu_read_lock();
 
 	/* get an event */
@@ -488,6 +506,7 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REQUESTED, CCIETH_CONNECTION_READY)
 	    != CCIETH_CONNECTION_REQUESTED)
 		goto out_with_conn;
+	conn->need_ack = 0;
 
 	/* setup connection */
 	conn->dest_id = src_conn_id;
@@ -613,6 +632,9 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 	printk("got conn reject from eid %d conn id %d seqnum %d to %d %d\n",
 	       src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
 
+	ccieth_connect_ack(ep, dst_conn_id,
+			   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum);
+
 	/* get an event */
 	spin_lock_bh(&ep->free_event_list_lock);
 	if (list_empty(&ep->free_event_list)) {
@@ -637,6 +659,7 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 		spin_unlock(&ep->connection_idr_lock);
 		goto out_with_conn;
 	}
+	conn->need_ack = 0;
 	idr_remove(&ep->connection_idr, dst_conn_id);
 	spin_unlock(&ep->connection_idr_lock);
 
@@ -665,6 +688,109 @@ out:
 	dev_kfree_skb(skb);
 	return err;
 }
+
+static int
+ccieth_connect_ack(struct ccieth_endpoint *ep, __u32 src_conn_id,
+		   __u8 dst_addr[6],  __u32 dst_ep_id, __u32 dst_conn_id,
+		   __u32 req_seqnum)
+{
+	struct sk_buff *skb;
+	struct net_device *ifp;
+	struct ccieth_pkt_header_connect_ack *hdr;
+	size_t skblen;
+	int err;
+
+	/* allocate and initialize the skb */
+	skblen = sizeof(*hdr);
+	if (skblen < ETH_ZLEN)
+		skblen = ETH_ZLEN;
+	err = -ENOMEM;
+        skb = alloc_skb(skblen, GFP_KERNEL);
+	if (!skb)
+		goto out;
+	skb_reset_mac_header(skb);
+	skb_reset_network_header(skb);
+	skb->protocol = __constant_htons(ETH_P_CCI);
+	skb_put(skb, skblen);
+
+	rcu_read_lock();
+
+	/* is the interface still available? */
+	ifp = rcu_dereference(ep->ifp);
+	if (!ifp) {
+		err = -ENODEV;
+		goto out_with_rculock;
+	}
+	skb->dev = ifp;
+
+	/* fill headers */
+	hdr = (struct ccieth_pkt_header_connect_ack *) skb_mac_header(skb);
+	memcpy(&hdr->eth.h_dest, dst_addr, 6);
+	memcpy(&hdr->eth.h_source, ep->addr, 6);
+	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
+	hdr->type = CCIETH_PKT_CONNECT_ACK;
+	hdr->dst_ep_id = htonl(dst_ep_id);
+	hdr->dst_conn_id = htonl(dst_conn_id);
+	hdr->src_ep_id = htonl(ep->id);
+	hdr->src_conn_id = htonl(src_conn_id);
+	hdr->req_seqnum = htonl(req_seqnum);
+
+	dev_queue_xmit(skb);
+
+	rcu_read_unlock();
+	return 0;
+
+out_with_rculock:
+	kfree_skb(skb);
+	rcu_read_unlock();
+out:
+	return err;
+}
+
+static int
+ccieth__recv_connect_ack(struct ccieth_endpoint *ep, 
+			 struct sk_buff *skb,
+			 struct ccieth_pkt_header_connect_ack *hdr)
+{
+	struct ccieth_connection *conn;
+	__u32 src_conn_id;
+	__u32 src_ep_id;
+	__u32 dst_conn_id;
+	__u32 dst_ep_id;
+	__u32 req_seqnum;
+	int err;
+
+	printk("processing queued connect ack skb %p\n", skb);
+
+	src_conn_id = ntohl(hdr->src_conn_id);
+	src_ep_id = ntohl(hdr->src_ep_id);
+	dst_conn_id = ntohl(hdr->dst_conn_id);
+	dst_ep_id = ntohl(hdr->dst_ep_id);
+	req_seqnum = ntohl(hdr->req_seqnum);
+
+	printk("got conn ack from eid %d conn id %d seqnum %d to %d %d\n",
+	       src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
+
+	rcu_read_lock();
+
+	/* find the connection and update it */
+	conn = idr_find(&ep->connection_idr, dst_conn_id);
+	if (!conn || conn->req_seqnum != req_seqnum)
+                goto out_with_rculock;
+
+	conn->need_ack = 0;
+
+	rcu_read_unlock();
+
+	dev_kfree_skb(skb);
+	return 0;
+
+out_with_rculock:
+	rcu_read_unlock();
+	dev_kfree_skb(skb);
+	return err;
+}
+
 
 void
 ccieth_deferred_connect_recv_workfunc(struct work_struct *work)
@@ -719,6 +845,17 @@ ccieth_deferred_connect_recv_workfunc(struct work_struct *work)
 			err = ccieth__recv_connect_reject(ep, skb, hdr);
 			break;
 		}
+		case CCIETH_PKT_CONNECT_ACK: {
+			struct ccieth_pkt_header_connect_ack _hdr, *hdr;
+			/* copy the entire header */
+			hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
+			if (!hdr) {
+				dev_kfree_skb(skb);
+				continue;
+			}
+			err = ccieth__recv_connect_ack(ep, skb, hdr);
+			break;
+		}
 		default:
 			BUG();
 		}
@@ -738,8 +875,6 @@ ccieth_defer_connect_recv(struct net_device *ifp, struct sk_buff *skb)
 	__be32 dst_ep_id_n, *dst_ep_id_n_p;
 	int err;
 
-	/* FIXME always ack REJECT */
-
 	/* copy the entire header */
 	err = -EINVAL;
 	dst_ep_id_n_p = skb_header_pointer(skb, offsetof(struct ccieth_pkt_header_generic, dst_ep_id), sizeof(dst_ep_id_n), &dst_ep_id_n);
@@ -750,7 +885,10 @@ ccieth_defer_connect_recv(struct net_device *ifp, struct sk_buff *skb)
 
 	/* find endpoint and check that it's attached to this ifp */
 	ep = idr_find(&ccieth_ep_idr, ntohl(*dst_ep_id_n_p));
-	if (!ep || ep->ifp != ifp)
+	if (!ep)
+		/* FIXME nack */
+		goto out_with_rculock;
+	if (ep->ifp != ifp)
 		goto out_with_rculock;
 
 	printk("queueing skb %p\n", skb);

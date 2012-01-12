@@ -92,6 +92,7 @@ struct ccieth_connection {
 	int id; /* always valid */ /* FIXME keep in network order too? */
 	enum ccieth_connection_status status;
 	struct ccieth_endpoint *ep;
+	int need_ack;
 
 	__u8 attribute;
 	__u32 req_seqnum;
