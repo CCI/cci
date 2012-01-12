@@ -25,9 +25,6 @@ BEGIN_C_DECLS
 
    A verbs device may have these items:
 
-   mss = 1024			# max_send_size for MSGs
-				  the default is the device MTU
-
    ip = 1.2.3.4			# IPv4 address of device
 				  the default is the first RDMA device found
 

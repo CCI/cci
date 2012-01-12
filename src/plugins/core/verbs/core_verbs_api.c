@@ -367,7 +367,6 @@ verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 		const char		*interface	= NULL;
 		struct in_addr		in;
 		uint16_t		port		= 0;
-		uint32_t		mss		= 0;
 		cci_device_t		*device		= NULL;
 		verbs_dev_t		*vdev		= NULL;
 		struct ibv_port_attr	port_attr;
@@ -400,15 +399,6 @@ verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
 				const char *port_str = *arg + 5;
 
 				port = (uint16_t) strtoul(port_str, NULL, 0);
-			} else if (0 == strncmp("mss=", *arg, 4)) {
-				const char *mss_str = *arg + 4;
-
-				mss = strtoul(mss_str, NULL, 0);
-				if (mss > IBV_MTU_4096) {
-					debug(CCI_DB_INFO, "mss %s is larger than "
-							"IBV_MTU_4096", mss_str);
-					mss = IBV_MTU_4096;
-				}
 			} else if (0 == strncmp("hca_id=", *arg, 7)) {
 				hca_id = *arg + 7;
 			} else if (0 == strncmp("interface=", *arg, 10)) {
@@ -546,7 +536,6 @@ static const char *
 verbs_strerror(enum cci_status status)
 {
 	char *str	= NULL;
-	char unknown[32];
 
 	CCI_ENTER;
 
@@ -555,9 +544,8 @@ verbs_strerror(enum cci_status status)
 			str = "";
 			break;
 		default:
-			memset(unknown, 0, sizeof(unknown));
-			sprintf(unknown, "unknown status %u", status);
-			str = unknown;
+			CCI_EXIT;
+			return strerror(status);
 	}
 
 	CCI_EXIT;
@@ -1124,7 +1112,6 @@ verbs_accept(union cci_event *event,
 	verbs_ep_t	*vep		= NULL;
 	verbs_conn_t	*vconn		= NULL;
 	verbs_rx_t	*rx		= NULL;
-	cci_endpoint_t	*endpoint	= NULL;
 	uint32_t	header		= 0;
 
 	CCI_ENTER;
@@ -1133,7 +1120,6 @@ verbs_accept(union cci_event *event,
 	rx = container_of(evt, verbs_rx_t, evt);
 	ep = evt->ep;
 	vep = ep->priv;
-	endpoint = &ep->endpoint;
 
 	conn = evt->conn;
 	vconn = conn->priv;
@@ -1163,6 +1149,8 @@ verbs_accept(union cci_event *event,
 	*connection = &conn->connection;
 
 out:
+	ret = verbs_post_rx(ep, rx);
+
 	CCI_EXIT;
 	return ret;
 }
@@ -1175,11 +1163,9 @@ verbs_reject(union cci_event *event)
 	cci__ep_t	*ep		= NULL;
 	cci__conn_t	*conn		= NULL;
 	cci__evt_t	*evt		= NULL;
-	verbs_ep_t	*vep		= NULL;
 	verbs_conn_t	*vconn		= NULL;
 	verbs_rx_t	*rx		= NULL;
 	verbs_tx_t	*tx		= NULL;
-	cci_endpoint_t	*endpoint	= NULL;
 	uint32_t	header		= 0;
 
 	CCI_ENTER;
@@ -1187,8 +1173,6 @@ verbs_reject(union cci_event *event)
 	evt = container_of(event, cci__evt_t, event);
 	rx = container_of(evt, verbs_rx_t, evt);
 	ep = evt->ep;
-	vep = ep->priv;
-	endpoint = &ep->endpoint;
 
 	conn = evt->conn;
 	vconn = conn->priv;
@@ -1207,8 +1191,11 @@ verbs_reject(union cci_event *event)
 	header |= (CCI_EVENT_CONNECT_REJECTED << 4);
 
 	ret = verbs_post_send(conn, (uintptr_t) tx, NULL, 0, header);
+	/* FIXME handle error */
 
 	/* wait for send to complete before destorying the ep and conn */
+
+	ret = verbs_post_rx(ep, rx);
 
 	CCI_EXIT;
 	return ret;
@@ -1722,9 +1709,15 @@ verbs_get_cm_event(cci__ep_t *ep)
 	switch (cm_evt->event) {
 		case RDMA_CM_EVENT_CONNECT_REQUEST:
 			ret = verbs_handle_conn_request(ep, cm_evt);
+			if (ret)
+				debug(CCI_DB_INFO, "%s: verbs_handle_conn_request()"
+					"returned %s", __func__, strerror(ret));
 			break;
 		case RDMA_CM_EVENT_ESTABLISHED:
 			ret = verbs_handle_conn_established(ep, cm_evt);
+			if (ret)
+				debug(CCI_DB_INFO, "%s: verbs_handle_conn_established()"
+					"returned %s", __func__, strerror(ret));
 			break;
 		default:
 			debug(CCI_DB_CONN, "ignoring %s event",
@@ -2005,7 +1998,6 @@ static int
 verbs_handle_rma_remote_reply(cci__ep_t *ep, struct ibv_wc wc)
 {
 	int			ret	= CCI_SUCCESS;
-	cci__conn_t		*conn	= NULL;
 	verbs_conn_t		*vconn	= NULL;
 	verbs_ep_t		*vep	= ep->priv;
 	verbs_rx_t		*rx	= NULL;
@@ -2018,7 +2010,6 @@ verbs_handle_rma_remote_reply(cci__ep_t *ep, struct ibv_wc wc)
 	rx = (verbs_rx_t *)(uintptr_t) wc.wr_id;
 
 	vconn = verbs_qp_num_to_conn(ep, wc.qp_num);
-	conn = vconn->conn;
 
 	if (wc.byte_len == sizeof(verbs_rma_addr_rkey_t)) {
 		remote = calloc(1, sizeof(*remote));
@@ -2246,7 +2237,7 @@ verbs_handle_send_completion(cci__ep_t *ep, struct ibv_wc wc)
 		break;
 	default:
 		debug(CCI_DB_INFO, "%s: ignoring %s msg",
-			__func__, verbs_msg_type_str(type));
+			__func__, verbs_msg_type_str(tx->msg_type));
 		break;
 	}
 
@@ -2495,7 +2486,6 @@ verbs_send_common(cci_connection_t *connection, struct iovec *iov, uint32_t iovc
 	cci_endpoint_t	*endpoint	= connection->endpoint;
 	cci__conn_t	*conn		= NULL;
 	cci__ep_t	*ep		= NULL;
-	verbs_conn_t	*vconn		= NULL;
 	verbs_ep_t	*vep		= NULL;
 	verbs_tx_t	*tx		= NULL;
 	uint32_t	header		= VERBS_MSG_SEND;
@@ -2520,7 +2510,6 @@ verbs_send_common(cci_connection_t *connection, struct iovec *iov, uint32_t iovc
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 	vep = ep->priv;
 	conn = container_of(connection, cci__conn_t, connection );
-	vconn = conn->priv;
 
 	is_reliable = cci_conn_is_reliable(conn);
 
@@ -2835,7 +2824,6 @@ verbs_rma(cci_connection_t *connection,
 	cci__ep_t		*ep	= NULL;
 	cci__conn_t		*conn	= NULL;
 	verbs_ep_t		*vep	= NULL;
-	verbs_conn_t		*vconn	= NULL;
 	verbs_rma_handle_t	*local	= (verbs_rma_handle_t *)(uintptr_t)local_handle;
 	verbs_rma_op_t		*rma_op	= NULL;
 
@@ -2847,7 +2835,6 @@ verbs_rma(cci_connection_t *connection,
 	}
 
 	conn = container_of(connection, cci__conn_t, connection);
-	vconn = conn->priv;
 	ep = container_of(connection->endpoint, cci__ep_t, endpoint);
 	vep = ep->priv;
 
