@@ -227,6 +227,13 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	skb_reset_network_header(skb);
 	skb->protocol = __constant_htons(ETH_P_CCI);
 	skb_put(skb, skblen);
+	/* copy data while not holding RCU read lock yet */
+	hdr = (struct ccieth_pkt_header_msg *) skb_mac_header(skb);
+	err = copy_from_user(&hdr->msg, (const void __user *)(uintptr_t) arg->msg_ptr, arg->msg_len);
+	if (err) {
+		err = -EFAULT;
+		goto out_with_skb;
+	}
 
 	rcu_read_lock();
 
@@ -261,7 +268,6 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	event->event.send.context = arg->context;
 
 	/* fill headers */
-	hdr = (struct ccieth_pkt_header_msg *) skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
 	memcpy(&hdr->eth.h_source, ep->addr, 6);
 	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
@@ -271,12 +277,6 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	hdr->conn_seqnum = htonl(conn->req_seqnum);
 	conn->set_next_send_seqnum(conn, hdr);
 	hdr->msg_len = htonl(arg->msg_len);
-	/* FIXME not inside rcu_read_lock! */
-	err = copy_from_user(&hdr->msg, (const void __user *)(uintptr_t) arg->msg_ptr, arg->msg_len);
-	if (err) {
-		err = -EFAULT;
-		goto out_with_event;
-	}
 
 	/* FIXME: implement flags */
 
@@ -291,12 +291,9 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	rcu_read_unlock();
 	return 0;
 
-out_with_event:
-	spin_lock_bh(&ep->free_event_list_lock);
-	list_add_tail(&event->list, &ep->free_event_list);
-	spin_unlock_bh(&ep->free_event_list_lock);
 out_with_rculock:
 	rcu_read_unlock();
+out_with_skb:
 	kfree_skb(skb);
 out:
 	return err;
