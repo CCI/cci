@@ -70,7 +70,7 @@ ccieth_connection_event_destructor(struct ccieth_endpoint *ep,
 }
 
 static
-void ccieth_connect_timer_hdlr(unsigned long data)
+void ccieth_connect_request_timer_hdlr(unsigned long data)
 {
 	struct ccieth_connection *conn = (void*) data;
 	struct ccieth_endpoint *ep = conn->ep;
@@ -156,7 +156,7 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 		goto out;
 	conn->skb = NULL;
 	conn->need_ack = 1;
-	setup_timer(&conn->timer, ccieth_connect_timer_hdlr, (unsigned long) conn);
+	setup_timer(&conn->timer, ccieth_connect_request_timer_hdlr, (unsigned long) conn);
 
 	/* get a connection id (only reserve it) */
 retry:
