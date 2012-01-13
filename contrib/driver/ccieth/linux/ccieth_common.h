@@ -55,32 +55,37 @@ struct ccieth_endpoint {
 
 /* connection status automata:
  *
- * on connect ioctl:
+ * on connect_request ioctl:
  * - initiator creates connection with status REQUESTED
- * - timeout while REQUESTED to resend send_connect
+ * - initiator resends until acked
+ * - timeout while status REQUESTED to resend connect_request
  *
- * on incoming connect:
+ * on incoming connect_request:
  * - target creates connection with status RECEIVED, in the receive side to detect duplicates
- * - the number of received (or total?) connections in limited to avoid ddos
- * - event only delivered to user-space if we created a connection
+ * - event only delivered to user-space if we successfully created a connection
+ * - TODO the number of received (or total?) connections in limited to avoid ddos
  *
  * on accept ioctl:
- * - target switches status to READY
+ * - target switches connection status from RECEIVED to READY
+ * - target resends until acked
  * - initiator switches status to READY when receiving accept
  *
  * on reject ioctl:
- * - target switches status to REJECTED
+ * - target switches connection status from RECEIVED to REJECTED
+ * - target resends until acked, then destroys the connection
  * - initiator destroys connection when receiving reject
- * - initiator sends a reject ack when receiving reject, even if connection was already destroyed
- * - target destroys connection when receiving reject ack
- * - timeout while REJECTED to resend send_reject
+ *
+ * on destroy:
+ * - status is atomically test-and-set to CLOSING
+ * - connection is removed from endpoint idr to avoid new users
+ * - connection is destroyed after RCU grace period
  */
 enum ccieth_connection_status {
 	/* status for both sides */
-	CCIETH_CONNECTION_READY,     /* accept sent or received */
+	CCIETH_CONNECTION_READY,     /* connection is running */
 	CCIETH_CONNECTION_CLOSING,   /* timeout'ing, being disconnected, or endpoint being destroyed, already unhashed */
 	/* initiator side */
-	CCIETH_CONNECTION_REQUESTED, /* request sent */
+	CCIETH_CONNECTION_REQUESTED, /* request sent, maybe acked, but not replied or rejected yet */
 	/* target side */
 	CCIETH_CONNECTION_RECEIVED,  /* request received, not accepted or rejected yet */
 	CCIETH_CONNECTION_REJECTED,  /* reject sent and not acked yet */
