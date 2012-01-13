@@ -1111,13 +1111,11 @@ verbs_accept(union cci_event *event,
 	cci__evt_t	*evt		= NULL;
 	verbs_ep_t	*vep		= NULL;
 	verbs_conn_t	*vconn		= NULL;
-	verbs_rx_t	*rx		= NULL;
 	uint32_t	header		= 0;
 
 	CCI_ENTER;
 
 	evt = container_of(event, cci__evt_t, event);
-	rx = container_of(evt, verbs_rx_t, evt);
 	ep = evt->ep;
 	vep = ep->priv;
 
@@ -1147,10 +1145,8 @@ verbs_accept(union cci_event *event,
 	}
 
 	*connection = &conn->connection;
-
 out:
-	ret = verbs_post_rx(ep, rx);
-
+	/* do not repost rx here - it will be posted in return event */
 	CCI_EXIT;
 	return ret;
 }
@@ -1164,14 +1160,12 @@ verbs_reject(union cci_event *event)
 	cci__conn_t	*conn		= NULL;
 	cci__evt_t	*evt		= NULL;
 	verbs_conn_t	*vconn		= NULL;
-	verbs_rx_t	*rx		= NULL;
 	verbs_tx_t	*tx		= NULL;
 	uint32_t	header		= 0;
 
 	CCI_ENTER;
 
 	evt = container_of(event, cci__evt_t, event);
-	rx = container_of(evt, verbs_rx_t, evt);
 	ep = evt->ep;
 
 	conn = evt->conn;
@@ -1193,9 +1187,9 @@ verbs_reject(union cci_event *event)
 	ret = verbs_post_send(conn, (uintptr_t) tx, NULL, 0, header);
 	/* FIXME handle error */
 
-	/* wait for send to complete before destorying the ep and conn */
+	/* do not repost rx here - it will be posted in return event */
 
-	ret = verbs_post_rx(ep, rx);
+	/* wait for send to complete before destorying the ep and conn */
 
 	CCI_EXIT;
 	return ret;
