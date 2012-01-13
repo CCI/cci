@@ -87,6 +87,8 @@ union ccieth_pkt_header {
 		__be32 dst_conn_id;
 		/* 24 */
 		__be32 conn_seqnum;
+		__be32 msg_seqnum;
+		/* 32 */
 		__be32 msg_len;
 		__u8 msg[0];
 	} msg;

@@ -20,6 +20,7 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 	struct ccieth_connection *conn;
 	__u32 dst_ep_id;
 	__u32 dst_conn_id;
+	__u32 msg_seqnum;
 	__u32 msg_len;
 	int err;
 
@@ -31,10 +32,11 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 
 	dst_ep_id = ntohl(hdr->dst_ep_id);
 	dst_conn_id = ntohl(hdr->dst_conn_id);
+	msg_seqnum = ntohl(hdr->msg_seqnum);
 	msg_len = ntohl(hdr->msg_len);
 
-	printk("got msg len %d to eid %d conn id %d\n",
-	       msg_len, dst_ep_id, dst_conn_id);
+	printk("got msg len %d to eid %d conn id %d seqnum %d\n",
+	       msg_len, dst_ep_id, dst_conn_id, msg_seqnum);
 
 	rcu_read_lock();
 

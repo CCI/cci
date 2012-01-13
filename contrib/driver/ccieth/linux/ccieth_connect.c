@@ -53,6 +53,40 @@ ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 	return 0;
 }
 
+static void
+ccieth_conn_ro_set_next_send_seqnum(struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr)
+{
+	hdr->msg_seqnum = htonl(atomic_inc_return(&conn->ro.next_send_seqnum));
+}
+static void
+ccieth_conn_ro_init(struct ccieth_connection *conn)
+{
+	conn->set_next_send_seqnum = ccieth_conn_ro_set_next_send_seqnum;
+	atomic_set(&conn->ro.next_send_seqnum, jiffies);
+}
+
+static void
+ccieth_conn_ru_set_next_send_seqnum(struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr)
+{
+	hdr->msg_seqnum = htonl(atomic_inc_return(&conn->ru.next_send_seqnum));
+}
+static void
+ccieth_conn_ru_init(struct ccieth_connection *conn)
+{
+	conn->set_next_send_seqnum = ccieth_conn_ru_set_next_send_seqnum;
+	atomic_set(&conn->ru.next_send_seqnum, jiffies);
+}
+
+static void
+ccieth_conn_uu_set_next_send_seqnum(struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr)
+{
+}
+static void
+ccieth_conn_uu_init(struct ccieth_connection *conn)
+{
+	conn->set_next_send_seqnum = ccieth_conn_uu_set_next_send_seqnum;
+}
+
 static int ccieth_recv_connect_idrforeach_cb(int id, void *p, void *data)
 {
 	struct ccieth_connection *conn = p, *new = data;
@@ -190,18 +224,29 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	if (arg->data_len > ep->max_send_size)
 		goto out;
 
-	if (arg->attribute != CCIETH_CONNECT_ATTR_RO
-	    && arg->attribute != CCIETH_CONNECT_ATTR_RU
-	    && arg->attribute != CCIETH_CONNECT_ATTR_UU)
-		/* FIXME switch case to set retransmit methods */
-		goto out;
-
 	/* get a connection */
 	err = -ENOMEM;
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out;
 	conn->skb = NULL;
+
+	/* initialize attribute */
+	switch (arg->attribute) {
+	case CCIETH_CONNECT_ATTR_RO:
+		ccieth_conn_ro_init(conn);
+		break;
+	case CCIETH_CONNECT_ATTR_RU:
+		ccieth_conn_ru_init(conn);
+		break;
+	case CCIETH_CONNECT_ATTR_UU:
+		ccieth_conn_uu_init(conn);
+		break;
+	default:
+		err = -EINVAL;
+		goto out_with_conn;
+	}
+
 	/* initialize the timer to make destroy easier */
 	setup_timer(&conn->timer, ccieth_connect_request_timer_hdlr, (unsigned long) conn);
 
@@ -336,7 +381,6 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	    && hdr->attribute != CCIETH_CONNECT_ATTR_RU
 	    && hdr->attribute != CCIETH_CONNECT_ATTR_UU)
 		/* remote doesn't look OK, ignore */
-		/* FIXME switch case to set retransmit methods */
 		goto out;
 
 	src_ep_id = ntohl(hdr->src_ep_id);
@@ -354,6 +398,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	/* check msg length */
 	err = -EINVAL;
 	if (data_len > ep->max_send_size)
+		/* FIXME: nack? ignore? instead of ack */
 		goto out;
 
 	/* get an event */
@@ -374,6 +419,23 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	if (!conn)
 		goto out_with_event;
 	conn->need_ack = 0;
+
+	/* initialize attribute */
+	switch (hdr->attribute) {
+	case CCIETH_CONNECT_ATTR_RO:
+		ccieth_conn_ro_init(conn);
+		break;
+	case CCIETH_CONNECT_ATTR_RU:
+		ccieth_conn_ru_init(conn);
+		break;
+	case CCIETH_CONNECT_ATTR_UU:
+		ccieth_conn_uu_init(conn);
+		break;
+	default:
+		err = -EINVAL;
+		goto out_with_conn;
+	}
+
 	/* initialize the timer to make destroy easier */
 	setup_timer(&conn->timer, ccieth_connect_reply_timer_hdlr, (unsigned long) conn);
 

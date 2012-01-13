@@ -20,6 +20,7 @@
 #define CCIETH_EVENT_SLOT_NR 64
 
 struct ccieth_endpoint;
+struct ccieth_pkt_header_msg;
 
 struct ccieth_endpoint_event {
 	struct list_head list;
@@ -103,6 +104,18 @@ struct ccieth_connection {
 	__u32 req_seqnum;
 	__u32 max_send_size;
 	__u64 user_conn_id;
+
+	void (*set_next_send_seqnum)(struct ccieth_connection *, struct ccieth_pkt_header_msg *);
+	union {
+		struct {
+			atomic_t next_send_seqnum; /* FIXME: make sure it reaches U32MAX? for portability ? */
+		} ro;
+		struct {
+			atomic_t next_send_seqnum;
+		} ru;
+		struct {
+		} uu;
+	};
 
 	/* resending of request, accept or reject */
 	unsigned long expire; /* in jiffies, only for request because it has a timeout */
