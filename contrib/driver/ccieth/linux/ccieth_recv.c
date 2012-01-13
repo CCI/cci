@@ -207,7 +207,7 @@ ccieth_netdevice_notifier_cb(struct notifier_block *unused,
 }
 
 static struct notifier_block ccieth_netdevice_notifier = {
-        .notifier_call = ccieth_netdevice_notifier_cb,
+	.notifier_call = ccieth_netdevice_notifier_cb,
 };
 
 int
@@ -215,9 +215,9 @@ ccieth_net_init(void)
 {
 	int ret;
 
-        ret = register_netdevice_notifier(&ccieth_netdevice_notifier);
-        if (ret < 0)
-                goto out;
+	ret = register_netdevice_notifier(&ccieth_netdevice_notifier);
+	if (ret < 0)
+		goto out;
 
 	dev_add_pack(&ccieth_pt);
 

@@ -20,7 +20,7 @@ ccieth_connect_ack(struct ccieth_endpoint *ep, __u32 src_conn_id,
 static void
 ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 {
-        struct ccieth_connection *conn = container_of(rcu_head, struct ccieth_connection, destroy_rcu_head);
+	struct ccieth_connection *conn = container_of(rcu_head, struct ccieth_connection, destroy_rcu_head);
 	printk("destroying connection %p in rcu call\n", conn);
 	kfree_skb(conn->skb);
 	kfree(conn);
@@ -176,7 +176,7 @@ retry:
 	skblen = sizeof(*hdr) + arg->data_len;
 	if (skblen < ETH_ZLEN)
 		skblen = ETH_ZLEN;
-        skb = alloc_skb(skblen, GFP_KERNEL);
+	skb = alloc_skb(skblen, GFP_KERNEL);
 	if (!skb)
 		goto out_with_conn_id;
 	skb_reset_mac_header(skb);
@@ -501,7 +501,7 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	/* find the connection and update it */
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
 	if (!conn || conn->req_seqnum != req_seqnum)
-                goto out_with_event;
+		goto out_with_event;
 
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REQUESTED, CCIETH_CONNECTION_READY)
 	    != CCIETH_CONNECTION_REQUESTED)
@@ -705,7 +705,7 @@ ccieth_connect_ack(struct ccieth_endpoint *ep, __u32 src_conn_id,
 	if (skblen < ETH_ZLEN)
 		skblen = ETH_ZLEN;
 	err = -ENOMEM;
-        skb = alloc_skb(skblen, GFP_KERNEL);
+	skb = alloc_skb(skblen, GFP_KERNEL);
 	if (!skb)
 		goto out;
 	skb_reset_mac_header(skb);
@@ -776,7 +776,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	/* find the connection and update it */
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
 	if (!conn || conn->req_seqnum != req_seqnum)
-                goto out_with_rculock;
+		goto out_with_rculock;
 
 	conn->need_ack = 0;
 
