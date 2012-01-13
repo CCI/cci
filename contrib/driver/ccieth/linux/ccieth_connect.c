@@ -183,6 +183,9 @@ retry:
 	skb_reset_network_header(skb);
 	skb->protocol = __constant_htons(ETH_P_CCI);
 	skb_put(skb, skblen);
+	skb2 = skb_clone(skb, GFP_KERNEL);
+	if (!skb2)
+		goto out_with_skb;
 	/* setup as much as possible of the skb
 	 * so that things don't fail later once the connection is hashed
 	 */
@@ -200,7 +203,7 @@ retry:
 	err = copy_from_user(&hdr->data, (const void __user *)(uintptr_t) arg->data_ptr, arg->data_len);
 	if (err) {
 		err = -EFAULT;
-		goto out_with_skb;
+		goto out_with_skb2;
 	}
 
 	/* initialize the connection */
@@ -216,22 +219,19 @@ retry:
 	hdr->src_conn_id = htonl(id);
 
 	/* keep the current skb cached in the connection,
-	 * and try to send a clone. if we can't, we'll resend later.
+	 * and try to send the clone. if we can't, we'll resend later.
 	 */
 	conn->skb = skb;
-	skb2 = skb_clone(skb, GFP_KERNEL);
-	if (skb2) {
-		rcu_read_lock();
-		/* is the interface still available? */
-		ifp = rcu_dereference(ep->ifp);
-		if (!ifp) {
-			err = -ENODEV;
-			goto out_with_rculock;
-		}
-		skb2->dev = ifp;
-		dev_queue_xmit(skb2);
-		rcu_read_unlock();
+	rcu_read_lock();
+	/* is the interface still available? */
+	ifp = rcu_dereference(ep->ifp);
+	if (!ifp) {
+		err = -ENODEV;
+		goto out_with_rculock;
 	}
+	skb2->dev = ifp;
+	dev_queue_xmit(skb2);
+	rcu_read_unlock();
 
 	/* setup resend or timeout timer */
 	now = jiffies;
@@ -251,6 +251,7 @@ retry:
 
 out_with_rculock:
 	rcu_read_unlock();
+out_with_skb2:
 	kfree_skb(skb2);
 out_with_skb:
 	kfree_skb(skb);
