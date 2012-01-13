@@ -268,6 +268,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	hdr->type = CCIETH_PKT_MSG;
 	hdr->dst_ep_id = htonl(conn->dest_eid);
 	hdr->dst_conn_id = htonl(conn->dest_id);
+	hdr->conn_seqnum = htonl(conn->req_seqnum);
 	hdr->msg_len = htonl(arg->msg_len);
 	err = copy_from_user(&hdr->msg, (const void __user *)(uintptr_t) arg->msg_ptr, arg->msg_len);
 	if (err) {
