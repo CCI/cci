@@ -111,6 +111,11 @@ struct ccieth_ioctl_connect_request {
 };
 #define CCIETH_IOCTL_CONNECT_REQUEST _IOWR(CCIETH_IOCTL_MAGIC, 0x5, struct ccieth_ioctl_connect_request)
 
+/* FIXME: enforce matching with enum cci_conn_attribute */
+#define CCIETH_CONNECT_ATTR_RO 0
+#define CCIETH_CONNECT_ATTR_RU 1
+#define CCIETH_CONNECT_ATTR_UU 2
+
 struct ccieth_ioctl_connect_accept {
 	__u32 conn_id;
 	__u32 max_send_size;

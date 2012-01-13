@@ -442,7 +442,7 @@ static int eth_create_endpoint(cci_device_t *device,
 	  /* connect */
 	  tv.tv_sec = 3; /* so that we get some resends */
 	  tv.tv_usec = 0;
-	  ret = cci_connect(*endpoint, name, "hello world!", 13, 123, (void*)0xdeadbeef, 0, &tv);
+	  ret = cci_connect(*endpoint, name, "hello world!", 13, CCI_CONN_ATTR_RO, (void*)0xdeadbeef, 0, &tv);
 	  assert(ret == CCI_SUCCESS);
 
 	  /* ignore connect request */
@@ -454,7 +454,7 @@ static int eth_create_endpoint(cci_device_t *device,
 	  assert(!strcmp(event->request.data_ptr, "hello world!"));
 	  printf("got data len %d data %s\n",
 		 event->request.data_len, event->request.data_ptr);
-	  assert(event->request.attribute == 123);
+	  assert(event->request.attribute == CCI_CONN_ATTR_RO);
 	  printf("got attr %d\n",
 		 event->request.attribute);
 
@@ -470,7 +470,7 @@ static int eth_create_endpoint(cci_device_t *device,
 	  /* connect */
 	  tv.tv_sec = 1;
 	  tv.tv_usec = 0;
-	  ret = cci_connect(*endpoint, name, "hello world!", 13, 123, (void*)0xdeadbeef, 0, &tv);
+	  ret = cci_connect(*endpoint, name, "hello world!", 13, CCI_CONN_ATTR_RU, (void*)0xdeadbeef, 0, &tv);
 	  assert(ret == CCI_SUCCESS);
 
 	  /* handle connect request and reject it */
@@ -482,7 +482,7 @@ static int eth_create_endpoint(cci_device_t *device,
 	  assert(!strcmp(event->request.data_ptr, "hello world!"));
 	  printf("got data len %d data %s\n",
 		 event->request.data_len, event->request.data_ptr);
-	  assert(event->request.attribute == 123);
+	  assert(event->request.attribute == CCI_CONN_ATTR_RU);
 	  printf("got attr %d\n",
 		 event->request.attribute);
 	  ret = cci_reject(event);
@@ -500,7 +500,7 @@ static int eth_create_endpoint(cci_device_t *device,
 	  /* connect */
 	  tv.tv_sec = 1;
 	  tv.tv_usec = 0;
-	  ret = cci_connect(*endpoint, name, "hello world!", 13, 123, (void*)0xdeadbeef, 0, &tv);
+	  ret = cci_connect(*endpoint, name, "hello world!", 13, CCI_CONN_ATTR_UU, (void*)0xdeadbeef, 0, &tv);
 	  assert(ret == CCI_SUCCESS);
 
 	  /* handle connect request and accept it */
@@ -512,7 +512,7 @@ static int eth_create_endpoint(cci_device_t *device,
 	  assert(!strcmp(event->request.data_ptr, "hello world!"));
 	  printf("got data len %d data %s\n",
 		 event->request.data_len, event->request.data_ptr);
-	  assert(event->request.attribute == 123);
+	  assert(event->request.attribute == CCI_CONN_ATTR_UU);
 	  printf("got attr %d\n",
 		 event->request.attribute);
 	  ret = cci_accept(event, (void*)0xfedcba98, &sconn);

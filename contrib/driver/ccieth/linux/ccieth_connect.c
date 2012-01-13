@@ -190,6 +190,12 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	if (arg->data_len > ep->max_send_size)
 		goto out;
 
+	if (arg->attribute != CCIETH_CONNECT_ATTR_RO
+	    && arg->attribute != CCIETH_CONNECT_ATTR_RU
+	    && arg->attribute != CCIETH_CONNECT_ATTR_UU)
+		/* FIXME switch case to set retransmit methods */
+		goto out;
+
 	/* get a connection */
 	err = -ENOMEM;
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
@@ -325,6 +331,13 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	int err;
 
 	printk("processing queued connect request skb %p\n", skb);
+
+	if (hdr->attribute != CCIETH_CONNECT_ATTR_RO
+	    && hdr->attribute != CCIETH_CONNECT_ATTR_RU
+	    && hdr->attribute != CCIETH_CONNECT_ATTR_UU)
+		/* remote doesn't look OK, ignore */
+		/* FIXME switch case to set retransmit methods */
+		goto out;
 
 	src_ep_id = ntohl(hdr->src_ep_id);
 	src_conn_id = ntohl(hdr->src_conn_id);
