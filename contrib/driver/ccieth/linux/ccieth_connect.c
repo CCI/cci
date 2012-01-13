@@ -804,6 +804,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	__u32 dst_conn_id;
 	__u32 dst_ep_id;
 	__u32 req_seqnum;
+	int destroy = 0;
 	int err;
 
 	printk("processing queued connect ack skb %p\n", skb);
@@ -828,11 +829,20 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 
 	conn->need_ack = 0;
 
-	/* FIXME: change REJECTED into CLOSING */
+	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REJECTED, CCIETH_CONNECTION_CLOSING)
+	    == CCIETH_CONNECTION_REJECTED)
+		destroy = 1;
 
 	rcu_read_unlock();
 
-	/* FIXME: destroy if was REJECTED */
+	if (destroy) {
+		printk("destroying acked rejected connection %p\n", conn);
+		spin_lock(&ep->connection_idr_lock);
+		idr_remove(&ep->connection_idr, conn->id);
+		spin_unlock(&ep->connection_idr_lock);
+		del_timer_sync(&conn->timer);
+		call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
+	}
 
 	dev_kfree_skb(skb);
 	return 0;
