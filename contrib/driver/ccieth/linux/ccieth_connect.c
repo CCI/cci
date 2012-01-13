@@ -560,12 +560,12 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	conn->need_ack = 1;
 	mod_timer(&conn->timer, jiffies + CCIETH_CONNECT_RESEND_DELAY);
 
-	rcu_read_unlock();
+	rcu_read_unlock(); /* end of rcu read access to ep conn idr only */
 
 	/* try to send a clone. if we can't, we'll resend later. */
 	skb = skb_clone(skb, GFP_KERNEL);
 	if (skb) {
-		rcu_read_lock(); /* for ep->ifp only, different from above */
+		rcu_read_lock(); /* start of another rcu read access for ep->ifp only */
 		/* is the interface still available? */
 		ifp = rcu_dereference(ep->ifp);
 		if (!ifp) {
@@ -712,12 +712,12 @@ ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_re
 	conn->need_ack = 1;
 	mod_timer(&conn->timer, jiffies + CCIETH_CONNECT_RESEND_DELAY);
 
-	rcu_read_unlock();
+	rcu_read_unlock(); /* end of rcu read access to ep conn idr only */
 
 	/* try to send a clone. if we can't, we'll resend later. */
 	skb = skb_clone(skb, GFP_KERNEL);
 	if (skb) {
-		rcu_read_lock(); /* for ep->ifp only, different from above */
+		rcu_read_lock(); /* start of another rcu read access for ep->ifp only */
 		/* is the interface still available? */
 		ifp = rcu_dereference(ep->ifp);
 		if (!ifp) {

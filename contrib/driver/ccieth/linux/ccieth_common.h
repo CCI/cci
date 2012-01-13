@@ -43,7 +43,8 @@ struct ccieth_endpoint {
 	struct sk_buff_head deferred_connect_recv_queue;
 	struct work_struct deferred_connect_recv_work;
 
-	/* modified by ioctl and deferred network handler, does not need _bh() */
+	/* modified by ioctl and deferred network handler, does not need _bh().
+	 * accessed under RCU read lock. */
 	struct idr connection_idr;
 	spinlock_t connection_idr_lock;
 	atomic_t connection_req_seqnum;
@@ -135,7 +136,7 @@ struct ccieth_connection {
 	struct ccieth_endpoint_event embedded_event;
 };
 
-extern struct idr ccieth_ep_idr;
+extern struct idr ccieth_ep_idr; /* accessed under RCU read lock */
 
 extern int ccieth_net_init(void);
 extern void ccieth_net_exit(void);
