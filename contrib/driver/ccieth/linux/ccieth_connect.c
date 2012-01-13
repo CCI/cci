@@ -80,6 +80,7 @@ ccieth_conn_ru_init(struct ccieth_connection *conn)
 static void
 ccieth_conn_uu_set_next_send_seqnum(struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr)
 {
+	hdr->msg_seqnum = htonl(-1); /* debug */
 }
 static void
 ccieth_conn_uu_init(struct ccieth_connection *conn)
