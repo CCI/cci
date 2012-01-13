@@ -277,6 +277,8 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	__u32 data_len;
 	__u32 src_max_send_size;
 	__u32 req_seqnum;
+	struct sk_buff *replyskb;
+	size_t replyskblen;
 	int id;
 	int err;
 
@@ -312,11 +314,25 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	spin_unlock_bh(&ep->free_event_list_lock);
 
 	/* get a connection */
+	err = -ENOMEM;
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out_with_event;
-	conn->skb = NULL;
 	conn->need_ack = 0;
+
+	/* allocate and initialize the connect reply skb now so that we don't fail with ENOMEM later */
+	replyskblen = max(sizeof(struct ccieth_pkt_header_connect_accept),
+			  sizeof(struct ccieth_pkt_header_connect_reject));
+	if (replyskblen < ETH_ZLEN)
+		replyskblen = ETH_ZLEN;
+	replyskb = alloc_skb(replyskblen, GFP_KERNEL);
+	if (!replyskb)
+		goto out_with_conn;
+	skb_reset_mac_header(replyskb);
+	skb_reset_network_header(replyskb);
+	replyskb->protocol = __constant_htons(ETH_P_CCI);
+	skb_put(replyskb, replyskblen);
+	conn->skb = replyskb;
 
 	/* setup the connection so that we can check for duplicates before inserting */
 	conn->ep = ep;
@@ -341,7 +357,7 @@ retry:
 				goto retry;
 			err = -ENOMEM;
 		}
-		goto out_with_conn;
+		goto out_with_replyskb;
 	}
 
 	/* setup the event */
@@ -370,6 +386,8 @@ out_with_conn_id:
 	spin_lock(&ep->connection_idr_lock);
 	idr_remove(&ep->connection_idr, id);
 	spin_unlock(&ep->connection_idr_lock);
+out_with_replyskb:
+	kfree_skb(replyskb);
 out_with_conn:
 	kfree(conn);
 out_with_event:
@@ -388,21 +406,7 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	struct net_device *ifp;
 	struct ccieth_pkt_header_connect_accept *hdr;
 	struct ccieth_connection *conn;
-	size_t skblen;
 	int err;
-
-	/* allocate and initialize the skb */
-	skblen = sizeof(*hdr);
-	if (skblen < ETH_ZLEN)
-		skblen = ETH_ZLEN;
-	err = -ENOMEM;
-        skb = alloc_skb(skblen, GFP_KERNEL);
-	if (!skb)
-		goto out;
-	skb_reset_mac_header(skb);
-	skb_reset_network_header(skb);
-	skb->protocol = __constant_htons(ETH_P_CCI);
-	skb_put(skb, skblen);
 
 	rcu_read_lock();
 
@@ -412,7 +416,6 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 		err = -ENODEV;
 		goto out_with_rculock;
 	}
-	skb->dev = ifp;
 
 	/* update the connection now that we can't fail anywhere else */
 	err = -EINVAL;
@@ -427,6 +430,9 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	conn->user_conn_id = arg->user_conn_id;
 
 	/* fill headers */
+	skb = conn->skb;
+	conn->skb = NULL; /* FIXME: cache and resend until acked */
+	skb->dev = ifp;
 	hdr = (struct ccieth_pkt_header_connect_accept *) skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
 	memcpy(&hdr->eth.h_source, ep->addr, 6);
@@ -445,9 +451,7 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	return 0;
 
 out_with_rculock:
-	kfree_skb(skb);
 	rcu_read_unlock();
-out:
 	return err;
 }
 
@@ -546,21 +550,7 @@ ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_re
 	struct net_device *ifp;
 	struct ccieth_pkt_header_connect_reject *hdr;
 	struct ccieth_connection *conn;
-	size_t skblen;
 	int err;
-
-	/* allocate and initialize the skb */
-	skblen = sizeof(*hdr);
-	if (skblen < ETH_ZLEN)
-		skblen = ETH_ZLEN;
-	err = -ENOMEM;
-        skb = alloc_skb(skblen, GFP_KERNEL);
-	if (!skb)
-		goto out;
-	skb_reset_mac_header(skb);
-	skb_reset_network_header(skb);
-	skb->protocol = __constant_htons(ETH_P_CCI);
-	skb_put(skb, skblen);
 
 	rcu_read_lock();
 
@@ -570,7 +560,6 @@ ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_re
 		err = -ENODEV;
 		goto out_with_rculock;
 	}
-	skb->dev = ifp;
 
 	/* update the connection now that we can't fail anywhere else */
 	err = -EINVAL;
@@ -583,6 +572,9 @@ ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_re
 		goto out_with_rculock;
 
 	/* fill headers */
+	skb = conn->skb;
+	conn->skb = NULL; /* FIXME: cache and resend until acked */
+	skb->dev = ifp;
 	hdr = (struct ccieth_pkt_header_connect_reject *) skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
 	memcpy(&hdr->eth.h_source, ep->addr, 6);
@@ -594,17 +586,13 @@ ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_re
 	hdr->src_conn_id = htonl(conn->id);
 	hdr->req_seqnum = htonl(conn->req_seqnum);
 
-	/* FIXME: cache and resend until acked */
-
 	dev_queue_xmit(skb);
 
 	rcu_read_unlock();
 	return 0;
 
 out_with_rculock:
-	kfree_skb(skb);
 	rcu_read_unlock();
-out:
 	return err;
 }
 
