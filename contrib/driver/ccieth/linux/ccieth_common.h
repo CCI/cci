@@ -99,9 +99,10 @@ struct ccieth_connection {
 	__u32 max_send_size;
 	__u64 user_conn_id;
 
-	unsigned long expire; /* in jiffies */
+	/* resending of request, accept or reject */
+	unsigned long expire; /* in jiffies, only for request because it has a timeout */
 	struct timer_list timer;
-	struct sk_buff *skb;
+	struct sk_buff *skb; /* cached skb, to be cloned for resending */
 
 	/* dest fields are valid when status RECEIVED, READY or REJECTED */
 	/* FIXME: store in network order? */

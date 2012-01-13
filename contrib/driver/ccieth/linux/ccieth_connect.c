@@ -132,6 +132,38 @@ void ccieth_connect_request_timer_hdlr(unsigned long data)
 	/* don't use conn anymore, the event destructor will destroy it after RCU grace period */
 }
 
+static
+void ccieth_connect_reply_timer_hdlr(unsigned long data)
+{
+	struct ccieth_connection *conn = (void*) data;
+	struct ccieth_endpoint *ep = conn->ep;
+	struct sk_buff *skb;
+
+	if (conn->status != CCIETH_CONNECTION_READY && conn->status != CCIETH_CONNECTION_REJECTED)
+		return;
+
+	if (!conn->need_ack)
+		return;
+
+	/* resend request */
+	mod_timer(&conn->timer, jiffies + CCIETH_CONNECT_RESEND_DELAY);
+
+	skb = skb_clone(conn->skb, GFP_ATOMIC);
+	if (skb) {
+		struct net_device *ifp;
+		rcu_read_lock();
+		/* is the interface still available? */
+		ifp = rcu_dereference(ep->ifp);
+		if (ifp) {
+			skb->dev = ifp;
+			dev_queue_xmit(skb);
+		} else {
+			kfree_skb(skb);
+		}
+		rcu_read_unlock();
+	}
+}
+
 int
 ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_request *arg)
 {
@@ -155,7 +187,7 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	if (!conn)
 		goto out;
 	conn->skb = NULL;
-	conn->need_ack = 1;
+	/* initialize the timer to make destroy easier */
 	setup_timer(&conn->timer, ccieth_connect_request_timer_hdlr, (unsigned long) conn);
 
 	/* get a connection id (only reserve it) */
@@ -218,6 +250,7 @@ retry:
 	idr_replace(&ep->connection_idr, conn, id);
 	hdr->src_conn_id = htonl(id);
 
+	conn->need_ack = 1;
 	/* keep the current skb cached in the connection,
 	 * and try to send the clone. if we can't, we'll resend later.
 	 */
@@ -319,6 +352,8 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	if (!conn)
 		goto out_with_event;
 	conn->need_ack = 0;
+	/* initialize the timer to make destroy easier */
+	setup_timer(&conn->timer, ccieth_connect_reply_timer_hdlr, (unsigned long) conn);
 
 	/* allocate and initialize the connect reply skb now so that we don't fail with ENOMEM later */
 	replyskblen = max(sizeof(struct ccieth_pkt_header_connect_accept),
@@ -410,14 +445,7 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 
 	rcu_read_lock();
 
-	/* is the interface still available? */
-	ifp = rcu_dereference(ep->ifp);
-	if (!ifp) {
-		err = -ENODEV;
-		goto out_with_rculock;
-	}
-
-	/* update the connection now that we can't fail anywhere else */
+	/* update the connection */
 	err = -EINVAL;
 	conn = idr_find(&ep->connection_idr, arg->conn_id);
 	if (!conn)
@@ -431,8 +459,6 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 
 	/* fill headers */
 	skb = conn->skb;
-	conn->skb = NULL; /* FIXME: cache and resend until acked */
-	skb->dev = ifp;
 	hdr = (struct ccieth_pkt_header_connect_accept *) skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
 	memcpy(&hdr->eth.h_source, ep->addr, 6);
@@ -445,11 +471,31 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	hdr->max_send_size = htonl(conn->max_send_size);
 	hdr->req_seqnum = htonl(conn->req_seqnum);
 
-	dev_queue_xmit(skb);
+	/* setup resend or timeout timer */
+	conn->need_ack = 1;
+	mod_timer(&conn->timer, jiffies + CCIETH_CONNECT_RESEND_DELAY);
 
 	rcu_read_unlock();
+
+	/* try to send a clone. if we can't, we'll resend later. */
+	skb = skb_clone(skb, GFP_KERNEL);
+	if (skb) {
+		rcu_read_lock(); /* for ep->ifp only, different from above */
+		/* is the interface still available? */
+		ifp = rcu_dereference(ep->ifp);
+		if (!ifp) {
+			err = -ENODEV;
+			goto out_with_skb;
+		}
+		skb->dev = ifp;
+		dev_queue_xmit(skb);
+		rcu_read_unlock();
+	}
+
 	return 0;
 
+out_with_skb:
+	kfree_skb(skb);
 out_with_rculock:
 	rcu_read_unlock();
 	return err;
@@ -554,14 +600,7 @@ ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_re
 
 	rcu_read_lock();
 
-	/* is the interface still available? */
-	ifp = rcu_dereference(ep->ifp);
-	if (!ifp) {
-		err = -ENODEV;
-		goto out_with_rculock;
-	}
-
-	/* update the connection now that we can't fail anywhere else */
+	/* update the connection */
 	err = -EINVAL;
 	conn = idr_find(&ep->connection_idr, arg->conn_id);
 	if (!conn)
@@ -573,8 +612,6 @@ ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_re
 
 	/* fill headers */
 	skb = conn->skb;
-	conn->skb = NULL; /* FIXME: cache and resend until acked */
-	skb->dev = ifp;
 	hdr = (struct ccieth_pkt_header_connect_reject *) skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
 	memcpy(&hdr->eth.h_source, ep->addr, 6);
@@ -586,11 +623,31 @@ ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_re
 	hdr->src_conn_id = htonl(conn->id);
 	hdr->req_seqnum = htonl(conn->req_seqnum);
 
-	dev_queue_xmit(skb);
+	/* setup resend or timeout timer */
+	conn->need_ack = 1;
+	mod_timer(&conn->timer, jiffies + CCIETH_CONNECT_RESEND_DELAY);
 
 	rcu_read_unlock();
+
+	/* try to send a clone. if we can't, we'll resend later. */
+	skb = skb_clone(skb, GFP_KERNEL);
+	if (skb) {
+		rcu_read_lock(); /* for ep->ifp only, different from above */
+		/* is the interface still available? */
+		ifp = rcu_dereference(ep->ifp);
+		if (!ifp) {
+			err = -ENODEV;
+			goto out_with_skb;
+		}
+		skb->dev = ifp;
+		dev_queue_xmit(skb);
+		rcu_read_unlock();
+	}
+
 	return 0;
 
+out_with_skb:
+	kfree_skb(skb);
 out_with_rculock:
 	rcu_read_unlock();
 	return err;
@@ -767,9 +824,15 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	if (!conn || conn->req_seqnum != req_seqnum)
 		goto out_with_rculock;
 
+	printk("conn %p status %d acked\n", conn, conn->status);
+
 	conn->need_ack = 0;
 
+	/* FIXME: change REJECTED into CLOSING */
+
 	rcu_read_unlock();
+
+	/* FIXME: destroy if was REJECTED */
 
 	dev_kfree_skb(skb);
 	return 0;
