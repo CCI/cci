@@ -431,7 +431,7 @@ static int eth_create_endpoint(cci_device_t *device,
 
   *fdp = eep->fd = fd;
 
-  {
+  if (getenv("CCIETH_DEBUG")) {
 	  /* debugging */
 
 	  cci_connection_t *sconn, *cconn;
