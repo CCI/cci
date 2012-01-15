@@ -112,7 +112,7 @@ ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *a
 		goto out_with_ifp;
 	}
 	rcu_assign_pointer(ep->ifp, ifp);
-	memcpy(ep->addr, &ifp->dev_addr, 6);
+	memcpy(ep->addr, &arg->addr, 6);
 	ep->max_send_size = ccieth_max_send_size(ifp->mtu);
 
 	INIT_LIST_HEAD(&ep->event_list);
