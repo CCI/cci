@@ -14,6 +14,7 @@
 #include <linux/list.h>
 #include <linux/kref.h>
 #include <linux/workqueue.h>
+#include <linux/completion.h>
 
 #include "ccieth_io.h"
 
@@ -100,6 +101,7 @@ struct ccieth_connection {
 	enum ccieth_connection_status status;
 	struct ccieth_endpoint *ep;
 	int need_ack;
+	struct completion acked_completion;
 
 	__u8 attribute;
 	__u32 req_seqnum;

@@ -230,6 +230,7 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out;
+	init_completion(&conn->acked_completion);
 	conn->skb = NULL;
 
 	/* initialize attribute */
@@ -419,6 +420,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out_with_event;
+	init_completion(&conn->acked_completion);
 	conn->need_ack = 0;
 	conn->attribute = hdr->attribute;
 
@@ -501,6 +503,7 @@ retry:
 	spin_unlock_bh(&ep->event_list_lock);
 
 	dev_kfree_skb(skb);
+
 	return 0;
 
 out_with_conn_id:
@@ -578,6 +581,12 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 		rcu_read_unlock();
 	}
 
+	/* FIXME: block for now so that cci_send() right after cci_accept()
+	 * doesn't get ignored (accept recv is deferred while MSG recv isn't).
+	 */
+	if (conn->attribute == CCIETH_CONNECT_ATTR_UU)
+		/* only matters for UU, MSG isn't resent there */
+		wait_for_completion_interruptible(&conn->acked_completion);
 	return 0;
 
 out_with_skb:
@@ -913,6 +922,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	printk("conn %p status %d acked\n", conn, conn->status);
 
 	conn->need_ack = 0;
+	complete(&conn->acked_completion);
 
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REJECTED, CCIETH_CONNECTION_CLOSING)
 	    == CCIETH_CONNECTION_REJECTED)
