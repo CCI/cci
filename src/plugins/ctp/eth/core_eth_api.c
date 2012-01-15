@@ -817,14 +817,15 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 	return CCI_SUCCESS;
 
 out_with_event:
-	free(event);
+	free(_ev);
 	return CCI_EAGAIN;
 }
 
 
 static int eth_return_event(cci_event_t *event)
 {
-	free(event);
+	cci__evt_t *_ev = container_of(event, cci__evt_t, event);
+	free(_ev);
 	return 0;
 }
 
