@@ -420,6 +420,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	if (!conn)
 		goto out_with_event;
 	conn->need_ack = 0;
+	conn->attribute = hdr->attribute;
 
 	/* initialize attribute */
 	switch (hdr->attribute) {
