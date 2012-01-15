@@ -264,6 +264,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 	/* setup the event */
 	event->event.type = CCIETH_IOCTL_EVENT_SEND;
+	event->event.data_length = 0;
 	event->event.send.user_conn_id = conn->user_conn_id;
 	event->event.send.context = arg->context;
 
@@ -404,7 +405,7 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 			return -EAGAIN;
 
 		ret = copy_to_user((__user void *)arg, &event->event, sizeof(event->event));
-		if (!ret)
+		if (!ret && event->event.data_length > 0)
 			ret = copy_to_user(((__user void *) arg)+sizeof(struct ccieth_ioctl_get_event),
 					   event+1, event->event.data_length);
 

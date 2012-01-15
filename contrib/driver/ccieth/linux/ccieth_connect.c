@@ -167,6 +167,7 @@ void ccieth_connect_request_timer_hdlr(unsigned long data)
 
 	printk("delivering connection %p timeout\n", conn);
 	conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECT_TIMEDOUT;
+	conn->embedded_event.event.data_length = 0;
 	conn->embedded_event.event.connect_timedout.user_conn_id = conn->user_conn_id;
 	conn->embedded_event.destructor = ccieth_connection_event_destructor;
 
@@ -642,6 +643,7 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 
 	/* setup the event */
 	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_ACCEPTED;
+	event->event.data_length = 0;
 	event->event.connect_accepted.conn_id = dst_conn_id;
 
 	/* find the connection and update it */
@@ -806,6 +808,7 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 
 	/* setup the event */
 	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_REJECTED;
+	event->event.data_length = 0;
 	event->event.connect_rejected.user_conn_id = conn->user_conn_id;
 
 	/* destroy connection now that we don't need it */
