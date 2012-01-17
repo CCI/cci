@@ -457,6 +457,8 @@ static int eth_create_endpoint(cci_device_t *device,
 	  assert(event->request.attribute == CCI_CONN_ATTR_RO);
 	  printf("got attr %d\n",
 		 event->request.attribute);
+	  ret = cci_return_event(event);
+	  assert(ret == CCI_SUCCESS);
 
 	  /* handle timedout event */
 	  while ((ret = cci_get_event(*endpoint, &event)) == CCI_EAGAIN);
@@ -486,6 +488,8 @@ static int eth_create_endpoint(cci_device_t *device,
 	  printf("got attr %d\n",
 		 event->request.attribute);
 	  ret = cci_reject(event);
+	  assert(ret == CCI_SUCCESS);
+	  ret = cci_return_event(event);
 	  assert(ret == CCI_SUCCESS);
 
 	  /* handle connect rejected */
