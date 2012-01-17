@@ -48,7 +48,7 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 	 * isn't already doing it inside a call_rcu */
 	rcu_read_lock();
 	ifp = rcu_dereference(ep->ifp);
-	if (ifp && cmpxchg(&ep->ifp, ifp, NULL) == ifp) {
+	if (ifp && cmpxchg((struct net_device __force **)&ep->ifp, ifp, NULL) == ifp) {
 		rcu_read_unlock();
 		dev_put(ifp);
 	} else {

@@ -1047,7 +1047,7 @@ ccieth_defer_connect_recv(struct net_device *ifp, struct sk_buff *skb)
 	if (!ep)
 		/* FIXME nack */
 		goto out_with_rculock;
-	if (ep->ifp != ifp)
+	if (rcu_access_pointer(ep->ifp) != ifp)
 		goto out_with_rculock;
 
 	printk("queueing skb %p\n", skb);

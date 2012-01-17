@@ -42,7 +42,7 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 
 	/* find endpoint and check that it's attached to this ifp */
 	ep = idr_find(&ccieth_ep_idr, dst_ep_id);
-	if (!ep || ep->ifp != ifp)
+	if (!ep || rcu_access_pointer(ep->ifp) != ifp)
 		goto out_with_rculock;
 
 	/* check msg length */
@@ -160,7 +160,7 @@ static int ccieth_netdevice_notifier_idrforeach_cb(int id, void *p, void *_data)
 	struct net_device *ifp = data->ifp;
 	unsigned long event = data->event;
 
-	if (!ep || ep->ifp != ifp)
+	if (!ep || rcu_access_pointer(ep->ifp) != ifp)
 		return 0;
 
 	if (event == NETDEV_CHANGEMTU) {
@@ -171,7 +171,7 @@ static int ccieth_netdevice_notifier_idrforeach_cb(int id, void *p, void *_data)
 			return 0;
 	}
 
-	if (cmpxchg(&ep->ifp, ifp, NULL) == ifp) {
+	if (cmpxchg((struct net_device __force **)&ep->ifp, ifp, NULL) == ifp) {
 		ep->release_ifp = ifp;
 		call_rcu(&ep->release_ifp_rcu_head, ccieth_release_ifp_rcu);
 
