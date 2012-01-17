@@ -17,6 +17,7 @@
 #include <linux/completion.h>
 
 #include "ccieth_io.h"
+#include "ccieth_hal.h"
 
 #define CCIETH_EVENT_SLOT_NR 64
 
