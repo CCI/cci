@@ -39,20 +39,22 @@ BEGIN_C_DECLS
 
 #define GNI_MAX_HDR_SIZE      (32)           // per CCI spec
 #define GNI_DEFAULT_MSS       (768)          // 
-#define GNI_MIN_MSS           (768)
+//#define GNI_MIN_MSS           (768)
+#define GNI_MIN_MSS           (128)
 #define GNI_MAX_SIZE          (64 * 1024 - 1)// max payload + header
 #define GNI_MAX_MSS           (GNI_MAX_SIZE - GNI_MAX_HDR_SIZE - 8)
+#define GNI_MBOX_MAX_CREDITS  (20)           // MAX tx messages
 
 #define GNI_BLOCK_SIZE        (64)           // bytes for id storage
 #define GNI_EP_MAX_HDR_SIZE   (GNI_MAX_HDR_SIZE)
 #define GNI_EP_BUF_LEN        (GNI_MAX_MSS)  // 65495 B
 #define GNI_EP_RX_CNT         (1024)         // MAX rx messages
-#define GNI_EP_TX_CNT         (32)           // MAX tx messages
+#define GNI_EP_TX_CNT         (1024)         // MAX tx messages
 #define GNI_NUM_BLOCKS        (16384)        // number of blocks
 #define GNI_MAX_EP_ID         (GNI_BLOCK_SIZE * GNI_NUM_BLOCKS)
 #define GNI_EP_BITS           (32)
 #define GNI_EP_SHIFT          (32)
-#define GNI_PROG_TIME_US      (1)            // progress delay micro-sec
+#define GNI_PROG_TIME_US      (10000)        // progress delay micro-sec
 
 #define GNI_EP_MATCH          ((uint64_t)0)
 #define GNI_EP_IGNORE         (~((uint64_t)0))
@@ -160,22 +162,26 @@ typedef enum gni_msg_type {
 // OOB msg types
 typedef enum gni_msg_oob_type {
 
-    GNI_MSG_OOB_CONN_REQUEST,
-    GNI_MSG_OOB_CONN_REPLY,
     GNI_MSG_KEEPALIVE
 }                               gni_msg_oob_type_t;
 
 typedef struct gni_rx {
-    cci__evt_t *                evt;         // associated event
-    gni_msg_type_t              msg_type;    // message type
-    gni_msg_oob_type_t          oob_type;    // oob type
-    int32_t                     flags;       // CCI flags
-    void *                      buffer;      // active msg buffer
-    uint16_t                    len;         // length of buffer
-    gni_ep_handle_t             ep_hndl;     // ep handle
-    TAILQ_ENTRY(gni_rx)         gentry;      // Hangs on ep->rxs
-    TAILQ_ENTRY(gni_rx)         entry;       // Hangs on ep->idle_rxs
+    cci__evt_t                  evt;         // associated event
+    TAILQ_ENTRY(gni_rx)         gentry;      // Hangs on ep->rxs_all
+    TAILQ_ENTRY(gni_rx)         entry;       // Hangs on ep->rxs
 }                               gni_rx_t;
+
+typedef struct gni_tx {
+    cci__evt_t                  evt;         // associated event
+    uint32_t                    id;          // ID of tx; returned by CQ
+    void *                      ptr;         // send buffer
+    void *                      user_ptr;    // user send buffer
+    uint32_t                    len;         // length of buffer used
+    uint32_t                    zero_copy;   // zero copy
+    TAILQ_ENTRY(gni_tx)         gentry;      // Hangs on ep->txs_all
+    TAILQ_ENTRY(gni_tx)         entry;       // Hangs on ep->txs
+    TAILQ_ENTRY(gni_tx)         qentry;      // Hangs on ep->txs_queue
+}                               gni_tx_t;
 
 // GNI connection status
 typedef enum gni_conn_status {
@@ -212,11 +218,16 @@ typedef struct gni_ep {
     gni_mailbox_t               dst_box;     // Destination SMSG mailbox
     gni_ep_handle_t             ep_hndl;     // ep handle
     void *                      rxbuf;       // Large buffer for rx's
+    void *                      txbuf;       // Large buffer for tx's
+    uint32_t                    credits;     // tracking send credits
     TAILQ_HEAD(g_conns, gni_conn)
                                 gconns;      // List of all conns
     TAILQ_HEAD(g_evts, gni_evt) evts;        // List of all evts
-    TAILQ_HEAD(g_rxs, gni_rx)   rxs;         // List of all rxs
-    TAILQ_HEAD(g_rxsi, gni_rx)  idle_rxs;    // List of idle rxs
+    TAILQ_HEAD(g_rxsa, gni_rx)  rxs_all;     // List of all rxs
+    TAILQ_HEAD(g_rxs, gni_rx)   rxs;         // List of available rxs
+    TAILQ_HEAD(g_txsa, gni_tx)  txs_all;     // List of all txs
+    TAILQ_HEAD(g_txs, gni_tx)   txs;         // List of available txs
+    TAILQ_HEAD(g_txsq, gni_tx)  txs_queue;   // List of queued txs
     TAILQ_HEAD(g_handles, gni_rma_handle)
                                 handles;     // List of RMA regions
     TAILQ_HEAD(g_ops, gni_rma_op)
@@ -232,13 +243,6 @@ typedef struct gni_conn {
     struct sockaddr_in          sin;
     TAILQ_ENTRY(gni_conn)       entry;
 }                               gni_conn_t;
-
-typedef struct gni_lep {
-
-    gni_cq_handle_t             cqhd;        // destination queue
-    gni_cq_handle_t             cqhl;        // destination queue
-    gni_ep_handle_t *           ep_hndl_list;
-}                               gni_lep_t;
 
 int cci_core_gni_post_load(
     cci_plugin_t *              me );
