@@ -3351,6 +3351,9 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
 }
 
 /*
+ * GV [2012/01/16] Not sure that an event needs to be returned on the server
+ * side so part of the following comments may be wrong. The event related code
+ * is deactivated until this is clarified.
  * First of all, remember that on the server side, we always receive a conn_ack
  * for both an accepted and a rejected connection (in the context of a reliable
  * connection). Therefore, the conn_ack follows a conn_reply that was either
@@ -3420,6 +3423,7 @@ sock_handle_conn_ack(sock_conn_t *sconn,
         debug((CCI_DB_MSG|CCI_DB_CONN), "received conn_ack and no matching tx "
               "(seq %u ack %u)", seq, ts); //FIXME
     } else {
+#if 0
         sock_header_t *hdr  = NULL;
         sock_msg_type_t type;
         uint8_t a;
@@ -3449,8 +3453,11 @@ sock_handle_conn_ack(sock_conn_t *sconn,
             *((void **) &event->recv.ptr) = NULL;
             event->recv.connection = &conn->connection;
         }
+#endif
         pthread_mutex_lock(&ep->lock);
+#if 0
         TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+#endif
         TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
         pthread_mutex_unlock(&ep->lock);
     }
