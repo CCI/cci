@@ -52,6 +52,15 @@ echo " * ${CONFIG_LINE}" >> ${TMP_CHECKS_NAME}
 echo " */" >> ${TMP_CHECKS_NAME}
 echo "" >> ${TMP_CHECKS_NAME}
 
+# dev_getbyhwaddr_rcu added in 2.6.38
+echo -n "  checking (in kernel headers) dev_getbyhwaddr_rcu availability ... "
+if grep "dev_getbyhwaddr_rcu(" ${LINUX_SRC}/include/linux/netdevice.h > /dev/null ; then
+  echo "#define CCIETH_HAVE_DEV_GETBYHWADDR_RCU 1" >> ${TMP_CHECKS_NAME}
+  echo yes
+else
+  echo no
+fi
+
 # add the footer
 echo "" >> ${TMP_CHECKS_NAME}
 echo "#endif /* CCIETH_CHECKS_H */" >> ${TMP_CHECKS_NAME}

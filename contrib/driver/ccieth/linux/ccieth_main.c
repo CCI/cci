@@ -94,17 +94,17 @@ ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *a
 	int id, i;
 	int err;
 
-	rcu_read_lock();
-	ifp = dev_getbyhwaddr_rcu(&init_net, ARPHRD_ETHER, (const char *)&arg->addr);
+	ccieth_dev_getbyhwaddr_lock();
+	ifp = ccieth_dev_getbyhwaddr(&init_net, ARPHRD_ETHER, (const char *)&arg->addr);
 	if (!ifp) /* allow loopback to ease development */
-		ifp = dev_getbyhwaddr_rcu(&init_net, ARPHRD_LOOPBACK, (const char *)&arg->addr);
+		ifp = ccieth_dev_getbyhwaddr(&init_net, ARPHRD_LOOPBACK, (const char *)&arg->addr);
 	if (!ifp) {
-		rcu_read_unlock();
+		ccieth_dev_getbyhwaddr_unlock();
 		err = -ENODEV;
 		goto out;
 	}
 	dev_hold(ifp);
-	rcu_read_unlock();
+	ccieth_dev_getbyhwaddr_unlock();
 
 	ep = kmalloc(sizeof(struct ccieth_endpoint), GFP_KERNEL);
 	if (!ep) {
@@ -340,8 +340,8 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		gi_arg.pci_func = -1;
 		gi_arg.rate = 0;
 
-		rcu_read_lock();
-		ifp = dev_getbyhwaddr_rcu(&init_net, ARPHRD_ETHER, (const char *)&gi_arg.addr);
+		ccieth_dev_getbyhwaddr_lock();
+		ifp = ccieth_dev_getbyhwaddr(&init_net, ARPHRD_ETHER, (const char *)&gi_arg.addr);
 		if (ifp) {
 			struct device *dev = ifp->dev.parent;
 
@@ -365,7 +365,7 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 			}
 		} else
 			ret = -ENODEV;
-		rcu_read_unlock();
+		ccieth_dev_getbyhwaddr_unlock();
 
 		ret = copy_to_user((__user void *)arg, &gi_arg, sizeof(gi_arg));
 		if (ret)
