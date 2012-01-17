@@ -426,7 +426,7 @@ sock_close_socket(cci_os_handle_t sock)
     FD_CLR(sock, &sglobals->fds);
     sglobals->fd_idx[sock].type = SOCK_FD_UNUSED;
     if (sock == sglobals->nfds - 1) {
-        int i = sock - 1;
+        int i;
         sock_fd_idx_t *idx;
         for (i = sock - 1; i >= 0; i--) {
             idx = (sock_fd_idx_t *) &sglobals->fd_idx[i];
@@ -975,6 +975,7 @@ static int sock_reject(union cci_event *event)
 
     evt = container_of(event, cci__evt_t, event);
     ep = evt->ep;
+    sep = ep->priv;
     rx = container_of(evt, sock_rx_t, evt);
 
     /* get a tx */
@@ -1293,9 +1294,6 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     assert(tx->len <= ep->buffer_len);
 
     /* insert at tail of device's queued list */
-
-    dev = ep->dev;
-    sdev = dev->priv;
 
     tx->state = SOCK_TX_QUEUED;
     pthread_mutex_lock(&dev->lock);
