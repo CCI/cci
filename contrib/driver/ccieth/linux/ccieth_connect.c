@@ -380,6 +380,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 
 	printk("processing queued connect request skb %p\n", skb);
 
+	err = -EINVAL;
 	if (hdr->attribute != CCIETH_CONNECT_ATTR_RO
 	    && hdr->attribute != CCIETH_CONNECT_ATTR_RU
 	    && hdr->attribute != CCIETH_CONNECT_ATTR_UU)
@@ -399,7 +400,6 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 			   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum);
 
 	/* check msg length */
-	err = -EINVAL;
 	if (data_len > ep->max_send_size)
 		/* FIXME: nack? ignore? instead of ack */
 		goto out;
