@@ -465,7 +465,7 @@ static int eth_create_endpoint(cci_device_t *device,
 	  printf("got attr %d\n",
 		 event->request.attribute);
 	  ret = cci_return_event(event);
-	  assert(ret == CCI_SUCCESS);
+	  assert(ret == CCI_EINVAL); /* cannot return connreq event without accept/reject */
 
 	  /* handle timedout event */
 	  while ((ret = cci_get_event(*endpoint, &event)) == CCI_EAGAIN);
@@ -496,6 +496,10 @@ static int eth_create_endpoint(cci_device_t *device,
 		 event->request.attribute);
 	  ret = cci_reject(event);
 	  assert(ret == CCI_SUCCESS);
+	  ret = cci_accept(event, NULL, NULL);
+	  assert(ret == CCI_EINVAL); /* cannot accept already rejected connreq */
+	  ret = cci_reject(event);
+	  assert(ret == CCI_EINVAL); /* cannot reject already rejected connreq */
 	  ret = cci_return_event(event);
 	  assert(ret == CCI_SUCCESS);
 
@@ -505,6 +509,10 @@ static int eth_create_endpoint(cci_device_t *device,
 	  printf("got event type %d\n", event->type);
 	  assert(event->type == CCI_EVENT_CONNECT_REJECTED);
 	  assert(event->rejected.context == (void*)0xdeadbeef);
+	  ret = cci_accept(event, NULL, NULL);
+	  assert(ret == CCI_EINVAL); /* cannot accept non-connreq event */
+	  ret = cci_reject(event);
+	  assert(ret == CCI_EINVAL); /* cannot reject non-connreq event */
 	  ret = cci_return_event(event);
 	  assert(ret == CCI_SUCCESS);
 
@@ -532,6 +540,10 @@ static int eth_create_endpoint(cci_device_t *device,
 		 sconn, sconn->attribute, sconn->max_send_size);
 	  assert(sconn->endpoint == *endpoint);
 	  assert(sconn->context == (void*)0xfedcba98);
+	  ret = cci_accept(event, NULL, NULL);
+	  assert(ret == CCI_EINVAL); /* cannot accept already accepted connreq */
+	  ret = cci_reject(event);
+	  assert(ret == CCI_EINVAL); /* cannot reject already accepted connreq */
 	  ret = cci_return_event(event);
 	  assert(ret == CCI_SUCCESS);
 
@@ -609,14 +621,19 @@ static int eth_accept(union cci_event *event,
                       cci_connection_t **connection)
 {
 	cci__evt_t *_ev = container_of(event, cci__evt_t, event);
+	eth__evt_t *eev = (void*) (_ev + 1);
 	cci__ep_t *_ep = _ev->ep;
 	eth__ep_t *eep = _ep->priv;
-	struct ccieth_ioctl_get_event *ge = (void*) (_ev + 1);
+	struct ccieth_ioctl_get_event *ge = (void*) (eev + 1);
 	__u32 conn_id = ge->connect_request.conn_id;
 	struct ccieth_ioctl_connect_accept ac;
 	cci__conn_t *_conn;
 	eth__conn_t *econn;
 	int err;
+
+	if (event->type != CCI_EVENT_CONNECT_REQUEST
+	    || !eev->type_params.connect_request.need_reply)
+		return CCI_EINVAL;
 
 	_conn = malloc(sizeof(*_conn) + sizeof(*econn));
 	if (!_conn)
@@ -635,6 +652,8 @@ static int eth_accept(union cci_event *event,
 		return errno;
 	}
 
+	eev->type_params.connect_request.need_reply = 0;
+
 	_conn->connection.max_send_size = ge->connect_request.max_send_size;
 	_conn->connection.endpoint = &_ep->endpoint;
 	_conn->connection.attribute = ge->connect_request.attribute;
@@ -648,12 +667,17 @@ static int eth_accept(union cci_event *event,
 static int eth_reject(union cci_event *event)
 {
 	cci__evt_t *_ev = container_of(event, cci__evt_t, event);
+	eth__evt_t *eev = (void*) (_ev + 1);
 	cci__ep_t *_ep = _ev->ep;
 	eth__ep_t *eep = _ep->priv;
-	struct ccieth_ioctl_get_event *ge = (void*) (_ev + 1);
+	struct ccieth_ioctl_get_event *ge = (void*) (eev + 1);
 	__u32 conn_id = ge->connect_request.conn_id;
 	struct ccieth_ioctl_connect_reject rj;
 	int err;
+
+	if (event->type != CCI_EVENT_CONNECT_REQUEST
+	    || !eev->type_params.connect_request.need_reply)
+		return CCI_EINVAL;
 
 	rj.conn_id = conn_id;
 	err = ioctl(eep->fd, CCIETH_IOCTL_CONNECT_REJECT, &rj);
@@ -661,6 +685,8 @@ static int eth_reject(union cci_event *event)
 		perror("ioctl connect reject");
 		return errno;
 	}
+
+	eev->type_params.connect_request.need_reply = 0;
 
 	return CCI_SUCCESS;
 }
@@ -746,17 +772,19 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 	cci__ep_t *_ep = container_of(endpoint, cci__ep_t, endpoint);
 	eth__ep_t *eep = _ep->priv;
 	cci__evt_t *_ev;
+	eth__evt_t *eev;
 	cci_event_t *event;
 	struct ccieth_ioctl_get_event *ge;
 	char *data;
 	int ret;
 
-	_ev = malloc(sizeof(*_ev) + sizeof(*ge) + _ep->dev->device.max_send_size);
+	_ev = malloc(sizeof(*_ev) + sizeof(*eev) + sizeof(*ge) + _ep->dev->device.max_send_size);
 	if (!_ev)
 		return CCI_ENOMEM;
 	_ev->ep = _ep;
 	event = &_ev->event;
-	ge = (void*) (_ev + 1);
+	eev = (void*) (_ev + 1);
+	ge = (void*) (eev + 1);
 	data = (void*) (ge + 1);
 
 	ret = ioctl(eep->fd, CCIETH_IOCTL_GET_EVENT, ge);
@@ -794,6 +822,7 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 		event->request.data_len = ge->data_length;
 		event->request.data_ptr = ge->data_length ? data : NULL;
 		event->request.attribute = ge->connect_request.attribute;
+		eev->type_params.connect_request.need_reply = 1;
 		break;
 	case CCIETH_IOCTL_EVENT_CONNECT_ACCEPTED: {
 		cci__conn_t *_conn;
@@ -856,6 +885,12 @@ out_with_event:
 static int eth_return_event(cci_event_t *event)
 {
 	cci__evt_t *_ev = container_of(event, cci__evt_t, event);
+	eth__evt_t *eev = (void*)(_ev + 1);
+
+	if (event->type == CCI_EVENT_CONNECT_REQUEST
+	    && eev->type_params.connect_request.need_reply)
+		return CCI_EINVAL;
+
 	free(_ev);
 	return 0;
 }

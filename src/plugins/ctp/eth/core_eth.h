@@ -26,6 +26,14 @@ typedef struct eth__conn {
 	int id;
 } eth__conn_t;
 
+typedef struct eth__evt {
+	union {
+		struct {
+			int need_reply; /* for connect request */
+		} connect_request;
+	} type_params;
+} eth__evt_t;
+
 int cci_core_eth_post_load(cci_plugin_t *me);
 int cci_core_eth_pre_unload(cci_plugin_t *me);
 
