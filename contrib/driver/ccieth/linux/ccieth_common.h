@@ -21,6 +21,8 @@
 
 #define CCIETH_EVENT_SLOT_NR 64
 
+#define CCIETH_MAX_CONNECTION_RECEIVED 64
+
 struct ccieth_endpoint;
 struct ccieth_pkt_header_msg;
 
@@ -50,6 +52,7 @@ struct ccieth_endpoint {
 	struct idr connection_idr;
 	spinlock_t connection_idr_lock;
 	atomic_t connection_req_seqnum;
+	atomic_t connection_received; /* up to CCIETH_MAX_CONNECTION_RECEIVED */
 
 	struct rcu_head release_ifp_rcu_head;
 	struct net_device *release_ifp;

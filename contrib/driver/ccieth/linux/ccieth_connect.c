@@ -387,6 +387,11 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 		/* remote doesn't look OK, ignore */
 		goto out;
 
+	if (atomic_read(&ep->connection_received) >= CCIETH_MAX_CONNECTION_RECEIVED)
+		/* don't let the network DoS us if the application
+		 * doesn't handle connection request quickly enough */
+		goto out;
+
 	src_ep_id = ntohl(hdr->src_ep_id);
 	src_conn_id = ntohl(hdr->src_conn_id);
 	data_len = ntohl(hdr->data_len);
@@ -496,6 +501,7 @@ retry:
 	/* things cannot fail anymore now, insert the connection for real */
 	conn->id = id;
 	idr_replace(&ep->connection_idr, conn, id);
+	atomic_inc(&ep->connection_received);
 
 	/* finalize and notify the event */
 	event->event.connect_request.conn_id = id;
@@ -544,6 +550,7 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_RECEIVED, CCIETH_CONNECTION_READY)
 	    != CCIETH_CONNECTION_RECEIVED)
 		goto out_with_rculock;
+	atomic_dec(&ep->connection_received);
 	conn->max_send_size = arg->max_send_size;
 	conn->user_conn_id = arg->user_conn_id;
 
@@ -706,6 +713,7 @@ ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_re
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_RECEIVED, CCIETH_CONNECTION_REJECTED)
 	    != CCIETH_CONNECTION_RECEIVED)
 		goto out_with_rculock;
+	atomic_dec(&ep->connection_received);
 
 	/* fill headers */
 	skb = conn->skb;

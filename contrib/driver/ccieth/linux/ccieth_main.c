@@ -132,6 +132,7 @@ ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *a
 	idr_init(&ep->connection_idr);
 	spin_lock_init(&ep->connection_idr_lock);
 	atomic_set(&ep->connection_req_seqnum, jiffies); /* a bit of random just for fun */
+	atomic_set(&ep->connection_received, 0);
 
 	skb_queue_head_init(&ep->deferred_connect_recv_queue);
 	INIT_WORK(&ep->deferred_connect_recv_work, ccieth_deferred_connect_recv_workfunc);
