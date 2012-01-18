@@ -673,6 +673,8 @@ union cci_event;
   \param[in,out] connection	Connection pointer to a connection request structure.
 
   \return CCI_SUCCESS   The connection has been established.
+  \return CCI_EINVAL    The event is not a connection request or it has
+                        already been accepted or rejected.
   \return Each driver may have additional error codes.
 
   Upon success, the incoming connection request is bound to the
@@ -692,6 +694,8 @@ CCI_DECLSPEC int cci_accept(union cci_event *conn_req,
   \param[in] conn_req	Connection request event to reject.
 
   \return CCI_SUCCESS	Connection request has been rejected.
+  \return CCI_EINVAL    The event is not a connection request or it has
+                        already been accepted or rejected.
   \return Each driver may have additional error codes.
 
    Rejects an incoming connection request.  The connection request
@@ -1019,6 +1023,9 @@ typedef struct cci_event_connect_rejected {
   The ordering of fields in this struct is intended to reduce memory
   holes between fields.
 
+  This event should be passed to either cci_accept() or cci_reject()
+  before being returned with cci_return_event().
+
   \ingroup events
 */
 typedef struct cci_event_connect_request {
@@ -1181,6 +1188,8 @@ CCI_DECLSPEC int cci_get_event(cci_endpoint_t *endpoint,
   \param[in] event	    Event to return.
 
   \return CCI_SUCCESS  The event was returned to CCI.
+  \return CCI_EINVAL   The event is a connection request and it has
+                       not been passed to cci_accept() or cci_reject().
   \return Each driver may have additional error codes.
 
   \todo What to do about hardware that cannot return buffers out of
