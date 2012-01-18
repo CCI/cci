@@ -27,4 +27,9 @@
 #define __rcu
 #endif
 
+/* rcu_access_pointer added in 2.6.34 */
+#ifndef rcu_access_pointer
+#define rcu_access_pointer(x) (x)
+#endif
+
 #endif /* CCIETH_HAL_H */
