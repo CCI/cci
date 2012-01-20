@@ -1048,12 +1048,6 @@ ccieth_deferred_connect_recv_workfunc(struct work_struct *work)
 		default:
 			BUG();
 		}
-
-		if (err && err != -EINVAL) {
-			/* not enough memory or events, other skbuffs will fail the same, drop everything for now */
-			skb_queue_purge(&ep->deferred_connect_recv_queue);
-			return;
-		}
 	}
 }
 
