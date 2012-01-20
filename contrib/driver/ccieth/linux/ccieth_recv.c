@@ -46,13 +46,14 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 		goto out_with_rculock;
 
 	/* check msg length */
-	if (msg_len > ep->max_send_size)
+	if (msg_len > ep->max_send_size
+	    || skb->len < sizeof(*hdr) + msg_len)
 		goto out_with_rculock;
 
 	/* get an event */
+	err = -ENOMEM;
 	spin_lock_bh(&ep->free_event_list_lock);
 	if (list_empty(&ep->free_event_list)) {
-		err = -ENOMEM;
 		spin_unlock_bh(&ep->free_event_list_lock);
 		printk("ccieth: no event slot for msg\n");
 		goto out_with_rculock;
@@ -66,10 +67,10 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 	event->event.data_length = msg_len;
 
 	err = skb_copy_bits(skb, sizeof(*hdr), event+1, msg_len);
-	if (err < 0)
-		goto out_with_event;
+	BUG_ON(err < 0);
 
 	/* find the connection */
+	err = -EINVAL;
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
 	if (!conn || conn->status != CCIETH_CONNECTION_READY)
 		goto out_with_event;

@@ -404,7 +404,8 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	       src_ep_id, src_conn_id, req_seqnum);
 
 	/* check msg length */
-	if (data_len > ep->max_send_size)
+	if (data_len > ep->max_send_size
+	    || skb->len < sizeof(*hdr) + data_len)
 		/* FIXME: nack */
 		goto out;
 
@@ -413,9 +414,9 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	 */
 
 	/* get an event */
+	err = -ENOMEM;
 	spin_lock_bh(&ep->free_event_list_lock);
 	if (list_empty(&ep->free_event_list)) {
-		err = -ENOMEM;
 		spin_unlock_bh(&ep->free_event_list_lock);
 		printk("ccieth: no event slot for connect request\n");
 		goto out;
@@ -425,7 +426,6 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	spin_unlock_bh(&ep->free_event_list_lock);
 
 	/* get a connection */
-	err = -ENOMEM;
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out_with_event;
@@ -500,8 +500,7 @@ retry:
 	event->event.connect_request.attribute = hdr->attribute;
 	event->event.connect_request.max_send_size = src_max_send_size < ep->max_send_size ? src_max_send_size : ep->max_send_size;
 	err = skb_copy_bits(skb, sizeof(*hdr), event+1, data_len);
-	if (err < 0)
-		goto out_with_conn_id;
+	BUG_ON(err < 0);
 
 	/* things cannot fail anymore now, insert the connection for real */
 	conn->id = id;
@@ -519,10 +518,6 @@ retry:
 	dev_kfree_skb(skb);
 	return 0;
 
-out_with_conn_id:
-	spin_lock(&ep->connection_idr_lock);
-	idr_remove(&ep->connection_idr, id);
-	spin_unlock(&ep->connection_idr_lock);
 out_with_replyskb:
 	kfree_skb(replyskb);
 out_with_conn:
@@ -644,9 +639,9 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	rcu_read_lock();
 
 	/* get an event */
+	err = -ENOMEM;
 	spin_lock_bh(&ep->free_event_list_lock);
 	if (list_empty(&ep->free_event_list)) {
-		err = -ENOMEM;
 		spin_unlock_bh(&ep->free_event_list_lock);
 		printk("ccieth: no event slot for connect accepted\n");
 		goto out_with_rculock;
@@ -661,11 +656,13 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	event->event.connect_accepted.conn_id = dst_conn_id;
 
 	/* find the connection and update it */
+	err = -EINVAL;
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
 	if (!conn || conn->req_seqnum != req_seqnum)
 		/* FIXME: nack */
 		goto out_with_event;
 
+	err = 0;
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REQUESTED, CCIETH_CONNECTION_READY)
 	    != CCIETH_CONNECTION_REQUESTED) {
 		/* already received, a previous ack might have been lost, ack again */
@@ -801,9 +798,9 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 	       src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
 
 	/* get an event */
+	err = -ENOMEM;
 	spin_lock_bh(&ep->free_event_list_lock);
 	if (list_empty(&ep->free_event_list)) {
-		err = -ENOMEM;
 		spin_unlock_bh(&ep->free_event_list_lock);
 		printk("ccieth: no event slot for connect reject\n");
 		goto out;
@@ -814,12 +811,14 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 
 	/* find the connection and remove it */
 	spin_lock(&ep->connection_idr_lock);
+	err = -EINVAL;
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
 	if (!conn || conn->req_seqnum != req_seqnum) {
 		spin_unlock(&ep->connection_idr_lock);
 		/* FIXME: nack */
 		goto out_with_event;
 	}
+	err = 0;
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REQUESTED, CCIETH_CONNECTION_CLOSING)
 	    != CCIETH_CONNECTION_REQUESTED) {
 		spin_unlock(&ep->connection_idr_lock);
@@ -948,6 +947,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	rcu_read_lock();
 
 	/* find the connection and update it */
+	err = -EINVAL;
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
 	if (!conn || conn->req_seqnum != req_seqnum)
 		goto out_with_rculock;
