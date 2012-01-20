@@ -211,15 +211,25 @@ verbs_wc_to_cci_status(enum ibv_wc_status wc_status)
 static int
 verbs_ifa_to_context(struct ibv_context *context, struct sockaddr *sa)
 {
-	int			ret	= CCI_SUCCESS;
-	struct rdma_cm_id	*id;
+	int			              ret = CCI_SUCCESS;
+	struct rdma_cm_id	      *id = NULL;
+    struct rdma_event_channel *ch = NULL;
 
 	CCI_ENTER;
 
-	ret = rdma_create_id(NULL, &id, NULL, RDMA_PS_UDP);
+    /*
+     * Old OFED version requires an event channel to be passed on
+     * to the rdma_create_id function.
+     */
+    ch = rdma_create_event_channel();
+    if (NULL == ch) {
+        ret = errno;
+        goto out;
+    }
+
+  	ret = rdma_create_id(ch, &id, NULL, RDMA_PS_UDP);
 	if (ret) {
 		ret = errno;
-		CCI_EXIT;
 		goto out;
 	}
 
@@ -227,10 +237,15 @@ verbs_ifa_to_context(struct ibv_context *context, struct sockaddr *sa)
 	if (ret == 0) {
 		if (id->verbs != context)
 			ret = -1;
-	}
-	rdma_destroy_id(id);
-
+	} else {
+        char ip[256];
+        ret = errno;
+        printf("failure reasons %s for IP %s\n", strerror(ret), inet_ntop(AF_INET, sa, ip, 256));
+    }
 out:
+	if( NULL != id ) rdma_destroy_id(id);
+    if( NULL != ch ) rdma_destroy_event_channel(ch);
+
 	CCI_EXIT;
 	return ret;
 }
@@ -1252,7 +1267,9 @@ verbs_connect(cci_endpoint_t *endpoint, char *server_uri,
 	verbs_ep_t		*vep		= NULL;
 	verbs_conn_t		*vconn		= NULL;
 	verbs_conn_request_t	*cr		= NULL;
+#if HAVE_RDMA_ADDRINFO
 	struct rdma_addrinfo	hints, *res	= NULL;
+#endif   /* HAVE_RDMA_ADDRINFO */
 	struct ibv_qp_init_attr	attr;
 	struct rdma_conn_param	param;
 	uint32_t		header		= 0;
@@ -1308,6 +1325,7 @@ verbs_connect(cci_endpoint_t *endpoint, char *server_uri,
 	if (ret)
 		goto out;
 
+#if HAVE_RDMA_ADDRINFO
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
 	hints.ai_qp_type = IBV_QPT_RC;
@@ -1342,6 +1360,16 @@ verbs_connect(cci_endpoint_t *endpoint, char *server_uri,
 			strerror(ret));
 		goto out;
 	}
+#else
+    ret = rdma_create_id( vep->channel, &vconn->id, NULL, RDMA_PS_UDP );
+	if (ret == -1) {
+		ret = errno;
+		debug(CCI_DB_CONN, "rdma_create_id() returned %s",
+              strerror(ret));
+		goto out;
+	}
+#endif   /* HAVE_RDMA_ADDRINFO */
+
 	vconn->id->context = conn;
 	vconn->state = VERBS_CONN_ACTIVE;
 
@@ -1375,8 +1403,10 @@ out:
 	 * if (ret)
 	 *	free memory
 	 */
+#if HAVE_RDMA_ADDRINFO
 	if (res)
 		rdma_freeaddrinfo(res);
+#endif   /* HAVE_RDMA_ADDRINFO */
 	if (node)
 		free(node);
 	CCI_EXIT;
