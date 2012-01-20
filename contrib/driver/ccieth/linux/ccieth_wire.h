@@ -67,7 +67,7 @@ union ccieth_pkt_header {
 	struct ccieth_pkt_header_connect_ack {
 		struct ethhdr eth;
 		__u8 type;
-		__u8 pad1;
+		__u8 status;
 		__be32 dst_ep_id;
 		__be32 dst_conn_id;
 		/* 24 */
@@ -100,6 +100,12 @@ enum ccieth_pkt_type {
 	CCIETH_PKT_CONNECT_REJECT,
 	CCIETH_PKT_CONNECT_ACK,
 	CCIETH_PKT_MSG,
+};
+
+enum ccieth_pkt_ack_status {
+	CCIETH_PKT_ACK_SUCCESS,
+	CCIETH_PKT_ACK_INVALID,
+	CCIETH_PKT_ACK_NO_CONNECTION,
 };
 
 #endif /* CCIETH_WIRE_H */

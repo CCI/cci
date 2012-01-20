@@ -15,7 +15,8 @@
 static int
 ccieth_connect_ack(struct ccieth_endpoint *ep, __u32 src_conn_id,
 		   __u8 dst_addr[6],  __u32 dst_ep_id, __u32 dst_conn_id,
-		   __u32 req_seqnum);
+		   __u32 req_seqnum,
+		   __u8 ack_status);
 
 static void
 ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
@@ -369,6 +370,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	struct sk_buff *replyskb;
 	size_t replyskblen;
 	int need_ack = 0;
+	enum ccieth_pkt_ack_status ack_status = CCIETH_PKT_ACK_SUCCESS;
 	int id;
 	int err;
 
@@ -398,9 +400,11 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 
 	/* check msg length */
 	if (data_len > ep->max_send_size
-	    || skb->len < sizeof(*hdr) + data_len)
-		/* FIXME: nack */
+	    || skb->len < sizeof(*hdr) + data_len) {
+		need_ack = 1;
+		ack_status = CCIETH_PKT_ACK_INVALID;
 		goto out;
+	}
 
 	/* the request looks ok.
 	 * if we fail to honor it below, just ignore it and let it be resent later.
@@ -509,7 +513,8 @@ retry:
 	spin_unlock_bh(&ep->event_list_lock);
 
 	ccieth_connect_ack(ep, -1,
-			   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum);
+			   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
+			   ack_status);
 	dev_kfree_skb(skb);
 	return 0;
 
@@ -524,7 +529,8 @@ out_with_event:
 out:
 	if (need_ack)
 		ccieth_connect_ack(ep, -1,
-				   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum);
+				   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
+				   ack_status);
 	dev_kfree_skb(skb);
 	return err;
 }
@@ -629,6 +635,7 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	__u32 max_send_size;
 	__u32 req_seqnum;
 	int need_ack = 0;
+	enum ccieth_pkt_ack_status ack_status = CCIETH_PKT_ACK_SUCCESS;
 	int err;
 
 	printk("processing queued connect accept skb %p\n", skb);
@@ -665,9 +672,11 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	/* find the connection and update it */
 	err = -EINVAL;
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
-	if (!conn || conn->req_seqnum != req_seqnum)
-		/* FIXME: nack */
+	if (!conn || conn->req_seqnum != req_seqnum) {
+		need_ack = 1;
+		ack_status = CCIETH_PKT_ACK_NO_CONNECTION;
 		goto out_with_event;
+	}
 
 	err = 0;
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REQUESTED, CCIETH_CONNECTION_READY)
@@ -694,7 +703,8 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	rcu_read_unlock();
 
 	ccieth_connect_ack(ep, dst_conn_id,
-			   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum);
+			   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
+			   ack_status);
 	dev_kfree_skb(skb);
 	return 0;
 
@@ -708,7 +718,8 @@ out_with_rculock:
 	rcu_read_unlock();
 	if (need_ack)
 		ccieth_connect_ack(ep, dst_conn_id,
-				   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum);
+				   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
+				   ack_status);
 	dev_kfree_skb(skb);
 	return err;
 }
@@ -790,6 +801,7 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 	__u32 dst_ep_id;
 	__u32 req_seqnum;
 	int need_ack = 0;
+	enum ccieth_pkt_ack_status ack_status = CCIETH_PKT_ACK_SUCCESS;
 	int err;
 
 	printk("processing queued connect reject skb %p\n", skb);
@@ -809,7 +821,8 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 	err = -EINVAL;
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
 	if (!conn || conn->req_seqnum != req_seqnum) {
-		/* FIXME: nack */
+		need_ack = 1;
+		ack_status = CCIETH_PKT_ACK_NO_CONNECTION;
 		goto out_with_rculock;
 	}
 	err = 0;
@@ -838,7 +851,8 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 	spin_unlock_bh(&ep->event_list_lock);
 
 	ccieth_connect_ack(ep, dst_conn_id,
-			   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum);
+			   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
+			   ack_status);
 	dev_kfree_skb(skb);
 	return 0;
 
@@ -846,7 +860,8 @@ out_with_rculock:
 	rcu_read_unlock();
 	if (need_ack)
 		ccieth_connect_ack(ep, dst_conn_id,
-				   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum);
+				   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
+				   ack_status);
 	dev_kfree_skb(skb);
 	return err;
 }
@@ -854,7 +869,8 @@ out_with_rculock:
 static int
 ccieth_connect_ack(struct ccieth_endpoint *ep, __u32 src_conn_id,
 		   __u8 dst_addr[6],  __u32 dst_ep_id, __u32 dst_conn_id,
-		   __u32 req_seqnum)
+		   __u32 req_seqnum,
+		   __u8 ack_status)
 {
 	struct sk_buff *skb;
 	struct net_device *ifp;
@@ -891,6 +907,7 @@ ccieth_connect_ack(struct ccieth_endpoint *ep, __u32 src_conn_id,
 	memcpy(&hdr->eth.h_source, ep->addr, 6);
 	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
 	hdr->type = CCIETH_PKT_CONNECT_ACK;
+	hdr->status = ack_status;
 	hdr->dst_ep_id = htonl(dst_ep_id);
 	hdr->dst_conn_id = htonl(dst_conn_id);
 	hdr->src_ep_id = htonl(ep->id);
@@ -921,6 +938,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	__u32 dst_conn_id;
 	__u32 dst_ep_id;
 	__u32 req_seqnum;
+	__u8 ack_status;
 	int destroy = 0;
 	int err;
 
@@ -931,6 +949,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	dst_conn_id = ntohl(hdr->dst_conn_id);
 	dst_ep_id = ntohl(hdr->dst_ep_id);
 	req_seqnum = ntohl(hdr->req_seqnum);
+	ack_status = hdr->status;
 
 	printk("got conn ack from eid %d conn id %d seqnum %d to %d %d\n",
 	       src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
@@ -943,7 +962,10 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	if (!conn || conn->req_seqnum != req_seqnum)
 		goto out_with_rculock;
 
-	printk("conn %p status %d acked\n", conn, conn->status);
+	printk("conn %p status %d acked with status %d\n", conn, conn->status, ack_status);
+
+	if (ack_status != CCIETH_PKT_ACK_SUCCESS)
+		goto out_with_rculock;
 
 	conn->need_ack = 0;
 	acked_completion = rcu_dereference(conn->acked_completion);
