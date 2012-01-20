@@ -964,14 +964,12 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 
 	printk("conn %p status %d acked with status %d\n", conn, conn->status, ack_status);
 
-	if (ack_status != CCIETH_PKT_ACK_SUCCESS)
-		goto out_with_rculock;
-
 	conn->need_ack = 0;
 	acked_completion = rcu_dereference(conn->acked_completion);
 	if (acked_completion)
 		complete(&acked_completion->completion);
 
+	/* reject ack status doesn't matter, just destroy the connection */
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REJECTED, CCIETH_CONNECTION_CLOSING)
 	    == CCIETH_CONNECTION_REJECTED)
 		destroy = 1;
