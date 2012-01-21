@@ -79,6 +79,10 @@ struct ccieth_ioctl_get_event {
 			__u64 user_conn_id;
 			/* 16 */
 		} connect_rejected;
+		struct {
+			__u64 user_conn_id;
+			/* 16 */
+		} connection_closed;
 	};
 };
 #define CCIETH_IOCTL_GET_EVENT _IOW(CCIETH_IOCTL_MAGIC, 0x3, struct ccieth_ioctl_get_event)
@@ -150,5 +154,7 @@ struct ccieth_ioctl_msg {
 #define CCIETH_IOCTL_EVENT_CONNECT_REJECTED 5
 #define CCIETH_IOCTL_EVENT_CONNECT_REQUEST 6
 #define CCIETH_IOCTL_EVENT_DEVICE_FAILED 8
+
+#define CCIETH_IOCTL_EVENT_CONNECTION_CLOSED 20
 
 #endif /* CCIETH_IO_H */

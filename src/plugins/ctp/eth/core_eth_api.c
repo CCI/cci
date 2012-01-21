@@ -869,6 +869,17 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 		event->type = CCI_EVENT_ENDPOINT_DEVICE_FAILED;
 		event->dev_failed.endpoint = endpoint;
 		break;
+	case CCIETH_IOCTL_EVENT_CONNECTION_CLOSED: {
+		cci__conn_t *_conn;
+		eth__conn_t *econn;
+
+		CCIETH_VALGRIND_MEMORY_MAKE_READABLE(&ge->connection_closed.user_conn_id, sizeof(ge->connection_closed.user_conn_id));
+		_conn = (void*)(uintptr_t) ge->connection_closed.user_conn_id;
+		econn = (void*) (_conn+1);
+		econn->id = -1; /* keep the connection, but make it unusable */
+		printf("marked connection as closed\n");
+		break;
+	}
 	default:
 		printf("got invalid event type %d\n", ge->type);
 		goto out_with_event;

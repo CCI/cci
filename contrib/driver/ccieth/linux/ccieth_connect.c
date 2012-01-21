@@ -981,6 +981,14 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 			notify_close = 1;
 			conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECT_REJECTED;
 			conn->embedded_event.event.connect_rejected.user_conn_id = conn->user_conn_id;
+
+		} else if (cmpxchg(&conn->status, CCIETH_CONNECTION_READY, CCIETH_CONNECTION_CLOSING)
+		    == CCIETH_CONNECTION_READY) {
+			/* ready nack likely means that the remote side closed in the meantime, maybe because of the timeout.
+			 * tell user-space that the connection isn't ready anymore */
+			notify_close = 1;
+			conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECTION_CLOSED;
+			conn->embedded_event.event.connection_closed.user_conn_id = conn->user_conn_id;
 		}
 	}
 
