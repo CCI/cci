@@ -158,14 +158,11 @@ void ccieth_connect_request_timer_hdlr(unsigned long data)
 
 	printk("delivering connection %p timeout\n", conn);
 	conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECT_TIMEDOUT;
-	conn->embedded_event.event.data_length = 0;
 	conn->embedded_event.event.connect_timedout.user_conn_id = conn->user_conn_id;
-	conn->embedded_event.destructor = ccieth_connection_event_destructor;
-
+	/* destroy the connection after the event */
 	spin_lock_bh(&ep->event_list_lock);
 	list_add_tail(&conn->embedded_event.list, &ep->event_list);
 	spin_unlock_bh(&ep->event_list_lock);
-	/* don't use conn anymore, the event destructor will destroy it after RCU grace period */
 }
 
 static
@@ -222,6 +219,8 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out;
+	conn->embedded_event.event.data_length = 0;
+	conn->embedded_event.destructor = ccieth_connection_event_destructor;
 	init_completion(&conn->acked_completion);
 	conn->skb = NULL;
 
@@ -420,6 +419,8 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out_with_event;
+	conn->embedded_event.event.data_length = 0;
+	conn->embedded_event.destructor = ccieth_connection_event_destructor;
 	init_completion(&conn->acked_completion);
 	conn->need_ack = 0;
 	conn->attribute = hdr->attribute;
@@ -812,10 +813,8 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 
 	/* setup the event */
 	conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECT_REJECTED;
-	conn->embedded_event.event.data_length = 0;
 	conn->embedded_event.event.connect_rejected.user_conn_id = conn->user_conn_id;
-	conn->embedded_event.destructor = ccieth_connection_event_destructor;
-
+	/* destroy the connection after the event */
 	spin_lock_bh(&ep->event_list_lock);
 	list_add_tail(&conn->embedded_event.list, &ep->event_list);
 	spin_unlock_bh(&ep->event_list_lock);

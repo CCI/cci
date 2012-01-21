@@ -139,6 +139,10 @@ struct ccieth_connection {
 
 	struct rcu_head destroy_rcu_head;
 
+	/* event to be used when destroying the connection:
+	 * the user should set the status to CLOSING first,
+	 * and let the event destructor destroy the connection for real.
+	 */
 	struct ccieth_endpoint_event embedded_event;
 };
 
