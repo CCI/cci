@@ -767,7 +767,6 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 			    struct sk_buff *skb,
 			    struct ccieth_pkt_header_connect_reject *hdr)
 {
-	struct ccieth_endpoint_event *event;
 	struct ccieth_connection *conn;
 	__u32 src_conn_id;
 	__u32 src_ep_id;
@@ -788,18 +787,6 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 	printk("got conn reject from eid %d conn id %d seqnum %d to %d %d\n",
 	       src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
 
-	/* get an event */
-	err = -ENOMEM;
-	spin_lock_bh(&ep->free_event_list_lock);
-	if (list_empty(&ep->free_event_list)) {
-		spin_unlock_bh(&ep->free_event_list_lock);
-		printk("ccieth: no event slot for connect reject\n");
-		goto out;
-	}
-	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
-	list_del(&event->list);
-	spin_unlock_bh(&ep->free_event_list_lock);
-
 	/* find the connection and remove it */
 	spin_lock(&ep->connection_idr_lock);
 	err = -EINVAL;
@@ -807,7 +794,7 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 	if (!conn || conn->req_seqnum != req_seqnum) {
 		spin_unlock(&ep->connection_idr_lock);
 		/* FIXME: nack */
-		goto out_with_event;
+		goto out;
 	}
 	err = 0;
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REQUESTED, CCIETH_CONNECTION_CLOSING)
@@ -821,17 +808,16 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 	idr_remove(&ep->connection_idr, dst_conn_id);
 	spin_unlock(&ep->connection_idr_lock);
 
-	/* setup the event */
-	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_REJECTED;
-	event->event.data_length = 0;
-	event->event.connect_rejected.user_conn_id = conn->user_conn_id;
-
-	/* destroy connection now that we don't need it */
 	del_timer_sync(&conn->timer);
-	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
+
+	/* setup the event */
+	conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECT_REJECTED;
+	conn->embedded_event.event.data_length = 0;
+	conn->embedded_event.event.connect_rejected.user_conn_id = conn->user_conn_id;
+	conn->embedded_event.destructor = ccieth_connection_event_destructor;
 
 	spin_lock_bh(&ep->event_list_lock);
-	list_add_tail(&event->list, &ep->event_list);
+	list_add_tail(&conn->embedded_event.list, &ep->event_list);
 	spin_unlock_bh(&ep->event_list_lock);
 
 	ccieth_connect_ack(ep, dst_conn_id,
@@ -841,10 +827,6 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 
 out_with_conn:
 	/* nothing */
-out_with_event:
-	spin_lock_bh(&ep->free_event_list_lock);
-	list_add_tail(&event->list, &ep->free_event_list);
-	spin_unlock_bh(&ep->free_event_list_lock);
 out:
 	if (need_ack)
 		ccieth_connect_ack(ep, dst_conn_id,
