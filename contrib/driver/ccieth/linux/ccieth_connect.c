@@ -26,17 +26,6 @@ ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 	kfree(conn);
 }
 
-/* must be called after unhash from endpoint idr, or when the idr cannot be used anymore.
- * conn status must be CLOSING
- */
-static void
-ccieth_destroy_connection(struct ccieth_connection *conn)
-{
-	/* the timer may not be running, but setup_timer has always been called */
-	del_timer_sync(&conn->timer);
-	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
-}
-
 int
 ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 {
@@ -48,7 +37,9 @@ ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 		/* somebody else is closing it */
 		return 0;
 
-	ccieth_destroy_connection(conn);
+	del_timer_sync(&conn->timer);
+	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
+
 	(*destroyed_conn)++;
 	return 0;
 }
@@ -836,7 +827,8 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 	event->event.connect_rejected.user_conn_id = conn->user_conn_id;
 
 	/* destroy connection now that we don't need it */
-	ccieth_destroy_connection(conn);
+	del_timer_sync(&conn->timer);
+	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
 
 	spin_lock_bh(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
@@ -965,10 +957,11 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 
 	if (destroy) {
 		printk("destroying acked rejected connection %p\n", conn);
+		del_timer_sync(&conn->timer);
 		spin_lock(&ep->connection_idr_lock);
 		idr_remove(&ep->connection_idr, conn->id);
 		spin_unlock(&ep->connection_idr_lock);
-		ccieth_destroy_connection(conn);
+		call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
 	}
 
 	dev_kfree_skb(skb);
