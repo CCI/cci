@@ -939,7 +939,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	__u32 dst_ep_id;
 	__u32 req_seqnum;
 	__u8 ack_status;
-	int destroy = 0;
+	int destroy = 0, notify_close = 0;
 	int err;
 
 	printk("processing queued connect ack skb %p\n", skb);
@@ -974,15 +974,37 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	    == CCIETH_CONNECTION_REJECTED)
 		destroy = 1;
 
+	else if (ack_status != CCIETH_PKT_ACK_SUCCESS) {
+		if (cmpxchg(&conn->status, CCIETH_CONNECTION_REQUESTED, CCIETH_CONNECTION_CLOSING)
+		    == CCIETH_CONNECTION_REQUESTED) {
+			/* request nack is similar to reject */
+			notify_close = 1;
+			conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECT_REJECTED;
+			conn->embedded_event.event.connect_rejected.user_conn_id = conn->user_conn_id;
+		}
+	}
+
 	rcu_read_unlock();
 
-	if (destroy) {
+	if (notify_close) {
+		/* we set to CLOSING, we own the connection now, nobody else may destroy it */
+		del_timer_sync(&conn->timer);
+		spin_lock(&ep->connection_idr_lock);
+		idr_remove(&ep->connection_idr, dst_conn_id);
+		spin_unlock(&ep->connection_idr_lock);
+		/* destroy the connection after the event */
+		spin_lock_bh(&ep->event_list_lock);
+		list_add_tail(&conn->embedded_event.list, &ep->event_list);
+		spin_unlock_bh(&ep->event_list_lock);
+
+	} else if (destroy) {
 		printk("destroying acked rejected connection %p\n", conn);
 		/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 		del_timer_sync(&conn->timer);
 		spin_lock(&ep->connection_idr_lock);
 		idr_remove(&ep->connection_idr, conn->id);
 		spin_unlock(&ep->connection_idr_lock);
+		/* destroy the connection immediately (after RCU grace period) */
 		call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
 	}
 
