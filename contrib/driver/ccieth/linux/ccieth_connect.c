@@ -37,7 +37,9 @@ ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 		/* somebody else is closing it */
 		return 0;
 
+	/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 	del_timer_sync(&conn->timer);
+	/* the caller will destroy the entire idr, no need to remove us from there */
 	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
 
 	(*destroyed_conn)++;
@@ -152,6 +154,7 @@ void ccieth_connect_request_timer_hdlr(unsigned long data)
 		/* somebody else is closing it */
 		return;
 
+	/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 	spin_lock(&ep->connection_idr_lock);
 	idr_remove(&ep->connection_idr, conn->id);
 	spin_unlock(&ep->connection_idr_lock);
@@ -788,28 +791,31 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 	printk("got conn reject from eid %d conn id %d seqnum %d to %d %d\n",
 	       src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
 
+	rcu_read_lock();
+
 	/* find the connection and remove it */
-	spin_lock(&ep->connection_idr_lock);
 	err = -EINVAL;
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
 	if (!conn || conn->req_seqnum != req_seqnum) {
-		spin_unlock(&ep->connection_idr_lock);
 		/* FIXME: nack */
-		goto out;
+		goto out_with_rculock;
 	}
 	err = 0;
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REQUESTED, CCIETH_CONNECTION_CLOSING)
 	    != CCIETH_CONNECTION_REQUESTED) {
-		spin_unlock(&ep->connection_idr_lock);
 		/* already received, a previous ack might have been lost, ack again */
 		need_ack = 1;
-		goto out_with_conn;
+		goto out_with_rculock;
 	}
 	conn->need_ack = 0;
+
+	rcu_read_unlock();
+
+	/* we set to CLOSING, we own the connection now, nobody else may destroy it */
+	del_timer_sync(&conn->timer);
+	spin_lock(&ep->connection_idr_lock);
 	idr_remove(&ep->connection_idr, dst_conn_id);
 	spin_unlock(&ep->connection_idr_lock);
-
-	del_timer_sync(&conn->timer);
 
 	/* setup the event */
 	conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECT_REJECTED;
@@ -824,9 +830,8 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 	dev_kfree_skb(skb);
 	return 0;
 
-out_with_conn:
-	/* nothing */
-out:
+out_with_rculock:
+	rcu_read_unlock();
 	if (need_ack)
 		ccieth_connect_ack(ep, dst_conn_id,
 				   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum);
@@ -938,6 +943,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 
 	if (destroy) {
 		printk("destroying acked rejected connection %p\n", conn);
+		/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 		del_timer_sync(&conn->timer);
 		spin_lock(&ep->connection_idr_lock);
 		idr_remove(&ep->connection_idr, conn->id);
