@@ -32,4 +32,16 @@
 #define rcu_access_pointer(x) (x)
 #endif
 
+/* kfree_rcu added in 3.0 */
+#ifndef CCIETH_HAVE_KFREE_RCU
+static inline void ccieth_kfree_rcu_call(struct rcu_head *rcu_head)
+{
+	kfree((void*) rcu_head);
+}
+#define kfree_rcu(ptr, field) do {				\
+	BUILD_BUG_ON(offsetof(typeof(*ptr), field) != 0);	\
+	call_rcu((void*) ptr, ccieth_kfree_rcu_call);		\
+} while (0)
+#endif
+
 #endif /* CCIETH_HAL_H */

@@ -61,6 +61,15 @@ else
   echo no
 fi
 
+# kfree_rcu added in 3.0
+echo -n "  checking (in kernel headers) kfree_rcu availability ... "
+if grep kfree_rcu ${LINUX_SRC}/include/linux/rcupdate.h > /dev/null ; then
+  echo "#define CCIETH_HAVE_KFREE_RCU 1" >> ${TMP_CHECKS_NAME}
+  echo yes
+else
+  echo no
+fi
+
 # add the footer
 echo "" >> ${TMP_CHECKS_NAME}
 echo "#endif /* CCIETH_CHECKS_H */" >> ${TMP_CHECKS_NAME}
