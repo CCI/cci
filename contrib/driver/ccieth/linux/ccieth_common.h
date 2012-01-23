@@ -112,6 +112,7 @@ struct ccieth_connection {
 	__u64 user_conn_id;
 
 	void (*set_next_send_seqnum)(struct ccieth_connection *, struct ccieth_pkt_header_msg *);
+	void (*free)(struct ccieth_connection *);
 	union {
 		struct {
 			atomic_t next_send_seqnum; /* FIXME: make sure it reaches U32MAX? for portability ? */

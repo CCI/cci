@@ -29,9 +29,15 @@ ccieth_conn_ro_set_next_send_seqnum(struct ccieth_connection *conn, struct cciet
 }
 
 static void
+ccieth_conn_ro_free(struct ccieth_connection *conn)
+{
+}
+
+static void
 ccieth_conn_ro_init(struct ccieth_connection *conn)
 {
 	conn->set_next_send_seqnum = ccieth_conn_ro_set_next_send_seqnum;
+	conn->free = ccieth_conn_ro_free;
 	atomic_set(&conn->ro.next_send_seqnum, jiffies);
 }
 
@@ -46,9 +52,15 @@ ccieth_conn_ru_set_next_send_seqnum(struct ccieth_connection *conn, struct cciet
 }
 
 static void
+ccieth_conn_ru_free(struct ccieth_connection *conn)
+{
+}
+
+static void
 ccieth_conn_ru_init(struct ccieth_connection *conn)
 {
 	conn->set_next_send_seqnum = ccieth_conn_ru_set_next_send_seqnum;
+	conn->free = ccieth_conn_ru_free;
 	atomic_set(&conn->ru.next_send_seqnum, jiffies);
 }
 
@@ -63,9 +75,15 @@ ccieth_conn_uu_set_next_send_seqnum(struct ccieth_connection *conn, struct cciet
 }
 
 static void
+ccieth_conn_uu_free(struct ccieth_connection *conn)
+{
+}
+
+static void
 ccieth_conn_uu_init(struct ccieth_connection *conn)
 {
 	conn->set_next_send_seqnum = ccieth_conn_uu_set_next_send_seqnum;
+	conn->free = ccieth_conn_uu_free;
 }
 
 static void
@@ -97,6 +115,7 @@ ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 {
 	struct ccieth_connection *conn = container_of(rcu_head, struct ccieth_connection, destroy_rcu_head);
 	printk("destroying connection %p in rcu call\n", conn);
+	conn->free(conn);
 	skb_queue_purge(&conn->deferred_msg_recv_queue);
 	kfree_skb(conn->skb);
 	kfree(conn);
