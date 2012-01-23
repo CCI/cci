@@ -357,9 +357,9 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 			}
 
 			if (ifp->ethtool_ops && ifp->ethtool_ops->get_settings) {
-				struct ethtool_cmd cmd;
-				if (ifp->ethtool_ops->get_settings(ifp, &cmd) >= 0) {
-					u32 speed = ethtool_cmd_speed(&cmd);
+				struct ethtool_cmd ecmd;
+				if (ifp->ethtool_ops->get_settings(ifp, &ecmd) >= 0) {
+					u32 speed = ethtool_cmd_speed(&ecmd);
 					if (speed != -1)
 						gi_arg.rate = ((u64) speed) * 1000000;
 				}

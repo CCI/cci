@@ -52,6 +52,8 @@ struct ccieth_ioctl_get_event {
 			__u64 context;
 			/* 24 */
 			__u32 status;
+			__u32 pad1;
+			/* 32 */
 		} send;
 		struct {
 			__u64 user_conn_id;
@@ -70,6 +72,8 @@ struct ccieth_ioctl_get_event {
 			__u64 user_conn_id;
 			/* 24 */
 			__u32 max_send_size;
+			__u32 pad1;
+			/* 32 */
 		} connect_accepted;
 		struct {
 			__u64 user_conn_id;
@@ -143,6 +147,8 @@ struct ccieth_ioctl_msg {
 	__u64 context;
 	/* 24 */
 	__u32 flags;
+	__u32 pad1;
+	/* 32 */
 };
 #define CCIETH_IOCTL_MSG _IOR(CCIETH_IOCTL_MAGIC, 0x8, struct ccieth_ioctl_msg)
 
