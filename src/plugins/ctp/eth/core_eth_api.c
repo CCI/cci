@@ -250,6 +250,12 @@ static int eth_get_devices(cci_device_t const ***devices_p)
 	  continue;
 	}
 
+	/* FIXME: add a device structure initialization function in the core */
+	TAILQ_INIT(&_dev->eps);
+	pthread_mutex_init(&_dev->lock, NULL);
+	if (is_loopback)
+	  _dev->is_default = 1;
+	TAILQ_INSERT_TAIL(&globals->devs, _dev, entry);
 	devices[count] = device;
 	count++;
       }
