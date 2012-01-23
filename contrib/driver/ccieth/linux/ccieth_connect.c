@@ -683,15 +683,15 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock_bh(&ep->event_list_lock);
 
+	/* handle deferred msgs */
+	ccieth__recv_deferred_msg(ep, conn);
+
 	rcu_read_unlock();
 
 	ccieth_connect_ack(ep, dst_conn_id,
 			   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
 			   ack_status);
 	dev_kfree_skb(skb);
-
-	/* handle deferred msgs */
-	ccieth__recv_deferred_msg(ep, conn);
 	return 0;
 
 out_with_conn:
