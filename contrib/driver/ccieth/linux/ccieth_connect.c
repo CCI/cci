@@ -68,6 +68,26 @@ ccieth_conn_uu_init(struct ccieth_connection *conn)
 	conn->set_next_send_seqnum = ccieth_conn_uu_set_next_send_seqnum;
 }
 
+static void
+ccieth_conn_init(struct ccieth_connection *conn, int attribute)
+{
+	conn->attribute = attribute;
+
+	switch (attribute) {
+	case CCIETH_CONNECT_ATTR_RO:
+		ccieth_conn_ro_init(conn);
+		break;
+	case CCIETH_CONNECT_ATTR_RU:
+		ccieth_conn_ru_init(conn);
+		break;
+	case CCIETH_CONNECT_ATTR_UU:
+		ccieth_conn_uu_init(conn);
+		break;
+	default:
+		BUG();
+	}
+}
+
 /*
  * Connection destruction management
  */
@@ -231,6 +251,11 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	if (arg->data_len > ep->max_send_size)
 		goto out;
 
+	if (arg->attribute != CCIETH_CONNECT_ATTR_RO
+	    && arg->attribute != CCIETH_CONNECT_ATTR_RU
+	    && arg->attribute != CCIETH_CONNECT_ATTR_UU)
+		goto out;
+
 	/* get a connection */
 	err = -ENOMEM;
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
@@ -240,22 +265,7 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	conn->embedded_event.event.data_length = 0;
 	conn->embedded_event.destructor = ccieth_connection_event_destructor;
 	conn->skb = NULL;
-
-	/* initialize attribute */
-	switch (arg->attribute) {
-	case CCIETH_CONNECT_ATTR_RO:
-		ccieth_conn_ro_init(conn);
-		break;
-	case CCIETH_CONNECT_ATTR_RU:
-		ccieth_conn_ru_init(conn);
-		break;
-	case CCIETH_CONNECT_ATTR_UU:
-		ccieth_conn_uu_init(conn);
-		break;
-	default:
-		err = -EINVAL;
-		goto out_with_conn;
-	}
+	ccieth_conn_init(conn, arg->attribute);
 
 	/* initialize the timer to make destroy easier */
 	setup_timer(&conn->timer, ccieth_connect_request_timer_hdlr, (unsigned long) conn);
@@ -314,7 +324,6 @@ retry:
 	conn->status = CCIETH_CONNECTION_REQUESTED;
 	memcpy(&conn->dest_addr, &arg->dest_addr, 6);
 	conn->dest_eid = arg->dest_eid;
-	conn->attribute = arg->attribute;
 	conn->user_conn_id = arg->user_conn_id;
 	conn->id = id;
 	idr_replace(&ep->connection_idr, conn, id);
@@ -458,22 +467,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	conn->embedded_event.event.data_length = 0;
 	conn->embedded_event.destructor = ccieth_connection_event_destructor;
 	conn->need_ack = 0;
-	conn->attribute = hdr->attribute;
-
-	/* initialize attribute */
-	switch (hdr->attribute) {
-	case CCIETH_CONNECT_ATTR_RO:
-		ccieth_conn_ro_init(conn);
-		break;
-	case CCIETH_CONNECT_ATTR_RU:
-		ccieth_conn_ru_init(conn);
-		break;
-	case CCIETH_CONNECT_ATTR_UU:
-		ccieth_conn_uu_init(conn);
-		break;
-	default:
-		BUG(); /* already checked above */
-	}
+	ccieth_conn_init(conn, hdr->attribute);
 
 	/* initialize the timer to make destroy easier */
 	setup_timer(&conn->timer, ccieth_connect_reply_timer_hdlr, (unsigned long) conn);
