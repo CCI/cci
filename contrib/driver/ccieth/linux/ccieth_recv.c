@@ -11,12 +11,54 @@
 #include <ccieth_common.h>
 #include <ccieth_wire.h>
 
+/* called under rcu_read_lock() */
+static int
+ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
+		 struct ccieth_pkt_header_msg *hdr, struct sk_buff *skb)
+{
+	struct ccieth_endpoint_event *event;
+	__u32 msg_len = ntohl(hdr->msg_len);
+	int err;
+
+	/* get an event */
+	err = -ENOMEM;
+	spin_lock_bh(&ep->free_event_list_lock);
+	if (list_empty(&ep->free_event_list)) {
+		spin_unlock_bh(&ep->free_event_list_lock);
+		printk("ccieth: no event slot for msg\n");
+		goto out;
+	}
+	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
+	list_del(&event->list);
+	spin_unlock_bh(&ep->free_event_list_lock);
+
+	/* setup the event */
+	event->event.type = CCIETH_IOCTL_EVENT_RECV;
+	event->event.data_length = msg_len;
+
+	err = skb_copy_bits(skb, sizeof(*hdr), event+1, msg_len);
+	BUG_ON(err < 0);
+
+	/* finalize and notify the event */
+	event->event.recv.user_conn_id = conn->user_conn_id;
+
+	spin_lock_bh(&ep->event_list_lock);
+	list_add_tail(&event->list, &ep->event_list);
+	spin_unlock_bh(&ep->event_list_lock);
+
+	dev_kfree_skb(skb);
+	return 0;
+
+out:
+	dev_kfree_skb(skb);
+	return err;
+}
+
 static int
 ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 {
 	struct ccieth_pkt_header_msg _hdr, *hdr;
 	struct ccieth_endpoint *ep;
-	struct ccieth_endpoint_event *event;
 	struct ccieth_connection *conn;
 	__u32 dst_ep_id;
 	__u32 dst_conn_id;
@@ -50,47 +92,17 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 	    || skb->len < sizeof(*hdr) + msg_len)
 		goto out_with_rculock;
 
-	/* get an event */
-	err = -ENOMEM;
-	spin_lock_bh(&ep->free_event_list_lock);
-	if (list_empty(&ep->free_event_list)) {
-		spin_unlock_bh(&ep->free_event_list_lock);
-		printk("ccieth: no event slot for msg\n");
-		goto out_with_rculock;
-	}
-	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
-	list_del(&event->list);
-	spin_unlock_bh(&ep->free_event_list_lock);
-
-	/* setup the event */
-	event->event.type = CCIETH_IOCTL_EVENT_RECV;
-	event->event.data_length = msg_len;
-
-	err = skb_copy_bits(skb, sizeof(*hdr), event+1, msg_len);
-	BUG_ON(err < 0);
-
 	/* find the connection */
 	err = -EINVAL;
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
 	if (!conn || conn->status != CCIETH_CONNECTION_READY)
-		goto out_with_event;
+		goto out_with_rculock;
 
-	/* finalize and notify the event */
-	event->event.recv.user_conn_id = conn->user_conn_id;
-
-	spin_lock_bh(&ep->event_list_lock);
-	list_add_tail(&event->list, &ep->event_list);
-	spin_unlock_bh(&ep->event_list_lock);
+	err = ccieth__recv_msg(ep, conn, hdr, skb);
 
 	rcu_read_unlock();
+	return err;
 
-	dev_kfree_skb(skb);
-	return 0;
-
-out_with_event:
-	spin_lock_bh(&ep->free_event_list_lock);
-	list_add_tail(&event->list, &ep->free_event_list);
-	spin_unlock_bh(&ep->free_event_list_lock);
 out_with_rculock:
 	rcu_read_unlock();
 out:
