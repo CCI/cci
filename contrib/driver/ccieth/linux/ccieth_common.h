@@ -142,6 +142,8 @@ struct ccieth_connection {
 
 	/* FIXME: cache skb headers? */
 
+	struct sk_buff_head deferred_msg_recv_queue;
+
 	struct rcu_head destroy_rcu_head;
 
 	/* event to be used when destroying the connection:
@@ -162,6 +164,7 @@ extern int ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl
 extern int ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_reject *arg);
 extern void ccieth_deferred_connect_recv_workfunc(struct work_struct *work);
 extern int ccieth_defer_connect_recv(struct net_device *ifp, struct sk_buff *skb);
+extern void ccieth__recv_deferred_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn);
 
 static inline __u32
 ccieth_max_send_size(__u32 mtu)

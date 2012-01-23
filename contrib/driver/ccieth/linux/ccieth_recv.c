@@ -54,6 +54,19 @@ out:
 	return err;
 }
 
+void
+ccieth__recv_deferred_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn)
+{
+	struct sk_buff *skb;
+	while ((skb = skb_dequeue(&conn->deferred_msg_recv_queue)) != NULL) {
+		struct ccieth_pkt_header_msg _hdr, *hdr;
+		printk("processing deferred msg\n");
+		hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
+		BUG_ON(!hdr); /* would have failed in ccieth_recv_msg() */
+		ccieth__recv_msg(ep, conn, hdr, skb);
+	}
+}
+
 static int
 ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 {
@@ -95,10 +108,20 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 	/* find the connection */
 	err = -EINVAL;
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
-	if (!conn || conn->status != CCIETH_CONNECTION_READY)
+	if (!conn)
 		goto out_with_rculock;
 
-	err = ccieth__recv_msg(ep, conn, hdr, skb);
+	if (conn->status == CCIETH_CONNECTION_READY) {
+		err = ccieth__recv_msg(ep, conn, hdr, skb);
+	} else if (conn->status == CCIETH_CONNECTION_REQUESTED) {
+		printk("deferring msg until accept\n");
+		skb_queue_tail(&conn->deferred_msg_recv_queue, skb);
+		if (conn->status == CCIETH_CONNECTION_READY)
+			/* accepted in the meantime, make sure it didn't miss our packet */
+			ccieth__recv_deferred_msg(ep, conn);
+		err = 0;
+	} else
+		goto out_with_rculock;
 
 	rcu_read_unlock();
 	return err;

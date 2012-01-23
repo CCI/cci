@@ -23,6 +23,7 @@ ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 {
 	struct ccieth_connection *conn = container_of(rcu_head, struct ccieth_connection, destroy_rcu_head);
 	printk("destroying connection %p in rcu call\n", conn);
+	skb_queue_purge(&conn->deferred_msg_recv_queue);
 	kfree_skb(conn->skb);
 	kfree(conn);
 }
@@ -224,6 +225,7 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	if (!conn)
 		goto out;
 	rcu_assign_pointer(conn->acked_completion, NULL);
+	skb_queue_head_init(&conn->deferred_msg_recv_queue);
 	conn->embedded_event.event.data_length = 0;
 	conn->embedded_event.destructor = ccieth_connection_event_destructor;
 	conn->skb = NULL;
@@ -427,6 +429,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	if (!conn)
 		goto out_with_event;
 	rcu_assign_pointer(conn->acked_completion, NULL);
+	skb_queue_head_init(&conn->deferred_msg_recv_queue);
 	conn->embedded_event.event.data_length = 0;
 	conn->embedded_event.destructor = ccieth_connection_event_destructor;
 	conn->need_ack = 0;
@@ -706,6 +709,9 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 			   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
 			   ack_status);
 	dev_kfree_skb(skb);
+
+	/* handle deferred msgs */
+	ccieth__recv_deferred_msg(ep, conn);
 	return 0;
 
 out_with_conn:
