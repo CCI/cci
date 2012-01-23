@@ -121,6 +121,7 @@ struct ccieth_connection {
 			atomic_t next_send_seqnum;
 		} ru;
 		struct {
+			struct sk_buff_head deferred_msg_recv_queue;
 		} uu;
 	};
 
@@ -136,8 +137,6 @@ struct ccieth_connection {
 	__u32 dest_eid;
 
 	/* FIXME: cache skb headers? */
-
-	struct sk_buff_head deferred_msg_recv_queue;
 
 	struct rcu_head destroy_rcu_head;
 
@@ -159,7 +158,9 @@ extern int ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl
 extern int ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_reject *arg);
 extern void ccieth_deferred_connect_recv_workfunc(struct work_struct *work);
 extern int ccieth_defer_connect_recv(struct net_device *ifp, struct sk_buff *skb);
-extern void ccieth__recv_deferred_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn);
+
+extern void ccieth_conn_uu_defer_recv_msg(struct ccieth_connection *conn, struct sk_buff *skb);
+extern int ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr, struct sk_buff *skb);
 
 static inline __u32
 ccieth_max_send_size(__u32 mtu)

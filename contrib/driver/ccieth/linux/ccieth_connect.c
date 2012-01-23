@@ -69,6 +69,32 @@ ccieth_conn_ru_init(struct ccieth_connection *conn)
  */
 
 static void
+ccieth_conn_uu_recv_deferred_msgs(struct ccieth_connection *conn)
+{
+	struct sk_buff *skb;
+	BUG_ON(conn->attribute != CCIETH_CONNECT_ATTR_UU);
+	while ((skb = skb_dequeue(&conn->uu.deferred_msg_recv_queue)) != NULL) {
+		struct ccieth_pkt_header_msg _hdr, *hdr;
+		printk("processing deferred msg\n");
+		hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
+		BUG_ON(!hdr); /* would have failed in ccieth_recv_msg() */
+		ccieth__recv_msg(conn->ep, conn, hdr, skb);
+	}
+}
+
+void
+ccieth_conn_uu_defer_recv_msg(struct ccieth_connection *conn,
+			      struct sk_buff *skb)
+{
+	BUG_ON(conn->attribute != CCIETH_CONNECT_ATTR_UU);
+	printk("deferring UU msg until accept\n");
+	skb_queue_tail(&conn->uu.deferred_msg_recv_queue, skb);
+	if (conn->status == CCIETH_CONNECTION_READY)
+		/* accepted in the meantime, make sure it didn't miss our packet */
+		ccieth_conn_uu_recv_deferred_msgs(conn);
+}
+
+static void
 ccieth_conn_uu_set_next_send_seqnum(struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr)
 {
 	hdr->msg_seqnum = htonl(-1); /* debug */
@@ -77,6 +103,7 @@ ccieth_conn_uu_set_next_send_seqnum(struct ccieth_connection *conn, struct cciet
 static void
 ccieth_conn_uu_free(struct ccieth_connection *conn)
 {
+	skb_queue_purge(&conn->uu.deferred_msg_recv_queue);
 }
 
 static void
@@ -84,6 +111,7 @@ ccieth_conn_uu_init(struct ccieth_connection *conn)
 {
 	conn->set_next_send_seqnum = ccieth_conn_uu_set_next_send_seqnum;
 	conn->free = ccieth_conn_uu_free;
+	skb_queue_head_init(&conn->uu.deferred_msg_recv_queue);
 }
 
 static void
@@ -116,7 +144,6 @@ ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 	struct ccieth_connection *conn = container_of(rcu_head, struct ccieth_connection, destroy_rcu_head);
 	printk("destroying connection %p in rcu call\n", conn);
 	conn->free(conn);
-	skb_queue_purge(&conn->deferred_msg_recv_queue);
 	kfree_skb(conn->skb);
 	kfree(conn);
 }
@@ -280,7 +307,6 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out;
-	skb_queue_head_init(&conn->deferred_msg_recv_queue);
 	conn->embedded_event.event.data_length = 0;
 	conn->embedded_event.destructor = ccieth_connection_event_destructor;
 	conn->skb = NULL;
@@ -482,7 +508,6 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out_with_event;
-	skb_queue_head_init(&conn->deferred_msg_recv_queue);
 	conn->embedded_event.event.data_length = 0;
 	conn->embedded_event.destructor = ccieth_connection_event_destructor;
 	conn->need_ack = 0;
@@ -724,7 +749,8 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	spin_unlock_bh(&ep->event_list_lock);
 
 	/* handle deferred msgs */
-	ccieth__recv_deferred_msg(ep, conn);
+	if (conn->attribute == CCIETH_CONNECT_ATTR_UU)
+		ccieth_conn_uu_recv_deferred_msgs(conn);
 
 	rcu_read_unlock();
 
