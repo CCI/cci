@@ -224,7 +224,6 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out;
-	rcu_assign_pointer(conn->acked_completion, NULL);
 	skb_queue_head_init(&conn->deferred_msg_recv_queue);
 	conn->embedded_event.event.data_length = 0;
 	conn->embedded_event.destructor = ccieth_connection_event_destructor;
@@ -428,7 +427,6 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out_with_event;
-	rcu_assign_pointer(conn->acked_completion, NULL);
 	skb_queue_head_init(&conn->deferred_msg_recv_queue);
 	conn->embedded_event.event.data_length = 0;
 	conn->embedded_event.destructor = ccieth_connection_event_destructor;
@@ -545,14 +543,7 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	struct net_device *ifp;
 	struct ccieth_pkt_header_connect_accept *hdr;
 	struct ccieth_connection *conn;
-	struct ccieth_rcu_completion *acked_completion;
 	int err;
-
-	err = -ENOMEM;
-	acked_completion = kmalloc(sizeof(*acked_completion), GFP_KERNEL);
-	if (!acked_completion)
-		goto out;
-	init_completion(&acked_completion->completion);
 
 	rcu_read_lock();
 
@@ -568,7 +559,6 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	atomic_dec(&ep->connection_received);
 	conn->max_send_size = arg->max_send_size;
 	conn->user_conn_id = arg->user_conn_id;
-	rcu_assign_pointer(conn->acked_completion, acked_completion);
 
 	/* fill headers */
 	skb = conn->skb;
@@ -605,22 +595,12 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 		rcu_read_unlock();
 	}
 
-	/* FIXME: block for now so that cci_send() right after cci_accept()
-	 * doesn't get ignored (accept recv is deferred while MSG recv isn't).
-	 */
-	if (conn->attribute == CCIETH_CONNECT_ATTR_UU)
-		wait_for_completion_interruptible(&acked_completion->completion);
-	rcu_assign_pointer(conn->acked_completion, NULL);
-	kfree_rcu(acked_completion, rcu);
 	return 0;
 
 out_with_skb:
 	kfree_skb(skb);
-	rcu_assign_pointer(conn->acked_completion, NULL);
 out_with_rculock:
 	rcu_read_unlock();
-	kfree_rcu(acked_completion, rcu);
-out:
 	return err;
 }
 
@@ -938,7 +918,6 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 			 struct ccieth_pkt_header_connect_ack *hdr)
 {
 	struct ccieth_connection *conn;
-	struct ccieth_rcu_completion *acked_completion;
 	__u32 src_conn_id;
 	__u32 src_ep_id;
 	__u32 dst_conn_id;
@@ -971,9 +950,6 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	printk("conn %p status %d acked with status %d\n", conn, conn->status, ack_status);
 
 	conn->need_ack = 0;
-	acked_completion = rcu_dereference(conn->acked_completion);
-	if (acked_completion)
-		complete(&acked_completion->completion);
 
 	/* reject ack status doesn't matter, just destroy the connection */
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REJECTED, CCIETH_CONNECTION_CLOSING)

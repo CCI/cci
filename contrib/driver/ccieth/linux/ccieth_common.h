@@ -98,11 +98,6 @@ enum ccieth_connection_status {
 	CCIETH_CONNECTION_REJECTED,  /* reject sent and not acked yet */
 };
 
-struct ccieth_rcu_completion {
-	struct rcu_head rcu; /* for kfree_rcu() */
-	struct completion completion;
-};
-
 #define CCIETH_CONNECT_RESEND_DELAY (HZ)
 
 struct ccieth_connection {
@@ -110,7 +105,6 @@ struct ccieth_connection {
 	enum ccieth_connection_status status;
 	struct ccieth_endpoint *ep;
 	int need_ack;
-	struct ccieth_rcu_completion __rcu *acked_completion;
 
 	__u8 attribute;
 	__u32 req_seqnum;
