@@ -205,15 +205,21 @@ static int eth_get_devices(cci_device_t const ***devices_p)
     }
 
     if (TAILQ_EMPTY(&globals->devs)) {
+      int loopback_ok = (getenv("CCIETH_ALLOW_LOOPBACK") != NULL);
       /* get all ethernet devices from the system */
       for (addr = addrs; addr != NULL; addr = addr->ifa_next) {
+	int is_loopback = 0;
 	/* need a packet iface with an address */
 	if (addr->ifa_addr == NULL
 	    || addr->ifa_addr->sa_family != AF_PACKET)
 	  continue;
 	/* ignore loopback and */
-	if (addr->ifa_flags & IFF_LOOPBACK)
-	  continue;
+	if (addr->ifa_flags & IFF_LOOPBACK) {
+	  if (loopback_ok)
+	    is_loopback = 1;
+	  else
+	    continue;
+	}
 	/* ignore iface if not up */
 	if (!(addr->ifa_flags & IFF_UP))
 	  continue;
