@@ -166,7 +166,8 @@ typedef enum gni_msg_oob_type {
 // GNI connection status
 typedef enum gni_conn_status {
 
-    GNI_CONN_PENDING,
+    GNI_CONN_PENDING_REQUEST,
+    GNI_CONN_PENDING_REPLY,
     GNI_CONN_ACCEPTED,
     GNI_CONN_REJECTED,
     GNI_CONN_FAILED,
@@ -191,16 +192,6 @@ typedef struct gni_tx {
     TAILQ_ENTRY(gni_tx)         qentry;      // Hangs on ep->txs_queue
 }                               gni_tx_t;
 
-typedef struct gni_conn {
-
-    cci__conn_t *               conn;
-    void *                      data_ptr;
-    uint32_t                    data_len;
-    gni_conn_status_t           status;      // status of connection
-    struct sockaddr_in          sin;
-    TAILQ_ENTRY(gni_conn)       entry;
-}                               gni_conn_t;
-
 typedef struct gni_rhd {
     uint64_t                    rma_hndl;
     TAILQ_ENTRY(gni_rhd)        entry;       // Hangs on gep->rma_hndls
@@ -216,29 +207,39 @@ typedef struct gni_mailbox {
     uint32_t                    inst_id;     // PID of instance
     gni_smsg_attr_t             attr;        // mailbox attributes
     cci_conn_attribute_t        cci_attr;    // connection attributes
-    gni_conn_t *                gconn;
+    void *                      gconn;
     union {
         uint32_t                length;      // connection payload size
         gni_conn_status_t       reply;       // connection reply
     }                           info;
 }                               gni_mailbox_t;
 
+typedef struct gni_conn {
+
+    cci__conn_t *               conn;
+    void *                      data_ptr;
+    uint32_t                    data_len;
+    struct sockaddr_in          sin;
+    gni_conn_status_t           status;      // status of connection
+    uint32_t                    credits;     // tracking send credits
+    int32_t                     vmd_index;   // VMD option(s)
+    uint64_t                    vmd_flags;   // VMD flag(s)
+    gni_cq_handle_t             src_cq_hndl; // Local CQ handle
+    gni_cq_handle_t             dst_cq_hndl; // Destination CQ handle
+    gni_mailbox_t               src_box;     // Local SMSG mailbox
+    gni_ep_handle_t             ep_hndl;     // GNI ep handle
+    gni_mailbox_t               dst_box;     // Destination SMSG mailbox
+    TAILQ_ENTRY(gni_conn)       entry;
+}                               gni_conn_t;
+
 typedef struct gni_ep {
 
     uint32_t                    id;          // id for multiplexing
-    int32_t                     in_use;      // to serialize get_event
-    int32_t                     vmd_index;   // VMD option(s)
-    uint64_t                    vmd_flags;   // VMD flag(s)
-    pthread_mutex_t             lock;        // lock to protect sd
     int32_t                     sd;          // request sd
-    gni_ep_handle_t             ep_hndl;     // ep handle
-    gni_mailbox_t               src_box;     // Local SMSG mailbox
-    gni_mailbox_t               dst_box;     // Destination SMSG mailbox
-    gni_cq_handle_t             src_cq_hndl; // Local CQ handle
-    gni_cq_handle_t             dst_cq_hndl; // Destination CQ handle
+    int32_t                     in_use;      // to serialize get_event
     void *                      rxbuf;       // Large buffer for rx's
     void *                      txbuf;       // Large buffer for tx's
-    uint32_t                    credits;     // tracking send credits
+    gni_mailbox_t *             dst_box;     // Incoming mailbox request
     TAILQ_HEAD(g_rxsa, gni_rx)  rxs_all;     // List of all rxs
     TAILQ_HEAD(g_rxs, gni_rx)   rxs;         // List of available rxs
     TAILQ_HEAD(g_txsa, gni_tx)  txs_all;     // List of all txs
