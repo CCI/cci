@@ -183,13 +183,15 @@ static int eth__get_device_info(cci__dev_t *_dev, struct ifaddrs *addr)
 static int eth_get_devices(cci_device_t const ***devices_p)
 {
     int ret;
-    cci__dev_t *_dev;
+    cci__dev_t *_dev, *maxrate_dev;
     cci_device_t **devices;
     unsigned count = 0;
     cci_device_t *device;
     eth__dev_t *edev;
     struct ifaddrs *addrs = NULL, *addr;
     struct sockaddr_ll *lladdr;
+    int no_default;
+    int maxrate;
 
     CCI_ENTER;
 
@@ -253,6 +255,7 @@ static int eth_get_devices(cci_device_t const ***devices_p)
 	/* FIXME: add a device structure initialization function in the core */
 	TAILQ_INIT(&_dev->eps);
 	pthread_mutex_init(&_dev->lock, NULL);
+        _dev->driver = "eth";
 	if (is_loopback)
 	  _dev->is_default = 1;
 	TAILQ_INSERT_TAIL(&globals->devs, _dev, entry);
@@ -330,6 +333,27 @@ static int eth_get_devices(cci_device_t const ***devices_p)
     freeifaddrs(addrs);
     addrs = NULL;
 
+    /* find the default if it doesn't exist yet */
+    maxrate = 0;
+    maxrate_dev = NULL;
+    no_default = 1;
+    TAILQ_FOREACH(_dev, &globals->devs, entry) {
+      if (0 == strcmp("eth", _dev->driver)) {
+	if (_dev->is_default) {
+	  no_default = 0;
+	  break;
+	}
+	if (!_dev->is_up)
+	  continue;
+	if (device->rate != -1ULL && (!maxrate_dev || device->rate > maxrate)) {
+	  maxrate_dev = _dev;
+	  maxrate = device->rate;
+	}
+      }
+    }
+    if (no_default && maxrate_dev)
+      maxrate_dev->is_default = 1;
+
     {
       int i;
       debug(CCI_DB_INFO, "listing devices:");
@@ -338,14 +362,15 @@ static int eth_get_devices(cci_device_t const ***devices_p)
 	cci__dev_t *_dev = container_of(device, cci__dev_t, device);
         eth__dev_t *edev = _dev->priv;
 	struct sockaddr_ll *addr = &edev->addr;
-	debug(CCI_DB_INFO, "  device `%s' has address %02x:%02x:%02x:%02x:%02x:%02x",
+	debug(CCI_DB_INFO, "  device `%s' has address %02x:%02x:%02x:%02x:%02x:%02x%s",
 	       device->name,
 	       addr->sll_addr[0],
 	       addr->sll_addr[1],
 	       addr->sll_addr[2],
 	       addr->sll_addr[3],
 	       addr->sll_addr[4],
-	       addr->sll_addr[5]);
+	       addr->sll_addr[5],
+	       _dev->is_default ? " (default)" : "");
       }
       debug(CCI_DB_INFO, "end of device list.");
     }
