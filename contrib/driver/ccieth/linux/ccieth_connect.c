@@ -18,6 +18,60 @@ ccieth_connect_ack(struct ccieth_endpoint *ep, __u32 src_conn_id,
 		   __u32 req_seqnum,
 		   __u8 ack_status);
 
+/*
+ * RO specific callbacks
+ */
+
+static void
+ccieth_conn_ro_set_next_send_seqnum(struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr)
+{
+	hdr->msg_seqnum = htonl(atomic_inc_return(&conn->ro.next_send_seqnum));
+}
+
+static void
+ccieth_conn_ro_init(struct ccieth_connection *conn)
+{
+	conn->set_next_send_seqnum = ccieth_conn_ro_set_next_send_seqnum;
+	atomic_set(&conn->ro.next_send_seqnum, jiffies);
+}
+
+/*
+ * RU specific callbacks
+ */
+
+static void
+ccieth_conn_ru_set_next_send_seqnum(struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr)
+{
+	hdr->msg_seqnum = htonl(atomic_inc_return(&conn->ru.next_send_seqnum));
+}
+
+static void
+ccieth_conn_ru_init(struct ccieth_connection *conn)
+{
+	conn->set_next_send_seqnum = ccieth_conn_ru_set_next_send_seqnum;
+	atomic_set(&conn->ru.next_send_seqnum, jiffies);
+}
+
+/*
+ * UU specific callbacks
+ */
+
+static void
+ccieth_conn_uu_set_next_send_seqnum(struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr)
+{
+	hdr->msg_seqnum = htonl(-1); /* debug */
+}
+
+static void
+ccieth_conn_uu_init(struct ccieth_connection *conn)
+{
+	conn->set_next_send_seqnum = ccieth_conn_uu_set_next_send_seqnum;
+}
+
+/*
+ * Connection destruction management
+ */
+
 static void
 ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 {
@@ -26,6 +80,16 @@ ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 	skb_queue_purge(&conn->deferred_msg_recv_queue);
 	kfree_skb(conn->skb);
 	kfree(conn);
+}
+
+static void
+ccieth_connection_event_destructor(struct ccieth_endpoint *ep,
+				   struct ccieth_endpoint_event *event)
+{
+	struct ccieth_connection *conn = container_of(event, struct ccieth_connection, embedded_event);
+	/* the event was enqueued from ccieth_connect_timer_hdlr, while rcu readers may exist */
+	/* timer isn't running anymore, no need to del_timer_sync() */
+	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
 }
 
 int
@@ -48,65 +112,9 @@ ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 	return 0;
 }
 
-static void
-ccieth_conn_ro_set_next_send_seqnum(struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr)
-{
-	hdr->msg_seqnum = htonl(atomic_inc_return(&conn->ro.next_send_seqnum));
-}
-static void
-ccieth_conn_ro_init(struct ccieth_connection *conn)
-{
-	conn->set_next_send_seqnum = ccieth_conn_ro_set_next_send_seqnum;
-	atomic_set(&conn->ro.next_send_seqnum, jiffies);
-}
-
-static void
-ccieth_conn_ru_set_next_send_seqnum(struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr)
-{
-	hdr->msg_seqnum = htonl(atomic_inc_return(&conn->ru.next_send_seqnum));
-}
-static void
-ccieth_conn_ru_init(struct ccieth_connection *conn)
-{
-	conn->set_next_send_seqnum = ccieth_conn_ru_set_next_send_seqnum;
-	atomic_set(&conn->ru.next_send_seqnum, jiffies);
-}
-
-static void
-ccieth_conn_uu_set_next_send_seqnum(struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr)
-{
-	hdr->msg_seqnum = htonl(-1); /* debug */
-}
-static void
-ccieth_conn_uu_init(struct ccieth_connection *conn)
-{
-	conn->set_next_send_seqnum = ccieth_conn_uu_set_next_send_seqnum;
-}
-
-static int ccieth_recv_connect_idrforeach_cb(int id, void *p, void *data)
-{
-	struct ccieth_connection *conn = p, *new = data;
-	/* return -EBUSY in case of duplicate incoming connect.
-	 * it may even already be accepted or rejcted.
-	 */
-	if (conn->status != CCIETH_CONNECTION_REQUESTED /* so that dest_id is valid */
-	    && !memcmp(&conn->dest_addr, &new->dest_addr, 6)
-	    && conn->dest_eid == new->dest_eid
-	    && conn->dest_id == new->dest_id
-	    && conn->req_seqnum == new->req_seqnum)
-		return -EBUSY;
-	return 0;
-}
-
-static void
-ccieth_connection_event_destructor(struct ccieth_endpoint *ep,
-				   struct ccieth_endpoint_event *event)
-{
-	struct ccieth_connection *conn = container_of(event, struct ccieth_connection, embedded_event);
-	/* the event was enqueued from ccieth_connect_timer_hdlr, while rcu readers may exist */
-	/* timer isn't running anymore, no need to del_timer_sync() */
-	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
-}
+/*
+ * Connect packet timers
+ */
 
 static
 void ccieth_connect_request_timer_hdlr(unsigned long data)
@@ -201,6 +209,10 @@ void ccieth_connect_reply_timer_hdlr(unsigned long data)
 		rcu_read_unlock();
 	}
 }
+
+/*
+ * Connect request, accept, reject and ack
+ */
 
 int
 ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_request *arg)
@@ -354,6 +366,21 @@ out_with_conn:
 	kfree(conn);
 out:
 	return err;
+}
+
+static int ccieth_recv_connect_idrforeach_cb(int id, void *p, void *data)
+{
+	struct ccieth_connection *conn = p, *new = data;
+	/* return -EBUSY in case of duplicate incoming connect.
+	 * it may even already be accepted or rejcted.
+	 */
+	if (conn->status != CCIETH_CONNECTION_REQUESTED /* so that dest_id is valid */
+	    && !memcmp(&conn->dest_addr, &new->dest_addr, 6)
+	    && conn->dest_eid == new->dest_eid
+	    && conn->dest_id == new->dest_id
+	    && conn->req_seqnum == new->req_seqnum)
+		return -EBUSY;
+	return 0;
 }
 
 static int
@@ -1007,6 +1034,9 @@ out_with_rculock:
 	return err;
 }
 
+/*
+ * Generic receiving of connect packets
+ */
 
 void
 ccieth_deferred_connect_recv_workfunc(struct work_struct *work)
