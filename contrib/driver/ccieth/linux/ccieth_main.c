@@ -343,6 +343,8 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 
 		ccieth_dev_getbyhwaddr_lock();
 		ifp = ccieth_dev_getbyhwaddr(&init_net, ARPHRD_ETHER, (const char *)&gi_arg.addr);
+		if (!ifp) /* allow loopback to ease development */
+			ifp = ccieth_dev_getbyhwaddr(&init_net, ARPHRD_LOOPBACK, (const char *)&gi_arg.addr);
 		if (ifp) {
 			struct device *dev = ifp->dev.parent;
 
@@ -364,14 +366,15 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 						gi_arg.rate = ((u64) speed) * 1000000;
 				}
 			}
-		} else
-			ret = -ENODEV;
+		} else {
+			ccieth_dev_getbyhwaddr_unlock();
+			return -ENODEV;
+		}
 		ccieth_dev_getbyhwaddr_unlock();
 
 		ret = copy_to_user((__user void *)arg, &gi_arg, sizeof(gi_arg));
 		if (ret)
 			return -EFAULT;
-
 
 		return 0;
 	}

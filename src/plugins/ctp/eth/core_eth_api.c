@@ -153,7 +153,9 @@ static int eth__get_device_info(cci__dev_t *_dev, struct ifaddrs *addr)
 
   ret = ioctl(fd, CCIETH_IOCTL_GET_INFO, &arg);
   if (ret < 0) {
-    perror("ioctl get info");
+    if (errno != ENODEV)
+      perror("ioctl get info");
+    close(fd);
     return -1;
   }
   CCIETH_VALGRIND_MEMORY_MAKE_READABLE(&arg.max_send_size, sizeof(arg.max_send_size));
