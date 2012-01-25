@@ -13,10 +13,10 @@
 #include <ccieth_wire.h>
 
 static int
-ccieth_connect_ack(struct ccieth_endpoint *ep, __u32 src_conn_id,
-		   __u8 dst_addr[6],  __u32 dst_ep_id, __u32 dst_conn_id,
-		   __u32 req_seqnum,
-		   __u8 ack_status);
+ccieth_connect_ack_from_endpoint(struct ccieth_endpoint *ep, __u32 src_conn_id,
+				 __u8 dst_addr[6],  __u32 dst_ep_id, __u32 dst_conn_id,
+				 __u32 req_seqnum,
+				 __u8 ack_status);
 
 /*
  * RO specific callbacks
@@ -578,9 +578,9 @@ retry:
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock_bh(&ep->event_list_lock);
 
-	ccieth_connect_ack(ep, -1,
-			   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
-			   ack_status);
+	ccieth_connect_ack_from_endpoint(ep, -1,
+					 (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
+					 ack_status);
 	dev_kfree_skb(skb);
 	return 0;
 
@@ -594,9 +594,9 @@ out_with_event:
 	spin_unlock_bh(&ep->free_event_list_lock);
 out:
 	if (need_ack)
-		ccieth_connect_ack(ep, -1,
-				   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
-				   ack_status);
+		ccieth_connect_ack_from_endpoint(ep, -1,
+						 (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
+						 ack_status);
 	dev_kfree_skb(skb);
 	return err;
 }
@@ -754,9 +754,9 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 
 	rcu_read_unlock();
 
-	ccieth_connect_ack(ep, dst_conn_id,
-			   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
-			   ack_status);
+	ccieth_connect_ack_from_endpoint(ep, dst_conn_id,
+					 (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
+					 ack_status);
 	dev_kfree_skb(skb);
 	return 0;
 
@@ -769,9 +769,9 @@ out_with_event:
 out_with_rculock:
 	rcu_read_unlock();
 	if (need_ack)
-		ccieth_connect_ack(ep, dst_conn_id,
-				   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
-				   ack_status);
+		ccieth_connect_ack_from_endpoint(ep, dst_conn_id,
+						 (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
+						 ack_status);
 	dev_kfree_skb(skb);
 	return err;
 }
@@ -902,27 +902,27 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 	list_add_tail(&conn->embedded_event.list, &ep->event_list);
 	spin_unlock_bh(&ep->event_list_lock);
 
-	ccieth_connect_ack(ep, dst_conn_id,
-			   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
-			   ack_status);
+	ccieth_connect_ack_from_endpoint(ep, dst_conn_id,
+					 (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
+					 ack_status);
 	dev_kfree_skb(skb);
 	return 0;
 
 out_with_rculock:
 	rcu_read_unlock();
 	if (need_ack)
-		ccieth_connect_ack(ep, dst_conn_id,
-				   (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
-				   ack_status);
+		ccieth_connect_ack_from_endpoint(ep, dst_conn_id,
+						 (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
+						 ack_status);
 	dev_kfree_skb(skb);
 	return err;
 }
 
 static int
-ccieth_connect_ack(struct ccieth_endpoint *ep, __u32 src_conn_id,
-		   __u8 dst_addr[6],  __u32 dst_ep_id, __u32 dst_conn_id,
-		   __u32 req_seqnum,
-		   __u8 ack_status)
+ccieth_connect_ack_from_endpoint(struct ccieth_endpoint *ep, __u32 src_conn_id,
+				 __u8 dst_addr[6],  __u32 dst_ep_id, __u32 dst_conn_id,
+				 __u32 req_seqnum,
+				 __u8 ack_status)
 {
 	struct sk_buff *skb;
 	struct net_device *ifp;
