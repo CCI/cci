@@ -978,6 +978,94 @@ out:
 	return err;
 }
 
+/* called with RCU lock held, cannot sleep */
+static int
+ccieth_connect_ack_without_endpoint(struct net_device *ifp,
+				    __u8 intype, struct sk_buff *inskb,
+				    __u8 ack_status)
+{
+	struct sk_buff *skb;
+	struct ccieth_pkt_header_connect_ack *hdr;
+	size_t skblen;
+	int err;
+
+	/* allocate and initialize the skb */
+	skblen = sizeof(*hdr);
+	if (skblen < ETH_ZLEN)
+		skblen = ETH_ZLEN;
+	err = -ENOMEM;
+	skb = alloc_skb(skblen, GFP_ATOMIC);
+	if (!skb)
+		goto out;
+	skb_reset_mac_header(skb);
+	skb_reset_network_header(skb);
+	skb->protocol = __constant_htons(ETH_P_CCI);
+	skb_put(skb, skblen);
+	skb->dev = ifp;
+
+	/* fill headers */
+	hdr = (struct ccieth_pkt_header_connect_ack *) skb_mac_header(skb);
+	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
+	hdr->type = CCIETH_PKT_CONNECT_ACK;
+	hdr->status = ack_status;
+
+	switch (intype) {
+	case CCIETH_PKT_CONNECT_REQUEST: {
+		struct ccieth_pkt_header_connect_request _inhdr, *inhdr;
+		inhdr = skb_header_pointer(inskb, 0, sizeof(_inhdr), &_inhdr);
+		if (!inhdr)
+			goto out_with_skb;
+		memcpy(&hdr->eth.h_dest, &inhdr->eth.h_source, 6);
+		memcpy(&hdr->eth.h_source, &inhdr->eth.h_dest, 6);
+		hdr->dst_ep_id = inhdr->src_ep_id;
+		hdr->dst_conn_id = inhdr->src_conn_id;
+		hdr->src_ep_id = inhdr->dst_ep_id;
+		hdr->src_conn_id = htonl(-1);
+		hdr->req_seqnum = inhdr->req_seqnum;
+		break;
+	}
+	case CCIETH_PKT_CONNECT_ACCEPT: {
+		struct ccieth_pkt_header_connect_accept _inhdr, *inhdr;
+		inhdr = skb_header_pointer(inskb, 0, sizeof(_inhdr), &_inhdr);
+		if (!inhdr)
+			goto out_with_skb;
+		memcpy(&hdr->eth.h_dest, &inhdr->eth.h_source, 6);
+		memcpy(&hdr->eth.h_source, &inhdr->eth.h_dest, 6);
+		hdr->dst_ep_id = inhdr->src_ep_id;
+		hdr->dst_conn_id = inhdr->src_conn_id;
+		hdr->src_ep_id = inhdr->dst_ep_id;
+		hdr->src_conn_id = inhdr->dst_conn_id;
+		hdr->req_seqnum = inhdr->req_seqnum;
+		break;
+	}
+	case CCIETH_PKT_CONNECT_REJECT: {
+		struct ccieth_pkt_header_connect_reject _inhdr, *inhdr;
+		inhdr = skb_header_pointer(inskb, 0, sizeof(_inhdr), &_inhdr);
+		if (!inhdr)
+			goto out_with_skb;
+		memcpy(&hdr->eth.h_dest, &inhdr->eth.h_source, 6);
+		memcpy(&hdr->eth.h_source, &inhdr->eth.h_dest, 6);
+		hdr->dst_ep_id = inhdr->src_ep_id;
+		hdr->dst_conn_id = inhdr->src_conn_id;
+		hdr->src_ep_id = inhdr->dst_ep_id;
+		hdr->src_conn_id = inhdr->dst_conn_id;
+		hdr->req_seqnum = inhdr->req_seqnum;
+		break;
+	}
+	break;
+	default:
+		BUG();
+	}
+
+	dev_queue_xmit(skb);
+	return 0;
+
+out_with_skb:
+	kfree_skb(skb);
+out:
+	return err;
+}
+
 static int
 ccieth__recv_connect_ack(struct ccieth_endpoint *ep, 
 			 struct sk_buff *skb,
@@ -1164,9 +1252,11 @@ ccieth_defer_connect_recv(struct net_device *ifp, __u8 type, struct sk_buff *skb
 
 	/* find endpoint and check that it's attached to this ifp */
 	ep = idr_find(&ccieth_ep_idr, ntohl(*dst_ep_id_n_p));
-	if (!ep)
-		/* FIXME nack */
+	if (!ep) {
+		if (type != CCIETH_PKT_CONNECT_ACK)
+			ccieth_connect_ack_without_endpoint(ifp, type, skb, CCIETH_PKT_ACK_NO_ENDPOINT);
 		goto out_with_rculock;
+	}
 	if (rcu_access_pointer(ep->ifp) != ifp)
 		goto out_with_rculock;
 

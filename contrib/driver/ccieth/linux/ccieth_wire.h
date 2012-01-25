@@ -105,6 +105,7 @@ enum ccieth_pkt_type {
 enum ccieth_pkt_ack_status {
 	CCIETH_PKT_ACK_SUCCESS,
 	CCIETH_PKT_ACK_INVALID,
+	CCIETH_PKT_ACK_NO_ENDPOINT,
 	CCIETH_PKT_ACK_NO_CONNECTION,
 };
 
