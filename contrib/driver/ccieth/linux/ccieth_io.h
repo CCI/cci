@@ -163,4 +163,10 @@ struct ccieth_ioctl_msg {
 
 #define CCIETH_IOCTL_EVENT_CONNECTION_CLOSED 20
 
+static inline __u32
+ccieth_max_send_size(__u32 mtu)
+{
+        return mtu >= 9000 ? 8192 : 1024;
+}
+
 #endif /* CCIETH_IO_H */

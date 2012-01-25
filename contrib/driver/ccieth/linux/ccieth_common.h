@@ -162,10 +162,4 @@ extern int ccieth_defer_connect_recv(struct net_device *ifp, struct sk_buff *skb
 extern void ccieth_conn_uu_defer_recv_msg(struct ccieth_connection *conn, struct sk_buff *skb);
 extern int ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr, struct sk_buff *skb);
 
-static inline __u32
-ccieth_max_send_size(__u32 mtu)
-{
-	return mtu >= 9000 ? 8192 : 1024;
-}
-
 #endif /* CCIETH_COMMON_H */

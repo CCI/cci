@@ -178,7 +178,7 @@ static int eth__get_device_info(cci__dev_t *_dev, struct ifaddrs *addr)
 		assert(errno == ENODEV);
 		goto out_with_sockfd;
 	}
-	device->max_send_size = ifr.ifr_mtu >= 9000 ? 8192 : 1024;;
+	device->max_send_size = ccieth_max_send_size(ifr.ifr_mtu);
 
 	/* try to get the link rate now, kernel allows non-root since 2.6.37 only */
 	ecmd.cmd = ETHTOOL_GSET;
