@@ -360,6 +360,8 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 
 			if (ifp->ethtool_ops && ifp->ethtool_ops->get_settings) {
 				struct ethtool_cmd ecmd;
+				ecmd.cmd = ETHTOOL_GSET;
+				memset(&ecmd, 0, sizeof(ecmd));
 				if (ifp->ethtool_ops->get_settings(ifp, &ecmd) >= 0) {
 					u32 speed = ethtool_cmd_speed(&ecmd);
 					if (speed != -1)
