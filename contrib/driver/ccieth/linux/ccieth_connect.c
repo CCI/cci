@@ -1148,7 +1148,7 @@ ccieth_deferred_connect_recv_workfunc(struct work_struct *work)
 }
 
 int
-ccieth_defer_connect_recv(struct net_device *ifp, struct sk_buff *skb)
+ccieth_defer_connect_recv(struct net_device *ifp, __u8 type, struct sk_buff *skb)
 {
 	struct ccieth_endpoint *ep;
 	__be32 dst_ep_id_n, *dst_ep_id_n_p;

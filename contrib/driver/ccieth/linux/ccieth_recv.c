@@ -143,7 +143,7 @@ ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 	case CCIETH_PKT_CONNECT_ACCEPT:
 	case CCIETH_PKT_CONNECT_REJECT:
 	case CCIETH_PKT_CONNECT_ACK:
-		return ccieth_defer_connect_recv(ifp, skb);
+		return ccieth_defer_connect_recv(ifp, *typep, skb);
 	case CCIETH_PKT_MSG:
 		return ccieth_recv_msg(ifp, skb);
 	default:
