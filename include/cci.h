@@ -2,8 +2,8 @@
  * Copyright (c) 2010-2011 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2010-2011 Myricom, Inc.  All rights reserved.
  * Copyright (c) 2010-2011 Qlogic Corporation.  All rights reserved.
- * Copyright (c) 2010-2011 UT-Battelle, LLC.  All rights reserved.
- * Copyright (c) 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright (c) 2010-2012 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2010-2012 Oak Ridge National Labs.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -731,7 +731,8 @@ CCI_DECLSPEC int cci_reject(union cci_event *conn_req);
                         ordering, multicast, etc).
   \param[in] context	Cookie to be used to identify the completion through
                         a connect accepted, rejected, or timedout event.
-  \param[in] flags      Currently unused.
+  \param[in] flags      Array of key=value pairs to specify connection request
+                        parameters such as keepalive.
   \param[in] timeout	NULL means forever.
 
   \return CCI_SUCCESS   The request is buffered and ready to be sent or
@@ -744,7 +745,7 @@ CCI_DECLSPEC int cci_reject(union cci_event *conn_req);
 CCI_DECLSPEC int cci_connect(cci_endpoint_t *endpoint, char *server_uri,
                              void *data_ptr, uint32_t data_len,
                              cci_conn_attribute_t attribute,
-                             void *context, int flags, struct timeval *timeout);
+                             void *context, char **flags, struct timeval *timeout);
 
 /*!
   This constant is the maximum value of data_len passed to cci_connect().

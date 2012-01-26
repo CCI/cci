@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
- * Copyright © 2010-2011 UT-Battelle, LLC. All rights reserved.
- * Copyright © 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2010-2012 UT-Battelle, LLC. All rights reserved.
+ * Copyright © 2010-2012 Oak Ridge National Labs.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -58,7 +58,7 @@ static int sock_reject(union cci_event *conn_req);
 static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
                             void *data_ptr, uint32_t data_len,
                             cci_conn_attribute_t attribute,
-                            void *context, int flags,
+                            void *context, char **flags,
                             struct timeval *timeout);
 static int sock_disconnect(cci_connection_t *connection);
 static int sock_set_opt(cci_opt_handle_t *handle,
@@ -797,7 +797,7 @@ static int sock_accept(union cci_event *event,
     sock_tx_t       *tx     = NULL;
     sock_rx_t       *rx     = NULL;
     sock_handshake_t    *hs = NULL;
-    uint32_t        id, ack, max_recv_buffer_count, mss = 0;
+    uint32_t        id, ack, max_recv_buffer_count, mss = 0, ka;
 
 
     CCI_ENTER;
@@ -853,7 +853,11 @@ static int sock_accept(union cci_event *event,
     conn->connection.max_send_size = dev->device.max_send_size;
 
     hs = (sock_handshake_t *) (rx->buffer + (uintptr_t) sizeof(sock_header_r_t));
-    sock_parse_handshake(hs, &id, &ack, &max_recv_buffer_count, &mss);
+    sock_parse_handshake(hs, &id, &ack, &max_recv_buffer_count, &mss, &ka);
+    if (ka != 0UL) {
+        debug(CCI_DB_CONN, "keepalive timeout: %d", ka);
+        conn->keepalive_timeout = ka;
+    }
     if (mss < SOCK_MIN_MSS) {
         /* FIXME do what? */
     }
@@ -912,7 +916,8 @@ static int sock_accept(union cci_event *event,
     hs = (sock_handshake_t *) (tx->buffer + sizeof(*hdr_r));
     sock_pack_handshake(hs, sconn->id, peer_seq,
                         ep->endpoint.max_recv_buffer_count,
-                        conn->connection.max_send_size);
+                        conn->connection.max_send_size,
+                        0);
 
     tx->len = sizeof(*hdr_r) + sizeof(*hs);
     tx->seq = sconn->seq;
@@ -1140,7 +1145,7 @@ sock_find_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id, sock_ms
 static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
                             void *data_ptr, uint32_t data_len,
                             cci_conn_attribute_t attribute,
-                            void *context, int flags,
+                            void *context, char **flags,
                             struct timeval *timeout)
 {
     int                 ret;
@@ -1163,12 +1168,35 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     struct s_active     *active_list;
     sock_handshake_t    *hs         = NULL;
     uint16_t            port;
+    uint32_t            keepalive   = 0ULL;
 
     CCI_ENTER;
 
     if (!sglobals) {
         CCI_EXIT;
         return CCI_ENODEV;
+    }
+
+    /* Dealing with the flags:
+     * - for reliable connections, check whether the keepalive parameter is set
+     */
+    if ((((attribute & CCI_CONN_ATTR_RO) == CCI_CONN_ATTR_RO)
+        || ((attribute & CCI_CONN_ATTR_RU) == CCI_CONN_ATTR_RU))
+        && flags != NULL) {
+        int i = 0;
+        char *key;
+        char *val;
+        while (flags[i] != NULL) {
+            key = strtok (flags[i], "=");
+            if (key == NULL)
+                continue;
+            val = strtok (NULL, ";");
+            if (val == NULL)
+                continue;
+            if (strcmp (key, "keepalive") == 0)
+                keepalive = (uint32_t) atoi (val);
+            i++;
+        }
     }
 
     /* allocate a new connection */
@@ -1270,9 +1298,12 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
 
     /* add handshake */
     hs = (sock_handshake_t *) &hdr_r->data;
+    if (keepalive != 0UL)
+        conn->keepalive_timeout = keepalive;
     sock_pack_handshake(hs, sconn->id, 0,
                         endpoint->max_recv_buffer_count,
-                        connection->max_send_size);
+                        connection->max_send_size,
+                        keepalive);
 
     tx->len += sizeof(*hs);
     ptr = tx->buffer + tx->len;
@@ -3178,13 +3209,14 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
     sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts); //FIXME do something with ts
 
     if (sconn->status == SOCK_CONN_ACTIVE) {
-        uint32_t peer_id, ack, max_recv_buffer_count, mss;
+        uint32_t peer_id, ack, max_recv_buffer_count, mss, keepalive;
         struct s_active *active_list;
 
         debug(CCI_DB_CONN, "transition active connection to ready");
 
         hs = (sock_handshake_t *) (rx->buffer + sizeof(*hdr_r));
-        sock_parse_handshake(hs, &peer_id, &ack, &max_recv_buffer_count, &mss);
+        /* With conn_reply, we do not care about the keepalive param */
+        sock_parse_handshake(hs, &peer_id, &ack, &max_recv_buffer_count, &mss, &keepalive);
 
         /* get pending conn_req tx, create event, move conn to conn_hash */
         pthread_mutex_lock(&dev->lock);
@@ -3714,6 +3746,7 @@ sock_recvfrom_ep(cci__ep_t *ep)
     uint8_t a;
     uint16_t b;
     uint32_t id;
+    uint32_t keepalive;
     sock_rx_t *rx = NULL;
     struct sockaddr_in sin;
     socklen_t sin_len = sizeof(sin);
