@@ -42,7 +42,7 @@ BEGIN_C_DECLS
 #define   GNI_MIN_MSS         (128)
 #define   GNI_MAX_SIZE        (64 * 1024 - 1)// max payload + header
 #define   GNI_MAX_MSS         (GNI_MAX_SIZE - GNI_MAX_HDR_SIZE - 8)
-#define   GNI_MBOX_MAX_CREDIT (16)           // MAX in-flight txs
+#define   GNI_MBOX_MAX_CREDIT (16)           // MAX in-flight tx's
 
 #define   GNI_BLOCK_SIZE      (64)           // bytes for id storage
 #define   GNI_EP_MAX_HDR_SIZE (GNI_MAX_HDR_SIZE)
@@ -53,7 +53,8 @@ BEGIN_C_DECLS
 #define   GNI_MAX_EP_ID       (GNI_BLOCK_SIZE * GNI_NUM_BLOCKS)
 #define   GNI_EP_BITS         (32)
 #define   GNI_EP_SHIFT        (32)
-#define   GNI_PROG_TIME_US    (10000)        // progress delay micro-sec
+//#define   GNI_PROG_TIME_US    (1000)         // progress delay micro-sec
+#define   GNI_PROG_TIME_US    (100000)       // progress delay micro-sec
 
 #define   GNI_EP_MATCH        ((uint64_t)0)
 #define   GNI_EP_IGNORE       (~((uint64_t)0))
@@ -130,15 +131,15 @@ typedef struct gni_globals {
     const cci_device_t **       devices;     // Array of devices
 }                               gni_globals_t;
 
-typedef struct gni_dev {
+typedef struct gni__dev {
 
     uint8_t                     kid;         // 
     uint8_t                     ptag;        // protection tag
     uint16_t                    pad;         // pad
     uint32_t                    cookie;      // GNI cookie
     uint32_t                    modes;       // CD flag(s)
-    uint32_t                    nic_addr;    // NIC address of device
-    uint32_t                    inst_id;     // instance ID/PID
+    uint32_t                    NIC;         // NIC address of device
+    uint32_t                    INST;        // instance ID/PID
     int32_t                     sd;          // listen sd (always open)
     uint32_t                    progressing; // Being progressed?
     uint32_t                    port;        // Override port
@@ -146,7 +147,7 @@ typedef struct gni_dev {
     gni_nic_handle_t            nic_hndl;    // NIC handle
     char *                      nodename;    // 
     uint64_t *                  ep_ids;      // Endpoint id blocks
-}                               gni_dev_t;
+}                               gni__dev_t;
 
 // Limit of 4 message types to ensure we only use 2 bits for msg type
 typedef enum gni_msg_type {
@@ -170,14 +171,14 @@ typedef enum gni_conn_status {
     GNI_CONN_PENDING_REPLY,
     GNI_CONN_ACCEPTED,
     GNI_CONN_REJECTED,
-    GNI_CONN_FAILED,
+    GNI_CONN_TIMEDOUT,
     GNI_CONN_DISCONNECTED
 }                               gni_conn_status_t;
 
 typedef struct gni_rx {
     cci__evt_t                  evt;         // associated event
-    TAILQ_ENTRY(gni_rx)         centry;      // Hangs on ep->rxs_all
-    TAILQ_ENTRY(gni_rx)         entry;       // Hangs on ep->rxs
+    TAILQ_ENTRY(gni_rx)         centry;      // Hangs on ep->rx_all
+    TAILQ_ENTRY(gni_rx)         entry;       // Hangs on ep->rx
 }                               gni_rx_t;
 
 typedef struct gni_tx {
@@ -187,9 +188,9 @@ typedef struct gni_tx {
     void *                      user_ptr;    // user send buffer
     uint32_t                    len;         // length of buffer used
     uint32_t                    zero_copy;   // zero copy
-    TAILQ_ENTRY(gni_tx)         centry;      // Hangs on ep->txs_all
-    TAILQ_ENTRY(gni_tx)         entry;       // Hangs on ep->txs
-    TAILQ_ENTRY(gni_tx)         qentry;      // Hangs on ep->txs_queue
+    TAILQ_ENTRY(gni_tx)         centry;      // Hangs on ep->tx_all
+    TAILQ_ENTRY(gni_tx)         entry;       // Hangs on ep->tx
+    TAILQ_ENTRY(gni_tx)         qentry;      // Hangs on ep->tx_queue
 }                               gni_tx_t;
 
 typedef struct gni_rhd {
@@ -203,8 +204,8 @@ typedef struct gni_rop {
 }                               gni_rma_op_t;
 
 typedef struct gni_mailbox {
-    uint32_t                    nic_addr;    // NIC address of instance
-    uint32_t                    inst_id;     // PID of instance
+    uint32_t                    NIC;         // NIC address of instance
+    uint32_t                    INST;        // PID of instance
     gni_smsg_attr_t             attr;        // mailbox attributes
     cci_conn_attribute_t        cci_attr;    // connection attributes
     void *                      gconn;
@@ -214,14 +215,15 @@ typedef struct gni_mailbox {
     }                           info;
 }                               gni_mailbox_t;
 
-typedef struct gni_conn {
+typedef struct gni__conn {
 
-    cci__conn_t *               conn;
-    void *                      data_ptr;
-    uint32_t                    data_len;
+    cci__conn_t *               conn;        // point back to container
+    void *                      data_ptr;    // Optional CCI payload
+    uint32_t                    data_len;    // Length of payload
     struct sockaddr_in          sin;
     gni_conn_status_t           status;      // status of connection
     uint32_t                    credits;     // tracking send credits
+    uint32_t                    inuse;       // token for lockout
     int32_t                     vmd_index;   // VMD option(s)
     uint64_t                    vmd_flags;   // VMD flag(s)
     gni_cq_handle_t             src_cq_hndl; // Local CQ handle
@@ -229,10 +231,10 @@ typedef struct gni_conn {
     gni_mailbox_t               src_box;     // Local SMSG mailbox
     gni_ep_handle_t             ep_hndl;     // GNI ep handle
     gni_mailbox_t               dst_box;     // Destination SMSG mailbox
-    TAILQ_ENTRY(gni_conn)       entry;
-}                               gni_conn_t;
+    TAILQ_ENTRY(gni__conn)       entry;
+}                               gni__conn_t;
 
-typedef struct gni_ep {
+typedef struct gni__ep {
 
     uint32_t                    id;          // id for multiplexing
     int32_t                     sd;          // request sd
@@ -240,15 +242,15 @@ typedef struct gni_ep {
     void *                      rxbuf;       // Large buffer for rx's
     void *                      txbuf;       // Large buffer for tx's
     gni_mailbox_t *             dst_box;     // Incoming mailbox request
-    TAILQ_HEAD(g_rxsa, gni_rx)  rxs_all;     // List of all rxs
-    TAILQ_HEAD(g_rxs, gni_rx)   rxs;         // List of available rxs
-    TAILQ_HEAD(g_txsa, gni_tx)  txs_all;     // List of all txs
-    TAILQ_HEAD(g_txs, gni_tx)   txs;         // List of available txs
-    TAILQ_HEAD(g_txsq, gni_tx)  txs_queue;   // List of queued txs
-    TAILQ_HEAD(g_cxs, gni_conn) gconns;      // List of all conns
+    TAILQ_HEAD(g_rxa, gni_rx)   rx_all;      // List of all rx's
+    TAILQ_HEAD(g_rx, gni_rx)    rx;          // List of available rx's
+    TAILQ_HEAD(g_txa, gni_tx)   tx_all;      // List of all tx's
+    TAILQ_HEAD(g_tx, gni_tx)    tx;          // List of available tx
+    TAILQ_HEAD(g_txq, gni_tx)   tx_queue;    // List of queued tx
+    TAILQ_HEAD(g_cx, gni__conn) gconn;       // List of all conns
     TAILQ_HEAD(g_hndl, gni_rhd) rma_hndls;   // List of RMA handles
     TAILQ_HEAD(g_op, gni_rop)   rma_ops;     // List of RMA operations
-}                               gni_ep_t;
+}                               gni__ep_t;
 
 int cci_core_gni_post_load(
     cci_plugin_t *              me );
