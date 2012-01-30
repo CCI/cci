@@ -957,10 +957,8 @@ typedef struct cci_event_connect_accepted {
   /*! Type of event - should equal CCI_EVENT_CONNECT_ACCEPTED. */
   cci_event_type_t type;
 
-  /*! Context value that was passed to cci_connect() */
-  void *context;
-
-  /*! The new connection. */
+  /*! The new connection. Its context field contains the context
+    that was given to cci_connect(). */
   cci_connection_t *connection;
 } cci_event_connect_accepted_t;
 

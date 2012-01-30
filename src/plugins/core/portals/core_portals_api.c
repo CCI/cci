@@ -1533,6 +1533,7 @@ static int portals_connect(
     connection=&conn->connection;
     connection->attribute=attribute;
     connection->endpoint=endpoint;
+    connection->context=context;
 
     memset(&idp, 0, sizeof(idp)); /* satisfy -Wall -Werror */
     iRC=portals_getaddrinfo( server_uri, &idp, &idx );
@@ -1574,7 +1575,6 @@ static int portals_connect(
     evt->conn=conn;
     event=&evt->event;
     event->type=CCI_EVENT_CONNECT_ACCEPTED; /* for now */
-    event->accepted.context=context;
     event->accepted.connection=connection;
 
     /* pack the bits */
@@ -2859,7 +2859,6 @@ static void portals_handle_conn_reply(cci__ep_t *ep, ptl_event_t pevent)
     rx->am = am;
 
     evt = &rx->evt;
-    evt->event.accepted.context = pconn->tx->evt.event.send.context;
 
     if (pevent.mlength == sizeof(*accept)) {
         /* accept */

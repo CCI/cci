@@ -1823,7 +1823,6 @@ static int gni_accept(
     evt=calloc( 1, sizeof(*evt) );           // Create CCI event
     evt->ep=ep;
     evt->event.type=CCI_EVENT_CONNECT_ACCEPTED;
-    evt->event.accepted.context=context;
     evt->event.accepted.connection=&conn->connection;
     debug( CCI_DB_CONN, "%8s.%5d %s: posting event: %s", gdev->nodename,
            gdev->INST, __func__,

@@ -1188,6 +1188,7 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     connection = &conn->connection;
     connection->attribute = attribute;
     connection->endpoint = endpoint;
+    connection->context = context;
 
     /* set up sock specific info */
 
@@ -1240,7 +1241,6 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     evt->ep = ep;
     evt->conn = conn;
     evt->event.type = CCI_EVENT_CONNECT_ACCEPTED; /* for now */
-    evt->event.accepted.context = context;
     evt->event.accepted.connection = connection;
 
     /* pack the msg */
@@ -3075,7 +3075,6 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
 
         event = (cci_event_t *) &evt->event;
         event->type = (enum cci_event_type)reply; /* CCI_EVENT_CONNECT_[SUCCESS|REJECTED] */
-        event->accepted.context = tx->evt.event.send.context;
 
         i = sock_ip_hash(sin.sin_addr.s_addr, 0);
         active_list = &sep->active_hash[i];
