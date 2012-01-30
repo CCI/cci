@@ -75,7 +75,7 @@ ccieth_conn_uu_recv_deferred_msgs(struct ccieth_connection *conn)
 	BUG_ON(conn->attribute != CCIETH_CONNECT_ATTR_UU);
 	while ((skb = skb_dequeue(&conn->uu.deferred_msg_recv_queue)) != NULL) {
 		struct ccieth_pkt_header_msg _hdr, *hdr;
-		printk("processing deferred msg\n");
+		dprintk("processing deferred msg\n");
 		hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
 		BUG_ON(!hdr); /* would have failed in ccieth_recv_msg() */
 		ccieth__recv_msg(conn->ep, conn, hdr, skb);
@@ -87,7 +87,7 @@ ccieth_conn_uu_defer_recv_msg(struct ccieth_connection *conn,
 			      struct sk_buff *skb)
 {
 	BUG_ON(conn->attribute != CCIETH_CONNECT_ATTR_UU);
-	printk("deferring UU msg until accept\n");
+	dprintk("deferring UU msg until accept\n");
 	skb_queue_tail(&conn->uu.deferred_msg_recv_queue, skb);
 	if (conn->status == CCIETH_CONNECTION_READY)
 		/* accepted in the meantime, make sure it didn't miss our packet */
@@ -142,7 +142,7 @@ static void
 ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 {
 	struct ccieth_connection *conn = container_of(rcu_head, struct ccieth_connection, destroy_rcu_head);
-	printk("destroying connection %p in rcu call\n", conn);
+	dprintk("destroying connection %p in rcu call\n", conn);
 	conn->free(conn);
 	kfree_skb(conn->skb);
 	kfree(conn);
@@ -235,7 +235,7 @@ void ccieth_connect_request_timer_hdlr(unsigned long data)
 	idr_remove(&ep->connection_idr, conn->id);
 	spin_unlock(&ep->connection_idr_lock);
 
-	printk("delivering connection %p timeout\n", conn);
+	dprintk("delivering connection %p timeout\n", conn);
 	conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECT_TIMEDOUT;
 	conn->embedded_event.event.connect_timedout.user_conn_id = conn->user_conn_id;
 	/* destroy the connection after the event */
@@ -456,7 +456,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	int id;
 	int err;
 
-	printk("processing queued connect request skb %p\n", skb);
+	dprintk("processing queued connect request skb %p\n", skb);
 
 	err = -EINVAL;
 	if (hdr->attribute != CCIETH_CONNECT_ATTR_RO
@@ -477,8 +477,8 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	src_max_send_size = ntohl(hdr->max_send_size);
 	req_seqnum = ntohl(hdr->req_seqnum);
 
-	printk("got conn request from eid %d conn id %d seqnum %d\n",
-	       src_ep_id, src_conn_id, req_seqnum);
+	dprintk("got conn request from eid %d conn id %d seqnum %d\n",
+		src_ep_id, src_conn_id, req_seqnum);
 
 	/* check msg length */
 	if (data_len > ep->max_send_size
@@ -497,7 +497,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	spin_lock_bh(&ep->free_event_list_lock);
 	if (list_empty(&ep->free_event_list)) {
 		spin_unlock_bh(&ep->free_event_list_lock);
-		printk("ccieth: no event slot for connect request\n");
+		dprintk("ccieth: no event slot for connect request\n");
 		goto out;
 	}
 	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
@@ -686,7 +686,7 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	enum ccieth_pkt_ack_status ack_status = CCIETH_PKT_ACK_SUCCESS;
 	int err;
 
-	printk("processing queued connect accept skb %p\n", skb);
+	dprintk("processing queued connect accept skb %p\n", skb);
 
 	src_conn_id = ntohl(hdr->src_conn_id);
 	src_ep_id = ntohl(hdr->src_ep_id);
@@ -695,8 +695,8 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	max_send_size = ntohl(hdr->max_send_size);
 	req_seqnum = ntohl(hdr->req_seqnum);
 
-	printk("got conn accept from eid %d conn id %d seqnum %d to %d %d\n",
-	       src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
+	dprintk("got conn accept from eid %d conn id %d seqnum %d to %d %d\n",
+		src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
 
 	rcu_read_lock();
 
@@ -705,7 +705,7 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	spin_lock_bh(&ep->free_event_list_lock);
 	if (list_empty(&ep->free_event_list)) {
 		spin_unlock_bh(&ep->free_event_list_lock);
-		printk("ccieth: no event slot for connect accepted\n");
+		dprintk("ccieth: no event slot for connect accepted\n");
 		goto out_with_rculock;
 	}
 	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
@@ -856,7 +856,7 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 	enum ccieth_pkt_ack_status ack_status = CCIETH_PKT_ACK_SUCCESS;
 	int err;
 
-	printk("processing queued connect reject skb %p\n", skb);
+	dprintk("processing queued connect reject skb %p\n", skb);
 
 	src_conn_id = ntohl(hdr->src_conn_id);
 	src_ep_id = ntohl(hdr->src_ep_id);
@@ -864,8 +864,8 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 	dst_ep_id = ntohl(hdr->dst_ep_id);
 	req_seqnum = ntohl(hdr->req_seqnum);
 
-	printk("got conn reject from eid %d conn id %d seqnum %d to %d %d\n",
-	       src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
+	dprintk("got conn reject from eid %d conn id %d seqnum %d to %d %d\n",
+		src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
 
 	rcu_read_lock();
 
@@ -1081,7 +1081,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	int destroy = 0, notify_close = 0;
 	int err;
 
-	printk("processing queued connect ack skb %p\n", skb);
+	dprintk("processing queued connect ack skb %p\n", skb);
 
 	src_conn_id = ntohl(hdr->src_conn_id);
 	src_ep_id = ntohl(hdr->src_ep_id);
@@ -1090,8 +1090,8 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	req_seqnum = ntohl(hdr->req_seqnum);
 	ack_status = hdr->status;
 
-	printk("got conn ack from eid %d conn id %d seqnum %d to %d %d\n",
-	       src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
+	dprintk("got conn ack from eid %d conn id %d seqnum %d to %d %d\n",
+		src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
 
 	rcu_read_lock();
 
@@ -1101,7 +1101,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	if (!conn || conn->req_seqnum != req_seqnum)
 		goto out_with_rculock;
 
-	printk("conn %p status %d acked with status %d\n", conn, conn->status, ack_status);
+	dprintk("conn %p status %d acked with status %d\n", conn, conn->status, ack_status);
 
 	/* packet was received, stop resending */
 	conn->need_ack = 0;
@@ -1137,7 +1137,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 		spin_unlock_bh(&ep->event_list_lock);
 
 	} else if (destroy) {
-		printk("destroying acked rejected connection %p\n", conn);
+		dprintk("destroying acked rejected connection %p\n", conn);
 		/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 		del_timer_sync(&conn->timer);
 		spin_lock(&ep->connection_idr_lock);
@@ -1166,7 +1166,7 @@ ccieth_deferred_connect_recv_workfunc(struct work_struct *work)
 	struct ccieth_endpoint *ep = container_of(work, struct ccieth_endpoint, deferred_connect_recv_work);
 	struct sk_buff *skb;
 
-	printk("dequeueing queued skbs\n");
+	dprintk("dequeueing queued skbs\n");
 
 	while ((skb = skb_dequeue(&ep->deferred_connect_recv_queue)) != NULL) {
 		__u8 type, *typep;
@@ -1255,7 +1255,7 @@ ccieth_defer_connect_recv(struct net_device *ifp, __u8 type, struct sk_buff *skb
 	if (rcu_access_pointer(ep->ifp) != ifp)
 		goto out_with_rculock;
 
-	printk("queueing skb %p\n", skb);
+	dprintk("queueing skb %p\n", skb);
 	skb_queue_tail(&ep->deferred_connect_recv_queue, skb);
 	schedule_work(&ep->deferred_connect_recv_work);
 

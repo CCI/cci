@@ -4,6 +4,9 @@
 #
 
 ccflags-y = -I@abs_top_builddir@
+ifeq ($(DEBUG),1)
+ccflags-y += -DCCIETH_DEBUG=1
+endif
 
 obj-m += ccieth.o
 ccieth-y = ccieth_main.o ccieth_recv.o ccieth_connect.o

@@ -25,7 +25,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 	spin_lock_bh(&ep->free_event_list_lock);
 	if (list_empty(&ep->free_event_list)) {
 		spin_unlock_bh(&ep->free_event_list_lock);
-		printk("ccieth: no event slot for msg\n");
+		dprintk("ccieth: no event slot for msg\n");
 		goto out;
 	}
 	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
@@ -77,8 +77,8 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 	msg_seqnum = ntohl(hdr->msg_seqnum);
 	msg_len = ntohl(hdr->msg_len);
 
-	printk("got msg len %d to eid %d conn id %d seqnum %d\n",
-	       msg_len, dst_ep_id, dst_conn_id, msg_seqnum);
+	dprintk("got msg len %d to eid %d conn id %d seqnum %d\n",
+		msg_len, dst_ep_id, dst_conn_id, msg_seqnum);
 
 	rcu_read_lock();
 
@@ -136,7 +136,7 @@ ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 	if (!typep)
 		goto out;
 
-	printk("got a packet with type %d\n", *typep);
+	dprintk("got a packet with type %d\n", *typep);
 
 	switch (*typep) {
 	case CCIETH_PKT_CONNECT_REQUEST:
@@ -218,7 +218,7 @@ ccieth_netdevice_notifier_cb(struct notifier_block *unused,
 		/* if address changes, ... */
 	case NETDEV_UNREGISTER:
 		/* close endpoints and connections */
-		printk("ccieth notifier event %ld\n", event);
+		dprintk("ccieth notifier event %ld\n", event);
 		data.ifp = (struct net_device *) ptr;
 		data.event = event;
 		rcu_read_lock();

@@ -70,7 +70,7 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 
 	idr_for_each(&ep->connection_idr, ccieth_destroy_connection_idrforeach_cb,
 		     &destroyed_conn);
-	printk("destroyed %d connections on endpoint destroy\n", destroyed_conn);
+	dprintk("destroyed %d connections on endpoint destroy\n", destroyed_conn);
 	idr_remove_all(&ep->connection_idr);
 	idr_destroy(&ep->connection_idr);
 	kfree(ep);
@@ -256,7 +256,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	if (list_empty(&ep->free_event_list)) {
 		err = -ENOMEM;
 		spin_unlock_bh(&ep->free_event_list_lock);
-		printk("ccieth: no event slot for send\n");
+		dprintk("ccieth: no event slot for send\n");
 		goto out_with_rculock;
 	}
 	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);

@@ -162,4 +162,10 @@ extern int ccieth_defer_connect_recv(struct net_device *ifp, __u8 type, struct s
 extern void ccieth_conn_uu_defer_recv_msg(struct ccieth_connection *conn, struct sk_buff *skb);
 extern int ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr, struct sk_buff *skb);
 
+#ifdef CCIETH_DEBUG
+#define dprintk printk
+#else
+#define dprintk(args...) do { /* nothing */ } while (0)
+#endif
+
 #endif /* CCIETH_COMMON_H */
