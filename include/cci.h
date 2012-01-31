@@ -211,6 +211,11 @@ typedef enum cci_status {
      actually received the message or not.
 
      This error code won't occur for unreliable sends.
+
+     For a connection request, this error code means that the initiator
+     did not get anything back from the target within a timeout.
+     It is unknown whether the target received the request and ignored
+     it, did not receive it at all, or receive it too late.
   */
   CCI_ETIMEDOUT = ETIMEDOUT,
 
@@ -748,7 +753,7 @@ CCI_DECLSPEC int cci_reject(union cci_event *conn_req);
   \param[in] attribute	Attributes of the requested connection (reliability,
                         ordering, multicast, etc).
   \param[in] context	Cookie to be used to identify the completion through
-                        a connect accepted, rejected, or timedout event, and
+                        a connect accepted, rejected, or failed event, and
                         used to identify the connection in incoming events.
   \param[in] flags      Currently unused.
   \param[in] timeout	NULL means forever.
@@ -829,10 +834,10 @@ typedef enum cci_event_type {
      peer; a connection is now available for data transfer. */
   CCI_EVENT_CONNECT_ACCEPTED,
 
-  /*! A new outgoing connection did not complete the accept/connect
-     handshake with the peer in a finite time.  CCI has therefore
-     given up attempting to continue to create this connection. */
-  CCI_EVENT_CONNECT_TIMEDOUT,
+  /*! A new outgoing connection could not complete the accept/connect
+     handshake with the peer, either because the timeout expired, or
+     for another driver specific reason. */
+  CCI_EVENT_CONNECT_FAILED,
 
   /*! A new outgoing connection was rejected by the server. */
   CCI_EVENT_CONNECT_REJECTED,
@@ -976,13 +981,19 @@ typedef struct cci_event_connect_accepted {
 
   \ingroup events
 */
-typedef struct cci_event_connect_timedout {
-  /*! Type of event - should equal CCI_EVENT_CONNECT_TIMEDOUT. */
+typedef struct cci_event_connect_failed {
+  /*! Type of event - should equal CCI_EVENT_CONNECT_FAILED. */
   cci_event_type_t type;
+
+  /*! A status indicating why the connection failed.
+    If the connection could not be setup before the timeout expired,
+    status is CCI_ETIMEDOUT.
+    Each driver may have additional error codes. */
+  cci_status_t status;
 
   /*! Context value that was passed to cci_connect() */
   void *context;
-} cci_event_connect_timedout_t;
+} cci_event_connect_failed_t;
 
 /*!
   Connection rejected event.
@@ -1105,7 +1116,7 @@ typedef union cci_event {
   cci_event_recv_t recv;
   cci_event_connect_accepted_t accepted;
   cci_event_connect_rejected_t rejected;
-  cci_event_connect_timedout_t conn_timedout;
+  cci_event_connect_failed_t conn_failed;
   cci_event_connect_request_t request;
   cci_event_keepalive_timedout_t keepalive;
   cci_event_endpoint_device_failed_t dev_failed;

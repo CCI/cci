@@ -252,7 +252,7 @@ static char *      gni_cci_event_to_str(
         "CCI_EVENT_SEND",
         "CCI_EVENT_RECV",
         "CCI_EVENT_CONNECT_ACCEPTED",
-        "CCI_EVENT_CONNECT_TIMEDOUT",
+        "CCI_EVENT_CONNECT_FAILED",
         "CCI_EVENT_CONNECT_REJECTED",
         "CCI_EVENT_CONNECT_REQUEST",
         "CCI_EVENT_KEEPALIVE_TIMEDOUT",
@@ -2257,7 +2257,7 @@ static int gni_return_event(
             free(buffer);
 
         case CCI_EVENT_NONE:
-        case CCI_EVENT_CONNECT_TIMEDOUT:
+        case CCI_EVENT_CONNECT_FAILED:
         case CCI_EVENT_CONNECT_REJECTED:
         case CCI_EVENT_CONNECT_ACCEPTED:
         case CCI_EVENT_KEEPALIVE_TIMEDOUT:

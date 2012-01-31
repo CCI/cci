@@ -1664,7 +1664,8 @@ sock_progress_pending(cci__dev_t *dev)
                 int i;
                 struct s_active *active_list;
 
-                event->type = CCI_EVENT_CONNECT_TIMEDOUT;
+                event->type = CCI_EVENT_CONNECT_FAILED;
+                event->conn_failed.status = CCI_ETIMEDOUT;
                 if (conn->uri)
                     free((char *) conn->uri);
                 sconn->status = SOCK_CONN_CLOSING;
@@ -1824,7 +1825,8 @@ sock_progress_queued(cci__dev_t *dev)
             case SOCK_MSG_CONN_REQUEST:
                 /* FIXME only CONN_REQUEST gets an event
                  * the other two need to disconnect the conn */
-                event->type = CCI_EVENT_CONNECT_TIMEDOUT;
+                event->type = CCI_EVENT_CONNECT_FAILED;
+                event->conn_failed.status = CCI_ETIMEDOUT;
                 break;
             case SOCK_MSG_RMA_WRITE:
                 pthread_mutex_lock(&ep->lock);
