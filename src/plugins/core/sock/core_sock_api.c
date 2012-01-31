@@ -1669,6 +1669,13 @@ sock_progress_pending(cci__dev_t *dev)
             switch (tx->msg_type) {
                 case SOCK_MSG_SEND:
                     event->send.status = CCI_ETIMEDOUT;
+                    if (tx->rnr != 0 || sconn->rnr != 0) {
+                        event->send.status = CCI_ERR_RNR;
+                        /* We update the status of the connection so we know 
+                           that we have RNR + timeout */
+                        /* XXX Should use a macro here rather than hardcode a value */
+                        sconn->rnr = 2;
+                    }
                     break;
                 case SOCK_MSG_RMA_WRITE:
                     pthread_mutex_lock(&ep->lock);
@@ -1837,6 +1844,13 @@ sock_progress_queued(cci__dev_t *dev)
             switch (tx->msg_type) {
             case SOCK_MSG_SEND:
                 event->send.status = CCI_ETIMEDOUT;
+                if (tx->rnr != 0 || sconn->rnr != 0) {
+                    event->send.status = CCI_ERR_RNR;
+                    /* We update the status of the connection so we know 
+                       that we have RNR + timeout */
+                    /* XXX Should use a macro here rather than hardcode a value */
+                    sconn->rnr = 2;
+                }
                 break;
             case SOCK_MSG_CONN_REQUEST:
                 /* FIXME only CONN_REQUEST gets an event
@@ -2728,6 +2742,10 @@ sock_handle_rnr (sock_conn_t *sconn,
             tx->rnr = 1;
         }
     }
+
+    /* We also mark the conn as RNR */
+    if (sconn->rnr == 0)
+        sconn->rnr = 1;
 }
 
 /*!
@@ -2815,7 +2833,16 @@ sock_handle_ack(sock_conn_t *sconn,
                         TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
                     } else {
                         tx->state = SOCK_TX_COMPLETED;
-                        tx->evt.event.send.status = CCI_SUCCESS;
+                        /* In the context of an ordered reliable connection,
+                           if the receiver was always ready to receive, the 
+                           complete the send with a success status. Otherwise,
+                           we complete the send with a RNR status */
+                        if (conn->connection.attribute == CCI_CONN_ATTR_RO 
+                            && sconn->rnr != 2) {
+                            tx->evt.event.send.status = CCI_SUCCESS;
+                        } else {
+                            tx->evt.event.send.status = CCI_ERR_RNR;
+                        }
                         /* store locally until we can drop the locks */
                         TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
                     }
@@ -2849,7 +2876,16 @@ sock_handle_ack(sock_conn_t *sconn,
                         TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
                     } else {
                         tx->state = SOCK_TX_COMPLETED;
-                        tx->evt.event.send.status = CCI_SUCCESS;
+                        /* In the context of an ordered reliable connection,
+                           if the receiver was always ready to receive, the 
+                           complete the send with a success status. Otherwise,
+                           we complete the send with a RNR status */
+                        if (conn->connection.attribute == CCI_CONN_ATTR_RO 
+                            && sconn->rnr != 2) {
+                            tx->evt.event.send.status = CCI_SUCCESS;
+                        } else {
+                            tx->evt.event.send.status = CCI_ERR_RNR;
+                        }
                         /* store locally until we can drop the locks */
                         TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
                     }
@@ -2888,7 +2924,17 @@ sock_handle_ack(sock_conn_t *sconn,
                             TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
                         } else {
                             tx->state = SOCK_TX_COMPLETED;
+                            /* In the context of an ordered reliable connection
+                               if the receiver was always ready to receive, the
+                               complete the send with a success status.
+                               Otherwise, we complete the send with a RNR status
+                            */
+                        if (conn->connection.attribute == CCI_CONN_ATTR_RO
+                            && sconn->rnr != 2) {
                             tx->evt.event.send.status = CCI_SUCCESS;
+                        } else {
+                            tx->evt.event.send.status = CCI_ERR_RNR;
+                        }
                             /* store locally until we can drop the dev->lock */
                             TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
                         }
