@@ -65,7 +65,7 @@ static int sock_reject(union cci_event *conn_req);
 static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
                             void *data_ptr, uint32_t data_len,
                             cci_conn_attribute_t attribute,
-                            void *context, char **flags,
+                            void *context, int flags,
                             struct timeval *timeout);
 static int sock_disconnect(cci_connection_t *connection);
 static int sock_set_opt(cci_opt_handle_t *handle,
@@ -1157,7 +1157,7 @@ sock_find_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id, sock_ms
 static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
                             void *data_ptr, uint32_t data_len,
                             cci_conn_attribute_t attribute,
-                            void *context, char **flags,
+                            void *context, int flags,
                             struct timeval *timeout)
 {
     int                 ret;
@@ -1187,28 +1187,6 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     if (!sglobals) {
         CCI_EXIT;
         return CCI_ENODEV;
-    }
-
-    /* Dealing with the flags:
-     * - for reliable connections, check whether the keepalive parameter is set
-     */
-    if ((((attribute & CCI_CONN_ATTR_RO) == CCI_CONN_ATTR_RO)
-        || ((attribute & CCI_CONN_ATTR_RU) == CCI_CONN_ATTR_RU))
-        && flags != NULL) {
-        int i = 0;
-        char *key;
-        char *val;
-        while (flags[i] != NULL) {
-            key = strtok (flags[i], "=");
-            if (key == NULL)
-                continue;
-            val = strtok (NULL, ";");
-            if (val == NULL)
-                continue;
-            if (strcmp (key, "keepalive") == 0)
-                keepalive = (uint32_t) atoi (val);
-            i++;
-        }
     }
 
     /* allocate a new connection */
@@ -1258,6 +1236,15 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     sdev = dev->priv;
 
     connection->max_send_size = dev->device.max_send_size;
+
+    /* Dealing with keepalive, if set, include the keepalive timeout value into
+       the connection request */
+    if ((((attribute & CCI_CONN_ATTR_RO) == CCI_CONN_ATTR_RO)
+        || ((attribute & CCI_CONN_ATTR_RU) == CCI_CONN_ATTR_RU))
+        && ep->keepalive_timeout != 0UL)
+    {
+        keepalive = ep->keepalive_timeout;
+    }
 
     i = sock_ip_hash(ip, 0);
     active_list = &sep->active_hash[i];
