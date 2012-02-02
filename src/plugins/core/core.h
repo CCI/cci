@@ -1,5 +1,7 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2012 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2012 Oak Ridge National Laboratory.  All rights reserved.
  * $COPYRIGHT$
  *
  * Types for CCI.
@@ -45,7 +47,7 @@ typedef int (*cci_reject_fn_t)(union cci_event *conn_req);
 typedef int (*cci_connect_fn_t)(cci_endpoint_t *endpoint, char *server_uri,
                                 void *data_ptr, uint32_t data_len,
                                 cci_conn_attribute_t attribute,
-                                void *context, int flags,
+                                void *context, char **flags,
                                 struct timeval *timeout);
 typedef int (*cci_disconnect_fn_t)(cci_connection_t *connection);
 typedef int (*cci_set_opt_fn_t)(cci_opt_handle_t *handle,

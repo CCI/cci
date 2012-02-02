@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
- * Copyright © 2010-2011 UT-Battelle, LLC. All rights reserved.
- * Copyright © 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2010-2012 UT-Battelle, LLC. All rights reserved.
+ * Copyright © 2010-2012 Oak Ridge National Labs.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -272,11 +272,13 @@ typedef struct sock_handshake {
     uint32_t ack;                   /* to ack the request and reply */
     uint32_t max_recv_buffer_count; /* max recvs that I can handle */
     uint32_t mss;                   /* lower of each endpoint */
+    uint32_t keepalive;             /* keepalive timeout (when activated) */
 } sock_handshake_t;
 
 static inline void
 sock_pack_handshake(sock_handshake_t *hs, uint32_t id, uint32_t ack,
-                    uint32_t max_recv_buffer_count, uint32_t mss)
+                    uint32_t max_recv_buffer_count, uint32_t mss,
+                    uint32_t keepalive)
 {
     assert(mss <= (SOCK_UDP_MAX - SOCK_MAX_HDR_SIZE));
     assert(mss >= SOCK_MIN_MSS);
@@ -285,16 +287,18 @@ sock_pack_handshake(sock_handshake_t *hs, uint32_t id, uint32_t ack,
     hs->ack = htonl(ack);
     hs->max_recv_buffer_count = htonl(max_recv_buffer_count);
     hs->mss = htonl(mss);
+    hs->keepalive = htonl(keepalive);
 }
 
 static inline void
 sock_parse_handshake(sock_handshake_t *hs, uint32_t *id, uint32_t *ack,
-                     uint32_t *max_recv_buffer_count, uint32_t *mss)
+                     uint32_t *max_recv_buffer_count, uint32_t *mss, uint32_t *ka)
 {
     *id = ntohl(hs->id);
     *ack = ntohl(hs->ack);
     *max_recv_buffer_count = ntohl(hs->max_recv_buffer_count);
     *mss = ntohl(hs->mss);
+    *ka = ntohl(hs->keepalive);
 }
 
 
@@ -323,6 +327,8 @@ sock_parse_handshake(sock_handshake_t *hs, uint32_t *id, uint32_t *ack,
    +-------------------------------+
    |              mss              |
    +-------------------------------+
+   |            keepalive          |
+   +-------------------------------+
 
    The peer uses the id when sending to us.
    The user data follows the header.
@@ -334,7 +340,7 @@ sock_parse_handshake(sock_handshake_t *hs, uint32_t *id, uint32_t *ack,
    ts: timestamp in usecs
    max_recv_buffer_count: number of msgs we can receive
    mss: max send size
-
+   keepalive: if keepalive is activated, this specifies the keepalive timeout
  */
 
 static inline void
