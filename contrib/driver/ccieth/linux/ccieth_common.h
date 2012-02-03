@@ -111,7 +111,7 @@ struct ccieth_connection {
 	__u32 max_send_size;
 	__u64 user_conn_id;
 
-	void (*set_next_send_seqnum)(struct ccieth_connection *, struct ccieth_pkt_header_msg *);
+	void (*set_next_send_seqnum)(struct ccieth_connection *, struct sk_buff *skb, struct ccieth_pkt_header_msg *);
 	void (*free)(struct ccieth_connection *);
 	union {
 		struct {

@@ -277,7 +277,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	hdr->dst_ep_id = htonl(conn->dest_eid);
 	hdr->dst_conn_id = htonl(conn->dest_id);
 	hdr->conn_seqnum = htonl(conn->req_seqnum);
-	conn->set_next_send_seqnum(conn, hdr);
+	conn->set_next_send_seqnum(conn, skb, hdr);
 	hdr->msg_len = htonl(arg->msg_len);
 
 	/* FIXME: implement flags */

@@ -23,7 +23,8 @@ ccieth_connect_ack_from_endpoint(struct ccieth_endpoint *ep, __u32 src_conn_id,
  */
 
 static void
-ccieth_conn_ro_set_next_send_seqnum(struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr)
+ccieth_conn_ro_set_next_send_seqnum(struct ccieth_connection *conn,
+				    struct sk_buff *skb, struct ccieth_pkt_header_msg *hdr)
 {
 	hdr->msg_seqnum = htonl(atomic_inc_return(&conn->ro.next_send_seqnum));
 }
@@ -46,7 +47,8 @@ ccieth_conn_ro_init(struct ccieth_connection *conn)
  */
 
 static void
-ccieth_conn_ru_set_next_send_seqnum(struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr)
+ccieth_conn_ru_set_next_send_seqnum(struct ccieth_connection *conn,
+				    struct sk_buff *skb, struct ccieth_pkt_header_msg *hdr)
 {
 	hdr->msg_seqnum = htonl(atomic_inc_return(&conn->ru.next_send_seqnum));
 }
@@ -95,7 +97,8 @@ ccieth_conn_uu_defer_recv_msg(struct ccieth_connection *conn,
 }
 
 static void
-ccieth_conn_uu_set_next_send_seqnum(struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr)
+ccieth_conn_uu_set_next_send_seqnum(struct ccieth_connection *conn,
+				    struct sk_buff *skb, struct ccieth_pkt_header_msg *hdr)
 {
 	hdr->msg_seqnum = htonl(-1); /* debug */
 }
