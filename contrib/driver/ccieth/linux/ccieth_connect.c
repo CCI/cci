@@ -986,6 +986,7 @@ ccieth_connect_ack_without_endpoint(struct net_device *ifp,
 {
 	struct sk_buff *skb;
 	struct ccieth_pkt_header_connect_ack *hdr;
+	struct _ccieth_pkt_header_connect_generic _inhdr, *inhdr;
 	size_t skblen;
 	int err;
 
@@ -1009,53 +1010,42 @@ ccieth_connect_ack_without_endpoint(struct net_device *ifp,
 	hdr->type = CCIETH_PKT_CONNECT_ACK;
 	hdr->status = ack_status;
 
-	switch (intype) {
-	case CCIETH_PKT_CONNECT_REQUEST: {
-		struct ccieth_pkt_header_connect_request _inhdr, *inhdr;
-		inhdr = skb_header_pointer(inskb, 0, sizeof(_inhdr), &_inhdr);
-		if (!inhdr)
-			goto out_with_skb;
-		memcpy(&hdr->eth.h_dest, &inhdr->eth.h_source, 6);
-		memcpy(&hdr->eth.h_source, &inhdr->eth.h_dest, 6);
-		hdr->dst_ep_id = inhdr->src_ep_id;
-		hdr->dst_conn_id = inhdr->src_conn_id;
-		hdr->src_ep_id = inhdr->dst_ep_id;
-		hdr->src_conn_id = htonl(-1);
-		hdr->req_seqnum = inhdr->req_seqnum;
-		break;
-	}
-	case CCIETH_PKT_CONNECT_ACCEPT: {
-		struct ccieth_pkt_header_connect_accept _inhdr, *inhdr;
-		inhdr = skb_header_pointer(inskb, 0, sizeof(_inhdr), &_inhdr);
-		if (!inhdr)
-			goto out_with_skb;
-		memcpy(&hdr->eth.h_dest, &inhdr->eth.h_source, 6);
-		memcpy(&hdr->eth.h_source, &inhdr->eth.h_dest, 6);
-		hdr->dst_ep_id = inhdr->src_ep_id;
-		hdr->dst_conn_id = inhdr->src_conn_id;
-		hdr->src_ep_id = inhdr->dst_ep_id;
-		hdr->src_conn_id = inhdr->dst_conn_id;
-		hdr->req_seqnum = inhdr->req_seqnum;
-		break;
-	}
-	case CCIETH_PKT_CONNECT_REJECT: {
-		struct ccieth_pkt_header_connect_reject _inhdr, *inhdr;
-		inhdr = skb_header_pointer(inskb, 0, sizeof(_inhdr), &_inhdr);
-		if (!inhdr)
-			goto out_with_skb;
-		memcpy(&hdr->eth.h_dest, &inhdr->eth.h_source, 6);
-		memcpy(&hdr->eth.h_source, &inhdr->eth.h_dest, 6);
-		hdr->dst_ep_id = inhdr->src_ep_id;
-		hdr->dst_conn_id = inhdr->src_conn_id;
-		hdr->src_ep_id = inhdr->dst_ep_id;
-		hdr->src_conn_id = inhdr->dst_conn_id;
-		hdr->req_seqnum = inhdr->req_seqnum;
-		break;
-	}
-	break;
-	default:
-		BUG();
-	}
+	/* make sure we can read request/accept/reject headers as a generic packet */
+	BUILD_BUG_ON(sizeof(struct _ccieth_pkt_header_connect_generic) > sizeof(struct ccieth_pkt_header_connect_request));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, eth) != offsetof(struct ccieth_pkt_header_connect_request, eth));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, type) != offsetof(struct ccieth_pkt_header_connect_request, type));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, src_ep_id) != offsetof(struct ccieth_pkt_header_connect_request, src_ep_id));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, src_conn_id) != offsetof(struct ccieth_pkt_header_connect_request, src_conn_id));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, dst_ep_id) != offsetof(struct ccieth_pkt_header_connect_request, dst_ep_id));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, req_seqnum) != offsetof(struct ccieth_pkt_header_connect_request, req_seqnum));
+	BUILD_BUG_ON(sizeof(struct _ccieth_pkt_header_connect_generic) > sizeof(struct ccieth_pkt_header_connect_accept));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, eth) != offsetof(struct ccieth_pkt_header_connect_accept, eth));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, type) != offsetof(struct ccieth_pkt_header_connect_accept, type));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, src_ep_id) != offsetof(struct ccieth_pkt_header_connect_accept, src_ep_id));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, src_conn_id) != offsetof(struct ccieth_pkt_header_connect_accept, src_conn_id));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, dst_ep_id) != offsetof(struct ccieth_pkt_header_connect_accept, dst_ep_id));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, dst_conn_id) != offsetof(struct ccieth_pkt_header_connect_accept, dst_conn_id));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, req_seqnum) != offsetof(struct ccieth_pkt_header_connect_accept, req_seqnum));
+	BUILD_BUG_ON(sizeof(struct _ccieth_pkt_header_connect_generic) > sizeof(struct ccieth_pkt_header_connect_reject));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, eth) != offsetof(struct ccieth_pkt_header_connect_reject, eth));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, type) != offsetof(struct ccieth_pkt_header_connect_reject, type));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, src_ep_id) != offsetof(struct ccieth_pkt_header_connect_reject, src_ep_id));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, src_conn_id) != offsetof(struct ccieth_pkt_header_connect_reject, src_conn_id));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, dst_ep_id) != offsetof(struct ccieth_pkt_header_connect_reject, dst_ep_id));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, dst_conn_id) != offsetof(struct ccieth_pkt_header_connect_reject, dst_conn_id));
+	BUILD_BUG_ON(offsetof(struct _ccieth_pkt_header_connect_generic, req_seqnum) != offsetof(struct ccieth_pkt_header_connect_reject, req_seqnum));
+
+	/* copy packet info from generic connect header */
+	inhdr = skb_header_pointer(inskb, 0, sizeof(_inhdr), &_inhdr);
+	if (!inhdr)
+		goto out_with_skb;
+	memcpy(&hdr->eth.h_dest, &inhdr->eth.h_source, 6);
+	memcpy(&hdr->eth.h_source, &inhdr->eth.h_dest, 6);
+	hdr->dst_ep_id = inhdr->src_ep_id;
+	hdr->dst_conn_id = inhdr->src_conn_id;
+	hdr->src_ep_id = inhdr->dst_ep_id;
+	hdr->src_conn_id = intype == CCIETH_PKT_CONNECT_REQUEST ? htonl(-1) : inhdr->dst_conn_id;
+	hdr->req_seqnum = inhdr->req_seqnum;
 
 	dev_queue_xmit(skb);
 	return 0;

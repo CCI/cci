@@ -18,16 +18,36 @@ union ccieth_pkt_header {
 		/* 16 */
 		__be32 dst_ep_id;
 	} generic;
+	struct _ccieth_pkt_header_connect_generic {
+		/* generic connect packet type for (n)acking request/accept/reject:
+		 * - not larger than any actual connect header
+		 * - all (non-padding) fields here appear the same in actual connect headers
+		 * - dst_conn_id must be replaced with -1 manually if type is a request
+		 */
+		struct ethhdr eth;
+		__u8 type;
+		__u8 pad1;
+		/* 16 */
+		__be32 dst_ep_id;
+		__be32 dst_conn_id; /* except in request */
+		/* 24 */
+		__be32 src_ep_id;
+		__be32 src_conn_id;
+		/* 32 */
+		__be32 req_seqnum;
+		__be32 pad2;
+		/* 40 */
+	} _connect_generic;
 	struct ccieth_pkt_header_connect_request {
 		struct ethhdr eth;
 		__u8 type;
 		__u8 attribute;
 		/* 16 */
 		__be32 dst_ep_id;
-		__be32 src_ep_id;
-		/* 24 */
-		__be32 src_conn_id;
 		__be32 max_send_size;
+		/* 24 */
+		__be32 src_ep_id;
+		__be32 src_conn_id;
 		/* 32 */
 		__be32 req_seqnum;
 		__be32 data_len;
@@ -45,8 +65,8 @@ union ccieth_pkt_header {
 		__be32 src_ep_id; /* not really required? */
 		__be32 src_conn_id;
 		/* 32 */
-		__be32 max_send_size;
 		__be32 req_seqnum;
+		__be32 max_send_size;
 		/* 40 */
 	} connect_accept;
 	struct ccieth_pkt_header_connect_reject {
@@ -68,6 +88,7 @@ union ccieth_pkt_header {
 		struct ethhdr eth;
 		__u8 type;
 		__u8 status;
+		/* 16 */
 		__be32 dst_ep_id;
 		__be32 dst_conn_id;
 		/* 24 */
