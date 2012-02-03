@@ -1169,17 +1169,11 @@ ccieth_deferred_connect_recv_workfunc(struct work_struct *work)
 	dprintk("dequeueing queued skbs\n");
 
 	while ((skb = skb_dequeue(&ep->deferred_connect_recv_queue)) != NULL) {
-		__u8 type, *typep;
+		struct ccieth_connect_skb_cb *scb = CCIETH_CONNECT_SKB_CB(skb);
+		__u8 type = scb->type;
 		int err;
 
-		/* get type */
-		typep = skb_header_pointer(skb, offsetof(struct ccieth_pkt_header_generic, type), sizeof(type), &type);
-		if (!typep) {
-			dev_kfree_skb(skb);
-			continue;
-		}
-
-		switch (*typep) {
+		switch (type) {
 		case CCIETH_PKT_CONNECT_REQUEST: {
 			struct ccieth_pkt_header_connect_request _hdr, *hdr;
 			/* copy the entire header */
@@ -1234,6 +1228,7 @@ int
 ccieth_defer_connect_recv(struct net_device *ifp, __u8 type, struct sk_buff *skb)
 {
 	struct ccieth_endpoint *ep;
+	struct ccieth_connect_skb_cb *scb;
 	__be32 dst_ep_id_n, *dst_ep_id_n_p;
 	int err;
 
@@ -1254,6 +1249,11 @@ ccieth_defer_connect_recv(struct net_device *ifp, __u8 type, struct sk_buff *skb
 	}
 	if (rcu_access_pointer(ep->ifp) != ifp)
 		goto out_with_rculock;
+
+	/* save type for later reuse */
+	BUILD_BUG_ON(sizeof(*scb) > sizeof(skb->cb));
+	scb = CCIETH_CONNECT_SKB_CB(skb);
+	scb->type = type;
 
 	dprintk("queueing skb %p\n", skb);
 	skb_queue_tail(&ep->deferred_connect_recv_queue, skb);

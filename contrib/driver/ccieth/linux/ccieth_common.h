@@ -147,6 +147,12 @@ struct ccieth_connection {
 	struct ccieth_endpoint_event embedded_event;
 };
 
+/* stored in skbuff cb private field while queued for deferred processing */
+struct ccieth_connect_skb_cb {
+	__u8 type;
+};
+#define CCIETH_CONNECT_SKB_CB(__skb) ((struct ccieth_connect_skb_cb *)&((__skb)->cb[0]))
+
 extern struct idr ccieth_ep_idr; /* accessed under RCU read lock */
 
 extern int ccieth_net_init(void);
