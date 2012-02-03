@@ -18,6 +18,7 @@ ccieth_connect_ack_from_endpoint(struct ccieth_endpoint *ep, __u32 src_conn_id,
 				 __u32 req_seqnum,
 				 __u8 ack_status);
 
+/* FIXME: factorize identical callbacks */
 /*
  * RO specific callbacks
  */
@@ -26,7 +27,11 @@ static void
 ccieth_conn_ro_set_next_send_seqnum(struct ccieth_connection *conn,
 				    struct sk_buff *skb, struct ccieth_pkt_header_msg *hdr)
 {
-	hdr->msg_seqnum = htonl(atomic_inc_return(&conn->ro.next_send_seqnum));
+	struct ccieth_msg_skb_cb *scb = CCIETH_MSG_SKB_CB(skb);
+	__u32 seqnum = atomic_inc_return(&conn->ro.next_send_seqnum);
+	hdr->msg_seqnum = htonl(seqnum);
+	BUILD_BUG_ON(sizeof(*scb) > sizeof(skb->cb));
+	scb->seqnum = seqnum;	
 }
 
 static void
@@ -50,7 +55,10 @@ static void
 ccieth_conn_ru_set_next_send_seqnum(struct ccieth_connection *conn,
 				    struct sk_buff *skb, struct ccieth_pkt_header_msg *hdr)
 {
-	hdr->msg_seqnum = htonl(atomic_inc_return(&conn->ru.next_send_seqnum));
+	struct ccieth_msg_skb_cb *scb = CCIETH_MSG_SKB_CB(skb);
+	__u32 seqnum = atomic_inc_return(&conn->ro.next_send_seqnum);
+	hdr->msg_seqnum = htonl(seqnum);
+	scb->seqnum = seqnum;	
 }
 
 static void

@@ -153,6 +153,13 @@ struct ccieth_connect_skb_cb {
 };
 #define CCIETH_CONNECT_SKB_CB(__skb) ((struct ccieth_connect_skb_cb *)&((__skb)->cb[0]))
 
+/* stored in skbuff cb private field while queued for possible retransmit (RO or RU),
+ * or while queued before delivery to userspace (RO connection only) */
+struct ccieth_msg_skb_cb {
+	__u32 seqnum;
+};
+#define CCIETH_MSG_SKB_CB(__skb) ((struct ccieth_msg_skb_cb *)&((__skb)->cb[0]))
+
 extern struct idr ccieth_ep_idr; /* accessed under RCU read lock */
 
 extern int ccieth_net_init(void);
