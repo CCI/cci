@@ -538,6 +538,83 @@ ccieth_miscdev = {
 	.fops = &ccieth_miscdev_fops,
 };
 
+static void
+ccieth_release_ifp_rcu(struct rcu_head *rcu_head)
+{
+	struct ccieth_endpoint *ep = container_of(rcu_head, struct ccieth_endpoint, release_ifp_rcu_head);
+	dev_put(ep->release_ifp);
+}
+
+struct ccieth_netdevice_notifier_cbdata {
+	struct net_device *ifp;
+	unsigned long event;
+};
+
+static int ccieth_netdevice_notifier_idrforeach_cb(int id, void *p, void *_data)
+{
+	struct ccieth_endpoint *ep = p;
+	struct ccieth_netdevice_notifier_cbdata *data = _data;
+	struct net_device *ifp = data->ifp;
+	unsigned long event = data->event;
+
+	if (!ep || rcu_access_pointer(ep->ifp) != ifp)
+		return 0;
+
+	if (event == NETDEV_CHANGEMTU) {
+		if (ccieth_max_send_size(ifp->mtu) >= ep->max_send_size)
+			return 0;
+	} else if (event == NETDEV_CHANGEADDR) {
+		if (!memcmp(ifp->dev_addr, ep->addr, 6))
+			return 0;
+	}
+
+	if (cmpxchg((struct net_device __force **)&ep->ifp, ifp, NULL) == ifp) {
+		ep->release_ifp = ifp;
+		call_rcu(&ep->release_ifp_rcu_head, ccieth_release_ifp_rcu);
+
+		ep->embedded_event.event.type = CCIETH_IOCTL_EVENT_DEVICE_FAILED;
+		ep->embedded_event.event.data_length = 0;
+		spin_lock_bh(&ep->event_list_lock);
+		list_add_tail(&ep->embedded_event.list, &ep->event_list);
+		spin_unlock_bh(&ep->event_list_lock);
+	}
+
+	return 0;
+}
+
+static int
+ccieth_netdevice_notifier_cb(struct notifier_block *unused,
+			     unsigned long event, void *ptr)
+{
+	struct ccieth_netdevice_notifier_cbdata data;
+
+	switch (event) {
+	case NETDEV_CHANGEMTU:
+		/* if ccieth max_send_size becomes smaller, ... */
+	case NETDEV_CHANGEADDR:
+		/* if address changes, ... */
+	case NETDEV_UNREGISTER:
+		/* close endpoints and connections */
+		dprintk("ccieth notifier event %ld\n", event);
+		data.ifp = (struct net_device *) ptr;
+		data.event = event;
+		rcu_read_lock();
+		idr_for_each(&ccieth_ep_idr, ccieth_netdevice_notifier_idrforeach_cb, &data);
+		rcu_read_unlock();
+	}
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block ccieth_netdevice_notifier = {
+	.notifier_call = ccieth_netdevice_notifier_cb,
+};
+
+static struct packet_type ccieth_pt = {
+	.type = __constant_htons(ETH_P_CCI),
+	.func = ccieth_recv,
+};
+
 static int
 ccieth_init(void)
 {
@@ -546,9 +623,11 @@ ccieth_init(void)
 	idr_init(&ccieth_ep_idr);
 	spin_lock_init(&ccieth_ep_idr_lock);
 
-	ret = ccieth_net_init();
+	ret = register_netdevice_notifier(&ccieth_netdevice_notifier);
 	if (ret < 0)
 		goto out;
+
+	dev_add_pack(&ccieth_pt);
 
 	ret = misc_register(&ccieth_miscdev);
 	if (ret < 0)
@@ -557,7 +636,8 @@ ccieth_init(void)
 	return 0;
 
 out_with_net:
-	ccieth_net_exit();
+	dev_remove_pack(&ccieth_pt);
+	unregister_netdevice_notifier(&ccieth_netdevice_notifier);
 out:
 	return ret;
 }
@@ -566,7 +646,8 @@ static void
 ccieth_exit(void)
 {
 	misc_deregister(&ccieth_miscdev);
-	ccieth_net_exit();
+	dev_remove_pack(&ccieth_pt);
+	unregister_netdevice_notifier(&ccieth_netdevice_notifier);
 	idr_destroy(&ccieth_ep_idr);
 	rcu_barrier(); /* wait for rcu calls to be done */
 }

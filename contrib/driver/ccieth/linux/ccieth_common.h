@@ -162,9 +162,6 @@ struct ccieth_msg_skb_cb {
 
 extern struct idr ccieth_ep_idr; /* accessed under RCU read lock */
 
-extern int ccieth_net_init(void);
-extern void ccieth_net_exit(void);
-
 extern int ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data);
 extern int ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_request *arg);
 extern int ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_accept *arg);
@@ -174,6 +171,8 @@ extern int ccieth_defer_connect_recv(struct net_device *ifp, __u8 type, struct s
 
 extern void ccieth_conn_uu_defer_recv_msg(struct ccieth_connection *conn, struct sk_buff *skb);
 extern int ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr, struct sk_buff *skb);
+
+extern int ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt, struct net_device *orig_dev);
 
 #ifdef CCIETH_DEBUG
 #define dprintk printk
