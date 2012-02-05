@@ -125,6 +125,10 @@ struct ccieth_connection {
 		} uu;
 	};
 
+	/* delaying acking */
+	__u32 msg_ack_seqnum;
+	struct work_struct msg_ack_work;
+
 	/* resending of request, accept or reject */
 	unsigned long expire; /* in jiffies, only for request because it has a timeout */
 	struct timer_list timer;
@@ -170,6 +174,7 @@ extern void ccieth_deferred_connect_recv_workfunc(struct work_struct *work);
 extern int ccieth_defer_connect_recv(struct net_device *ifp, __u8 type, struct sk_buff *skb);
 
 extern int ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg);
+extern int ccieth_msg_ack(struct ccieth_connection *conn);
 
 extern void ccieth_conn_uu_defer_recv_msg(struct ccieth_connection *conn, struct sk_buff *skb);
 extern int ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr, struct sk_buff *skb);

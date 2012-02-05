@@ -113,6 +113,18 @@ union ccieth_pkt_header {
 		__be32 msg_len;
 		__u8 msg[0];
 	} msg;
+	struct ccieth_pkt_header_msg_ack {
+		struct ethhdr eth;
+		__u8 type;
+		__u8 pad1;
+		/* 16 */
+		__be32 dst_ep_id;
+		__be32 dst_conn_id;
+		/* 24 */
+		__be32 conn_seqnum;
+		__be32 acked_seqnum;
+		/* 32 */
+	} msg_ack;
 };
 
 enum ccieth_pkt_type {
@@ -121,6 +133,7 @@ enum ccieth_pkt_type {
 	CCIETH_PKT_CONNECT_REJECT,
 	CCIETH_PKT_CONNECT_ACK,
 	CCIETH_PKT_MSG,
+	CCIETH_PKT_MSG_ACK,
 };
 
 enum ccieth_pkt_ack_status {

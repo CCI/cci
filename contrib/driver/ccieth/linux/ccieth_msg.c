@@ -117,6 +117,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 {
 	struct ccieth_endpoint_event *event;
 	__u32 msg_len = ntohl(hdr->msg_len);
+	__u32 msg_seqnum = ntohl(hdr->msg_seqnum);
 	int err;
 
 	/* get an event */
@@ -144,6 +145,13 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 	spin_lock_bh(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock_bh(&ep->event_list_lock);
+
+	if (conn->attribute != CCIETH_CONNECT_ATTR_UU) {
+		/* FIXME: bitmap */
+		conn->msg_ack_seqnum = msg_seqnum;
+		/* FIXME: delayed in most cases, use timers */
+		schedule_work(&conn->msg_ack_work);
+	}
 
 	dev_kfree_skb(skb);
 	return 0;
@@ -203,11 +211,115 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 		   && conn->attribute == CCIETH_CONNECT_ATTR_UU) {
 		ccieth_conn_uu_defer_recv_msg(conn, skb);
 		err = 0;
+		/* UU doesn't need ack */
 	} else
 		goto out_with_rculock;
 
 	rcu_read_unlock();
 	return err;
+
+out_with_rculock:
+	rcu_read_unlock();
+out:
+	dev_kfree_skb(skb);
+	return err;
+}
+
+int
+ccieth_msg_ack(struct ccieth_connection *conn)
+{
+	struct ccieth_endpoint *ep = conn->ep;
+	struct net_device *ifp;
+	struct sk_buff *skb;
+	struct ccieth_pkt_header_msg_ack *hdr;
+	size_t skblen;
+	int err;
+
+	/* allocate and initialize the skb */
+	skblen = sizeof(*hdr);
+	if (skblen < ETH_ZLEN)
+		skblen = ETH_ZLEN;
+	skb = alloc_skb(skblen, GFP_KERNEL);
+	if (!skb)
+		goto out;
+	skb_reset_mac_header(skb);
+	skb_reset_network_header(skb);
+	skb->protocol = __constant_htons(ETH_P_CCI);
+	skb_put(skb, skblen);
+
+	/* fill headers */
+	hdr = (struct ccieth_pkt_header_msg_ack *) skb_mac_header(skb);
+	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
+	memcpy(&hdr->eth.h_source, ep->addr, 6);
+	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
+	hdr->type = CCIETH_PKT_MSG_ACK;
+	hdr->dst_ep_id = htonl(conn->dest_eid);
+	hdr->dst_conn_id = htonl(conn->dest_id);
+	hdr->conn_seqnum = htonl(conn->req_seqnum);
+	hdr->acked_seqnum = htonl(conn->msg_ack_seqnum);
+
+	rcu_read_lock();
+	/* is the interface still available? */
+	ifp = rcu_dereference(ep->ifp);
+	if (!ifp) {
+		err = -ENODEV;
+		goto out_with_rculock;
+	}
+	skb->dev = ifp;
+	dev_queue_xmit(skb);
+	rcu_read_unlock();
+	return 0;
+
+out_with_rculock:
+	rcu_read_unlock();
+	kfree_skb(skb);
+out:
+	return err;
+}
+
+static int
+ccieth_recv_msg_ack(struct net_device *ifp, struct sk_buff *skb)
+{
+	struct ccieth_pkt_header_msg_ack _hdr, *hdr;
+	struct ccieth_endpoint *ep;
+	struct ccieth_connection *conn;
+	__u32 dst_ep_id;
+	__u32 dst_conn_id;
+	__u32 acked_seqnum;
+	int err;
+
+	/* copy the entire header */
+	err = -EINVAL;
+	hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
+	if (!hdr)
+		goto out;
+
+	dst_ep_id = ntohl(hdr->dst_ep_id);
+	dst_conn_id = ntohl(hdr->dst_conn_id);
+	acked_seqnum = ntohl(hdr->acked_seqnum);
+
+	dprintk("got msg ack for seqnum %d to eid %d conn id %d\n",
+		acked_seqnum, dst_ep_id, dst_conn_id);
+
+	rcu_read_lock();
+
+	/* find endpoint and check that it's attached to this ifp */
+	ep = idr_find(&ccieth_ep_idr, dst_ep_id);
+	if (!ep || rcu_access_pointer(ep->ifp) != ifp)
+		goto out_with_rculock;
+
+	/* find the connection */
+	err = -EINVAL;
+	conn = idr_find(&ep->connection_idr, dst_conn_id);
+	if (!conn)
+		goto out_with_rculock;
+
+	/* TODO */
+
+	rcu_read_unlock();
+
+	dev_kfree_skb(skb);
+	return 0;
 
 out_with_rculock:
 	rcu_read_unlock();
@@ -245,6 +357,8 @@ ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 		return ccieth_defer_connect_recv(ifp, *typep, skb);
 	case CCIETH_PKT_MSG:
 		return ccieth_recv_msg(ifp, skb);
+	case CCIETH_PKT_MSG_ACK:
+		return ccieth_recv_msg_ack(ifp, skb);
 	default:
 		err = -EINVAL;
 		break;

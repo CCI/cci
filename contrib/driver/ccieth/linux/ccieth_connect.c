@@ -18,7 +18,16 @@ ccieth_connect_ack_from_endpoint(struct ccieth_endpoint *ep, __u32 src_conn_id,
 				 __u32 req_seqnum,
 				 __u8 ack_status);
 
+void
+ccieth_msg_ack_workfunc(struct work_struct *work)
+{
+	struct ccieth_connection *conn = container_of(work, struct ccieth_connection, msg_ack_work);
+	/* FIXME if not acked yet */
+	ccieth_msg_ack(conn);
+}
+
 /* FIXME: factorize identical callbacks */
+/* FIXME: filter with flags instead of attribute-specific callback */
 /*
  * RO specific callbacks
  */
@@ -130,6 +139,8 @@ ccieth_conn_init(struct ccieth_connection *conn, int attribute)
 {
 	conn->attribute = attribute;
 
+	INIT_WORK(&conn->msg_ack_work, ccieth_msg_ack_workfunc);
+
 	switch (attribute) {
 	case CCIETH_CONNECT_ATTR_RO:
 		ccieth_conn_ro_init(conn);
@@ -182,6 +193,7 @@ ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 
 	/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 	del_timer_sync(&conn->timer);
+	cancel_work_sync(&conn->msg_ack_work);
 	/* the caller will destroy the entire idr, no need to remove us from there */
 	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
 
