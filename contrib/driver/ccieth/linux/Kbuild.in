@@ -9,4 +9,4 @@ ccflags-y += -DCCIETH_DEBUG=1
 endif
 
 obj-m += ccieth.o
-ccieth-y = ccieth_main.o ccieth_recv.o ccieth_connect.o
+ccieth-y = ccieth_main.o ccieth_msg.o ccieth_connect.o

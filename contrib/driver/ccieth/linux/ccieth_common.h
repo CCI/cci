@@ -169,6 +169,8 @@ extern int ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl
 extern void ccieth_deferred_connect_recv_workfunc(struct work_struct *work);
 extern int ccieth_defer_connect_recv(struct net_device *ifp, __u8 type, struct sk_buff *skb);
 
+extern int ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg);
+
 extern void ccieth_conn_uu_defer_recv_msg(struct ccieth_connection *conn, struct sk_buff *skb);
 extern int ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr, struct sk_buff *skb);
 
