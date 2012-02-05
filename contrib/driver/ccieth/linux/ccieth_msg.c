@@ -30,7 +30,8 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	skblen = sizeof(*hdr) + arg->msg_len;
 	if (skblen < ETH_ZLEN)
 		skblen = ETH_ZLEN;
-	skb = alloc_skb(skblen, GFP_KERNEL);
+	/* allocate a clonable skbuff, even if it may not be useful for UU, but we don't have the connection yet */
+	skb = alloc_skb_fclone(skblen, GFP_KERNEL);
 	if (!skb)
 		goto out;
 	skb_reset_mac_header(skb);

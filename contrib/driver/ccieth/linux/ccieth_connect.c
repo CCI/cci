@@ -332,7 +332,6 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 		goto out;
 	conn->embedded_event.event.data_length = 0;
 	conn->embedded_event.destructor = ccieth_connection_event_destructor;
-	conn->skb = NULL;
 	ccieth_conn_init(conn, arg->attribute);
 
 	/* initialize the timer to make destroy easier */
@@ -356,7 +355,7 @@ retry:
 	skblen = sizeof(*hdr) + arg->data_len;
 	if (skblen < ETH_ZLEN)
 		skblen = ETH_ZLEN;
-	skb = alloc_skb(skblen, GFP_KERNEL);
+	skb = alloc_skb_fclone(skblen, GFP_KERNEL);
 	if (!skb)
 		goto out_with_conn_id;
 	skb_reset_mac_header(skb);
@@ -544,7 +543,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 			  sizeof(struct ccieth_pkt_header_connect_reject));
 	if (replyskblen < ETH_ZLEN)
 		replyskblen = ETH_ZLEN;
-	replyskb = alloc_skb(replyskblen, GFP_KERNEL);
+	replyskb = alloc_skb_fclone(replyskblen, GFP_KERNEL);
 	if (!replyskb)
 		goto out_with_conn;
 	skb_reset_mac_header(replyskb);
