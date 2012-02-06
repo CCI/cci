@@ -591,6 +591,9 @@ static inline int gni_create_smsg(
     uint32_t                    Align;
     uint64_t *                  buffer;       // Address of SMSG mailbox
     const cci_device_t *        device;
+    cci_endpoint_t *            endpoint;
+    cci__ep_t *                 ep;
+    gni__ep_t *                 gep;
     cci__dev_t *                dev;
     gni__dev_t *                gdev;
     cci__conn_t *               conn;
@@ -613,15 +616,19 @@ static inline int gni_create_smsg(
     if(!gconn)                                // No GNI part
         goto FAIL;
 
+    endpoint=connection->endpoint;
+    ep=container_of( endpoint, cci__ep_t, endpoint );
+    gep=ep->priv;
+
     gconn->credits=GNI_MBOX_MAX_CREDIT;      // Set limit on credits
-    gconn->vmd_index=-1;                     // Next entry in Memory
+    gep->vmd_index=-1;                       // Next entry in Memory
                                              //  .. Domain Desciptor Blk
     debug( CCI_DB_INFO, "%8s.%5d %s: vmd_index=     %8d",
-           gdev->nodename, gdev->INST, __func__, gconn->vmd_index );
+           gdev->nodename, gdev->INST, __func__, gep->vmd_index );
 
-    gconn->vmd_flags=GNI_MEM_READWRITE;      // memory region attributes
+    gep->vmd_flags=GNI_MEM_READWRITE;        // memory region attributes
     debug( CCI_DB_INFO, "%8s.%5d %s: vmd_flags=   0x%.8x",
-           gdev->nodename, gdev->INST, __func__, gconn->vmd_flags );
+           gdev->nodename, gdev->INST, __func__, gep->vmd_flags );
 
     gRv=GNI_CqCreate(                        // Create local CQ
         gdev->nic_hndl,                      // NIC handle
@@ -706,8 +713,8 @@ static inline int gni_create_smsg(
         (uint64_t)buffer,                    // Memory block
         Size,                                // Size of memory block
         gconn->dst_cq_hndl,                  // Note cq handle
-        gconn->vmd_flags,                    // Memory region attributes
-        gconn->vmd_index,                    // Allocation option
+        gep->vmd_flags,                      // Memory region attributes
+        gep->vmd_index,                      // Allocation option
         &(gconn->src_box.attr.mem_hndl) );   // Memory handle
     if( gRv!=GNI_RC_SUCCESS ) {
 
@@ -1294,15 +1301,15 @@ static int gni_free_devices(
     free(gglobals->devices);
     free((void *)gglobals);
 
-#ifdef    USE_PMI
-    fflush(stdout);
-    PMI_Finalize();
-    PMI_Barrier();                           // Ensure everyone is done
-#endif // USE_PMI
-
     GNI_SAMPLE_PRINT;
     GNI_SAMPLE_FREE;
     CCI_EXIT;
+
+#ifdef    USE_PMI
+    fflush(stdout);
+    PMI_Barrier();                           // Ensure everyone is done
+    PMI_Finalize();
+#endif // USE_PMI
     return(CCI_SUCCESS);
 }
 
@@ -1470,6 +1477,7 @@ static int gni_create_endpoint(
     gni__dev_t *                gdev;
     cci__ep_t *                 ep;
     gni__ep_t *                 gep;
+    gni_return_t                gRv;
     cci_status_t                cRv=CCI_ENODEV;    
 
     CCI_ENTER;
@@ -1505,6 +1513,40 @@ static int gni_create_endpoint(
     ep->buffer_len=dev->device.max_send_size;
     ep->tx_timeout=0;
 
+    gRv=GNI_CqCreate(                        // Create local CQ
+        gdev->nic_hndl,                      // NIC handle
+        GNI_EP_TX_CNT,                       // max events
+        0,                                   // interrupt on every event
+        GNI_CQ_NOBLOCK,                      // interrupt on every event
+        NULL,                                // address of event handler
+        NULL,                                // context for handler
+        &(gep->src_cq_hndl) );               // Get CQ (sends) handle
+    if( gRv!=GNI_RC_SUCCESS ) {
+
+        gni_log_gni( __func__, "GNI_CqCreate[src_cq]", gRv );
+        goto FAIL;
+    }
+    debug( CCI_DB_CONN, "%8s.%5d %s: src_cq_hndl= 0x%.8zx depth=  %8d",
+           gdev->nodename, gdev->INST, __func__, gep->src_cq_hndl,
+           GNI_EP_TX_CNT );
+
+    gRv=GNI_CqCreate(                        // Create destination CQ
+        gdev->nic_hndl,                      // NIC handle
+        GNI_EP_RX_CNT,                       // max events
+        0,                                   // interrupt on every event
+        GNI_CQ_NOBLOCK,                      // interrupt on every event
+        NULL,                                // address of event handler
+        NULL,                                // context for handler
+        &(gep->dst_cq_hndl) );               // Get CQ (receives) handle
+    if( gRv!=GNI_RC_SUCCESS ) {
+
+        gni_log_gni( __func__, "GNI_CqCreate[dst_cq]", gRv );
+        goto FAIL;
+    }
+    debug( CCI_DB_CONN, "%8s.%5d %s: dst_cq_hndl= 0x%.8zx depth=  %8d",
+           gdev->nodename, gdev->INST, __func__, gep->dst_cq_hndl,
+           GNI_EP_RX_CNT );
+
 //  Get endpoint id.
     pthread_mutex_lock(&ep->lock);           // get_ep_id
     gni_get_ep_id( device, &gep->id );
@@ -1532,6 +1574,9 @@ static int gni_create_endpoint(
         }
     debug( CCI_DB_INFO, "%8s.%5d %s: gni_add_rx:   buffers= %8d",
            gdev->nodename, gdev->INST, __func__, ep->rx_buf_cnt );
+    pthread_mutex_lock(&ep->lock);
+    gep->rx_used=0;
+    pthread_mutex_unlock(&ep->lock);
 
 //  Allocate tx buffer space and assign short message send buffers.
     gep->txbuf=calloc( ep->tx_buf_cnt, ep->buffer_len );
@@ -1543,6 +1588,9 @@ static int gni_create_endpoint(
         }
     debug( CCI_DB_INFO, "%8s.%5d %s: gni_add_tx:   buffers= %8d",
            gdev->nodename, gdev->INST, __func__, ep->tx_buf_cnt );
+    pthread_mutex_lock(&ep->lock);
+    gep->tx_used=0;
+    pthread_mutex_unlock(&ep->lock);
 
     name=calloc( 1, GNI_URI_MAX_LENGTH+1 );
     if(!name) {
@@ -1765,12 +1813,12 @@ static int gni_accept(
     conn->connection.context=context;
     conn->priv=gconn;
     gconn->conn=conn;                        // point back to conn
-    gconn->inuse=0;
-    gconn->vmd_index=-1;                     // Use next available entry
+    gconn->in_use=0;
+    gep->vmd_index=-1;                       // Use next available entry
                                              //   in Memory Domain
                                              //   Desciptor Block
     debug( CCI_DB_INFO, "%8s.%5d %s: vmd_index=             %8d",
-           gdev->nodename, gdev->INST, __func__, gconn->vmd_index );
+           gdev->nodename, gdev->INST, __func__, gep->vmd_index );
 
     gconn->data_len=0;
     memcpy( &(gconn->dst_box), dst_box, sz );
@@ -1988,7 +2036,7 @@ static int gni_connect(
         memcpy( gconn->data_ptr, data_ptr, data_len );
     gconn->sin=sin;                          // target socket address
     gconn->status=GNI_CONN_PENDING_REPLY;    // Set connection status
-    gconn->inuse=0;
+    gconn->in_use=0;
     debug( CCI_DB_INFO, "%8s.%5d %s: status=         %-24s",
            gdev->nodename, gdev->INST, __func__,
            gni_conn_status_to_str(gconn->status) );
@@ -2230,6 +2278,7 @@ static int gni_return_event(
             rx->evt.event.recv.connection=NULL;
             pthread_mutex_lock(&ep->lock);   // Return rx to list
             TAILQ_INSERT_HEAD( &gep->rx, rx, entry );
+            gep->rx_used--;
             pthread_mutex_unlock(&ep->lock);
             free_evt=0;
             goto event_next;
@@ -2246,6 +2295,7 @@ static int gni_return_event(
             tx->evt.event.send.context=NULL; // Clear context
             pthread_mutex_lock(&ep->lock);   // Return tx to list
             TAILQ_INSERT_HEAD( &gep->tx, tx, entry );
+            gep->tx_used--;
             pthread_mutex_unlock(&ep->lock);
             free_evt=0;
             goto event_next;
@@ -2280,7 +2330,8 @@ static int gni_return_event(
 
 
 static inline int gni_tx_send(
-    gni_tx_t *                  tx ) {
+    gni_tx_t *                  tx,
+    uint64_t                    flags ) {
 
     const cci_device_t *        device;
     cci__dev_t *                dev;
@@ -2291,7 +2342,7 @@ static inline int gni_tx_send(
     gni__ep_t *                 gep;
     cci__conn_t *               conn;
     gni__conn_t *               gconn;
-    uint64_t                    hdr[2];
+    uint64_t                    hdr[3];
     void *                      ptr;
     gni_return_t                gRv;
 
@@ -2328,13 +2379,15 @@ static inline int gni_tx_send(
 
     hdr[0]=(uint64_t)gconn;
     hdr[1]=tx->len;
-    debug( CCI_DB_INFO, "%8s.%5d %s: send_tx %lx %ld %lx %lx %lx",
-           gdev->nodename, gdev->INST, __func__, hdr[0], hdr[1],
+    hdr[2]=flags;                            // Enables internal message
+    debug( CCI_DB_MSG,
+           "%8s.%5d %s: send_tx %lx %ld %lx %lx %lx %lx %lx",
+           gdev->nodename, gdev->INST, __func__, hdr[0], hdr[1], hdr[2],
            *((uint64_t *)(ptr+0)), *((uint64_t *)(ptr+8)),
-           *((uint64_t *)(ptr+16)) );
+           *((uint64_t *)(ptr+16)), *((uint64_t *)(ptr+24)) );
     gRv=GNI_SmsgSend(       gconn->ep_hndl,  // Target GNI endpoint
                             hdr,             // header
-                            16,              // length of header
+                            24,              // length of header
                             ptr,             // payload
                             tx->len,         // length of payload
                             tx->id );        // message ID
@@ -2396,6 +2449,7 @@ static int gni_send(
 
         pthread_mutex_unlock(&ep->lock);     // fail tx
         cRv=CCI_ENOBUFS;
+        abort();
         goto FAIL;
     }
 
@@ -2403,6 +2457,7 @@ static int gni_send(
 
         tx=TAILQ_FIRST(&gep->tx);
         TAILQ_REMOVE( &gep->tx, tx, entry );
+        gep->tx_used++;
         break;
     }
     pthread_mutex_unlock(&ep->lock);         // end get
@@ -2418,7 +2473,7 @@ static int gni_send(
 
         TAILQ_INSERT_TAIL( &gep->tx_queue, tx, qentry );
         pthread_mutex_unlock(&ep->lock);     //  ... release "hot path"
-        gni_tx_send(tx);                     // Use "hot path"
+        gni_tx_send( tx, 0 );                // Use "hot path"
 
     } else {                                 // Have run out of credits;
 
@@ -2429,6 +2484,7 @@ static int gni_send(
     }                                        // Note: disable "hot path"
 
     FAIL:
+    assert(tx);
     CCI_EXIT;
     return(cRv);
 }
@@ -2473,8 +2529,13 @@ static int gni_rma_register(
     const cci_device_t *        device;
     cci__dev_t *                dev;
     gni__dev_t *                gdev;
-//  cci__ep_t *                 ep;
-//  gni__ep_t *                 gep;
+    cci__ep_t *                 ep;
+    gni__ep_t *                 gep;
+    gni_rma_hndl_t *            handle;
+    uint64_t                    Size;
+//  gni_mem_handle_t            mem_hndl;
+    void *                      vmd;
+    gni_return_t                gRv;
 
     CCI_ENTER;
 
@@ -2489,8 +2550,59 @@ static int gni_rma_register(
     debug( CCI_DB_WARN, "%8s.%5d In gni_rma_register()", gdev->nodename,
            gdev->INST );
 
+    ep=container_of( endpoint, cci__ep_t, endpoint );
+    gep=ep->priv;
+
+    handle=calloc( 1, sizeof(*handle) );
+    if(!handle) {
+
+        CCI_EXIT;
+        return(CCI_ENOMEM);
+    }
+
+    handle->ep=ep;
+    handle->refcnt=1;
+    handle->start=start;
+    handle->length=length;
+    handle->vmd_length=length+sizeof(uint64_t);
+    Size=handle->vmd_length+(gni_line-(handle->vmd_length%gni_line));
+    if( posix_memalign( &vmd, gni_line, Size ) ) {
+
+        CCI_EXIT;
+        return(CCI_ENOMEM);
+    }
+    memset( vmd, 0, Size );                  // Clear VMD
+
+    gRv=GNI_MemRegister(
+        gdev->nic_hndl,                      // NIC handle
+        (uint64_t)vmd,                       // Memory block
+        Size,                                // Size of memory block
+        gep->dst_cq_hndl,                    // Note cq handle
+        gep->vmd_flags,                      // Memory region attributes
+        gep->vmd_index,                      // Allocation option
+        &(handle->mem_hndl) );               // GNI Memory handle
+    if( gRv!=GNI_RC_SUCCESS ) {
+
+        gni_log_gni( __func__, "GNI_MemRegister", gRv );
+        goto FAIL;
+    }
+    handle->vmd=vmd;
+    debug( CCI_DB_MSG, "%8s.%5d %s: rma=%zp addr=%zp vmd=%zp mem_hndl=%zp",
+           gdev->nodename, gdev->INST, __func__,
+           handle, handle->start, handle->vmd, handle->mem_hndl );
+
+    pthread_mutex_lock(&ep->lock);
+    TAILQ_INSERT_TAIL( &gep->rma_hndls, handle, entry ); 
+    pthread_mutex_unlock(&ep->lock);
+
+    *rma_handle = (uint64_t)((uintptr_t)handle);
+
     CCI_EXIT;
-    return(CCI_ERR_NOT_IMPLEMENTED);
+    return(CCI_SUCCESS);
+
+    FAIL:
+    free(vmd);
+    return(CCI_ERROR);
 }
 
 
@@ -2532,8 +2644,18 @@ static int gni_rma(
     int32_t                     flags ) {
 
     const cci_device_t *        device;
+    cci_endpoint_t *            endpoint;
     cci__dev_t *                dev;
     gni__dev_t *                gdev;
+    cci__ep_t *                 ep;
+    gni__ep_t *                 gep;
+    cci__conn_t *               conn;
+    gni__conn_t *               gconn;
+    gni_rma_hndl_t *            local;
+    gni_rma_hndl_t *            remote;
+    gni_post_descriptor_t       dpost;
+    gni_return_t                gRv;
+    cci_status_t                cRv;
 
     CCI_ENTER;
 
@@ -2548,8 +2670,47 @@ static int gni_rma(
     debug( CCI_DB_WARN, "%8s.%5d In gni_rma()", gdev->nodename,
            gdev->INST );
 
+    conn=container_of( connection, cci__conn_t, connection );
+    gconn=conn->priv;
+    endpoint=connection->endpoint;
+    ep=container_of( endpoint, cci__ep_t, endpoint );
+    gep=ep->priv;
+
+    local=(gni_rma_hndl_t *)((uintptr_t)local_handle);
+    remote=(gni_rma_hndl_t *)((uintptr_t)remote_handle);
+
+    dpost.type=GNI_POST_RDMA_PUT;
+    dpost.rdma_mode=GNI_RDMAMODE_FENCE;
+    dpost.cq_mode=GNI_CQMODE_GLOBAL_EVENT | GNI_CQMODE_REMOTE_EVENT;
+    dpost.dlvr_mode=GNI_DLVMODE_PERFORMANCE;
+    dpost.local_addr=(uint64_t)(local->vmd);
+    dpost.local_addr+=local_offset;
+    dpost.local_mem_hndl=local->mem_hndl;
+    dpost.remote_addr=(uint64_t)(remote->vmd)+sizeof(uint64_t);
+    dpost.remote_addr+=remote_offset;
+    dpost.remote_mem_hndl=remote->mem_hndl;
+    dpost.length=len;
+    dpost.src_cq_hndl=gep->src_cq_hndl;
+
+    debug( CCI_DB_MSG, "%8s.%5d %s: (local)  vmd=%zp mem_hndl=%zp",
+           gdev->nodename, gdev->INST, __func__, dpost.local_addr,
+           dpost.local_mem_hndl );
+    debug( CCI_DB_MSG, "%8s.%5d %s: (remote) vmd=%zp mem_hndl=%zp",
+           gdev->nodename, gdev->INST, __func__, dpost.remote_addr,
+           dpost.remote_mem_hndl );
+
+    gRv=GNI_PostRdma( gconn->ep_hndl, &dpost );
+    if( gRv!=GNI_RC_SUCCESS ) {
+
+        cRv=CCI_ERROR;
+        goto FAIL;
+    }
+
+    cRv=CCI_SUCCESS;
+
+    FAIL:
     CCI_EXIT;
-    return(CCI_ERR_NOT_IMPLEMENTED);
+    return(cRv);
 }
 
 
@@ -2560,15 +2721,15 @@ static int gni_reap_recv(
     cci_endpoint_t *            endpoint;
     cci_connection_t *          connection;
     gni_rx_t *                  rx;
+    gni_cq_entry_t              cqe;
     gni__dev_t *                gdev;
     cci__ep_t *                 ep;
     gni__ep_t *                 gep;
     cci__conn_t *               conn;
     gni__conn_t *               gconn;
-    cci__evt_t *                evt;
-    gni_cq_entry_t              cqe;
-    gni_return_t                gRv;
+    cci__evt_t *                evt=NULL;
     cci_status_t                cRv=CCI_SUCCESS;
+    gni_return_t                gRv;
 
     CCI_ENTER;
 
@@ -2593,87 +2754,100 @@ static int gni_reap_recv(
         if( gconn->status!=GNI_CONN_ACCEPTED )
             continue;                        // Skip if not active
 
-//      if( !(gconn->inuse) ) {
-//
-//          pthread_mutex_lock(&ep->lock);
-//          gconn->inuse=1;
-//          pthread_mutex_unlock(&ep->lock);
-//      } else
-//          continue;
+        if(gconn->in_use)                    // Other thread has token
+            continue;
+
+        pthread_mutex_lock(&ep->lock);
+        gconn->in_use=1;                     // Take token
+        pthread_mutex_unlock(&ep->lock);
 
         gRv=GNI_CqGetEvent( gconn->dst_cq_hndl, &cqe );
-        if( gRv!=GNI_RC_NOT_DONE ) {         // Something's shaking
+        if( gRv==GNI_RC_NOT_DONE ) {         // No message
 
-            if( gRv==GNI_RC_SUCCESS ) {      // If CQ is OK...
+            pthread_mutex_lock(&ep->lock);
+            gconn->in_use=0;                 // Return token
+            pthread_mutex_unlock(&ep->lock);
+            continue;
+        }
 
-                gRv=GNI_RC_NOT_DONE;
-                while( gRv==GNI_RC_NOT_DONE )// Poll for message
-                    gRv=GNI_SmsgGetNext( gconn->ep_hndl,
-                                         (void **)&hdrs );
-                if( gRv==GNI_RC_SUCCESS ) {  // If got message...
+        if( gRv==GNI_RC_SUCCESS ) {          // If CQ is OK...
 
-//                  Note: INST is sender's gep->id and hdrs[0] is
-//                  sender's gconn.
-                    debug( CCI_DB_INFO, "%8s.%5d %s: INST=%lx",
-                           gdev->nodename, gdev->INST, __func__,
-                           GNI_CQ_GET_INST_ID(cqe) );
+            gRv=GNI_RC_NOT_DONE;
+            while( gRv==GNI_RC_NOT_DONE )    // Poll for message
+                gRv=GNI_SmsgGetNext( gconn->ep_hndl, (void **)&hdrs );
+            if( gRv==GNI_RC_SUCCESS ) {      // Got message...
 
-                    if(TAILQ_EMPTY(&gep->rx))
-                        return(CCI_ENOBUFS);
+//              Note: INST is sender's gep->id and hdrs[0] is sender's
+//              gconn.
+                debug( CCI_DB_INFO, "%8s.%5d %s: INST=%lx",
+                       gdev->nodename, gdev->INST, __func__,
+                       GNI_CQ_GET_INST_ID(cqe) );
 
-//                  Now, we need an rx structure to hold the message and
-//                  post an event for get_event().
-                    pthread_mutex_lock(&ep->lock);  // Get rx
-                    while( !TAILQ_EMPTY(&gep->rx) ) {
+                if(TAILQ_EMPTY(&gep->rx))
+                    return(CCI_ENOBUFS);
 
-                        rx=TAILQ_FIRST(&gep->rx);
-                        TAILQ_REMOVE( &gep->rx, rx, entry );
-                        break;
-                    }
-                    pthread_mutex_unlock(&ep->lock);
+//              Now, we need an rx structure to hold the message and
+//              post an event for get_event().
+                pthread_mutex_lock(&ep->lock);  // Get rx
+                while( !TAILQ_EMPTY(&gep->rx) ) {
 
-                    evt=&rx->evt;            // Embedded event
-                    conn=gconn->conn;
-                    connection=&conn->connection;
+                    rx=TAILQ_FIRST(&gep->rx);
+                    TAILQ_REMOVE( &gep->rx, rx, entry );
+                    gep->rx_used++;
+                    break;
+                }
+                pthread_mutex_unlock(&ep->lock);
+
+                evt=&rx->evt;            // Embedded event
+                conn=gconn->conn;
+                connection=&conn->connection;
+
+                if( hdrs[2]==0 ) {
 
                     *((uint32_t *)&evt->event.recv.len)=hdrs[1];
                     evt->event.recv.connection=connection;
-                    memcpy( evt->event.recv.ptr, &hdrs[2], hdrs[1] );
-
-                    gRv=GNI_SmsgRelease( gconn->ep_hndl );
-                    assert( gRv==GNI_RC_SUCCESS );
+                    memcpy( evt->event.recv.ptr, &hdrs[3], hdrs[1] );
                 } else
-                    gni_log_gni( __func__, "GNI_SmsgGetNext", gRv );
+                  goto INTERNAL;
 
-                debug( CCI_DB_INFO, "%8s.%5d %s: %lx %ld %lx %lx %lx",
-                       gdev->nodename, gdev->INST, __func__, hdrs[0],
-                       hdrs[1], hdrs[2], hdrs[3], hdrs[4] );
+                gRv=GNI_SmsgRelease( gconn->ep_hndl );
+                assert( gRv==GNI_RC_SUCCESS );
             } else
-                gni_log_gni( __func__, "GNI_CqGetEvent", gRv );
+                gni_log_gni( __func__, "GNI_SmsgGetNext", gRv );
 
-//          If GNI_CqGetEvent or GNI_SmsgGetNext had problems...
-//          or message connection did not match, create error event,
-//          rather than modifiying recv event.
-            if(!rx) {                        // Corrupts ptr address
-                                             // if recv event is used
-                evt=calloc( 1, sizeof(*evt) );
-                endpoint=&ep->endpoint;
-                evt->event.dev_failed.type=
-                    CCI_EVENT_ENDPOINT_DEVICE_FAILED;
-                evt->event.dev_failed.endpoint=endpoint;
-                cRv=CCI_ERROR;
-            }
+            debug( CCI_DB_INFO, "%8s.%5d %s: %lx %ld %lx %lx %lx",
+                   gdev->nodename, gdev->INST, __func__, hdrs[0],
+                   hdrs[1], hdrs[2], hdrs[3], hdrs[4] );
+        } else
+            gni_log_gni( __func__, "GNI_CqGetEvent", gRv );
 
-            debug( CCI_DB_INFO, "%8s.%5d %s: posting event: %s",
-                   gdev->nodename, gdev->INST, __func__,
-                   gni_cci_event_to_str(evt->event.type) );
-            pthread_mutex_lock(&ep->lock);   // Queue evt
-            TAILQ_INSERT_TAIL( &ep->evts, evt, entry );
-            pthread_mutex_unlock(&ep->lock);
+//      If GNI_CqGetEvent or GNI_SmsgGetNext had problems...
+//      or message connection did not match, create error event,
+//      rather than modifiying recv event.
+        if(!evt) {                       // Corrupts ptr address
+                                         // if recv event is used
+            evt=calloc( 1, sizeof(*evt) );
+            endpoint=&ep->endpoint;
+            evt->event.dev_failed.type=
+                CCI_EVENT_ENDPOINT_DEVICE_FAILED;
+            evt->event.dev_failed.endpoint=endpoint;
+            cRv=CCI_ERROR;
         }
-//      pthread_mutex_lock(&ep->lock);
-//      gconn->inuse=0;
-//      pthread_mutex_unlock(&ep->lock);
+
+        debug( CCI_DB_INFO, "%8s.%5d %s: posting event: %s",
+               gdev->nodename, gdev->INST, __func__,
+               gni_cci_event_to_str(evt->event.type) );
+        pthread_mutex_lock(&ep->lock);   // Queue evt
+        TAILQ_INSERT_TAIL( &ep->evts, evt, entry );
+        gconn->in_use=0;
+        pthread_mutex_unlock(&ep->lock);
+        continue;
+
+        INTERNAL:
+        pthread_mutex_lock(&ep->lock);   // Queue evt
+        gconn->in_use=0;
+        pthread_mutex_unlock(&ep->lock);
+        abort();                         // For now
     }
 
     CCI_EXIT;
@@ -2691,7 +2865,7 @@ static void gni_reap_send(
     cci__ep_t *                 ep;
     gni__ep_t *                 gep;
     gni__conn_t *               gconn;
-    cci__evt_t *                evt;
+    cci__evt_t *                evt=NULL;
     gni_return_t                gRv;
 
 
@@ -2723,31 +2897,44 @@ static void gni_reap_send(
         if( gconn->credits==GNI_MBOX_MAX_CREDIT )
             continue;
 
-        if( !(gconn->inuse) ) {
-
-            pthread_mutex_lock(&ep->lock);
-            gconn->inuse=1;
-            pthread_mutex_unlock(&ep->lock);
-        } else
+        if(gconn->in_use)                    // Other thread has token
             continue;
 
+        pthread_mutex_lock(&ep->lock);
+        gconn->in_use=1;                     // Take token
+        pthread_mutex_unlock(&ep->lock);
+
         gRv=GNI_CqGetEvent( gconn->src_cq_hndl, &cqe );
-        if( gRv!=GNI_RC_NOT_DONE ) {         // Something's shaking
+        if( gRv==GNI_RC_NOT_DONE ) {         // No message
 
-            if( gRv==GNI_RC_SUCCESS ) {      // match event ID to tx->id
+            pthread_mutex_lock(&ep->lock);
+            gconn->in_use=0;                 // Return token
+            pthread_mutex_unlock(&ep->lock);
+            continue;
+        }
 
-                TAILQ_FOREACH( tx, &gep->tx_all, centry ) {
+        if( gRv==GNI_RC_SUCCESS ) {          // match event ID to tx->id
 
-                    if( tx->id==GNI_CQ_GET_INST_ID(cqe) ) {
+            TAILQ_FOREACH( tx, &gep->tx_all, centry )
+                if( tx->id==GNI_CQ_GET_INST_ID(cqe) ) {
 
-                        evt=&tx->evt;        // Got tx, evt
-                        break;
-                    }
+                    evt=&tx->evt;            // Got tx, evt
+                    break;
                 }
-                debug( CCI_DB_INFO, "%8s.%5d %s: INST=%lx",
-                       gdev->nodename, gdev->INST, __func__,
-                       GNI_CQ_GET_INST_ID(cqe) );
-            }
+            debug( CCI_DB_INFO, "%8s.%5d %s: INST=%lx",
+                   gdev->nodename, gdev->INST, __func__,
+                   GNI_CQ_GET_INST_ID(cqe) );
+        }
+
+        if(!evt) {                           // Complain bitterly
+
+            evt=calloc( 1, sizeof(*evt) );
+            gni_log_gni( __func__, "GNI_CqGetEvent", gRv );
+            endpoint=&ep->endpoint;
+            evt->event.dev_failed.type=CCI_EVENT_ENDPOINT_DEVICE_FAILED;
+            evt->event.dev_failed.endpoint=endpoint;
+        } else {
+
             pthread_mutex_lock(&ep->lock);   // Restore credit
             gconn->credits++;                // Return credit
             pthread_mutex_unlock(&ep->lock); // 
@@ -2760,33 +2947,21 @@ static void gni_reap_send(
 
 //                  Take entry from top of queue.
                     tx=TAILQ_FIRST(&gep->tx_queue);
-                    gni_tx_send(tx);         // Initiate send
+                    gni_tx_send( tx, 0 );    // Initiate send
                 }
 //              Note that gni_tx_send() also decrements the credits and
 //              removes the tx from the queue.  So, while the above
 //              increment to the credits, re-enables the "hot path"; if
 //              there is a queued tx, it just got re-disabled.
             }
-
-            if(!evt) {
-
-                evt=calloc( 1, sizeof(*evt) );
-                gni_log_gni( __func__, "GNI_CqGetEvent", gRv );
-                endpoint=&ep->endpoint;
-                evt->event.dev_failed.type=
-                    CCI_EVENT_ENDPOINT_DEVICE_FAILED;
-                evt->event.dev_failed.endpoint=endpoint;
-            }
-
-            debug( CCI_DB_INFO, "%8s.%5d %s: posting event: %s",
-                   gdev->nodename, gdev->INST, __func__,
-                   gni_cci_event_to_str(evt->event.type) );
-            pthread_mutex_lock(&ep->lock);   // Queue evt
-            TAILQ_INSERT_TAIL( &ep->evts, evt, entry );
-            pthread_mutex_unlock(&ep->lock);
         }
-        pthread_mutex_lock(&ep->lock);
-        gconn->inuse=0;
+
+        debug( CCI_DB_INFO, "%8s.%5d %s: posting event: %s",
+               gdev->nodename, gdev->INST, __func__,
+               gni_cci_event_to_str(evt->event.type) );
+        pthread_mutex_lock(&ep->lock);       // Queue evt
+        TAILQ_INSERT_TAIL( &ep->evts, evt, entry );
+        gconn->in_use=0;                     // Return token
         pthread_mutex_unlock(&ep->lock);
     }
 
@@ -2932,7 +3107,7 @@ static void gni_progress_connection_request(
             gni_finish_smsg(connection);
             evt->event.type=CCI_EVENT_CONNECT_ACCEPTED;
             evt->event.accepted.connection=connection;
-            evt->event.accepted.context=connection->context;
+//          evt->event.accepted.context=connection->context;
         } else {
 
 //          ### Need to destroy src_box, gconn.
@@ -2940,10 +3115,10 @@ static void gni_progress_connection_request(
 
                 evt->event.type=CCI_EVENT_CONNECT_REJECTED;
                 evt->event.rejected.context=connection->context;
-            } else if( gconn->status==GNI_CONN_TIMEDOUT ) {
+            } else if( gconn->status==GNI_CONN_FAILED ) {
 
-                evt->event.type=CCI_EVENT_CONNECT_TIMEDOUT;
-                evt->event.conn_timedout.context=connection->context;
+                evt->event.type=CCI_EVENT_CONNECT_FAILED;
+                evt->event.conn_failed.context=connection->context;
             }
         }
 
@@ -3089,6 +3264,7 @@ static void gni_progress_dev(
     gni_progress_connection_request(dev);
     gni_progress_connection_reply(dev);
     gni_reap_send(dev);
+//  gni_reap_recv(dev);
 
     FAIL:
     CCI_EXIT;

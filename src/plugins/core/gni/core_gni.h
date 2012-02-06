@@ -53,8 +53,7 @@ BEGIN_C_DECLS
 #define   GNI_MAX_EP_ID       (GNI_BLOCK_SIZE * GNI_NUM_BLOCKS)
 #define   GNI_EP_BITS         (32)
 #define   GNI_EP_SHIFT        (32)
-//#define   GNI_PROG_TIME_US    (1000)         // progress delay micro-sec
-#define   GNI_PROG_TIME_US    (100000)       // progress delay micro-sec
+#define   GNI_PROG_TIME_US    (10000)        // progress delay micro-sec
 
 #define   GNI_EP_MATCH        ((uint64_t)0)
 #define   GNI_EP_IGNORE       (~((uint64_t)0))
@@ -171,7 +170,7 @@ typedef enum gni_conn_status {
     GNI_CONN_PENDING_REPLY,
     GNI_CONN_ACCEPTED,
     GNI_CONN_REJECTED,
-    GNI_CONN_TIMEDOUT,
+    GNI_CONN_FAILED,
     GNI_CONN_DISCONNECTED
 }                               gni_conn_status_t;
 
@@ -193,16 +192,6 @@ typedef struct gni_tx {
     TAILQ_ENTRY(gni_tx)         qentry;      // Hangs on ep->tx_queue
 }                               gni_tx_t;
 
-typedef struct gni_rhd {
-    uint64_t                    rma_hndl;
-    TAILQ_ENTRY(gni_rhd)        entry;       // Hangs on gep->rma_hndls
-}                               gni_rma_hndl_t;
-
-typedef struct gni_rop {
-    uint64_t                    rma_op;
-    TAILQ_ENTRY(gni_rop)        entry;       // Hangs on gep->rma_ops
-}                               gni_rma_op_t;
-
 typedef struct gni_mailbox {
     uint32_t                    NIC;         // NIC address of instance
     uint32_t                    INST;        // PID of instance
@@ -215,6 +204,23 @@ typedef struct gni_mailbox {
     }                           info;
 }                               gni_mailbox_t;
 
+typedef struct gni_rhd {
+
+    cci__ep_t *                 ep;          // Owning endpoint
+    void *                      start;       // app memory address
+    uint64_t                    length;      // max RMA transfer
+    gni_mem_handle_t            mem_hndl;    // GNI memory handle
+    void *                      vmd;         // GNI VMD
+    uint64_t                    vmd_length;
+    TAILQ_ENTRY(gni_rhd)        entry;       // 
+    uint32_t                    refcnt;      // Reference count
+}                               gni_rma_hndl_t;
+
+typedef struct gni_rop {
+    uint64_t                    rma_op;
+    TAILQ_ENTRY(gni_rop)        entry;       // Hangs on gep->rma_ops
+}                               gni_rma_op_t;
+
 typedef struct gni__conn {
 
     cci__conn_t *               conn;        // point back to container
@@ -223,25 +229,28 @@ typedef struct gni__conn {
     struct sockaddr_in          sin;
     gni_conn_status_t           status;      // status of connection
     uint32_t                    credits;     // tracking send credits
-    uint32_t                    inuse;       // token for lockout
-    int32_t                     vmd_index;   // VMD option(s)
-    uint64_t                    vmd_flags;   // VMD flag(s)
+    uint32_t                    in_use;      // token for lockout
     gni_cq_handle_t             src_cq_hndl; // Local CQ handle
     gni_cq_handle_t             dst_cq_hndl; // Destination CQ handle
     gni_mailbox_t               src_box;     // Local SMSG mailbox
     gni_ep_handle_t             ep_hndl;     // GNI ep handle
     gni_mailbox_t               dst_box;     // Destination SMSG mailbox
-    TAILQ_ENTRY(gni__conn)       entry;
+    TAILQ_ENTRY(gni__conn)      entry;
 }                               gni__conn_t;
 
 typedef struct gni__ep {
 
     uint32_t                    id;          // id for multiplexing
     int32_t                     sd;          // request sd
-    int32_t                     in_use;      // to serialize get_event
+    int32_t                     rx_used;     // to serialize get_event
+    int32_t                     tx_used;     // to serialize get_event
     void *                      rxbuf;       // Large buffer for rx's
     void *                      txbuf;       // Large buffer for tx's
     gni_mailbox_t *             dst_box;     // Incoming mailbox request
+    int32_t                     vmd_index;   // VMD option(s)
+    uint64_t                    vmd_flags;   // VMD flag(s)
+    gni_cq_handle_t             src_cq_hndl; // Local RM CQ handle
+    gni_cq_handle_t             dst_cq_hndl; // Destination RM CQ handle
     TAILQ_HEAD(g_rxa, gni_rx)   rx_all;      // List of all rx's
     TAILQ_HEAD(g_rx, gni_rx)    rx;          // List of available rx's
     TAILQ_HEAD(g_txa, gni_tx)   tx_all;      // List of all tx's
