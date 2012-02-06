@@ -152,7 +152,7 @@ poll_events(void)
             break;
         }
         case CCI_EVENT_CONNECT_ACCEPTED:
-        case CCI_EVENT_CONNECT_TIMEDOUT:
+        case CCI_EVENT_CONNECT_FAILED:
         case CCI_EVENT_CONNECT_REJECTED:
             if (!is_server) {
                 connect_done = 1;

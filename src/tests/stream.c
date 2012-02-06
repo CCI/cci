@@ -157,7 +157,7 @@ static void poll_events(void)
 			connection = event->accepted.connection;
 		}
 		break;
-	case CCI_EVENT_CONNECT_TIMEDOUT:
+	case CCI_EVENT_CONNECT_FAILED:
 	case CCI_EVENT_CONNECT_REJECTED:
 		if (!is_server) {
 			connect_done = 1;
