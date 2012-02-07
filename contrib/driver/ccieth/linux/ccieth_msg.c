@@ -14,7 +14,7 @@
 int
 ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 {
-	struct sk_buff *skb;
+	struct sk_buff *skb, *skb2;
 	struct net_device *ifp;
 	struct ccieth_pkt_header_msg *hdr;
 	struct ccieth_connection *conn;
@@ -30,6 +30,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	skblen = sizeof(*hdr) + arg->msg_len;
 	if (skblen < ETH_ZLEN)
 		skblen = ETH_ZLEN;
+	/* FIXME: user-space should tell us whether a clone is needed, and we'll check that once we'll have the connection */
 	/* allocate a clonable skbuff, even if it may not be useful for UU, but we don't have the connection yet */
 	skb = alloc_skb_fclone(skblen, GFP_KERNEL);
 	if (!skb)
@@ -38,12 +39,16 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	skb_reset_network_header(skb);
 	skb->protocol = __constant_htons(ETH_P_CCI);
 	skb_put(skb, skblen);
+	skb2 = skb_clone(skb, GFP_KERNEL);
+	if (!skb2)
+		goto out_with_skb;
+
 	/* copy data while not holding RCU read lock yet */
 	hdr = (struct ccieth_pkt_header_msg *) skb_mac_header(skb);
 	err = copy_from_user(&hdr->msg, (const void __user *)(uintptr_t) arg->msg_ptr, arg->msg_len);
 	if (err) {
 		err = -EFAULT;
-		goto out_with_skb;
+		goto out_with_skb2;
 	}
 
 	rcu_read_lock();
@@ -54,7 +59,6 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		err = -ENODEV;
 		goto out_with_rculock;
 	}
-	skb->dev = ifp;
 
 	/* find connection */
 	conn = idr_find(&ep->connection_idr, arg->conn_id);
@@ -89,21 +93,27 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	hdr->conn_seqnum = htonl(conn->req_seqnum);
 	hdr->msg_len = htonl(arg->msg_len);
 
+	/* FIXME: implement flags */
+
+
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
 		struct ccieth_msg_skb_cb *scb = CCIETH_MSG_SKB_CB(skb);
 		__u32 seqnum = atomic_inc_return(&conn->next_send_seqnum);
 		hdr->msg_seqnum = htonl(seqnum);
 		BUILD_BUG_ON(sizeof(*scb) > sizeof(skb->cb));
-		scb->seqnum = seqnum;	
+		scb->seqnum = seqnum;
+		skb2->dev = ifp;
+		dev_queue_xmit(skb2);
+		skb_queue_tail(&conn->resend_queue, skb);
+		dprintk("need to resend MSG skb %p\n", skb);
 	} else {
 #ifdef CCIETH_DEBUG
 		hdr->msg_seqnum = htonl(-1);
 #endif
+		skb->dev = ifp;
+		dev_queue_xmit(skb);
+		dev_kfree_skb(skb2); /* FIXME: not needed with user-space hints */
 	}
-
-	/* FIXME: implement flags */
-
-	dev_queue_xmit(skb);
 
 	/* finalize and notify the event */
 	event->event.send.status = 0;
@@ -116,6 +126,8 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 out_with_rculock:
 	rcu_read_unlock();
+out_with_skb2:
+	kfree_skb(skb2);
 out_with_skb:
 	kfree_skb(skb);
 out:
@@ -295,6 +307,8 @@ ccieth_recv_msg_ack(struct net_device *ifp, struct sk_buff *skb)
 	struct ccieth_pkt_header_msg_ack _hdr, *hdr;
 	struct ccieth_endpoint *ep;
 	struct ccieth_connection *conn;
+	unsigned long irqflags;
+	struct sk_buff *sskb;
 	__u32 dst_ep_id;
 	__u32 dst_conn_id;
 	__u32 acked_seqnum;
@@ -323,10 +337,21 @@ ccieth_recv_msg_ack(struct net_device *ifp, struct sk_buff *skb)
 	/* find the connection */
 	err = -EINVAL;
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
-	if (!conn)
+	if (!conn || !(conn->flags & CCIETH_CONN_FLAG_RELIABLE))
 		goto out_with_rculock;
 
-	/* TODO */
+	/* FIXME: use our own skb->prev/next list instead of hacking skb_queue */
+	spin_lock_irqsave(&conn->resend_queue.lock, irqflags);
+	sskb = ((struct sk_buff *) &conn->resend_queue)->next;
+	while (sskb != (struct sk_buff *) &conn->resend_queue) {
+		struct ccieth_msg_skb_cb *scb = CCIETH_MSG_SKB_CB(sskb);
+		if (scb->seqnum == acked_seqnum) {
+			__skb_unlink(sskb, &conn->resend_queue);
+			printk("no need to resend MSG skb %p anymore\n", sskb);
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&conn->resend_queue.lock, irqflags);
 
 	rcu_read_unlock();
 

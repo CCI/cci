@@ -120,6 +120,7 @@ struct ccieth_connection {
 
 	/* only if CCIETH_CONN_FLAG_RELIABLE */
 	atomic_t next_send_seqnum; /* FIXME: make sure it reaches U32MAX? for portability ? */
+	struct sk_buff_head resend_queue;
 	/* delaying acking */
 	__u32 msg_ack_seqnum;
 	struct work_struct msg_ack_work;
