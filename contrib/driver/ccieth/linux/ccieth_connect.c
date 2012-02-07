@@ -77,8 +77,11 @@ ccieth_conn_attr_init(struct ccieth_connection *conn, int attribute)
 
 	conn->flags = flags;
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
-		atomic_set(&conn->next_send_seqnum, jiffies);
-		skb_queue_head_init(&conn->resend_queue);
+		/* send side */
+		spin_lock_init(&conn->send_lock);
+		conn->send_next_seqnum = jiffies;
+		conn->send_queue_first = conn->send_queue_last = NULL;
+		/* recv side */
 		INIT_WORK(&conn->msg_ack_work, ccieth_msg_ack_workfunc);
 	}
 	if (conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG)
@@ -90,8 +93,14 @@ ccieth_conn_attr_free(struct ccieth_connection *conn)
 {
 	if (conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG)
 		skb_queue_purge(&conn->deferred_msg_recv_queue);
-	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE)
-		skb_queue_purge(&conn->resend_queue);
+	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
+		struct sk_buff *nskb, *skb = conn->send_queue_first;
+		while (skb) {
+			nskb = skb->next;
+			kfree_skb(skb);
+			skb = nskb;
+		}
+	}
 }
 
 /*

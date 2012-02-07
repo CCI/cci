@@ -119,9 +119,11 @@ struct ccieth_connection {
 	struct sk_buff_head deferred_msg_recv_queue;
 
 	/* only if CCIETH_CONN_FLAG_RELIABLE */
-	atomic_t next_send_seqnum; /* FIXME: make sure it reaches U32MAX? for portability ? */
-	struct sk_buff_head resend_queue;
-	/* delaying acking */
+	/* send-side reliability */
+	spinlock_t send_lock;
+	__u32 send_next_seqnum;
+	struct sk_buff *send_queue_first, *send_queue_last;
+	/* recv-side reliability */
 	__u32 msg_ack_seqnum;
 	struct work_struct msg_ack_work;
 

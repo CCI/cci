@@ -106,14 +106,27 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
 		struct ccieth_msg_skb_cb *scb = CCIETH_MSG_SKB_CB(skb);
-		__u32 seqnum = atomic_inc_return(&conn->next_send_seqnum);
-		hdr->msg_seqnum = htonl(seqnum);
+		__u32 seqnum;
 		BUILD_BUG_ON(sizeof(*scb) > sizeof(skb->cb));
+
+		spin_lock_bh(&conn->send_lock);
+		seqnum = conn->send_next_seqnum++;
+		hdr->msg_seqnum = htonl(seqnum);
 		scb->seqnum = seqnum;
+		if (conn->send_queue_last) {
+			conn->send_queue_last->next = skb;
+			skb->prev = conn->send_queue_last;
+		} else {
+			conn->send_queue_first = skb;
+			skb->prev = NULL;
+		}
+		conn->send_queue_last = skb;
+		skb->next = NULL;
+		dprintk("need to resend MSG skb %p\n", skb);
+		spin_unlock_bh(&conn->send_lock);
+
 		skb2->dev = ifp;
 		dev_queue_xmit(skb2);
-		skb_queue_tail(&conn->resend_queue, skb);
-		dprintk("need to resend MSG skb %p\n", skb);
 	} else {
 #ifdef CCIETH_DEBUG
 		hdr->msg_seqnum = htonl(-1);
@@ -314,8 +327,7 @@ ccieth_recv_msg_ack(struct net_device *ifp, struct sk_buff *skb)
 	struct ccieth_pkt_header_msg_ack _hdr, *hdr;
 	struct ccieth_endpoint *ep;
 	struct ccieth_connection *conn;
-	unsigned long irqflags;
-	struct sk_buff *sskb;
+	struct sk_buff *sskb, *nsskb;
 	__u32 dst_ep_id;
 	__u32 dst_conn_id;
 	__u32 acked_seqnum;
@@ -347,18 +359,27 @@ ccieth_recv_msg_ack(struct net_device *ifp, struct sk_buff *skb)
 	if (!conn || !(conn->flags & CCIETH_CONN_FLAG_RELIABLE))
 		goto out_with_rculock;
 
-	/* FIXME: use our own skb->prev/next list instead of hacking skb_queue */
-	spin_lock_irqsave(&conn->resend_queue.lock, irqflags);
-	sskb = ((struct sk_buff *) &conn->resend_queue)->next;
-	while (sskb != (struct sk_buff *) &conn->resend_queue) {
+	spin_lock_bh(&conn->send_lock);
+	sskb = conn->send_queue_first;
+	while (sskb != NULL) {
 		struct ccieth_msg_skb_cb *scb = CCIETH_MSG_SKB_CB(sskb);
+		nsskb = sskb->next;
 		if (scb->seqnum == acked_seqnum) {
-			__skb_unlink(sskb, &conn->resend_queue);
+			if (sskb == conn->send_queue_first)
+				conn->send_queue_first = nsskb;
+			else
+				sskb->prev->next = nsskb;
+			if (sskb == conn->send_queue_last)
+				conn->send_queue_last = sskb->prev;
+			else
+				sskb->next->prev = sskb->prev;
+			kfree_skb(sskb);
 			printk("no need to resend MSG skb %p anymore\n", sskb);
 			break;
 		}
+		sskb = nsskb;
 	}
-	spin_unlock_irqrestore(&conn->resend_queue.lock, irqflags);
+	spin_unlock_bh(&conn->send_lock);
 
 	rcu_read_unlock();
 
