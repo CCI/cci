@@ -551,12 +551,12 @@ typedef int cci_os_handle_t;
   times locally without affecting any remote resources.
 
   If it is desirable to bind the CCI endpoint to a specific set of
-  resources (e.g., a NUMA node), you should bind the calling thread
-  before calling cci_create_endpoint().
+  resources (e.g., a NUMA node), the application should bind the calling
+  thread before calling cci_create_endpoint().
 
-  Advice to users: if you want to set the send/receive buffer count
-  on the endpoint, call cci_set|get_opt() after creating the
-  endpoint.
+  Advice to users: to set the send/receive buffer count on the endpoint,
+  call cci_set|get_opt() after creating the endpoint with the applicable
+  options.
 
   \ingroup endpoints
 */
@@ -1136,9 +1136,6 @@ typedef union cci_event {
    Windows, so we have a function for that.  Since we are not Windows
    gurus, we decided to freeze it until we ask a pro about it.
 
-  \todo JMS What about blocking for incoming connection requests on
-   the cci_service_t?  That returns an OS handle, too.x
-
   \ingroup events
 */
 CCI_DECLSPEC int cci_arm_os_handle(cci_endpoint_t *endpoint, int flags);
@@ -1147,14 +1144,21 @@ CCI_DECLSPEC int cci_arm_os_handle(cci_endpoint_t *endpoint, int flags);
   Get the next available CCI event.
 
   This function never blocks; it polls instantly to see if there is
-  any pending event of any type (send completion, receive, or other
-  events -- errors, incoming connection requests, etc.).  If you want to
-  block, use the OS handle to use your OS's native blocking mechanism
-  (e.g., select/poll on the POSIX fd).  This also allows the app to
-  busy poll for a while and then OS block if nothing interesting is
-  happening.  The default OS handle returned when creating the
-  endpoint will return the equivalent of a POLL_IN when any event is
-  available.
+  any pending event of any type (send completion, receive, connection
+  request, etc.). If the application wants to block, it should pass the
+  OS handle to the OS's native blocking mechanism (e.g., select/poll on
+  the POSIX fd).  This also allows the app to busy poll for a while and
+  then OS block if nothing interesting is happening.  The behavior of
+  the OS handle when used with the OS blocking mechanism is to return
+  the equivalent of a POLLIN which indicates that the application should
+  call cci_get_event(). It does not, however, guarantee that
+  cci_get_event() will return something other than CCI_EAGAIN. For
+  example, the application has two threads: one blocking on the OS
+  handle and another calling cci_get_event(). By the time the blocking
+  thread wakes and calls cci_get_event(), the other thread may have
+  already reaped all the queued events. Note, the application must never
+  directly read from or write to the OS handle. The results are
+  undefined.
 
   This function borrows the buffer associated with the event; it must
   be explicitly returned later via cci_return_event().
@@ -1164,6 +1168,9 @@ CCI_DECLSPEC int cci_arm_os_handle(cci_endpoint_t *endpoint, int flags);
 
   \return CCI_SUCCESS   An event was retrieved.
   \return CCI_EAGAIN    No event is available.
+  \return CCI_ENOBUFS	No event is available and there are no available
+                        receive buffers. The application must return events
+			before any more messages can be received.
   \return Each driver may have additional error codes.
 
    To discuss:
