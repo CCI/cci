@@ -106,7 +106,6 @@ struct ccieth_connection {
 	struct ccieth_endpoint *ep;
 	int need_ack;
 
-	__u8 attribute;
 	__u32 req_seqnum;
 	__u32 max_send_size;
 	__u64 user_conn_id;

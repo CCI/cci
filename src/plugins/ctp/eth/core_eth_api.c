@@ -836,6 +836,7 @@ static int eth_connect(cci_endpoint_t *endpoint, char *server_uri,
 	econn = (void*) (_conn+1);
 	_conn->priv = econn;
 	_conn->connection.endpoint = endpoint;
+	_conn->connection.attribute = attribute;
 	_conn->connection.context = context;
 
 	arg.data_len = data_len;
@@ -951,14 +952,12 @@ static int eth_get_event(cci_endpoint_t *endpoint,
 		eth__conn_t *econn;
 
 		CCIETH_VALGRIND_MEMORY_MAKE_READABLE(&ge->connect_accepted.conn_id, sizeof(ge->connect_accepted.conn_id));
-		CCIETH_VALGRIND_MEMORY_MAKE_READABLE(&ge->connect_accepted.attribute, sizeof(ge->connect_accepted.attribute));
-		CCIETH_VALGRIND_MEMORY_MAKE_READABLE(&ge->connect_accepted.user_conn_id, sizeof(ge->connect_accepted.user_conn_id));
 		CCIETH_VALGRIND_MEMORY_MAKE_READABLE(&ge->connect_accepted.max_send_size, sizeof(ge->connect_accepted.max_send_size));
+		CCIETH_VALGRIND_MEMORY_MAKE_READABLE(&ge->connect_accepted.user_conn_id, sizeof(ge->connect_accepted.user_conn_id));
 		_conn = (void*)(uintptr_t) ge->connect_accepted.user_conn_id;
 		econn = (void*) (_conn+1);
 		econn->id = ge->connect_accepted.conn_id;
 		_conn->connection.max_send_size = ge->connect_accepted.max_send_size;
-		_conn->connection.attribute = ge->connect_accepted.attribute;
 
 		event->type = CCI_EVENT_CONNECT_ACCEPTED;
 		event->accepted.context = _conn->connection.context;

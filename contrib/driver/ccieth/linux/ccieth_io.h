@@ -67,13 +67,10 @@ struct ccieth_ioctl_get_event {
 		} connect_request;
 		struct {
 			__u32 conn_id;
-			__u32 attribute;
+			__u32 max_send_size;
 			/* 16 */
 			__u64 user_conn_id;
 			/* 24 */
-			__u32 max_send_size;
-			__u32 pad1;
-			/* 32 */
 		} connect_accepted;
 		struct {
 			__u64 user_conn_id;

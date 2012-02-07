@@ -75,7 +75,6 @@ ccieth_conn_attr_init(struct ccieth_connection *conn, int attribute)
 		BUG();
 	}
 
-	conn->attribute = attribute;
 	conn->flags = flags;
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
 		atomic_set(&conn->next_send_seqnum, jiffies);
@@ -699,7 +698,6 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	conn->max_send_size = max_send_size;
 
 	/* finalize and notify the event */
-	event->event.connect_accepted.attribute = conn->attribute;
 	event->event.connect_accepted.max_send_size = max_send_size;
 	event->event.connect_accepted.user_conn_id = conn->user_conn_id;
 
