@@ -87,8 +87,19 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	hdr->dst_ep_id = htonl(conn->dest_eid);
 	hdr->dst_conn_id = htonl(conn->dest_id);
 	hdr->conn_seqnum = htonl(conn->req_seqnum);
-	conn->set_next_send_seqnum(conn, skb, hdr);
 	hdr->msg_len = htonl(arg->msg_len);
+
+	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
+		struct ccieth_msg_skb_cb *scb = CCIETH_MSG_SKB_CB(skb);
+		__u32 seqnum = atomic_inc_return(&conn->next_send_seqnum);
+		hdr->msg_seqnum = htonl(seqnum);
+		BUILD_BUG_ON(sizeof(*scb) > sizeof(skb->cb));
+		scb->seqnum = seqnum;	
+	} else {
+#ifdef CCIETH_DEBUG
+		hdr->msg_seqnum = htonl(-1);
+#endif
+	}
 
 	/* FIXME: implement flags */
 
@@ -147,7 +158,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock_bh(&ep->event_list_lock);
 
-	if (conn->attribute != CCIETH_CONNECT_ATTR_UU) {
+	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
 		/* FIXME: bitmap */
 		conn->msg_ack_seqnum = msg_seqnum;
 		/* FIXME: delayed in most cases, use timers */
@@ -209,7 +220,7 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 	if (conn->status == CCIETH_CONNECTION_READY) {
 		err = ccieth__recv_msg(ep, conn, hdr, skb);
 	} else if (conn->status == CCIETH_CONNECTION_REQUESTED
-		   && conn->attribute == CCIETH_CONNECT_ATTR_UU) {
+		   && (conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG)) {
 		ccieth_conn_uu_defer_recv_msg(conn, skb);
 		err = 0;
 		/* UU doesn't need ack */

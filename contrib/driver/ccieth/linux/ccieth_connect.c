@@ -18,6 +18,10 @@ ccieth_connect_ack_from_endpoint(struct ccieth_endpoint *ep, __u32 src_conn_id,
 				 __u32 req_seqnum,
 				 __u8 ack_status);
 
+/*
+ * Connection attribute-specific function
+ */
+
 void
 ccieth_msg_ack_workfunc(struct work_struct *work)
 {
@@ -26,73 +30,12 @@ ccieth_msg_ack_workfunc(struct work_struct *work)
 	ccieth_msg_ack(conn);
 }
 
-/* FIXME: factorize identical callbacks */
-/* FIXME: filter with flags instead of attribute-specific callback */
-/*
- * RO specific callbacks
- */
-
-static void
-ccieth_conn_ro_set_next_send_seqnum(struct ccieth_connection *conn,
-				    struct sk_buff *skb, struct ccieth_pkt_header_msg *hdr)
-{
-	struct ccieth_msg_skb_cb *scb = CCIETH_MSG_SKB_CB(skb);
-	__u32 seqnum = atomic_inc_return(&conn->ro.next_send_seqnum);
-	hdr->msg_seqnum = htonl(seqnum);
-	BUILD_BUG_ON(sizeof(*scb) > sizeof(skb->cb));
-	scb->seqnum = seqnum;	
-}
-
-static void
-ccieth_conn_ro_free(struct ccieth_connection *conn)
-{
-}
-
-static void
-ccieth_conn_ro_init(struct ccieth_connection *conn)
-{
-	conn->set_next_send_seqnum = ccieth_conn_ro_set_next_send_seqnum;
-	conn->free = ccieth_conn_ro_free;
-	atomic_set(&conn->ro.next_send_seqnum, jiffies);
-}
-
-/*
- * RU specific callbacks
- */
-
-static void
-ccieth_conn_ru_set_next_send_seqnum(struct ccieth_connection *conn,
-				    struct sk_buff *skb, struct ccieth_pkt_header_msg *hdr)
-{
-	struct ccieth_msg_skb_cb *scb = CCIETH_MSG_SKB_CB(skb);
-	__u32 seqnum = atomic_inc_return(&conn->ro.next_send_seqnum);
-	hdr->msg_seqnum = htonl(seqnum);
-	scb->seqnum = seqnum;	
-}
-
-static void
-ccieth_conn_ru_free(struct ccieth_connection *conn)
-{
-}
-
-static void
-ccieth_conn_ru_init(struct ccieth_connection *conn)
-{
-	conn->set_next_send_seqnum = ccieth_conn_ru_set_next_send_seqnum;
-	conn->free = ccieth_conn_ru_free;
-	atomic_set(&conn->ru.next_send_seqnum, jiffies);
-}
-
-/*
- * UU specific callbacks
- */
-
 static void
 ccieth_conn_uu_recv_deferred_msgs(struct ccieth_connection *conn)
 {
 	struct sk_buff *skb;
-	BUG_ON(conn->attribute != CCIETH_CONNECT_ATTR_UU);
-	while ((skb = skb_dequeue(&conn->uu.deferred_msg_recv_queue)) != NULL) {
+	BUG_ON(!(conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG));
+	while ((skb = skb_dequeue(&conn->deferred_msg_recv_queue)) != NULL) {
 		struct ccieth_pkt_header_msg _hdr, *hdr;
 		dprintk("processing deferred msg\n");
 		hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
@@ -105,55 +48,48 @@ void
 ccieth_conn_uu_defer_recv_msg(struct ccieth_connection *conn,
 			      struct sk_buff *skb)
 {
-	BUG_ON(conn->attribute != CCIETH_CONNECT_ATTR_UU);
+	BUG_ON(!(conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG));
 	dprintk("deferring UU msg until accept\n");
-	skb_queue_tail(&conn->uu.deferred_msg_recv_queue, skb);
+	skb_queue_tail(&conn->deferred_msg_recv_queue, skb);
 	if (conn->status == CCIETH_CONNECTION_READY)
 		/* accepted in the meantime, make sure it didn't miss our packet */
 		ccieth_conn_uu_recv_deferred_msgs(conn);
 }
 
 static void
-ccieth_conn_uu_set_next_send_seqnum(struct ccieth_connection *conn,
-				    struct sk_buff *skb, struct ccieth_pkt_header_msg *hdr)
+ccieth_conn_attr_init(struct ccieth_connection *conn, int attribute)
 {
-	hdr->msg_seqnum = htonl(-1); /* debug */
-}
-
-static void
-ccieth_conn_uu_free(struct ccieth_connection *conn)
-{
-	skb_queue_purge(&conn->uu.deferred_msg_recv_queue);
-}
-
-static void
-ccieth_conn_uu_init(struct ccieth_connection *conn)
-{
-	conn->set_next_send_seqnum = ccieth_conn_uu_set_next_send_seqnum;
-	conn->free = ccieth_conn_uu_free;
-	skb_queue_head_init(&conn->uu.deferred_msg_recv_queue);
-}
-
-static void
-ccieth_conn_init(struct ccieth_connection *conn, int attribute)
-{
-	conn->attribute = attribute;
-
-	INIT_WORK(&conn->msg_ack_work, ccieth_msg_ack_workfunc);
+	unsigned long flags;
 
 	switch (attribute) {
 	case CCIETH_CONNECT_ATTR_RO:
-		ccieth_conn_ro_init(conn);
+		flags = CCIETH_CONN_FLAG_RELIABLE | CCIETH_CONN_FLAG_ORDERED;
 		break;
 	case CCIETH_CONNECT_ATTR_RU:
-		ccieth_conn_ru_init(conn);
+		flags = CCIETH_CONN_FLAG_RELIABLE;
 		break;
 	case CCIETH_CONNECT_ATTR_UU:
-		ccieth_conn_uu_init(conn);
+		flags = CCIETH_CONN_FLAG_DEFER_EARLY_MSG;
 		break;
 	default:
 		BUG();
 	}
+
+	conn->attribute = attribute;
+	conn->flags = flags;
+	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
+		atomic_set(&conn->next_send_seqnum, jiffies);
+		INIT_WORK(&conn->msg_ack_work, ccieth_msg_ack_workfunc);
+	}
+	if (conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG)
+		skb_queue_head_init(&conn->deferred_msg_recv_queue);
+}
+
+static void
+ccieth_conn_attr_free(struct ccieth_connection *conn)
+{
+	if (conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG)
+		skb_queue_purge(&conn->deferred_msg_recv_queue);
 }
 
 /*
@@ -165,7 +101,7 @@ ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 {
 	struct ccieth_connection *conn = container_of(rcu_head, struct ccieth_connection, destroy_rcu_head);
 	dprintk("destroying connection %p in rcu call\n", conn);
-	conn->free(conn);
+	ccieth_conn_attr_free(conn);
 	kfree_skb(conn->skb);
 	kfree(conn);
 }
@@ -193,7 +129,8 @@ ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 
 	/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 	del_timer_sync(&conn->timer);
-	cancel_work_sync(&conn->msg_ack_work);
+	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE)
+		cancel_work_sync(&conn->msg_ack_work);
 	/* the caller will destroy the entire idr, no need to remove us from there */
 	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
 
@@ -332,7 +269,7 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 		goto out;
 	conn->embedded_event.event.data_length = 0;
 	conn->embedded_event.destructor = ccieth_connection_event_destructor;
-	ccieth_conn_init(conn, arg->attribute);
+	ccieth_conn_attr_init(conn, arg->attribute);
 
 	/* initialize the timer to make destroy easier */
 	setup_timer(&conn->timer, ccieth_connect_request_timer_hdlr, (unsigned long) conn);
@@ -533,7 +470,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	conn->embedded_event.event.data_length = 0;
 	conn->embedded_event.destructor = ccieth_connection_event_destructor;
 	conn->need_ack = 0;
-	ccieth_conn_init(conn, hdr->attribute);
+	ccieth_conn_attr_init(conn, hdr->attribute);
 
 	/* initialize the timer to make destroy easier */
 	setup_timer(&conn->timer, ccieth_connect_reply_timer_hdlr, (unsigned long) conn);
@@ -771,7 +708,7 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	spin_unlock_bh(&ep->event_list_lock);
 
 	/* handle deferred msgs */
-	if (conn->attribute == CCIETH_CONNECT_ATTR_UU)
+	if (conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG)
 		ccieth_conn_uu_recv_deferred_msgs(conn);
 
 	rcu_read_unlock();

@@ -111,20 +111,16 @@ struct ccieth_connection {
 	__u32 max_send_size;
 	__u64 user_conn_id;
 
-	void (*set_next_send_seqnum)(struct ccieth_connection *, struct sk_buff *skb, struct ccieth_pkt_header_msg *);
-	void (*free)(struct ccieth_connection *);
-	union {
-		struct {
-			atomic_t next_send_seqnum; /* FIXME: make sure it reaches U32MAX? for portability ? */
-		} ro;
-		struct {
-			atomic_t next_send_seqnum;
-		} ru;
-		struct {
-			struct sk_buff_head deferred_msg_recv_queue;
-		} uu;
-	};
+#define CCIETH_CONN_FLAG_RELIABLE (1<<0)
+#define CCIETH_CONN_FLAG_ORDERED (1<<1)
+#define CCIETH_CONN_FLAG_DEFER_EARLY_MSG (1<<2)
+	unsigned long flags;
 
+	/* only if CCIETH_CONN_FLAG_DEFERRED_EARLY_MSG */
+	struct sk_buff_head deferred_msg_recv_queue;
+
+	/* only if CCIETH_CONN_FLAG_RELIABLE */
+	atomic_t next_send_seqnum; /* FIXME: make sure it reaches U32MAX? for portability ? */
 	/* delaying acking */
 	__u32 msg_ack_seqnum;
 	struct work_struct msg_ack_work;
