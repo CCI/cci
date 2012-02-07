@@ -965,10 +965,6 @@ static int ctp_eth_send(cci_connection_t * connection,
 	/* ccieth always copies to kernel sk_buffs */
 	flags &= ~CCI_FLAG_NO_COPY;
 
-	/* FIXME */
-	if (flags & CCI_FLAG_SILENT)
-		return ENOSYS;
-
 	/* make sure API flag match */
 	ETH_BUILD_ASSERT(CCI_FLAG_BLOCKING == CCIETH_FLAG_BLOCKING);
 	ETH_BUILD_ASSERT(CCI_FLAG_SILENT == CCIETH_FLAG_SILENT);

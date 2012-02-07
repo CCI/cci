@@ -16,6 +16,7 @@ check_PROGRAMS = \
 	stream	\
 	register	\
     rma_pipeline \
-	opt
+	opt	\
+	loopback
 
 TESTS =
