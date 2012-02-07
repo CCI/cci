@@ -14,7 +14,7 @@
 int
 ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 {
-	struct sk_buff *skb, *skb2;
+	struct sk_buff *skb, *skb2 = NULL;
 	struct net_device *ifp;
 	struct ccieth_pkt_header_msg *hdr;
 	struct ccieth_connection *conn;
@@ -30,18 +30,22 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	skblen = sizeof(*hdr) + arg->msg_len;
 	if (skblen < ETH_ZLEN)
 		skblen = ETH_ZLEN;
-	/* FIXME: user-space should tell us whether a clone is needed, and we'll check that once we'll have the connection */
-	/* allocate a clonable skbuff, even if it may not be useful for UU, but we don't have the connection yet */
-	skb = alloc_skb_fclone(skblen, GFP_KERNEL);
+	if (arg->internal_flags & CCIETH_MSG_FLAG_RELIABLE)
+		skb = alloc_skb_fclone(skblen, GFP_KERNEL);
+	else
+		skb = alloc_skb(skblen, GFP_KERNEL);
 	if (!skb)
 		goto out;
 	skb_reset_mac_header(skb);
 	skb_reset_network_header(skb);
 	skb->protocol = __constant_htons(ETH_P_CCI);
 	skb_put(skb, skblen);
-	skb2 = skb_clone(skb, GFP_KERNEL);
-	if (!skb2)
-		goto out_with_skb;
+	/* reliable sends need a clone */
+	if (arg->internal_flags & CCIETH_MSG_FLAG_RELIABLE) {
+		skb2 = skb_clone(skb, GFP_KERNEL);
+		if (!skb2)
+			goto out_with_skb;
+	}
 
 	/* copy data while not holding RCU read lock yet */
 	hdr = (struct ccieth_pkt_header_msg *) skb_mac_header(skb);
@@ -63,6 +67,10 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	/* find connection */
 	conn = idr_find(&ep->connection_idr, arg->conn_id);
 	if (!conn || conn->status != CCIETH_CONNECTION_READY)
+		goto out_with_rculock;
+	/* check that the user-space reliable hint was valid */
+	if (!!(arg->internal_flags & CCIETH_MSG_FLAG_RELIABLE)
+	    != !!(conn->flags & CCIETH_CONN_FLAG_RELIABLE))
 		goto out_with_rculock;
 
 	/* get an event */
@@ -112,7 +120,6 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 #endif
 		skb->dev = ifp;
 		dev_queue_xmit(skb);
-		dev_kfree_skb(skb2); /* FIXME: not needed with user-space hints */
 	}
 
 	/* finalize and notify the event */

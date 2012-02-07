@@ -143,8 +143,9 @@ struct ccieth_ioctl_msg {
 	/* 16 */
 	__u64 context;
 	/* 24 */
-	__u32 flags;
-	__u32 pad1;
+	__u32 api_flags;
+#define CCIETH_MSG_FLAG_RELIABLE (1<<0)
+	__u32 internal_flags;
 	/* 32 */
 };
 #define CCIETH_IOCTL_MSG _IOR(CCIETH_IOCTL_MAGIC, 0x8, struct ccieth_ioctl_msg)

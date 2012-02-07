@@ -1044,7 +1044,10 @@ static int eth_send(cci_connection_t *connection,
 	arg.msg_ptr = (uintptr_t) msg_ptr;
 	arg.msg_len = msg_len;
 	arg.context = (uintptr_t) context;
-	arg.flags = flags;
+	arg.api_flags = flags;
+	arg.internal_flags = 0;
+	if (connection->attribute != CCI_CONN_ATTR_UU)
+		arg.internal_flags |= CCIETH_MSG_FLAG_RELIABLE;
 
 	ret = ioctl(eep->fd, CCIETH_IOCTL_MSG, &arg);
 	if (ret < 0) {
