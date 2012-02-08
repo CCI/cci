@@ -44,7 +44,7 @@ union ccieth_pkt_header {
 		__u8 attribute;
 		/* 16 */
 		__be32 dst_ep_id;
-		__be32 max_send_size;
+		__be32 pad2_no_dst_conn_id; /* dst_conn_id N/A yet */
 		/* 24 */
 		__be32 src_ep_id;
 		__be32 src_conn_id;
@@ -52,6 +52,9 @@ union ccieth_pkt_header {
 		__be32 req_seqnum;
 		__be32 data_len;
 		/* 40 */
+		__be32 first_seqnum;
+		__be32 max_send_size;
+		/* 48 */
 		__u8 data[0];
 	} connect_request;
 	struct ccieth_pkt_header_connect_accept {
@@ -66,8 +69,11 @@ union ccieth_pkt_header {
 		__be32 src_conn_id;
 		/* 32 */
 		__be32 req_seqnum;
-		__be32 max_send_size;
+		__be32 pad2;
 		/* 40 */
+		__be32 first_seqnum;
+		__be32 max_send_size;
+		/* 48 */
 	} connect_accept;
 	struct ccieth_pkt_header_connect_reject {
 		struct ethhdr eth;

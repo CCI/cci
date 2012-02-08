@@ -192,7 +192,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
 		/* FIXME: bitmap */
-		conn->msg_ack_seqnum = msg_seqnum;
+		conn->recv_last_full_seqnum = msg_seqnum;
 		/* FIXME: delayed in most cases, use timers */
 		schedule_work(&conn->msg_ack_work);
 	}
@@ -300,7 +300,7 @@ ccieth_msg_ack(struct ccieth_connection *conn)
 	hdr->dst_ep_id = htonl(conn->dest_eid);
 	hdr->dst_conn_id = htonl(conn->dest_id);
 	hdr->conn_seqnum = htonl(conn->req_seqnum);
-	hdr->acked_seqnum = htonl(conn->msg_ack_seqnum);
+	hdr->acked_seqnum = htonl(conn->recv_last_full_seqnum);
 
 	rcu_read_lock();
 	/* is the interface still available? */

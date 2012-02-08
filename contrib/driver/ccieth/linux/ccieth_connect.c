@@ -326,6 +326,7 @@ retry:
 	hdr->src_ep_id = htonl(ep->id);
 	hdr->max_send_size = htonl(ep->max_send_size);
 	hdr->req_seqnum = htonl(req_seqnum);
+	hdr->first_seqnum = htonl(conn->send_next_seqnum);
 	hdr->data_len = htonl(arg->data_len);
 	err = copy_from_user(&hdr->data, (const void __user *)(uintptr_t) arg->data_ptr, arg->data_len);
 	if (err) {
@@ -419,6 +420,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	__u32 data_len;
 	__u32 src_max_send_size;
 	__u32 req_seqnum;
+	__u32 first_seqnum;
 	struct sk_buff *replyskb;
 	size_t replyskblen;
 	int need_ack = 0;
@@ -446,6 +448,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	data_len = ntohl(hdr->data_len);
 	src_max_send_size = ntohl(hdr->max_send_size);
 	req_seqnum = ntohl(hdr->req_seqnum);
+	first_seqnum = ntohl(hdr->first_seqnum);
 
 	dprintk("got conn request from eid %d conn id %d seqnum %d\n",
 		src_ep_id, src_conn_id, req_seqnum);
@@ -507,6 +510,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	conn->dest_eid = src_ep_id;
 	conn->dest_id = src_conn_id;
 	conn->req_seqnum = req_seqnum;
+	conn->recv_last_full_seqnum = first_seqnum-1;
 
 	/* get a connection id (only reserve it for now) */
 retry:
@@ -608,6 +612,7 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	hdr->src_conn_id = htonl(conn->id);
 	hdr->max_send_size = htonl(conn->max_send_size);
 	hdr->req_seqnum = htonl(conn->req_seqnum);
+	hdr->first_seqnum = htonl(conn->send_next_seqnum);
 
 	/* setup resend or timeout timer */
 	conn->need_ack = 1;
@@ -652,6 +657,7 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	__u32 dst_ep_id;
 	__u32 max_send_size;
 	__u32 req_seqnum;
+	__u32 first_seqnum;
 	int need_ack = 0;
 	enum ccieth_pkt_ack_status ack_status = CCIETH_PKT_ACK_SUCCESS;
 	int err;
@@ -664,6 +670,7 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	dst_ep_id = ntohl(hdr->dst_ep_id);
 	max_send_size = ntohl(hdr->max_send_size);
 	req_seqnum = ntohl(hdr->req_seqnum);
+	first_seqnum = ntohl(hdr->first_seqnum);
 
 	dprintk("got conn accept from eid %d conn id %d seqnum %d to %d %d\n",
 		src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
@@ -708,6 +715,7 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	/* setup connection */
 	conn->dest_id = src_conn_id;
 	conn->max_send_size = max_send_size;
+	conn->recv_last_full_seqnum = first_seqnum-1;
 
 	/* finalize and notify the event */
 	event->event.connect_accepted.max_send_size = max_send_size;
