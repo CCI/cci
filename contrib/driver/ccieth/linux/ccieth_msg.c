@@ -11,6 +11,32 @@
 #include <ccieth_common.h>
 #include <ccieth_wire.h>
 
+static void
+ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum)
+{
+	struct sk_buff *skb, *nskb;
+	spin_lock_bh(&conn->send_lock);
+	skb = conn->send_queue_first;
+	while (skb != NULL) {
+		struct ccieth_msg_skb_cb *scb = CCIETH_MSG_SKB_CB(skb);
+		nskb = skb->next;
+		if (scb->seqnum <= acked_seqnum) {
+			if (skb == conn->send_queue_first)
+				conn->send_queue_first = nskb;
+			else
+				skb->prev->next = nskb;
+			if (skb == conn->send_queue_last)
+				conn->send_queue_last = skb->prev;
+			else
+				skb->next->prev = skb->prev;
+			kfree_skb(skb);
+			dprintk("no need to resend MSG skb %p anymore\n", skb);
+		}
+		skb = nskb;
+	}
+	spin_unlock_bh(&conn->send_lock);
+}
+
 int
 ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 {
@@ -125,6 +151,11 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		dprintk("need to resend MSG skb %p\n", skb);
 		spin_unlock_bh(&conn->send_lock);
 
+		spin_lock_bh(&conn->recv_lock);
+		hdr->acked_seqnum = htonl(conn->recv_last_full_seqnum);
+		conn->recv_needack = 0;
+		spin_unlock_bh(&conn->recv_lock);
+
 		skb2->dev = ifp;
 		dev_queue_xmit(skb2);
 	} else {
@@ -190,6 +221,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 		/* reliable, look for obsolete, duplicates, ... */
 		__u32 relseqnum;
 		int relfull;
+
 		spin_lock_bh(&conn->recv_lock);
 		dprintk("got %d while we have %d+%lx\n",
 			msg_seqnum, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
@@ -214,8 +246,12 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 				  jiffies + CCIETH_DEFERRED_MSG_ACK_DELAY);
 		}
 		spin_unlock_bh(&conn->recv_lock);
+
+		/* piggyback acks */
+		ccieth_conn_handle_ack(conn, ntohl(hdr->acked_seqnum));
 	}
 
+	/* FIXME: deliver the event before doing all the reliability thing ? */
 	spin_lock_bh(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock_bh(&ep->event_list_lock);
@@ -224,6 +260,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 	return 0;
 
 out_with_recv_lock:
+	ccieth_conn_handle_ack(conn, ntohl(hdr->acked_seqnum));
 	spin_unlock_bh(&conn->recv_lock);
 	spin_lock_bh(&ep->free_event_list_lock);
 	list_add_tail(&event->list, &ep->free_event_list);
@@ -368,7 +405,6 @@ ccieth_recv_msg_ack(struct net_device *ifp, struct sk_buff *skb)
 	struct ccieth_pkt_header_msg_ack _hdr, *hdr;
 	struct ccieth_endpoint *ep;
 	struct ccieth_connection *conn;
-	struct sk_buff *sskb, *nsskb;
 	__u32 dst_ep_id;
 	__u32 dst_conn_id;
 	__u32 acked_seqnum;
@@ -400,26 +436,7 @@ ccieth_recv_msg_ack(struct net_device *ifp, struct sk_buff *skb)
 	if (!conn || !(conn->flags & CCIETH_CONN_FLAG_RELIABLE))
 		goto out_with_rculock;
 
-	spin_lock_bh(&conn->send_lock);
-	sskb = conn->send_queue_first;
-	while (sskb != NULL) {
-		struct ccieth_msg_skb_cb *scb = CCIETH_MSG_SKB_CB(sskb);
-		nsskb = sskb->next;
-		if (scb->seqnum <= acked_seqnum) {
-			if (sskb == conn->send_queue_first)
-				conn->send_queue_first = nsskb;
-			else
-				sskb->prev->next = nsskb;
-			if (sskb == conn->send_queue_last)
-				conn->send_queue_last = sskb->prev;
-			else
-				sskb->next->prev = sskb->prev;
-			kfree_skb(sskb);
-			dprintk("no need to resend MSG skb %p anymore\n", sskb);
-		}
-		sskb = nsskb;
-	}
-	spin_unlock_bh(&conn->send_lock);
+	ccieth_conn_handle_ack(conn, acked_seqnum);
 
 	rcu_read_unlock();
 

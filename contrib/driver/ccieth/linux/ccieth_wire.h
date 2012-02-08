@@ -116,7 +116,9 @@ union ccieth_pkt_header {
 		__be32 conn_seqnum;
 		__be32 msg_seqnum;
 		/* 32 */
+		__be32 acked_seqnum;
 		__be32 msg_len;
+		/* 40 */
 		__u8 msg[0];
 	} msg;
 	struct ccieth_pkt_header_msg_ack {
