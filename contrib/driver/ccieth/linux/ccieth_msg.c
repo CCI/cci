@@ -186,20 +186,45 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 	/* finalize and notify the event */
 	event->event.recv.user_conn_id = conn->user_conn_id;
 
+	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
+		/* reliable, look for obsolete, duplicates, ... */
+		__u32 relseqnum;
+		int relfull;
+		spin_lock_bh(&conn->recv_lock);
+		dprintk("got %d while we have %d+%lx\n",
+			msg_seqnum, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
+		relseqnum = msg_seqnum - conn->recv_last_full_seqnum - 1;
+		if (relseqnum > CCIETH_CONN_RECV_BITMAP_BITS)
+			/* way in advance (or very old), drop */
+			goto out_with_recv_lock;
+		if (conn->recv_next_bitmap & (1ULL << relseqnum))
+			/* duplicate, ignore */
+			goto out_with_recv_lock;
+		conn->recv_next_bitmap |= 1ULL << relseqnum;
+		/* how many new fully received packets? */
+		relfull = find_first_zero_bit(&conn->recv_next_bitmap, CCIETH_CONN_RECV_BITMAP_BITS);
+		conn->recv_next_bitmap >>= relfull;
+		conn->recv_last_full_seqnum += relfull;
+		dprintk("found %d new fully received, now have %d+%lx\n",
+			relfull, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
+		if (relfull)
+			/* FIXME: delayed in most cases, use timers */
+			schedule_work(&conn->msg_ack_work);
+		spin_unlock_bh(&conn->recv_lock);
+	}
+	
 	spin_lock_bh(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock_bh(&ep->event_list_lock);
 
-	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
-		/* FIXME: bitmap */
-		conn->recv_last_full_seqnum = msg_seqnum;
-		/* FIXME: delayed in most cases, use timers */
-		schedule_work(&conn->msg_ack_work);
-	}
-
 	dev_kfree_skb(skb);
 	return 0;
 
+out_with_recv_lock:
+	spin_unlock_bh(&conn->recv_lock);
+	spin_lock_bh(&ep->free_event_list_lock);
+	list_add_tail(&event->list, &ep->free_event_list);
+	spin_unlock_bh(&ep->free_event_list_lock);
 out:
 	dev_kfree_skb(skb);
 	return err;
@@ -364,7 +389,7 @@ ccieth_recv_msg_ack(struct net_device *ifp, struct sk_buff *skb)
 	while (sskb != NULL) {
 		struct ccieth_msg_skb_cb *scb = CCIETH_MSG_SKB_CB(sskb);
 		nsskb = sskb->next;
-		if (scb->seqnum == acked_seqnum) {
+		if (scb->seqnum <= acked_seqnum) {
 			if (sskb == conn->send_queue_first)
 				conn->send_queue_first = nsskb;
 			else
@@ -374,8 +399,7 @@ ccieth_recv_msg_ack(struct net_device *ifp, struct sk_buff *skb)
 			else
 				sskb->next->prev = sskb->prev;
 			kfree_skb(sskb);
-			printk("no need to resend MSG skb %p anymore\n", sskb);
-			break;
+			dprintk("no need to resend MSG skb %p anymore\n", sskb);
 		}
 		sskb = nsskb;
 	}

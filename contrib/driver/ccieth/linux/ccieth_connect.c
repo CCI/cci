@@ -82,6 +82,8 @@ ccieth_conn_attr_init(struct ccieth_connection *conn, int attribute)
 		conn->send_next_seqnum = jiffies;
 		conn->send_queue_first = conn->send_queue_last = NULL;
 		/* recv side */
+		spin_lock_init(&conn->recv_lock);
+		conn->recv_next_bitmap = 0;
 		INIT_WORK(&conn->msg_ack_work, ccieth_msg_ack_workfunc);
 	}
 	if (conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG)

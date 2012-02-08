@@ -124,7 +124,10 @@ struct ccieth_connection {
 	__u32 send_next_seqnum;
 	struct sk_buff *send_queue_first, *send_queue_last;
 	/* recv-side reliability */
+	spinlock_t recv_lock;
 	__u32 recv_last_full_seqnum;
+#define CCIETH_CONN_RECV_BITMAP_BITS BITS_PER_LONG
+	unsigned long recv_next_bitmap;
 	struct work_struct msg_ack_work;
 
 	/* resending of request, accept or reject */
