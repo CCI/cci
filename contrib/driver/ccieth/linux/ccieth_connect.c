@@ -22,13 +22,21 @@ ccieth_connect_ack_from_endpoint(struct ccieth_endpoint *ep, __u32 src_conn_id,
  * Connection attribute-specific function
  */
 
-void
-ccieth_msg_ack_workfunc(struct work_struct *work)
+static void
+ccieth_recv_needack_workfunc(struct work_struct *work)
 {
-	struct ccieth_connection *conn = container_of(work, struct ccieth_connection, msg_ack_work);
-	/* FIXME if not acked yet */
+	struct ccieth_connection *conn = container_of(work, struct ccieth_connection, recv_needack_work);
 	ccieth_msg_ack(conn);
 }
+
+static void
+ccieth_recv_needack_timer_hdlr(unsigned long _data)
+{
+	struct ccieth_connection *conn = (void *) _data;
+	if (conn->recv_needack)
+		schedule_work(&conn->recv_needack_work);
+}
+
 
 static void
 ccieth_conn_uu_recv_deferred_msgs(struct ccieth_connection *conn)
@@ -84,7 +92,8 @@ ccieth_conn_attr_init(struct ccieth_connection *conn, int attribute)
 		/* recv side */
 		spin_lock_init(&conn->recv_lock);
 		conn->recv_next_bitmap = 0;
-		INIT_WORK(&conn->msg_ack_work, ccieth_msg_ack_workfunc);
+		setup_timer(&conn->recv_needack_timer, ccieth_recv_needack_timer_hdlr, (unsigned long) conn);
+		INIT_WORK(&conn->recv_needack_work, ccieth_recv_needack_workfunc);
 	}
 	if (conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG)
 		skb_queue_head_init(&conn->deferred_msg_recv_queue);
@@ -142,8 +151,10 @@ ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 
 	/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 	del_timer_sync(&conn->connect_timer);
-	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE)
-		cancel_work_sync(&conn->msg_ack_work);
+	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
+		del_timer_sync(&conn->recv_needack_timer);
+		cancel_work_sync(&conn->recv_needack_work);
+	}
 	/* the caller will destroy the entire idr, no need to remove us from there */
 	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
 
@@ -207,6 +218,7 @@ void ccieth_connect_request_timer_hdlr(unsigned long data)
 	spin_lock(&ep->connection_idr_lock);
 	idr_remove(&ep->connection_idr, conn->id);
 	spin_unlock(&ep->connection_idr_lock);
+	/* nothing to cleanup in the reliability code, the connection has never been ready */
 
 	dprintk("delivering connection %p timeout\n", conn);
 	conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECT_TIMEDOUT;
@@ -1097,6 +1109,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	if (notify_close) {
 		/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 		del_timer_sync(&conn->connect_timer);
+		/* FIXME: cleanup reliability stuff */
 		spin_lock(&ep->connection_idr_lock);
 		idr_remove(&ep->connection_idr, dst_conn_id);
 		spin_unlock(&ep->connection_idr_lock);
@@ -1109,6 +1122,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 		dprintk("destroying acked rejected connection %p\n", conn);
 		/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 		del_timer_sync(&conn->connect_timer);
+		/* FIXME: cleanup reliability stuff */
 		spin_lock(&ep->connection_idr_lock);
 		idr_remove(&ep->connection_idr, conn->id);
 		spin_unlock(&ep->connection_idr_lock);

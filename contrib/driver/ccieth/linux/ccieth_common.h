@@ -100,6 +100,8 @@ enum ccieth_connection_status {
 
 #define CCIETH_CONNECT_RESEND_DELAY (HZ)
 
+#define CCIETH_DEFERRED_MSG_ACK_DELAY (HZ/10)
+
 struct ccieth_connection {
 	int id; /* always valid */ /* FIXME keep in network order too? */
 	enum ccieth_connection_status status;
@@ -127,7 +129,10 @@ struct ccieth_connection {
 	__u32 recv_last_full_seqnum;
 #define CCIETH_CONN_RECV_BITMAP_BITS BITS_PER_LONG
 	unsigned long recv_next_bitmap;
-	struct work_struct msg_ack_work;
+	/* recv-side deferred acking */
+	int recv_needack;
+	struct timer_list recv_needack_timer;
+	struct work_struct recv_needack_work;
 
 	/* resending of connect request, accept or reject */
 	int connect_needack;

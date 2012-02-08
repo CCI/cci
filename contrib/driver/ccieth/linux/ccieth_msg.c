@@ -207,9 +207,12 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 		conn->recv_last_full_seqnum += relfull;
 		dprintk("found %d new fully received, now have %d+%lx\n",
 			relfull, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
-		if (relfull)
-			/* FIXME: delayed in most cases, use timers */
-			schedule_work(&conn->msg_ack_work);
+		if (relfull) {
+			/* we need to ack */
+			conn->recv_needack = 1;
+			mod_timer(&conn->recv_needack_timer,
+				  jiffies + CCIETH_DEFERRED_MSG_ACK_DELAY);
+		}
 		spin_unlock_bh(&conn->recv_lock);
 	}
 
@@ -301,6 +304,7 @@ ccieth_msg_ack(struct ccieth_connection *conn)
 	struct net_device *ifp;
 	struct sk_buff *skb;
 	struct ccieth_pkt_header_msg_ack *hdr;
+	__u32 acked_seqnum;
 	size_t skblen;
 	int err;
 
@@ -316,6 +320,17 @@ ccieth_msg_ack(struct ccieth_connection *conn)
 	skb->protocol = __constant_htons(ETH_P_CCI);
 	skb_put(skb, skblen);
 
+	spin_lock_bh(&conn->recv_lock);
+	/* did we ack in the meantime? */
+	if (!conn->recv_needack) {
+		spin_unlock_bh(&conn->recv_lock);
+		goto out_with_skb;
+	}
+	/* no, we really need to ack */
+	acked_seqnum = conn->recv_last_full_seqnum;
+	conn->recv_needack = 0;
+	spin_unlock_bh(&conn->recv_lock);
+
 	/* fill headers */
 	hdr = (struct ccieth_pkt_header_msg_ack *) skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
@@ -325,7 +340,7 @@ ccieth_msg_ack(struct ccieth_connection *conn)
 	hdr->dst_ep_id = htonl(conn->dest_eid);
 	hdr->dst_conn_id = htonl(conn->dest_id);
 	hdr->conn_seqnum = htonl(conn->req_seqnum);
-	hdr->acked_seqnum = htonl(conn->recv_last_full_seqnum);
+	hdr->acked_seqnum = htonl(acked_seqnum);
 
 	rcu_read_lock();
 	/* is the interface still available? */
@@ -341,6 +356,7 @@ ccieth_msg_ack(struct ccieth_connection *conn)
 
 out_with_rculock:
 	rcu_read_unlock();
+out_with_skb:
 	kfree_skb(skb);
 out:
 	return err;
