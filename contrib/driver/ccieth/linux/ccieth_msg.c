@@ -153,7 +153,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 		spin_lock_bh(&conn->recv_lock);
 		hdr->acked_seqnum = htonl(conn->recv_last_full_seqnum);
-		conn->recv_needack = 0;
+		conn->recv_needack_nr = 0;
 		spin_unlock_bh(&conn->recv_lock);
 
 		skb2->dev = ifp;
@@ -239,9 +239,12 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 		conn->recv_last_full_seqnum += relfull;
 		dprintk("found %d new fully received, now have %d+%lx\n",
 			relfull, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
-		if (relfull) {
-			/* we need to ack */
-			conn->recv_needack = 1;
+		conn->recv_needack_nr += relfull;
+		if (conn->recv_needack_nr >= CCIETH_IMMEDIATE_MSG_ACK_NR) {
+			/* many non acked packets, we need to ack now */
+			schedule_work(&conn->recv_needack_work);
+		} else if (relfull) {
+			/* some new non acked packets, we need to ack at some point in the future */
 			mod_timer(&conn->recv_needack_timer,
 				  jiffies + CCIETH_DEFERRED_MSG_ACK_DELAY);
 		}
@@ -359,13 +362,13 @@ ccieth_msg_ack(struct ccieth_connection *conn)
 
 	spin_lock_bh(&conn->recv_lock);
 	/* did we ack in the meantime? */
-	if (!conn->recv_needack) {
+	if (!conn->recv_needack_nr) {
 		spin_unlock_bh(&conn->recv_lock);
 		goto out_with_skb;
 	}
 	/* no, we really need to ack */
 	acked_seqnum = conn->recv_last_full_seqnum;
-	conn->recv_needack = 0;
+	conn->recv_needack_nr = 0;
 	spin_unlock_bh(&conn->recv_lock);
 
 	/* fill headers */
