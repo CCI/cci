@@ -212,7 +212,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 			schedule_work(&conn->msg_ack_work);
 		spin_unlock_bh(&conn->recv_lock);
 	}
-	
+
 	spin_lock_bh(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock_bh(&ep->event_list_lock);

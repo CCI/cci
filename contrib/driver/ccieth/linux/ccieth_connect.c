@@ -115,7 +115,7 @@ ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 	struct ccieth_connection *conn = container_of(rcu_head, struct ccieth_connection, destroy_rcu_head);
 	dprintk("destroying connection %p in rcu call\n", conn);
 	ccieth_conn_attr_free(conn);
-	kfree_skb(conn->skb);
+	kfree_skb(conn->connect_skb);
 	kfree(conn);
 }
 
@@ -141,7 +141,7 @@ ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 		return 0;
 
 	/* we set to CLOSING, we own the connection now, nobody else may destroy it */
-	del_timer_sync(&conn->timer);
+	del_timer_sync(&conn->connect_timer);
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE)
 		cancel_work_sync(&conn->msg_ack_work);
 	/* the caller will destroy the entire idr, no need to remove us from there */
@@ -167,15 +167,15 @@ void ccieth_connect_request_timer_hdlr(unsigned long data)
 	if (status != CCIETH_CONNECTION_REQUESTED)
 		return;
 
-	if (now < conn->expire && conn->need_ack) {
+	if (now < conn->connect_expire && conn->connect_needack) {
 		/* resend request */
 		unsigned long next;
 		next = now + CCIETH_CONNECT_RESEND_DELAY;
-		if (next > conn->expire)
-			next = conn->expire;
-		mod_timer(&conn->timer, next);
+		if (next > conn->connect_expire)
+			next = conn->connect_expire;
+		mod_timer(&conn->connect_timer, next);
 
-		skb = skb_clone(conn->skb, GFP_ATOMIC);
+		skb = skb_clone(conn->connect_skb, GFP_ATOMIC);
 		if (skb) {
 			struct net_device *ifp;
 			rcu_read_lock();
@@ -191,9 +191,9 @@ void ccieth_connect_request_timer_hdlr(unsigned long data)
 		}
 		return;
 
-	} else if (now < conn->expire) {
+	} else if (now < conn->connect_expire) {
 		/* only keep the expire timer, no need to resend anymore */
-		mod_timer(&conn->timer, conn->expire);
+		mod_timer(&conn->connect_timer, conn->connect_expire);
 		return;
 	}
 
@@ -227,13 +227,13 @@ void ccieth_connect_reply_timer_hdlr(unsigned long data)
 	if (conn->status != CCIETH_CONNECTION_READY && conn->status != CCIETH_CONNECTION_REJECTED)
 		return;
 
-	if (!conn->need_ack)
+	if (!conn->connect_needack)
 		return;
 
 	/* resend request */
-	mod_timer(&conn->timer, jiffies + CCIETH_CONNECT_RESEND_DELAY);
+	mod_timer(&conn->connect_timer, jiffies + CCIETH_CONNECT_RESEND_DELAY);
 
-	skb = skb_clone(conn->skb, GFP_ATOMIC);
+	skb = skb_clone(conn->connect_skb, GFP_ATOMIC);
 	if (skb) {
 		struct net_device *ifp;
 		rcu_read_lock();
@@ -285,7 +285,7 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	ccieth_conn_attr_init(conn, arg->attribute);
 
 	/* initialize the timer to make destroy easier */
-	setup_timer(&conn->timer, ccieth_connect_request_timer_hdlr, (unsigned long) conn);
+	setup_timer(&conn->connect_timer, ccieth_connect_request_timer_hdlr, (unsigned long) conn);
 
 	/* get a connection id (only reserve it) */
 retry:
@@ -347,11 +347,11 @@ retry:
 	idr_replace(&ep->connection_idr, conn, id);
 	hdr->src_conn_id = htonl(id);
 
-	conn->need_ack = 1;
+	conn->connect_needack = 1;
 	/* keep the current skb cached in the connection,
 	 * and try to send the clone. if we can't, we'll resend later.
 	 */
-	conn->skb = skb;
+	conn->connect_skb = skb;
 	rcu_read_lock();
 	/* is the interface still available? */
 	ifp = rcu_dereference(ep->ifp);
@@ -367,14 +367,14 @@ retry:
 	now = jiffies;
 	if (arg->timeout_sec != -1ULL || arg->timeout_usec != -1) {
 		__u64 msecs = arg->timeout_sec * 1000 + arg->timeout_usec / 1000;
-		conn->expire = now + msecs_to_jiffies(msecs);
+		conn->connect_expire = now + msecs_to_jiffies(msecs);
 	} else {
-		conn->expire = -1; /* that's MAX_LONG now */
+		conn->connect_expire = -1; /* that's MAX_LONG now */
 	}
 	next = now + CCIETH_CONNECT_RESEND_DELAY;
-	if (next > conn->expire)
-		next = conn->expire;
-	mod_timer(&conn->timer, next);
+	if (next > conn->connect_expire)
+		next = conn->connect_expire;
+	mod_timer(&conn->connect_timer, next);
 
 	arg->conn_id = conn->id;
 	return 0;
@@ -485,11 +485,11 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 		goto out_with_event;
 	conn->embedded_event.event.data_length = 0;
 	conn->embedded_event.destructor = ccieth_connection_event_destructor;
-	conn->need_ack = 0;
+	conn->connect_needack = 0;
 	ccieth_conn_attr_init(conn, hdr->attribute);
 
 	/* initialize the timer to make destroy easier */
-	setup_timer(&conn->timer, ccieth_connect_reply_timer_hdlr, (unsigned long) conn);
+	setup_timer(&conn->connect_timer, ccieth_connect_reply_timer_hdlr, (unsigned long) conn);
 
 	/* allocate and initialize the connect reply skb now so that we don't fail with ENOMEM later */
 	replyskblen = max(sizeof(struct ccieth_pkt_header_connect_accept),
@@ -503,7 +503,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	skb_reset_network_header(replyskb);
 	replyskb->protocol = __constant_htons(ETH_P_CCI);
 	skb_put(replyskb, replyskblen);
-	conn->skb = replyskb;
+	conn->connect_skb = replyskb;
 
 	/* setup the connection so that we can check for duplicates before inserting */
 	conn->ep = ep;
@@ -602,7 +602,7 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	conn->user_conn_id = arg->user_conn_id;
 
 	/* fill headers */
-	skb = conn->skb;
+	skb = conn->connect_skb;
 	hdr = (struct ccieth_pkt_header_connect_accept *) skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
 	memcpy(&hdr->eth.h_source, ep->addr, 6);
@@ -617,8 +617,8 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	hdr->first_seqnum = htonl(conn->send_next_seqnum);
 
 	/* setup resend or timeout timer */
-	conn->need_ack = 1;
-	mod_timer(&conn->timer, jiffies + CCIETH_CONNECT_RESEND_DELAY);
+	conn->connect_needack = 1;
+	mod_timer(&conn->connect_timer, jiffies + CCIETH_CONNECT_RESEND_DELAY);
 
 	rcu_read_unlock(); /* end of rcu read access to ep conn idr only */
 
@@ -712,7 +712,7 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 		need_ack = 1;
 		goto out_with_conn;
 	}
-	conn->need_ack = 0;
+	conn->connect_needack = 0;
 
 	/* setup connection */
 	conn->dest_id = src_conn_id;
@@ -778,7 +778,7 @@ ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_re
 	atomic_dec(&ep->connection_received);
 
 	/* fill headers */
-	skb = conn->skb;
+	skb = conn->connect_skb;
 	hdr = (struct ccieth_pkt_header_connect_reject *) skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
 	memcpy(&hdr->eth.h_source, ep->addr, 6);
@@ -791,8 +791,8 @@ ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_re
 	hdr->req_seqnum = htonl(conn->req_seqnum);
 
 	/* setup resend or timeout timer */
-	conn->need_ack = 1;
-	mod_timer(&conn->timer, jiffies + CCIETH_CONNECT_RESEND_DELAY);
+	conn->connect_needack = 1;
+	mod_timer(&conn->connect_timer, jiffies + CCIETH_CONNECT_RESEND_DELAY);
 
 	rcu_read_unlock(); /* end of rcu read access to ep conn idr only */
 
@@ -863,12 +863,12 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 		need_ack = 1;
 		goto out_with_rculock;
 	}
-	conn->need_ack = 0;
+	conn->connect_needack = 0;
 
 	rcu_read_unlock();
 
 	/* we set to CLOSING, we own the connection now, nobody else may destroy it */
-	del_timer_sync(&conn->timer);
+	del_timer_sync(&conn->connect_timer);
 	spin_lock(&ep->connection_idr_lock);
 	idr_remove(&ep->connection_idr, dst_conn_id);
 	spin_unlock(&ep->connection_idr_lock);
@@ -1073,7 +1073,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	dprintk("conn %p status %d acked with status %d\n", conn, conn->status, ack_status);
 
 	/* packet was received, stop resending */
-	conn->need_ack = 0;
+	conn->connect_needack = 0;
 
 	/* reject ack status doesn't matter, just destroy the connection */
 	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REJECTED, CCIETH_CONNECTION_CLOSING)
@@ -1096,7 +1096,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 
 	if (notify_close) {
 		/* we set to CLOSING, we own the connection now, nobody else may destroy it */
-		del_timer_sync(&conn->timer);
+		del_timer_sync(&conn->connect_timer);
 		spin_lock(&ep->connection_idr_lock);
 		idr_remove(&ep->connection_idr, dst_conn_id);
 		spin_unlock(&ep->connection_idr_lock);
@@ -1108,7 +1108,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	} else if (destroy) {
 		dprintk("destroying acked rejected connection %p\n", conn);
 		/* we set to CLOSING, we own the connection now, nobody else may destroy it */
-		del_timer_sync(&conn->timer);
+		del_timer_sync(&conn->connect_timer);
 		spin_lock(&ep->connection_idr_lock);
 		idr_remove(&ep->connection_idr, conn->id);
 		spin_unlock(&ep->connection_idr_lock);

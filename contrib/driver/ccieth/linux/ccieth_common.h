@@ -104,7 +104,6 @@ struct ccieth_connection {
 	int id; /* always valid */ /* FIXME keep in network order too? */
 	enum ccieth_connection_status status;
 	struct ccieth_endpoint *ep;
-	int need_ack;
 
 	__u32 req_seqnum;
 	__u32 max_send_size;
@@ -130,10 +129,11 @@ struct ccieth_connection {
 	unsigned long recv_next_bitmap;
 	struct work_struct msg_ack_work;
 
-	/* resending of request, accept or reject */
-	unsigned long expire; /* in jiffies, only for request because it has a timeout */
-	struct timer_list timer;
-	struct sk_buff *skb; /* cached skb, to be cloned for resending */
+	/* resending of connect request, accept or reject */
+	int connect_needack;
+	unsigned long connect_expire; /* in jiffies, only for request because it has a timeout */
+	struct timer_list connect_timer;
+	struct sk_buff *connect_skb; /* cached skb, to be cloned for resending */
 
 	/* dest fields are valid when status RECEIVED, READY or REJECTED */
 	/* FIXME: store in network order? */
