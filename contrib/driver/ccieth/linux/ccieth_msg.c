@@ -11,6 +11,18 @@
 #include <ccieth_common.h>
 #include <ccieth_wire.h>
 
+static inline int
+ccieth_conn_send_ack(struct ccieth_connection *conn, __be32 *seqnum)
+{
+	int ret;
+	spin_lock_bh(&conn->recv_lock);
+	ret = conn->recv_needack_nr;
+	*seqnum = htonl(conn->recv_last_full_seqnum);
+	conn->recv_needack_nr = 0;
+	spin_unlock_bh(&conn->recv_lock);
+	return ret ? 0 : -EAGAIN;
+}
+
 static void
 ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum)
 {
@@ -151,10 +163,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		dprintk("need to resend MSG skb %p\n", skb);
 		spin_unlock_bh(&conn->send_lock);
 
-		spin_lock_bh(&conn->recv_lock);
-		hdr->acked_seqnum = htonl(conn->recv_last_full_seqnum);
-		conn->recv_needack_nr = 0;
-		spin_unlock_bh(&conn->recv_lock);
+		ccieth_conn_send_ack(conn, &hdr->acked_seqnum);
 
 		skb2->dev = ifp;
 		dev_queue_xmit(skb2);
@@ -344,7 +353,6 @@ ccieth_msg_ack(struct ccieth_connection *conn)
 	struct net_device *ifp;
 	struct sk_buff *skb;
 	struct ccieth_pkt_header_msg_ack *hdr;
-	__u32 acked_seqnum;
 	size_t skblen;
 	int err;
 
@@ -352,6 +360,7 @@ ccieth_msg_ack(struct ccieth_connection *conn)
 	skblen = sizeof(*hdr);
 	if (skblen < ETH_ZLEN)
 		skblen = ETH_ZLEN;
+	err = -ENOMEM;
 	skb = alloc_skb(skblen, GFP_KERNEL);
 	if (!skb)
 		goto out;
@@ -359,17 +368,6 @@ ccieth_msg_ack(struct ccieth_connection *conn)
 	skb_reset_network_header(skb);
 	skb->protocol = __constant_htons(ETH_P_CCI);
 	skb_put(skb, skblen);
-
-	spin_lock_bh(&conn->recv_lock);
-	/* did we ack in the meantime? */
-	if (!conn->recv_needack_nr) {
-		spin_unlock_bh(&conn->recv_lock);
-		goto out_with_skb;
-	}
-	/* no, we really need to ack */
-	acked_seqnum = conn->recv_last_full_seqnum;
-	conn->recv_needack_nr = 0;
-	spin_unlock_bh(&conn->recv_lock);
 
 	/* fill headers */
 	hdr = (struct ccieth_pkt_header_msg_ack *) skb_mac_header(skb);
@@ -380,7 +378,10 @@ ccieth_msg_ack(struct ccieth_connection *conn)
 	hdr->dst_ep_id = htonl(conn->dest_eid);
 	hdr->dst_conn_id = htonl(conn->dest_id);
 	hdr->conn_seqnum = htonl(conn->req_seqnum);
-	hdr->acked_seqnum = htonl(acked_seqnum);
+
+	err = ccieth_conn_send_ack(conn, &hdr->acked_seqnum);
+	if (err < 0)
+		goto out_with_skb;
 
 	rcu_read_lock();
 	/* is the interface still available? */
