@@ -115,6 +115,15 @@ ccieth_conn_attr_free(struct ccieth_connection *conn)
 	}
 }
 
+static void
+ccieth_conn_attr_stop_sync(struct ccieth_connection *conn)
+{
+	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
+		del_timer_sync(&conn->recv_needack_timer);
+		cancel_work_sync(&conn->recv_needack_work);
+	}
+}
+
 /*
  * Connection destruction management
  */
@@ -152,10 +161,7 @@ ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 
 	/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 	del_timer_sync(&conn->connect_timer);
-	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
-		del_timer_sync(&conn->recv_needack_timer);
-		cancel_work_sync(&conn->recv_needack_work);
-	}
+	ccieth_conn_attr_stop_sync(conn);
 	/* the caller will destroy the entire idr, no need to remove us from there */
 	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
 
@@ -219,7 +225,7 @@ void ccieth_connect_request_timer_hdlr(unsigned long data)
 	spin_lock(&ep->connection_idr_lock);
 	idr_remove(&ep->connection_idr, conn->id);
 	spin_unlock(&ep->connection_idr_lock);
-	/* nothing to cleanup in the reliability code, the connection has never been ready */
+	/* ccieth_conn_attr_stop_sync() not needed, the connection has never been ready */
 
 	dprintk("delivering connection %p timeout\n", conn);
 	conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECT_TIMEDOUT;
@@ -1110,7 +1116,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	if (notify_close) {
 		/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 		del_timer_sync(&conn->connect_timer);
-		/* FIXME: cleanup reliability stuff */
+		ccieth_conn_attr_stop_sync(conn);
 		spin_lock(&ep->connection_idr_lock);
 		idr_remove(&ep->connection_idr, dst_conn_id);
 		spin_unlock(&ep->connection_idr_lock);
@@ -1123,7 +1129,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 		dprintk("destroying acked rejected connection %p\n", conn);
 		/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 		del_timer_sync(&conn->connect_timer);
-		/* FIXME: cleanup reliability stuff */
+		ccieth_conn_attr_stop_sync(conn);
 		spin_lock(&ep->connection_idr_lock);
 		idr_remove(&ep->connection_idr, conn->id);
 		spin_unlock(&ep->connection_idr_lock);
