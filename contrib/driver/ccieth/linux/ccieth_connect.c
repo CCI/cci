@@ -675,7 +675,6 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	__u32 src_conn_id;
 	__u32 src_ep_id;
 	__u32 dst_conn_id;
-	__u32 dst_ep_id;
 	__u32 max_send_size;
 	__u32 req_seqnum;
 	__u32 first_seqnum;
@@ -688,13 +687,12 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	src_conn_id = ntohl(hdr->src_conn_id);
 	src_ep_id = ntohl(hdr->src_ep_id);
 	dst_conn_id = ntohl(hdr->dst_conn_id);
-	dst_ep_id = ntohl(hdr->dst_ep_id);
 	max_send_size = ntohl(hdr->max_send_size);
 	req_seqnum = ntohl(hdr->req_seqnum);
 	first_seqnum = ntohl(hdr->first_seqnum);
 
 	dprintk("got conn accept from eid %d conn id %d seqnum %d to %d %d\n",
-		src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
+		src_ep_id, src_conn_id, req_seqnum, ntohl(hdr->dst_ep_id), dst_conn_id);
 
 	rcu_read_lock();
 
@@ -848,7 +846,6 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 	__u32 src_conn_id;
 	__u32 src_ep_id;
 	__u32 dst_conn_id;
-	__u32 dst_ep_id;
 	__u32 req_seqnum;
 	int need_ack = 0;
 	enum ccieth_pkt_ack_status ack_status = CCIETH_PKT_ACK_SUCCESS;
@@ -859,11 +856,10 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 	src_conn_id = ntohl(hdr->src_conn_id);
 	src_ep_id = ntohl(hdr->src_ep_id);
 	dst_conn_id = ntohl(hdr->dst_conn_id);
-	dst_ep_id = ntohl(hdr->dst_ep_id);
 	req_seqnum = ntohl(hdr->req_seqnum);
 
 	dprintk("got conn reject from eid %d conn id %d seqnum %d to %d %d\n",
-		src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
+		src_ep_id, src_conn_id, req_seqnum, ntohl(hdr->dst_ep_id), dst_conn_id);
 
 	rcu_read_lock();
 
@@ -1060,10 +1056,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 			 struct ccieth_pkt_header_connect_ack *hdr)
 {
 	struct ccieth_connection *conn;
-	__u32 src_conn_id;
-	__u32 src_ep_id;
 	__u32 dst_conn_id;
-	__u32 dst_ep_id;
 	__u32 req_seqnum;
 	__u8 ack_status;
 	int destroy = 0, notify_close = 0;
@@ -1071,15 +1064,12 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 
 	dprintk("processing queued connect ack skb %p\n", skb);
 
-	src_conn_id = ntohl(hdr->src_conn_id);
-	src_ep_id = ntohl(hdr->src_ep_id);
 	dst_conn_id = ntohl(hdr->dst_conn_id);
-	dst_ep_id = ntohl(hdr->dst_ep_id);
 	req_seqnum = ntohl(hdr->req_seqnum);
 	ack_status = hdr->status;
 
 	dprintk("got conn ack from eid %d conn id %d seqnum %d to %d %d\n",
-		src_ep_id, src_conn_id, req_seqnum, dst_ep_id, dst_conn_id);
+		ntohl(hdr->src_ep_id), ntohl(hdr->src_conn_id), req_seqnum, ntohl(hdr->dst_ep_id), dst_conn_id);
 
 	rcu_read_lock();
 
@@ -1161,7 +1151,6 @@ ccieth_deferred_connect_recv_workfunc(struct work_struct *work)
 	while ((skb = skb_dequeue(&ep->deferred_connect_recv_queue)) != NULL) {
 		struct ccieth_connect_skb_cb *scb = CCIETH_CONNECT_SKB_CB(skb);
 		__u8 type = scb->type;
-		int err;
 
 		switch (type) {
 		case CCIETH_PKT_CONNECT_REQUEST: {
@@ -1172,7 +1161,7 @@ ccieth_deferred_connect_recv_workfunc(struct work_struct *work)
 				dev_kfree_skb(skb);
 				continue;
 			}
-			err = ccieth__recv_connect_request(ep, skb, hdr);
+			ccieth__recv_connect_request(ep, skb, hdr);
 			break;
 		}
 		case CCIETH_PKT_CONNECT_ACCEPT: {
@@ -1183,7 +1172,7 @@ ccieth_deferred_connect_recv_workfunc(struct work_struct *work)
 				dev_kfree_skb(skb);
 				continue;
 			}
-			err = ccieth__recv_connect_accept(ep, skb, hdr);
+			ccieth__recv_connect_accept(ep, skb, hdr);
 			break;
 		}
 		case CCIETH_PKT_CONNECT_REJECT: {
@@ -1194,7 +1183,7 @@ ccieth_deferred_connect_recv_workfunc(struct work_struct *work)
 				dev_kfree_skb(skb);
 				continue;
 			}
-			err = ccieth__recv_connect_reject(ep, skb, hdr);
+			ccieth__recv_connect_reject(ep, skb, hdr);
 			break;
 		}
 		case CCIETH_PKT_CONNECT_ACK: {
@@ -1205,7 +1194,7 @@ ccieth_deferred_connect_recv_workfunc(struct work_struct *work)
 				dev_kfree_skb(skb);
 				continue;
 			}
-			err = ccieth__recv_connect_ack(ep, skb, hdr);
+			ccieth__recv_connect_ack(ep, skb, hdr);
 			break;
 		}
 		default:
