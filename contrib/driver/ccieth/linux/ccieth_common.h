@@ -15,6 +15,9 @@
 #include <linux/kref.h>
 #include <linux/workqueue.h>
 #include <linux/completion.h>
+#ifdef CONFIG_CCIETH_DEBUGFS
+#include <linux/debugfs.h>
+#endif
 
 #include "ccieth_io.h"
 #include "ccieth_hal.h"
@@ -58,6 +61,10 @@ struct ccieth_endpoint {
 	struct net_device *release_ifp;
 
 	struct ccieth_endpoint_event embedded_event;
+
+#ifdef CONFIG_CCIETH_DEBUGFS
+	struct dentry *debugfs_dir;
+#endif
 };
 
 /* connection status automata:
@@ -156,6 +163,10 @@ struct ccieth_connection {
 	 * and let the event destructor destroy the connection for real.
 	 */
 	struct ccieth_endpoint_event embedded_event;
+
+#ifdef CONFIG_CCIETH_DEBUGFS
+	struct dentry *debugfs_dir;
+#endif
 };
 
 /* stored in skbuff cb private field while queued for deferred processing */
@@ -172,6 +183,9 @@ struct ccieth_msg_skb_cb {
 #define CCIETH_MSG_SKB_CB(__skb) ((struct ccieth_msg_skb_cb *)&((__skb)->cb[0]))
 
 extern struct idr ccieth_ep_idr; /* accessed under RCU read lock */
+#ifdef CONFIG_CCIETH_DEBUGFS
+extern struct dentry *ccieth_debugfs_root;
+#endif
 
 extern int ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data);
 extern int ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_request *arg);

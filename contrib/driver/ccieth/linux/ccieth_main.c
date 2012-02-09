@@ -24,6 +24,9 @@
 
 struct idr ccieth_ep_idr;
 static spinlock_t ccieth_ep_idr_lock;
+#ifdef CONFIG_CCIETH_DEBUGFS
+struct dentry *ccieth_debugfs_root;
+#endif
 
 static void
 ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
@@ -35,6 +38,11 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 	spin_lock(&ccieth_ep_idr_lock);
 	idr_remove(&ccieth_ep_idr, ep->id);
 	spin_unlock(&ccieth_ep_idr_lock);
+
+#ifdef CONFIG_CCIETH_DEBUGFS
+	if (ep->debugfs_dir)
+		debugfs_remove_recursive(ep->debugfs_dir);
+#endif
 
 	/* the network cannot start new receive handlers now, but some may be running */
 	synchronize_net();
@@ -158,6 +166,19 @@ retry:
 		goto out_with_idr;
 	}
 	BUG_ON(idr_replace(&ccieth_ep_idr, ep, id) != NULL);
+
+#ifdef CONFIG_CCIETH_DEBUGFS
+	ep->debugfs_dir = NULL;
+	if (ccieth_debugfs_root) {
+		char * name = kasprintf(GFP_KERNEL, "ep%08x", id);
+		if (name) {
+			struct dentry *d = debugfs_create_dir(name, ccieth_debugfs_root);
+			if (!IS_ERR(d))
+				ep->debugfs_dir = d;
+			kfree(name);
+		}
+	}
+#endif
 
 	return 0;
 
@@ -524,9 +545,17 @@ ccieth_init(void)
 	idr_init(&ccieth_ep_idr);
 	spin_lock_init(&ccieth_ep_idr_lock);
 
+#ifdef CONFIG_CCIETH_DEBUGFS
+	ccieth_debugfs_root = debugfs_create_dir("ccieth", NULL);
+	if (IS_ERR(ccieth_debugfs_root)) {
+		ret = PTR_ERR(ccieth_debugfs_root);
+		goto out;
+	}
+#endif
+
 	ret = register_netdevice_notifier(&ccieth_netdevice_notifier);
 	if (ret < 0)
-		goto out;
+		goto out_with_debugfs;
 
 	dev_add_pack(&ccieth_pt);
 
@@ -539,7 +568,11 @@ ccieth_init(void)
 out_with_net:
 	dev_remove_pack(&ccieth_pt);
 	unregister_netdevice_notifier(&ccieth_netdevice_notifier);
+out_with_debugfs:
+#ifdef CONFIG_CCIETH_DEBUGFS
+	debugfs_remove(ccieth_debugfs_root);
 out:
+#endif
 	return ret;
 }
 
@@ -549,6 +582,9 @@ ccieth_exit(void)
 	misc_deregister(&ccieth_miscdev);
 	dev_remove_pack(&ccieth_pt);
 	unregister_netdevice_notifier(&ccieth_netdevice_notifier);
+#ifdef CONFIG_CCIETH_DEBUGFS
+	debugfs_remove(ccieth_debugfs_root);
+#endif
 	idr_destroy(&ccieth_ep_idr);
 	rcu_barrier(); /* wait for rcu calls to be done */
 }
