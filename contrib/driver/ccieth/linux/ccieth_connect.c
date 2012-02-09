@@ -125,6 +125,36 @@ ccieth_conn_attr_stop_sync(struct ccieth_connection *conn)
 }
 
 /*
+ * Per connection statistics
+ */
+
+static void
+ccieth_conn_stats_init(struct ccieth_connection *conn, const char *prefix)
+{
+#ifdef CONFIG_CCIETH_DEBUGFS
+	conn->debugfs_dir = NULL;
+	if (conn->ep->debugfs_dir) {
+		char * name = kasprintf(GFP_KERNEL, "%s%08x", prefix, conn->id);
+		if (name) {
+			struct dentry *d = debugfs_create_dir(name, conn->ep->debugfs_dir);
+			if (!IS_ERR(d))
+				conn->debugfs_dir = d;
+			kfree(name);
+		}
+	}
+#endif
+}
+
+static void
+ccieth_conn_stats_free(struct ccieth_connection *conn)
+{
+#ifdef CONFIG_CCIETH_DEBUGFS
+	if (conn->debugfs_dir)
+		debugfs_remove(conn->debugfs_dir);
+#endif
+}
+
+/*
  * Connection destruction management
  */
 
@@ -135,10 +165,7 @@ ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 	dprintk("destroying connection %p in rcu call\n", conn);
 	ccieth_conn_attr_free(conn);
 	kfree_skb(conn->connect_skb);
-#ifdef CONFIG_CCIETH_DEBUGFS
-	if (conn->debugfs_dir)
-		debugfs_remove(conn->debugfs_dir);
-#endif
+	ccieth_conn_stats_free(conn);
 	kfree(conn);
 }
 
@@ -370,18 +397,7 @@ retry:
 	idr_replace(&ep->connection_idr, conn, id);
 	hdr->src_conn_id = htonl(id);
 
-#ifdef CONFIG_CCIETH_DEBUGFS
-	conn->debugfs_dir = NULL;
-	if (conn->ep->debugfs_dir) {
-		char * name = kasprintf(GFP_KERNEL, "connreq%08x", id);
-		if (name) {
-			struct dentry *d = debugfs_create_dir(name, conn->ep->debugfs_dir);
-			if (!IS_ERR(d))
-				conn->debugfs_dir = d;
-			kfree(name);
-		}
-	}
-#endif
+	ccieth_conn_stats_init(conn, "connreq");
 
 	conn->connect_needack = 1;
 	/* keep the current skb cached in the connection,
@@ -417,10 +433,7 @@ retry:
 
 out_with_rculock:
 	rcu_read_unlock();
-#ifdef CONFIG_CCIETH_DEBUGFS
-	if (conn->debugfs_dir)
-		debugfs_remove(conn->debugfs_dir);
-#endif
+	ccieth_conn_stats_free(conn);
 out_with_skb2:
 	kfree_skb(skb2);
 out_with_skb:
@@ -588,18 +601,7 @@ retry:
 	idr_replace(&ep->connection_idr, conn, id);
 	atomic_inc(&ep->connection_received);
 
-#ifdef CONFIG_CCIETH_DEBUGFS
-	conn->debugfs_dir = NULL;
-	if (conn->ep->debugfs_dir) {
-		char * name = kasprintf(GFP_KERNEL, "connacc%08x", id);
-		if (name) {
-			struct dentry *d = debugfs_create_dir(name, conn->ep->debugfs_dir);
-			if (!IS_ERR(d))
-				conn->debugfs_dir = d;
-			kfree(name);
-		}
-	}
-#endif
+	ccieth_conn_stats_init(conn, "connacc");
 
 	/* finalize and notify the event */
 	event->event.connect_request.conn_id = id;
