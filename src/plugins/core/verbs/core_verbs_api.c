@@ -20,6 +20,7 @@
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <net/if.h>
+#include <netdb.h>
 
 #include "cci.h"
 #include "plugins/core/core.h"
@@ -211,8 +212,8 @@ verbs_wc_to_cci_status(enum ibv_wc_status wc_status)
 static int
 verbs_ifa_to_context(struct ibv_context *context, struct sockaddr *sa)
 {
-	int			              ret = CCI_SUCCESS;
-	struct rdma_cm_id	      *id = NULL;
+	int			ret	= CCI_SUCCESS;
+	struct rdma_cm_id	*id;
     struct rdma_event_channel *ch = NULL;
 
 	CCI_ENTER;
@@ -227,7 +228,7 @@ verbs_ifa_to_context(struct ibv_context *context, struct sockaddr *sa)
         goto out;
     }
 
-  	ret = rdma_create_id(ch, &id, NULL, RDMA_PS_UDP);
+    ret = rdma_create_id(ch, &id, NULL, RDMA_PS_UDP);
 	if (ret) {
 		ret = errno;
 		goto out;
@@ -237,15 +238,10 @@ verbs_ifa_to_context(struct ibv_context *context, struct sockaddr *sa)
 	if (ret == 0) {
 		if (id->verbs != context)
 			ret = -1;
-	} else {
-        char ip[256];
-        ret = errno;
-        printf("failure reasons %s for IP %s\n", strerror(ret), inet_ntop(AF_INET, sa, ip, 256));
-    }
-out:
-	if( NULL != id ) rdma_destroy_id(id);
-    if( NULL != ch ) rdma_destroy_event_channel(ch);
+	}
+	rdma_destroy_id(id);
 
+out:
 	CCI_EXIT;
 	return ret;
 }
@@ -254,7 +250,7 @@ static int
 verbs_find_rdma_devices(struct ibv_context **contexts, int count, struct ifaddrs **ifaddrs)
 {
 	int		ret		= CCI_SUCCESS;
-	int		i		= 0;
+	int		i, j;
 	struct ifaddrs	*addrs		= NULL;
 	struct ifaddrs	*ifa		= NULL;
 	struct ifaddrs	*tmp		= NULL;
@@ -273,26 +269,27 @@ verbs_find_rdma_devices(struct ibv_context **contexts, int count, struct ifaddrs
 		goto out;
 	}
 
-	for (i = 0; i < count; i++) {
+	for (i = j = 0; i < count; i++) {
 		struct ibv_context	*c	= contexts[i];
+		//char ip[256];
 
 		for (tmp = ifa; tmp != NULL; tmp = tmp->ifa_next) {
 			if (tmp->ifa_addr->sa_family == AF_INET &&
 				!(tmp->ifa_flags & IFF_LOOPBACK)) {
-				ret = verbs_ifa_to_context(c, tmp->ifa_addr);
-				if (!ret) {
-					int len = sizeof(struct sockaddr);
-					addrs[i].ifa_name = strdup(tmp->ifa_name);
-					addrs[i].ifa_flags = tmp->ifa_flags;
-					addrs[i].ifa_addr = calloc(1, len);
-					memcpy(addrs[i].ifa_addr,tmp->ifa_addr, len);
-					addrs[i].ifa_netmask = calloc(1, len);
-					memcpy(addrs[i].ifa_netmask, tmp->ifa_netmask, len);
-					addrs[i].ifa_broadaddr = calloc(1, len);
-					memcpy(addrs[i].ifa_broadaddr, tmp->ifa_broadaddr, len);
-					i++;
-					break;
-				}
+                    ret = verbs_ifa_to_context(c, tmp->ifa_addr);
+                    if (!ret) {
+                        int len = sizeof(struct sockaddr);
+                        addrs[j].ifa_name = strdup(tmp->ifa_name);
+                        addrs[j].ifa_flags = tmp->ifa_flags;
+                        addrs[j].ifa_addr = calloc(1, len);
+                        memcpy(addrs[j].ifa_addr,tmp->ifa_addr, len);
+                        addrs[j].ifa_netmask = calloc(1, len);
+                        memcpy(addrs[j].ifa_netmask, tmp->ifa_netmask, len);
+                        addrs[j].ifa_broadaddr = calloc(1, len);
+                        memcpy(addrs[j].ifa_broadaddr, tmp->ifa_broadaddr, len);
+                        j++;
+                        break;
+                    }
 			}
 		}
 	}
@@ -660,6 +657,18 @@ verbs_post_rx(cci__ep_t *ep, verbs_rx_t *rx)
 	CCI_EXIT;
 	return ret;
 }
+
+#if HAVE_RDMA_ADDRINFO
+void rdma_destroy_ep(struct rdma_cm_id *id)
+{
+    struct cma_id_private *id_priv;
+  
+    if (id->qp)
+        rdma_destroy_qp(id);
+  
+    rdma_destroy_id(id);
+}
+#endif  /* HAVE_RDMA_ADDRINFO */
 
 static int
 verbs_create_endpoint(cci_device_t *device,
@@ -1325,6 +1334,15 @@ verbs_connect(cci_endpoint_t *endpoint, char *server_uri,
 	if (ret)
 		goto out;
 
+	memset(&attr, 0, sizeof(attr));
+	attr.qp_type = IBV_QPT_RC;
+	attr.send_cq = vep->cq;
+	attr.recv_cq = vep->cq;
+	attr.srq = vep->srq;
+	attr.cap.max_send_wr = VERBS_EP_TX_CNT;
+	attr.cap.max_send_sge = 1;
+	attr.cap.max_recv_sge = 1;
+
 #if HAVE_RDMA_ADDRINFO
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
@@ -1337,14 +1355,6 @@ verbs_connect(cci_endpoint_t *endpoint, char *server_uri,
 		goto out;
 	}
 
-	memset(&attr, 0, sizeof(attr));
-	attr.qp_type = IBV_QPT_RC;
-	attr.send_cq = vep->cq;
-	attr.recv_cq = vep->cq;
-	attr.srq = vep->srq;
-	attr.cap.max_send_wr = VERBS_EP_TX_CNT;
-	attr.cap.max_send_sge = 1;
-	attr.cap.max_recv_sge = 1;
 	ret = rdma_create_ep(&vconn->id, res, vep->pd, &attr);
 	if (ret == -1) {
 		ret = errno;
@@ -1352,23 +1362,91 @@ verbs_connect(cci_endpoint_t *endpoint, char *server_uri,
 			strerror(ret));
 		goto out;
 	}
+#else
+    {
+        struct sockaddr_in dst;
+	debug(CCI_DB_ALL, "not using rdma_create_ep() or rdma_getaddrinfo()");
+
+        {
+            struct addrinfo *res, hints;
+
+            memset(&hints, 0, sizeof(struct addrinfo));
+            hints.ai_family = PF_INET;
+            ret = getaddrinfo(node, service, &hints, &res);
+            if (ret) {
+                ret = errno;
+                debug(CCI_DB_PEER, "getaddrinfo failed - %s\n", strerror(ret));
+                goto out;
+            }
+            assert(res->ai_family == PF_INET);
+
+            dst = *(struct sockaddr_in *) res->ai_addr;
+            freeaddrinfo(res);
+        }
+
+        ret = rdma_create_id( vep->channel, &vconn->id, NULL, RDMA_PS_TCP );
+        if (ret != 0) {
+            ret = errno;
+            debug(CCI_DB_CONN, "rdma_create_id() returned %s", strerror(ret));
+            goto out;
+        }
+
+        ret = rdma_resolve_addr(vconn->id, NULL, (struct sockaddr*)&dst, 2000);
+        if (ret != 0) {
+            ret = errno;
+            debug(CCI_DB_CONN, "rdma_resolve_addr() returned %s", strerror(ret));
+            goto out;
+        }
+
+        {
+            struct rdma_cm_event *event;
+            int done = 0;
+
+            while (!done) {
+                ret = rdma_get_cm_event(vep->channel, &event);
+                if (ret) {
+                    ret = errno;
+                    if( EAGAIN == ret ) continue;
+                    debug(CCI_DB_CONN, "rdma_get_cm_event() returned %s",
+                          strerror(ret));
+                    goto out;
+                }
+                if( RDMA_CM_EVENT_ADDR_RESOLVED == event->event ) {
+                    ret = rdma_resolve_route(vconn->id, 2000);
+                    if (ret != 0) {
+                        ret = errno;
+                        debug(CCI_DB_CONN, "rdma_resolve_route() returned %s",
+                              strerror(ret));
+                        rdma_ack_cm_event(event);
+                        goto out;
+                    }
+                } else if( RDMA_CM_EVENT_ROUTE_RESOLVED == event->event ) {
+                    done = 1;
+                } else {
+                    printf("Got %s while solving %s! Give up!!!\n", rdma_event_str(event->event), node);
+                    ret = CCI_EADDRNOTAVAIL;
+                    rdma_ack_cm_event(event);
+                    goto out;
+                }
+                rdma_ack_cm_event(event);
+            }
+        }
+
+        ret = rdma_create_qp(vconn->id, vep->pd, &attr);
+        if(ret != 0) {
+            ret = errno;
+            debug(CCI_DB_CONN, "rdma_create_qp() returned %s\n", strerror(ret));
+            goto out;
+        }
+    }
+#endif   /* HAVE_RDMA_ADDRINFO */
 
 	ret = rdma_migrate_id(vconn->id, vep->channel);
 	if (ret == -1) {
 		ret = errno;
-		debug(CCI_DB_CONN, "rdma_migrate_id() returned %s",
-			strerror(ret));
+		debug(CCI_DB_CONN, "rdma_migrate_id() returned %s", strerror(ret));
 		goto out;
 	}
-#else
-    ret = rdma_create_id( vep->channel, &vconn->id, NULL, RDMA_PS_UDP );
-	if (ret == -1) {
-		ret = errno;
-		debug(CCI_DB_CONN, "rdma_create_id() returned %s",
-              strerror(ret));
-		goto out;
-	}
-#endif   /* HAVE_RDMA_ADDRINFO */
 
 	vconn->id->context = conn;
 	vconn->state = VERBS_CONN_ACTIVE;
@@ -1392,8 +1470,10 @@ verbs_connect(cci_endpoint_t *endpoint, char *server_uri,
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_REMOVE(&vep->active, vconn, temp);
 		pthread_mutex_unlock(&ep->lock);
-		goto out;
+		debug(CCI_DB_CONN, "rdma_connect() returned %s", strerror(ret));
+        goto out;
 	}
+    ret = 0;  /* we're good to go at this point */
 
 	debug(CCI_DB_CONN, "connecting to %s %s\n",
 		node, service);
@@ -1412,7 +1492,6 @@ out:
 	CCI_EXIT;
 	return ret;
 }
-
 
 static int
 verbs_disconnect(cci_connection_t *connection)
