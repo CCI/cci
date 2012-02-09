@@ -168,7 +168,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		skb2->dev = ifp;
 		dev_queue_xmit(skb2);
 	} else {
-#ifdef CCIETH_DEBUG
+#ifdef CONFIG_CCIETH_DEBUG
 		hdr->msg_seqnum = htonl(-1);
 #endif
 		skb->dev = ifp;

@@ -188,7 +188,7 @@ extern int ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection
 
 extern int ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt, struct net_device *orig_dev);
 
-#ifdef CCIETH_DEBUG
+#ifdef CONFIG_CCIETH_DEBUG
 #define dprintk printk
 #else
 #define dprintk(args...) do { /* nothing */ } while (0)
