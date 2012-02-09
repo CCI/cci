@@ -141,6 +141,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 	/* FIXME: implement flags */
 
+	CCIETH_STAT_INC(conn, send);
 
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
 		struct ccieth_msg_skb_cb *scb = CCIETH_MSG_SKB_CB(skb);
@@ -226,6 +227,8 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 	/* finalize and notify the event */
 	event->event.recv.user_conn_id = conn->user_conn_id;
 
+	CCIETH_STAT_INC(conn, recv);
+
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
 		/* reliable, look for obsolete, duplicates, ... */
 		__u32 relseqnum;
@@ -235,12 +238,19 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 		dprintk("got %d while we have %d+%lx\n",
 			msg_seqnum, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
 		relseqnum = msg_seqnum - conn->recv_last_full_seqnum - 1;
-		if (relseqnum > CCIETH_CONN_RECV_BITMAP_BITS)
+		if (relseqnum > CCIETH_CONN_RECV_BITMAP_BITS) {
 			/* way in advance (or very old), drop */
+			CCIETH_STAT_INC(conn, recv_tooearly);
 			goto out_with_recv_lock;
-		if (conn->recv_next_bitmap & (1ULL << relseqnum))
+		}
+		if (conn->recv_next_bitmap & (1ULL << relseqnum)) {
 			/* duplicate, ignore */
+			CCIETH_STAT_INC(conn, recv_duplicate);
 			goto out_with_recv_lock;
+		}
+		if (relseqnum > 0) {
+			CCIETH_STAT_INC(conn, recv_misorder);
+		}
 		conn->recv_next_bitmap |= 1ULL << relseqnum;
 		/* how many new fully received packets? */
 		relfull = find_first_zero_bit(&conn->recv_next_bitmap, CCIETH_CONN_RECV_BITMAP_BITS);
@@ -380,6 +390,8 @@ ccieth_msg_ack(struct ccieth_connection *conn)
 	err = ccieth_conn_send_ack(conn, &hdr->acked_seqnum);
 	if (err < 0)
 		goto out_with_skb;
+
+	CCIETH_STAT_INC(conn, ack_explicit);
 
 	rcu_read_lock();
 	/* is the interface still available? */

@@ -132,13 +132,22 @@ static void
 ccieth_conn_stats_init(struct ccieth_connection *conn, const char *prefix)
 {
 #ifdef CONFIG_CCIETH_DEBUGFS
+	memset(&conn->stats, 0, sizeof(conn->stats));
 	conn->debugfs_dir = NULL;
 	if (conn->ep->debugfs_dir) {
 		char * name = kasprintf(GFP_KERNEL, "%s%08x", prefix, conn->id);
 		if (name) {
 			struct dentry *d = debugfs_create_dir(name, conn->ep->debugfs_dir);
-			if (!IS_ERR(d))
+			if (!IS_ERR(d)) {
 				conn->debugfs_dir = d;
+				debugfs_create_u32("send", 0444, d, &conn->stats.send);
+				debugfs_create_u32("send_resend", 0444, d, &conn->stats.send_resend);
+				debugfs_create_u32("recv", 0444, d, &conn->stats.recv);
+				debugfs_create_u32("recv_duplicate", 0444, d, &conn->stats.recv_duplicate);
+				debugfs_create_u32("recv_misorder", 0444, d, &conn->stats.recv_misorder);
+				debugfs_create_u32("recv_tooearly", 0444, d, &conn->stats.recv_tooearly);
+				debugfs_create_u32("ack_explicit", 0444, d, &conn->stats.ack_explicit);
+			}
 			kfree(name);
 		}
 	}
@@ -150,7 +159,7 @@ ccieth_conn_stats_free(struct ccieth_connection *conn)
 {
 #ifdef CONFIG_CCIETH_DEBUGFS
 	if (conn->debugfs_dir)
-		debugfs_remove(conn->debugfs_dir);
+		debugfs_remove_recursive(conn->debugfs_dir);
 #endif
 }
 

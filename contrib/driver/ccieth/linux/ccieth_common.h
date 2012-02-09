@@ -166,8 +166,23 @@ struct ccieth_connection {
 
 #ifdef CONFIG_CCIETH_DEBUGFS
 	struct dentry *debugfs_dir;
+	struct {
+		__u32 send;
+		__u32 send_resend;
+		__u32 recv;
+		__u32 recv_duplicate;
+		__u32 recv_misorder;
+		__u32 recv_tooearly;
+		__u32 ack_explicit;
+	} stats;
 #endif
 };
+
+#ifdef CONFIG_CCIETH_DEBUGFS
+#define CCIETH_STAT_INC(conn, name) (conn)->stats.name++
+#else
+#define CCIETH_STAT_INC(conn, name) do { /* nothing */ } while (0)
+#endif
 
 /* stored in skbuff cb private field while queued for deferred processing */
 struct ccieth_connect_skb_cb {
