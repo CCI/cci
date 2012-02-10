@@ -179,7 +179,7 @@ ccieth_conn_stats_init(struct ccieth_connection *conn, const char *prefix)
 }
 
 static void
-ccieth_conn_stats_free(struct ccieth_connection *conn)
+ccieth_conn_stats_stop(struct ccieth_connection *conn)
 {
 #ifdef CONFIG_CCIETH_DEBUGFS
 	if (conn->debugfs_dir)
@@ -198,7 +198,6 @@ ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 	dprintk("destroying connection %p in rcu call\n", conn);
 	ccieth_conn_free(conn);
 	kfree_skb(conn->connect_skb);
-	ccieth_conn_stats_free(conn);
 	kfree(conn);
 }
 
@@ -226,6 +225,8 @@ ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 	/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 	del_timer_sync(&conn->connect_timer);
 	ccieth_conn_stop_sync(conn);
+	/* remove our debugfs entries now, so that the caller can remove its endpoint debugfs dir */
+	ccieth_conn_stats_stop(conn);
 	/* the caller will destroy the entire idr, no need to remove us from there */
 	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
 
@@ -465,7 +466,7 @@ retry:
 
 out_with_rculock:
 	rcu_read_unlock();
-	ccieth_conn_stats_free(conn);
+	ccieth_conn_stats_stop(conn);
 out_with_skb2:
 	kfree_skb(skb2);
 out_with_skb:

@@ -39,11 +39,6 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 	idr_remove(&ccieth_ep_idr, ep->id);
 	spin_unlock(&ccieth_ep_idr_lock);
 
-#ifdef CONFIG_CCIETH_DEBUGFS
-	if (ep->debugfs_dir)
-		debugfs_remove_recursive(ep->debugfs_dir);
-#endif
-
 	/* the network cannot start new receive handlers now, but some may be running */
 	synchronize_net();
 	/* all receive handlers are gone now */
@@ -81,6 +76,11 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 	dprintk("destroyed %d connections on endpoint destroy\n", destroyed_conn);
 	idr_remove_all(&ep->connection_idr);
 	idr_destroy(&ep->connection_idr);
+#ifdef CONFIG_CCIETH_DEBUGFS
+	/* no that connection debugfs entries are gone, remove the endpoint debugfs dir */
+	if (ep->debugfs_dir)
+		debugfs_remove(ep->debugfs_dir);
+#endif
 	kfree(ep);
 }
 
