@@ -323,12 +323,16 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 			msg_seqnum, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
 		relseqnum = msg_seqnum - conn->recv_last_full_seqnum - 1;
 		if (relseqnum > CCIETH_CONN_RECV_BITMAP_BITS) {
-			/* way in advance (or very old), drop */
-			CCIETH_STAT_INC(conn, recv_tooearly);
+			if (relseqnum <= 65536)
+				/* way in advance, drop */
+				CCIETH_STAT_INC(conn, recv_tooearly);
+			else
+				/* old duplicate, ignore */
+				CCIETH_STAT_INC(conn, recv_duplicate);
 			goto out_with_recv_lock;
 		}
 		if (conn->recv_next_bitmap & (1ULL << relseqnum)) {
-			/* duplicate, ignore */
+			/* recent misordered duplicate, ignore */
 			CCIETH_STAT_INC(conn, recv_duplicate);
 			goto out_with_recv_lock;
 		}
