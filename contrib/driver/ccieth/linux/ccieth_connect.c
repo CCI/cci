@@ -12,6 +12,9 @@
 #include <ccieth_common.h>
 #include <ccieth_wire.h>
 
+static void
+ccieth_connection_event_destructor(struct ccieth_endpoint *ep,
+				   struct ccieth_endpoint_event *event);
 static int
 ccieth_connect_ack_from_endpoint(struct ccieth_endpoint *ep, __u32 src_conn_id,
 				 __u8 dst_addr[6],  __u32 dst_ep_id, __u32 dst_conn_id,
@@ -65,9 +68,13 @@ ccieth_conn_uu_defer_recv_msg(struct ccieth_connection *conn,
 }
 
 static void
-ccieth_conn_attr_init(struct ccieth_connection *conn, int attribute)
+ccieth_conn_init(struct ccieth_connection *conn, struct ccieth_endpoint *ep, int attribute)
 {
 	unsigned long flags;
+
+	conn->ep = ep;
+	conn->embedded_event.event.data_length = 0;
+	conn->embedded_event.destructor = ccieth_connection_event_destructor;
 
 	switch (attribute) {
 	case CCIETH_CONNECT_ATTR_RO:
@@ -101,7 +108,7 @@ ccieth_conn_attr_init(struct ccieth_connection *conn, int attribute)
 }
 
 static void
-ccieth_conn_attr_free(struct ccieth_connection *conn)
+ccieth_conn_free(struct ccieth_connection *conn)
 {
 	if (conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG)
 		skb_queue_purge(&conn->deferred_msg_recv_queue);
@@ -116,7 +123,7 @@ ccieth_conn_attr_free(struct ccieth_connection *conn)
 }
 
 static void
-ccieth_conn_attr_stop_sync(struct ccieth_connection *conn)
+ccieth_conn_stop_sync(struct ccieth_connection *conn)
 {
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
 		del_timer_sync(&conn->recv_needack_timer);
@@ -172,7 +179,7 @@ ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 {
 	struct ccieth_connection *conn = container_of(rcu_head, struct ccieth_connection, destroy_rcu_head);
 	dprintk("destroying connection %p in rcu call\n", conn);
-	ccieth_conn_attr_free(conn);
+	ccieth_conn_free(conn);
 	kfree_skb(conn->connect_skb);
 	ccieth_conn_stats_free(conn);
 	kfree(conn);
@@ -201,7 +208,7 @@ ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 
 	/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 	del_timer_sync(&conn->connect_timer);
-	ccieth_conn_attr_stop_sync(conn);
+	ccieth_conn_stop_sync(conn);
 	/* the caller will destroy the entire idr, no need to remove us from there */
 	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
 
@@ -265,7 +272,7 @@ void ccieth_connect_request_timer_hdlr(unsigned long data)
 	spin_lock(&ep->connection_idr_lock);
 	idr_remove(&ep->connection_idr, conn->id);
 	spin_unlock(&ep->connection_idr_lock);
-	/* ccieth_conn_attr_stop_sync() not needed, the connection has never been ready */
+	/* ccieth_conn_stop_sync() not needed, the connection has never been ready */
 
 	dprintk("delivering connection %p timeout\n", conn);
 	conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECT_TIMEDOUT;
@@ -339,9 +346,7 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out;
-	conn->embedded_event.event.data_length = 0;
-	conn->embedded_event.destructor = ccieth_connection_event_destructor;
-	ccieth_conn_attr_init(conn, arg->attribute);
+	ccieth_conn_init(conn, ep, arg->attribute);
 
 	/* initialize the timer to make destroy easier */
 	setup_timer(&conn->connect_timer, ccieth_connect_request_timer_hdlr, (unsigned long) conn);
@@ -396,7 +401,6 @@ retry:
 	}
 
 	/* initialize the connection */
-	conn->ep = ep;
 	conn->req_seqnum = req_seqnum;
 	conn->status = CCIETH_CONNECTION_REQUESTED;
 	memcpy(&conn->dest_addr, &arg->dest_addr, 6);
@@ -547,9 +551,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out_with_event;
-	conn->embedded_event.event.data_length = 0;
-	conn->embedded_event.destructor = ccieth_connection_event_destructor;
-	ccieth_conn_attr_init(conn, hdr->attribute);
+	ccieth_conn_init(conn, ep, hdr->attribute);
 	/* no need for a ack before accept()/reject() is actually called */
 	conn->connect_needack = 0;
 
@@ -571,7 +573,6 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	conn->connect_skb = replyskb;
 
 	/* setup the connection so that we can check for duplicates before inserting */
-	conn->ep = ep;
 	conn->status = CCIETH_CONNECTION_RECEIVED;
 	memcpy(&conn->dest_addr, &hdr->eth.h_source, 6);
 	conn->dest_eid = src_ep_id;
@@ -1159,7 +1160,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	if (notify_close) {
 		/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 		del_timer_sync(&conn->connect_timer);
-		ccieth_conn_attr_stop_sync(conn);
+		ccieth_conn_stop_sync(conn);
 		spin_lock(&ep->connection_idr_lock);
 		idr_remove(&ep->connection_idr, dst_conn_id);
 		spin_unlock(&ep->connection_idr_lock);
@@ -1172,7 +1173,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 		dprintk("destroying acked rejected connection %p\n", conn);
 		/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 		del_timer_sync(&conn->connect_timer);
-		ccieth_conn_attr_stop_sync(conn);
+		ccieth_conn_stop_sync(conn);
 		spin_lock(&ep->connection_idr_lock);
 		idr_remove(&ep->connection_idr, conn->id);
 		spin_unlock(&ep->connection_idr_lock);
