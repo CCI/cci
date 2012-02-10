@@ -106,7 +106,7 @@ enum ccieth_connection_status {
 };
 
 #define CCIETH_CONNECT_RESEND_DELAY (HZ) /* resend connect request/accept/reject every second until acked */
-
+#define CCIETH_MSG_RESEND_DELAY (HZ/2) /* resend MSG every half-second until acked */
 #define CCIETH_DEFERRED_MSG_ACK_DELAY (HZ/10) /* ack after 100ms if some msgs were not acked yet */
 #define CCIETH_IMMEDIATE_MSG_ACK_NR 8 /* ack after 8 msgs not acked yet */
 
@@ -131,7 +131,10 @@ struct ccieth_connection {
 	/* send-side reliability */
 	spinlock_t send_lock;
 	__u32 send_next_seqnum;
-	struct sk_buff *send_queue_first, *send_queue_last;
+	struct sk_buff *send_queue_first, *send_queue_last; /* ordered by resend_jiffies */
+	/* resending */
+	struct timer_list send_resend_timer;
+	struct work_struct send_resend_work;
 	/* recv-side reliability */
 	spinlock_t recv_lock;
 	__u32 recv_last_full_seqnum;
@@ -194,6 +197,11 @@ struct ccieth_connect_skb_cb {
  * or while queued before delivery to userspace (RO connection only) */
 struct ccieth_msg_skb_cb {
 	__u32 seqnum;
+	union {
+		struct {
+			unsigned long resend_jiffies;
+		} send;
+	};
 };
 #define CCIETH_MSG_SKB_CB(__skb) ((struct ccieth_msg_skb_cb *)&((__skb)->cb[0]))
 
@@ -208,6 +216,8 @@ extern int ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl
 extern int ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_reject *arg);
 extern void ccieth_deferred_connect_recv_workfunc(struct work_struct *work);
 extern int ccieth_defer_connect_recv(struct net_device *ifp, __u8 type, struct sk_buff *skb);
+
+extern int ccieth_msg_resend(struct ccieth_connection *conn);
 
 extern int ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg);
 extern int ccieth_msg_ack(struct ccieth_connection *conn);

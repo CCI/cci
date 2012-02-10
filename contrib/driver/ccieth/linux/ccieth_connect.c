@@ -26,6 +26,20 @@ ccieth_connect_ack_from_endpoint(struct ccieth_endpoint *ep, __u32 src_conn_id,
  */
 
 static void
+ccieth_send_resend_workfunc(struct work_struct *work)
+{
+	struct ccieth_connection *conn = container_of(work, struct ccieth_connection, send_resend_work);
+	ccieth_msg_resend(conn);
+}
+
+static void
+ccieth_send_resend_timer_hdlr(unsigned long _data)
+{
+	struct ccieth_connection *conn = (void *) _data;
+	schedule_work(&conn->send_resend_work);
+}
+
+static void
 ccieth_recv_needack_workfunc(struct work_struct *work)
 {
 	struct ccieth_connection *conn = container_of(work, struct ccieth_connection, recv_needack_work);
@@ -39,7 +53,6 @@ ccieth_recv_needack_timer_hdlr(unsigned long _data)
 	if (conn->recv_needack_nr)
 		schedule_work(&conn->recv_needack_work);
 }
-
 
 static void
 ccieth_conn_uu_recv_deferred_msgs(struct ccieth_connection *conn)
@@ -96,6 +109,8 @@ ccieth_conn_init(struct ccieth_connection *conn, struct ccieth_endpoint *ep, int
 		spin_lock_init(&conn->send_lock);
 		conn->send_next_seqnum = jiffies;
 		conn->send_queue_first = conn->send_queue_last = NULL;
+		setup_timer(&conn->send_resend_timer, ccieth_send_resend_timer_hdlr, (unsigned long) conn);
+		INIT_WORK(&conn->send_resend_work, ccieth_send_resend_workfunc);
 		/* recv side */
 		spin_lock_init(&conn->recv_lock);
 		conn->recv_next_bitmap = 0;
@@ -128,6 +143,8 @@ ccieth_conn_stop_sync(struct ccieth_connection *conn)
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
 		del_timer_sync(&conn->recv_needack_timer);
 		cancel_work_sync(&conn->recv_needack_work);
+		del_timer_sync(&conn->send_resend_timer);
+		cancel_work_sync(&conn->send_resend_work);
 	}
 }
 
