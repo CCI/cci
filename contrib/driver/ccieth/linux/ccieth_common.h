@@ -105,10 +105,10 @@ enum ccieth_connection_status {
 	CCIETH_CONNECTION_REJECTED,  /* reject sent and not acked yet */
 };
 
-#define CCIETH_CONNECT_RESEND_DELAY (HZ)
+#define CCIETH_CONNECT_RESEND_DELAY (HZ) /* resend connect request/accept/reject every second until acked */
 
-#define CCIETH_DEFERRED_MSG_ACK_DELAY (HZ/10)
-#define CCIETH_IMMEDIATE_MSG_ACK_NR 8
+#define CCIETH_DEFERRED_MSG_ACK_DELAY (HZ/10) /* ack after 100ms if some msgs were not acked yet */
+#define CCIETH_IMMEDIATE_MSG_ACK_NR 8 /* ack after 8 msgs not acked yet */
 
 struct ccieth_connection {
 	int id; /* always valid */ /* FIXME keep in network order too? */

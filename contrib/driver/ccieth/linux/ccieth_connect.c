@@ -406,8 +406,10 @@ retry:
 	idr_replace(&ep->connection_idr, conn, id);
 	hdr->src_conn_id = htonl(id);
 
+	/* now that the connection has an id, we can put stats in debugfs */
 	ccieth_conn_stats_init(conn, "connreq");
 
+	/* this connection now needs this request to be acked */
 	conn->connect_needack = 1;
 	/* keep the current skb cached in the connection,
 	 * and try to send the clone. if we can't, we'll resend later.
@@ -547,8 +549,9 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 		goto out_with_event;
 	conn->embedded_event.event.data_length = 0;
 	conn->embedded_event.destructor = ccieth_connection_event_destructor;
-	conn->connect_needack = 0;
 	ccieth_conn_attr_init(conn, hdr->attribute);
+	/* no need for a ack before accept()/reject() is actually called */
+	conn->connect_needack = 0;
 
 	/* initialize the timer to make destroy easier */
 	setup_timer(&conn->connect_timer, ccieth_connect_reply_timer_hdlr, (unsigned long) conn);
@@ -610,6 +613,7 @@ retry:
 	idr_replace(&ep->connection_idr, conn, id);
 	atomic_inc(&ep->connection_received);
 
+	/* now that the connection has an id, we can put stats in debugfs */
 	ccieth_conn_stats_init(conn, "connacc");
 
 	/* finalize and notify the event */
@@ -680,8 +684,9 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	hdr->req_seqnum = htonl(conn->req_seqnum);
 	hdr->first_seqnum = htonl(conn->send_next_seqnum);
 
-	/* setup resend or timeout timer */
+	/* this connection now needs this accept to be acked */
 	conn->connect_needack = 1;
+	/* setup resend or timeout timer */
 	mod_timer(&conn->connect_timer, jiffies + CCIETH_CONNECT_RESEND_DELAY);
 
 	rcu_read_unlock(); /* end of rcu read access to ep conn idr only */
@@ -774,6 +779,7 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 		need_ack = 1;
 		goto out_with_conn;
 	}
+	/* accept means ack, no need to resend anymore */
 	conn->connect_needack = 0;
 
 	/* setup connection */
@@ -852,8 +858,9 @@ ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_re
 	hdr->src_conn_id = htonl(conn->id);
 	hdr->req_seqnum = htonl(conn->req_seqnum);
 
-	/* setup resend or timeout timer */
+	/* this connection now needs this accept to be acked */
 	conn->connect_needack = 1;
+	/* setup resend or timeout timer */
 	mod_timer(&conn->connect_timer, jiffies + CCIETH_CONNECT_RESEND_DELAY);
 
 	rcu_read_unlock(); /* end of rcu read access to ep conn idr only */
@@ -923,6 +930,7 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 		need_ack = 1;
 		goto out_with_rculock;
 	}
+	/* reject means ack, no need to resend anymore */
 	conn->connect_needack = 0;
 
 	rcu_read_unlock();
