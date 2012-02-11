@@ -10,6 +10,9 @@ endif
 ifeq ($(STATS),1)
 ccflags-y += -DCONFIG_CCIETH_DEBUGFS=1
 endif
+ifneq ($(FAULT),)
+ccflags-y += -DCONFIG_CCIETH_FAULT=$(FAULT)
+endif
 ifneq ($(CFLAGS),)
 ccflags-y += $(CFLAGS)
 endif

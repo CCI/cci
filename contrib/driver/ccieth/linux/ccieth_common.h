@@ -233,4 +233,18 @@ extern int ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packe
 #define dprintk(args...) do { /* nothing */ } while (0)
 #endif
 
+#if (defined CONFIG_CCIETH_FAULT) && (CONFIG_CCIETH_FAULT > 0)
+#include <linux/random.h>
+#define dev_queue_xmit(skb) do {				\
+  __u16 val;							\
+  get_random_bytes(&val, sizeof(val));				\
+  if (100 * (unsigned long) val < CONFIG_CCIETH_FAULT * 65536)	\
+    kfree_skb(skb);						\
+  else								\
+    dev_queue_xmit(skb);					\
+} while (0)
+#if 0
+#endif
+#endif
+
 #endif /* CCIETH_COMMON_H */
