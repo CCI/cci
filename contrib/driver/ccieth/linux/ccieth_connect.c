@@ -108,7 +108,9 @@ ccieth_conn_init(struct ccieth_connection *conn, struct ccieth_endpoint *ep, int
 		/* send side */
 		spin_lock_init(&conn->send_lock);
 		conn->send_next_seqnum = jiffies;
-		conn->send_queue_first = conn->send_queue_last = NULL;
+		conn->send_queue_first_seqnum
+		 = conn->send_queue_last_seqnum
+		 = conn->send_queue_next_resend = NULL;
 		setup_timer(&conn->send_resend_timer, ccieth_send_resend_timer_hdlr, (unsigned long) conn);
 		INIT_WORK(&conn->send_resend_work, ccieth_send_resend_workfunc);
 		/* recv side */
@@ -128,7 +130,7 @@ ccieth_conn_free(struct ccieth_connection *conn)
 	if (conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG)
 		skb_queue_purge(&conn->deferred_msg_recv_queue);
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
-		struct sk_buff *nskb, *skb = conn->send_queue_first;
+		struct sk_buff *nskb, *skb = conn->send_queue_first_seqnum;
 		while (skb) {
 			nskb = skb->next;
 			kfree_skb(skb);

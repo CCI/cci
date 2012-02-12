@@ -131,7 +131,10 @@ struct ccieth_connection {
 	/* send-side reliability */
 	spinlock_t send_lock;
 	__u32 send_next_seqnum;
-	struct sk_buff *send_queue_first, *send_queue_last; /* ordered by resend_jiffies */
+	/* double-linked list of packets not acked yet, ordered by seqnum ... */
+	struct sk_buff *send_queue_first_seqnum, *send_queue_last_seqnum;
+	/* ... with a pointer to the next one to resend */
+	struct sk_buff *send_queue_next_resend;
 	/* resending */
 	struct timer_list send_resend_timer;
 	struct work_struct send_resend_work;

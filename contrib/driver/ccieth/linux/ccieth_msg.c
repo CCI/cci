@@ -26,27 +26,37 @@ ccieth_conn_send_ack(struct ccieth_connection *conn, __be32 *seqnum)
 static void
 ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum)
 {
-	struct sk_buff *skb, *nskb, *oldfirst, *newfirst;
+	struct sk_buff *skb, *nskb, *old_next_resend;
 
 	spin_lock_bh(&conn->send_lock);
 
-	skb = oldfirst = conn->send_queue_first;
-	/* dequeue acked */
+	old_next_resend = conn->send_queue_next_resend;
+	skb = conn->send_queue_first_seqnum;
+	/* remove acked MSGs */
 	while (skb != NULL) {
-		struct ccieth_msg_skb_cb *scb = CCIETH_MSG_SKB_CB(skb);
+		if (CCIETH_MSG_SKB_CB(skb)->seqnum > acked_seqnum)
+			/* queue is ordered by seqnum, no need to try further */
+			break;
+
 		nskb = skb->next;
-		if (scb->seqnum <= acked_seqnum) {
-			if (skb == conn->send_queue_first)
-				conn->send_queue_first = nskb;
-			else
-				skb->prev->next = nskb;
-			if (skb == conn->send_queue_last)
-				conn->send_queue_last = skb->prev;
-			else
-				skb->next->prev = skb->prev;
-			kfree_skb(skb);
-			dprintk("no need to resend MSG skb %p anymore\n", skb);
-		}
+
+		/* dequeue this MSG */
+		if (skb == conn->send_queue_first_seqnum)
+			conn->send_queue_first_seqnum = nskb;
+		else
+			skb->prev->next = nskb;
+		if (skb == conn->send_queue_last_seqnum)
+			conn->send_queue_last_seqnum = skb->prev;
+		else
+			skb->next->prev = skb->prev;
+
+		/* if this MSG was the next to resend, update the pointer */
+		if (skb == conn->send_queue_next_resend)
+			conn->send_queue_next_resend = nskb ? nskb : conn->send_queue_first_seqnum;
+
+		kfree_skb(skb);
+		dprintk("no need to resend MSG skb %p anymore\n", skb);
+
 		skb = nskb;
 	}
 
@@ -54,11 +64,9 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum)
 	 * - some MSGs still have not been acked
 	 * - the first one has changed
 	 */
-	newfirst = conn->send_queue_first;
-	if (newfirst && oldfirst != newfirst) {
-		struct ccieth_msg_skb_cb *scb = CCIETH_MSG_SKB_CB(newfirst);
-		mod_timer(&conn->send_resend_timer, scb->send.resend_jiffies);
-	}
+	if (conn->send_queue_next_resend && conn->send_queue_next_resend != old_next_resend)
+		mod_timer(&conn->send_resend_timer,
+			  CCIETH_MSG_SKB_CB(conn->send_queue_next_resend)->send.resend_jiffies);
 
 	spin_unlock_bh(&conn->send_lock);
 }
@@ -66,66 +74,49 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum)
 int
 ccieth_msg_resend(struct ccieth_connection *conn)
 {
-	if (!conn->send_queue_first)
-		return 0;
-
 	spin_lock_bh(&conn->send_lock);
+
+	if (!conn->send_queue_next_resend)
+		goto out_with_lock;
 
 	/* walk the resend_jiffies-ordered queue and resend everything needed */
 	while (1) {
-		struct sk_buff *skb = conn->send_queue_first, *newskb;
+		struct sk_buff *skb = conn->send_queue_next_resend;
 		struct ccieth_msg_skb_cb *scb = CCIETH_MSG_SKB_CB(skb);
 		struct net_device *ifp;
 
 		if (scb->send.resend_jiffies > jiffies)
 			break;
 
-		/* dequeue from beginning */
-		conn->send_queue_first = skb->next;
-		if (skb->next)
-			skb->next->prev = NULL;
-		else
-			conn->send_queue_last = NULL;
-		/* release the lock while resending */
-		spin_unlock_bh(&conn->send_lock);
-
 		CCIETH_STAT_INC(conn, send_resend);
 
 		/* try to send a clone */
-		newskb = skb_clone(skb, GFP_KERNEL);
-		if (newskb) {
-			rcu_read_lock();
-			/* is the interface still available? */
-			ifp = rcu_dereference(conn->ep->ifp);
-			if (ifp) {
-				struct ccieth_pkt_header_msg *hdr;
-				hdr = (struct ccieth_pkt_header_msg *) skb_mac_header(skb);
+		rcu_read_lock();
+		/* is the interface still available? */
+		ifp = rcu_dereference(conn->ep->ifp);
+		if (ifp) {
+			struct sk_buff *newskb = skb_clone(skb, GFP_ATOMIC);
+			if (newskb) {
+				struct ccieth_pkt_header_msg *hdr = (struct ccieth_pkt_header_msg *) skb_mac_header(skb);
 				ccieth_conn_send_ack(conn, &hdr->acked_seqnum);
 				newskb->dev = ifp;
 				dev_queue_xmit(newskb);
-			} else {
-				kfree_skb(newskb);
 			}
-			rcu_read_unlock();
 		}
+		rcu_read_unlock();
+
 		/* plan next resend for this MSG */
 		scb->send.resend_jiffies = jiffies + CCIETH_MSG_RESEND_DELAY;
 
-		/* done resending, reacquire the lock and requeue at the end */
-		spin_lock_bh(&conn->send_lock);
-
-		skb->prev = conn->send_queue_last;
-		skb->next = NULL;
-		if (conn->send_queue_last)
-			conn->send_queue_last->next = skb;
-		else
-			conn->send_queue_first = skb;
-		conn->send_queue_last = skb;
+		/* switch to next packet, wrap-around if needed */
+		conn->send_queue_next_resend = skb->next ? skb->next : conn->send_queue_first_seqnum;
 	}
 
 	/* update connection resend timer */
-	mod_timer(&conn->send_resend_timer, CCIETH_MSG_SKB_CB(conn->send_queue_first)->send.resend_jiffies);
+	mod_timer(&conn->send_resend_timer,
+		  CCIETH_MSG_SKB_CB(conn->send_queue_next_resend)->send.resend_jiffies);
 
+out_with_lock:
 	spin_unlock_bh(&conn->send_lock);
 	return 0;
 }
@@ -234,16 +225,17 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		hdr->msg_seqnum = htonl(seqnum);
 		scb->seqnum = seqnum;
 		scb->send.resend_jiffies = jiffies + CCIETH_MSG_RESEND_DELAY;
-		if (conn->send_queue_last) {
-			conn->send_queue_last->next = skb;
-			skb->prev = conn->send_queue_last;
+		if (conn->send_queue_last_seqnum) {
+			conn->send_queue_last_seqnum->next = skb;
+			skb->prev = conn->send_queue_last_seqnum;
 			/* timer already scheduled */
 		} else {
-			conn->send_queue_first = skb;
+			conn->send_queue_first_seqnum
+			 = conn->send_queue_next_resend = skb;
 			skb->prev = NULL;
 			mod_timer(&conn->send_resend_timer, scb->send.resend_jiffies);
 		}
-		conn->send_queue_last = skb;
+		conn->send_queue_last_seqnum = skb;
 		skb->next = NULL;
 		dprintk("need to resend MSG skb %p\n", skb);
 		spin_unlock_bh(&conn->send_lock);
