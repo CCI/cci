@@ -19,7 +19,7 @@
 
 #include "cci.h"
 
-#define ITERS       (512 * 1024)
+#define ITERS       (16 * 1024)
 #define WARMUP      (1024)
 #define MAX_RMA_SIZE    (4 * 1024 * 1024)
 
@@ -126,8 +126,6 @@ poll_events(void)
                 if (opts.method != AM && !is_server) {
                     /* get server_rma_handle */
                     opts = *((options_t *)event->recv.ptr);
-                    fprintf(stderr, "server RMA handle is 0x%"PRIx64"\n",
-                                    opts.server_rma_handle);
                 }
             } else if (is_server && event->recv.len == 3) {
                 done = 1;
@@ -186,9 +184,6 @@ do_client()
     char *func;
     char *header = "Done";
 
-    /* let server start */
-    sleep(3);
-
     /* initiate connect */
     ret = cci_connect(endpoint, server_uri, &opts, sizeof(opts), attr, NULL, 0, NULL);
     check_return("cci_connect", ret, 1);
@@ -236,7 +231,7 @@ do_client()
     }
 
     if (opts.method == AM)
-        printf("Bytes\tLatency (one-way)\tThroughput\n");
+        printf("Bytes\t\tLatency (one-way)\tThroughput\n");
     else
         printf("Bytes\t\tLatency (round-trip)\tThroughput\n");
 
@@ -348,7 +343,6 @@ do_server()
                 ret = cci_rma_register(endpoint, connection, buffer,
                                        opts.max_rma_size, &opts.server_rma_handle);
                 check_return("cci_rma_register", ret, 1);
-                fprintf(stderr, "server_rma_handle is 0x%"PRIx64"\n", opts.server_rma_handle);
             }
             ret = cci_send(connection, &opts, sizeof(opts), NULL, 0);
             check_return("cci_send", ret, 1);
@@ -427,6 +421,11 @@ int main(int argc, char *argv[])
         }
     }
 
+    if (!is_server && !server_uri) {
+        fprintf(stderr, "Must select -h or -s\n");
+	print_usage();
+    }
+
     if (attr == CCI_CONN_ATTR_UU) {
         if (opts.method != AM) {
             fprintf(stderr, "RMA %s not allowed with UU connections\n",
@@ -454,13 +453,7 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    ret = cci_get_devices((cci_device_t const *** const) &devices);
-    if (ret) {
-        fprintf(stderr, "cci_get_devices() failed with %s\n", cci_strerror(ret));
-        exit(EXIT_FAILURE);
-    }
-
-    /* create an endpoint? */
+    /* create an endpoint */
     ret = cci_create_endpoint(NULL, 0, &endpoint, &ep_fd);
     if (ret) {
         fprintf(stderr, "cci_create_endpoint() failed with %s\n", cci_strerror(ret));
@@ -481,11 +474,6 @@ int main(int argc, char *argv[])
     }
     if (buffer)
         free(buffer);
-    ret = cci_free_devices((cci_device_t const **) devices);
-    if (ret) {
-        fprintf(stderr, "cci_free_devices() failed with %s\n", cci_strerror(ret));
-        exit(EXIT_FAILURE);
-    }
 
     free(server_uri);
 
