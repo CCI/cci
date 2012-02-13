@@ -231,6 +231,40 @@ extern int ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection
 
 extern int ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt, struct net_device *orig_dev);
 
+static inline struct ccieth_endpoint_event *
+ccieth_get_free_event(struct ccieth_endpoint *ep)
+{
+	struct ccieth_endpoint_event *event;
+	spin_lock_bh(&ep->free_event_list_lock);
+	if (unlikely(list_empty(&ep->free_event_list))) {
+		spin_unlock_bh(&ep->free_event_list_lock);
+		return NULL;
+	}
+	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
+	list_del(&event->list);
+	spin_unlock_bh(&ep->free_event_list_lock);
+	return event;
+}
+
+static inline void
+ccieth_putback_free_event(struct ccieth_endpoint *ep,
+			  struct ccieth_endpoint_event *event)
+{
+	spin_lock_bh(&ep->free_event_list_lock);
+	list_add_tail(&event->list, &ep->free_event_list);
+	spin_unlock_bh(&ep->free_event_list_lock);
+}
+
+static inline void
+ccieth_queue_busy_event(struct ccieth_endpoint *ep,
+			struct ccieth_endpoint_event *event)
+{
+	spin_lock_bh(&ep->event_list_lock);
+	list_add_tail(&event->list, &ep->event_list);
+	spin_unlock_bh(&ep->event_list_lock);
+}
+
+
 #ifdef CONFIG_CCIETH_DEBUG
 #define dprintk printk
 #else

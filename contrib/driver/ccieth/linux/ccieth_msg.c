@@ -59,9 +59,7 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum)
 
 		event = scb->reliable_send.event;
 		event->event.send.status = 0;
-		spin_lock_bh(&conn->ep->event_list_lock);
-		list_add_tail(&event->list, &conn->ep->event_list);
-		spin_unlock_bh(&conn->ep->event_list_lock);
+		ccieth_queue_busy_event(conn->ep, event);
 
 		kfree_skb(skb);
 		dprintk("no need to resend MSG skb %p anymore\n", skb);
@@ -193,16 +191,12 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		goto out_with_rculock;
 
 	/* get an event */
-	spin_lock_bh(&ep->free_event_list_lock);
-	if (list_empty(&ep->free_event_list)) {
+	event = ccieth_get_free_event(ep);
+	if (!event) {
 		err = -ENOMEM;
-		spin_unlock_bh(&ep->free_event_list_lock);
 		dprintk("ccieth: no event slot for send\n");
 		goto out_with_rculock;
 	}
-	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
-	list_del(&event->list);
-	spin_unlock_bh(&ep->free_event_list_lock);
 
 	/* setup the event */
 	event->event.type = CCIETH_IOCTL_EVENT_SEND;
@@ -262,9 +256,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 		/* finalize and notify the event */
 		event->event.send.status = 0;
-		spin_lock_bh(&ep->event_list_lock);
-		list_add_tail(&event->list, &ep->event_list);
-		spin_unlock_bh(&ep->event_list_lock);
+		ccieth_queue_busy_event(ep, event);
 	}
 
 	rcu_read_unlock();
@@ -292,15 +284,11 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 
 	/* get an event */
 	err = -ENOMEM;
-	spin_lock_bh(&ep->free_event_list_lock);
-	if (list_empty(&ep->free_event_list)) {
-		spin_unlock_bh(&ep->free_event_list_lock);
+	event = ccieth_get_free_event(ep);
+	if (!event) {
 		dprintk("ccieth: no event slot for msg\n");
 		goto out;
 	}
-	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
-	list_del(&event->list);
-	spin_unlock_bh(&ep->free_event_list_lock);
 
 	/* setup the event */
 	event->event.type = CCIETH_IOCTL_EVENT_RECV;
@@ -363,9 +351,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 	}
 
 	/* FIXME: deliver the event before doing all the reliability thing ? */
-	spin_lock_bh(&ep->event_list_lock);
-	list_add_tail(&event->list, &ep->event_list);
-	spin_unlock_bh(&ep->event_list_lock);
+	ccieth_queue_busy_event(ep, event);
 
 	dev_kfree_skb(skb);
 	return 0;
@@ -373,9 +359,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 out_with_recv_lock:
 	ccieth_conn_handle_ack(conn, ntohl(hdr->acked_seqnum));
 	spin_unlock_bh(&conn->recv_lock);
-	spin_lock_bh(&ep->free_event_list_lock);
-	list_add_tail(&event->list, &ep->free_event_list);
-	spin_unlock_bh(&ep->free_event_list_lock);
+	ccieth_putback_free_event(ep, event);
 out:
 	dev_kfree_skb(skb);
 	return err;

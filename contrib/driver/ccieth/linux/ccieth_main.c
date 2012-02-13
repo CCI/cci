@@ -496,9 +496,7 @@ static int ccieth_netdevice_notifier_idrforeach_cb(int id, void *p, void *_data)
 
 		ep->embedded_event.event.type = CCIETH_IOCTL_EVENT_DEVICE_FAILED;
 		ep->embedded_event.event.data_length = 0;
-		spin_lock_bh(&ep->event_list_lock);
-		list_add_tail(&ep->embedded_event.list, &ep->event_list);
-		spin_unlock_bh(&ep->event_list_lock);
+		ccieth_queue_busy_event(ep, &ep->embedded_event);
 	}
 
 	return 0;
