@@ -34,7 +34,6 @@ int cci_plugins_core_verify(cci_plugin_t *plugin)
         NULL == p->send ||
         NULL == p->sendv ||
         NULL == p->rma_register ||
-        NULL == p->rma_register_phys ||
         NULL == p->rma_deregister ||
         NULL == p->rma) {
         debug( CCI_DB_WARN,

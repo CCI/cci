@@ -91,16 +91,23 @@ AH_BOTTOM([
 #endif /* CCI_CONFIGURE_H */
 ])
 
+# If debug mode, add -g
+AC_ARG_ENABLE([cci-debug],
+    AS_HELP_STRING([--enable-cci-debug],
+                   [Build w/support for debugging symbols]),
+                   AC_SUBST([DEBUG_FLAGS],["-O0 -g"]),
+                   [])
+
 # Extract compiler from Cray Programming Environment
 AS_IF([test "$PE_ENV" = "PGI"],
       AC_SUBST([CC],["pgcc"])
-      [cflags="-fast -Msmartalloc -Mnobuiltin"])
+      [cflags="-fast -Msmartalloc -Mnobuiltin $DEBUG_FLAGS"])
 AS_IF([test "$PE_ENV" = "GNU"],
       AC_SUBST([CC],["gcc"])
-      [cflags="-O3 -pthread -fno-builtin -Wall -Werror"])
+      [cflags="-O3 -pthread -fno-builtin -Wall -Werror $DEBUG_FLAGS"])
 AS_IF([test "$PE_ENV" = "INTEL"],
       AC_SUBST([CC],["icc"])
-      [cflags="-O3 -pthread -fno-builtin -Wall -Werror"])
+      [cflags="-O3 -pthread -fno-builtin -Wall -Werror $DEBUG_FLAGS"])
 
 # Cray compiler is not ready yet; needs libtool support
 #AS_IF([test "$PE_ENV" = "CRAY"],
@@ -120,10 +127,6 @@ CFLAGS="$CFLAGS_save"
 # Define cci's configure arguments
 CCI_DEFINE_ARGS
 
-# If debug mode, add -g
-AS_IF([test "$cci_debug" = "1"],
-      [CFLAGS="$CFLAGS -g"])
-
 # Setup the cci core
 CCI_SETUP_CORE([], [], [AC_MSG_ERROR([Cannot continue])], [1])
 
@@ -133,7 +136,7 @@ AC_ARG_WITH([pmi],
                    [Build w/support for Cray Process Manager Interface]),
     [], [with_pmi=no])
 AS_IF([test "x$with_pmi" != xno],
-      [AC_SUBST([pmi_CPPFLAGS], ["-I$with_pmi/include"])
+      [AC_SUBST([pmi_CPPFLAGS], ["-I$with_pmi/include -DUSE_PMI"])
        AC_SUBST([pmi_LDFLAGS], ["-L$with_pmi/lib64"])
        AC_SUBST([pmi_LIBS], ["-lpmi"])
        AC_DEFINE([HAVE_PMI], [1], [Define if you have PMI])])

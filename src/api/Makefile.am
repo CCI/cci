@@ -22,7 +22,6 @@ libcci_api_la_SOURCES = \
         rma.c \
         rma_deregister.c \
         rma_register.c \
-        rma_register_phys.c \
         send.c \
         sendv.c \
         set_opt.c \

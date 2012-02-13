@@ -2,8 +2,9 @@
  * Copyright (c) 2010-2011 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2010-2011 Myricom, Inc.  All rights reserved.
  * Copyright (c) 2010-2011 Qlogic Corporation.  All rights reserved.
- * Copyright (c) 2010-2012 UT-Battelle, LLC.  All rights reserved.
- * Copyright (c) 2010-2012 Oak Ridge National Labs.  All rights reserved.
+ * Copyright (c) 2010-2011 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -27,7 +28,7 @@
  * \todo How do we return errors for non-zero-copy sends?  (e.g., RNR
    errors that take a while to occur -- may be long after the send has
    locally completed).  We can't necessarily return a pointer to the
-   messsage that failed because the app may have overwritten it by
+   message that failed because the app may have overwritten it by
    then.  Possible: we could return an asynch event send error with a
    pointer to our internal buffer, with the condition that the
    internal buffer will be released when the event is returned...?
@@ -210,6 +211,11 @@ typedef enum cci_status {
      actually received the message or not.
 
      This error code won't occur for unreliable sends.
+
+     For a connection request, this error code means that the initiator
+     did not get anything back from the target within a timeout.
+     It is unknown whether the target received the request and ignored
+     it, did not receive it at all, or receive it too late.
   */
   CCI_ETIMEDOUT = ETIMEDOUT,
 
@@ -491,6 +497,9 @@ typedef struct cci_endpoint {
       to pass to cci_connect(). The application should never need to parse
       this URI. */
   char const * const name;
+
+  /*! Application-provided, private context. */
+  void *context;
 } cci_endpoint_t;
 
 /*! OS-native handles
@@ -542,12 +551,12 @@ typedef int cci_os_handle_t;
   times locally without affecting any remote resources.
 
   If it is desirable to bind the CCI endpoint to a specific set of
-  resources (e.g., a NUMA node), you should bind the calling thread
-  before calling cci_create_endpoint().
+  resources (e.g., a NUMA node), the application should bind the calling
+  thread before calling cci_create_endpoint().
 
-  Advice to users: if you want to set the send/receive buffer count
-  on the endpoint, call cci_set|get_opt() after creating the
-  endpoint.
+  Advice to users: to set the send/receive buffer count on the endpoint,
+  call cci_set|get_opt() after creating the endpoint with the applicable
+  options.
 
   \ingroup endpoints
 */
@@ -605,6 +614,11 @@ CCI_DECLSPEC int cci_destroy_endpoint(cci_endpoint_t *endpoint);
   RMA operations only applies to target notification, not data
   delivery.
 
+  For reliable connections, unordered connections allow the most
+  aggressive optimization of the underlying network(s) to provide better
+  performance. Requesting Ordered connections will reduce performance on
+  most networks.
+
   Unreliable unordered connections have no timeout.
 
   Multicast is always unreliable unordered.  Multicast connections
@@ -647,6 +661,8 @@ typedef struct cci_connection {
   cci_endpoint_t *endpoint;
   /*! Attributes of the connection */
   cci_conn_attribute_t attribute;
+  /*! Application-provided, private context. */
+  void *context;
 } cci_connection_t;
 
 union cci_event;
@@ -655,11 +671,15 @@ union cci_event;
   Accept a connection request and establish a connection with a specific
   endpoint.
 
-  \param[in] conn_req	A connection request event previously returned by
-			cci_get_event().
-  \param[in,out]	Connection pointer to a connection request structure.
+  \param[in] conn_req		A connection request event previously returned by
+				cci_get_event().
+  \param[in] context		Cookie to be used to identify the connection in
+				incoming events.
+  \param[in,out] connection	Connection pointer to a connection request structure.
 
   \return CCI_SUCCESS   The connection has been established.
+  \return CCI_EINVAL    The event is not a connection request or it has
+                        already been accepted or rejected.
   \return Each driver may have additional error codes.
 
   Upon success, the incoming connection request is bound to the
@@ -670,6 +690,7 @@ union cci_event;
   \ingroup connection
 */
 CCI_DECLSPEC int cci_accept(union cci_event *conn_req,
+                            void *context,
                             cci_connection_t **connection);
 
 /*!
@@ -678,6 +699,8 @@ CCI_DECLSPEC int cci_accept(union cci_event *conn_req,
   \param[in] conn_req	Connection request event to reject.
 
   \return CCI_SUCCESS	Connection request has been rejected.
+  \return CCI_EINVAL    The event is not a connection request or it has
+                        already been accepted or rejected.
   \return Each driver may have additional error codes.
 
    Rejects an incoming connection request.  The connection request
@@ -730,7 +753,8 @@ CCI_DECLSPEC int cci_reject(union cci_event *conn_req);
   \param[in] attribute	Attributes of the requested connection (reliability,
                         ordering, multicast, etc).
   \param[in] context	Cookie to be used to identify the completion through
-                        a connect accepted, rejected, or timedout event.
+                        a connect accepted, rejected, or failed event, and
+                        used to identify the connection in incoming events.
   \param[in] flags      Currently unused.
   \param[in] timeout	NULL means forever.
 
@@ -760,7 +784,7 @@ CCI_DECLSPEC int cci_connect(cci_endpoint_t *endpoint, char *server_uri,
   both local and remote side will get a DISCONNECTED communication error
   if sends are initiated on  this connection.
 
-  \param[in] connection	Connection to sever.
+  \param[in] connection	Connection to server.
 
   \return CCI_SUCCESS   The connection's resources have been released.
   \return CCI_EINVAL    Connection is NULL.
@@ -803,17 +827,17 @@ typedef enum cci_event_type {
   /*! A send or RMA has completed. */
   CCI_EVENT_SEND,
 
-  /*! An active message has been received. */
+  /*! A message has been received. */
   CCI_EVENT_RECV,
 
   /*! A new outgoing connection was successfully accepted at the
      peer; a connection is now available for data transfer. */
   CCI_EVENT_CONNECT_ACCEPTED,
 
-  /*! A new outgoing connection did not complete the accept/connect
-     handshake with the peer in a finite time.  CCI has therefore
-     given up attempting to continue to create this connection. */
-  CCI_EVENT_CONNECT_TIMEDOUT,
+  /*! A new outgoing connection could not complete the accept/connect
+     handshake with the peer, either because the timeout expired, or
+     for another driver specific reason. */
+  CCI_EVENT_CONNECT_FAILED,
 
   /*! A new outgoing connection was rejected by the server. */
   CCI_EVENT_CONNECT_REJECTED,
@@ -933,10 +957,8 @@ typedef struct cci_event_connect_accepted {
   /*! Type of event - should equal CCI_EVENT_CONNECT_ACCEPTED. */
   cci_event_type_t type;
 
-  /*! Context value that was passed to cci_connect() */
-  void *context;
-
-  /*! The new connection. */
+  /*! The new connection. Its context field contains the context
+    that was given to cci_connect(). */
   cci_connection_t *connection;
 } cci_event_connect_accepted_t;
 
@@ -957,13 +979,19 @@ typedef struct cci_event_connect_accepted {
 
   \ingroup events
 */
-typedef struct cci_event_connect_timedout {
-  /*! Type of event - should equal CCI_EVENT_CONNECT_TIMEDOUT. */
+typedef struct cci_event_connect_failed {
+  /*! Type of event - should equal CCI_EVENT_CONNECT_FAILED. */
   cci_event_type_t type;
+
+  /*! A status indicating why the connection failed.
+    If the connection could not be setup before the timeout expired,
+    status is CCI_ETIMEDOUT.
+    Each driver may have additional error codes. */
+  cci_status_t status;
 
   /*! Context value that was passed to cci_connect() */
   void *context;
-} cci_event_connect_timedout_t;
+} cci_event_connect_failed_t;
 
 /*!
   Connection rejected event.
@@ -993,7 +1021,7 @@ typedef struct cci_event_connect_rejected {
 /*!
   Connection request event.
 
-  An incoming conenction request from a client. It includes the
+  An incoming connection request from a client. It includes the
   requested connection attributes (reliability and ordering) and
   an optional payload.
 
@@ -1003,6 +1031,9 @@ typedef struct cci_event_connect_rejected {
 
   The ordering of fields in this struct is intended to reduce memory
   holes between fields.
+
+  This event should be passed to either cci_accept() or cci_reject()
+  before being returned with cci_return_event().
 
   \ingroup events
 */
@@ -1083,7 +1114,7 @@ typedef union cci_event {
   cci_event_recv_t recv;
   cci_event_connect_accepted_t accepted;
   cci_event_connect_rejected_t rejected;
-  cci_event_connect_timedout_t conn_timedout;
+  cci_event_connect_failed_t conn_failed;
   cci_event_connect_request_t request;
   cci_event_keepalive_timedout_t keepalive;
   cci_event_endpoint_device_failed_t dev_failed;
@@ -1105,9 +1136,6 @@ typedef union cci_event {
    Windows, so we have a function for that.  Since we are not Windows
    gurus, we decided to freeze it until we ask a pro about it.
 
-  \todo JMS What about blocking for incoming connection requests on
-   the cci_service_t?  That returns an OS handle, too.x
-
   \ingroup events
 */
 CCI_DECLSPEC int cci_arm_os_handle(cci_endpoint_t *endpoint, int flags);
@@ -1116,14 +1144,21 @@ CCI_DECLSPEC int cci_arm_os_handle(cci_endpoint_t *endpoint, int flags);
   Get the next available CCI event.
 
   This function never blocks; it polls instantly to see if there is
-  any pending event of any type (send completion, receive, or other
-  events -- errors, incoming connection requests, etc.).  If you want to
-  block, use the OS handle to use your OS's native blocking mechanism
-  (e.g., select/poll on the POSIX fd).  This also allows the app to
-  busy poll for a while and then OS block if nothing interesting is
-  happening.  The default OS handle returned when creating the
-  endpoint will return the equivalent of a POLL_IN when any event is
-  available.
+  any pending event of any type (send completion, receive, connection
+  request, etc.). If the application wants to block, it should pass the
+  OS handle to the OS's native blocking mechanism (e.g., select/poll on
+  the POSIX fd).  This also allows the app to busy poll for a while and
+  then OS block if nothing interesting is happening.  The behavior of
+  the OS handle when used with the OS blocking mechanism is to return
+  the equivalent of a POLLIN which indicates that the application should
+  call cci_get_event(). It does not, however, guarantee that
+  cci_get_event() will return something other than CCI_EAGAIN. For
+  example, the application has two threads: one blocking on the OS
+  handle and another calling cci_get_event(). By the time the blocking
+  thread wakes and calls cci_get_event(), the other thread may have
+  already reaped all the queued events. Note, the application must never
+  directly read from or write to the OS handle. The results are
+  undefined.
 
   This function borrows the buffer associated with the event; it must
   be explicitly returned later via cci_return_event().
@@ -1133,6 +1168,9 @@ CCI_DECLSPEC int cci_arm_os_handle(cci_endpoint_t *endpoint, int flags);
 
   \return CCI_SUCCESS   An event was retrieved.
   \return CCI_EAGAIN    No event is available.
+  \return CCI_ENOBUFS	No event is available and there are no available
+                        receive buffers. The application must return events
+			before any more messages can be received.
   \return Each driver may have additional error codes.
 
    To discuss:
@@ -1163,10 +1201,11 @@ CCI_DECLSPEC int cci_get_event(cci_endpoint_t *endpoint,
   just receive events.  However, it is possible (likely) that
   returning send completion and "other" events will be no-ops.
 
-  \param[in] endpoint	Endpoint that provided the event.
   \param[in] event	    Event to return.
 
   \return CCI_SUCCESS  The event was returned to CCI.
+  \return CCI_EINVAL   The event is a connection request and it has
+                       not been passed to cci_accept() or cci_reject().
   \return Each driver may have additional error codes.
 
   \todo What to do about hardware that cannot return buffers out of
@@ -1253,7 +1292,7 @@ typedef enum cci_opt_name {
       raised on that connection.
 
       - The CCI implementation will automatically send control
-      hearbeats across an inactive (but still alive) connection to
+      heartbeats across an inactive (but still alive) connection to
       reset the peer's keepalive timer before it times out.
 
       If a keepalive event is raised, the keepalive timeout is set to
@@ -1447,20 +1486,19 @@ CCI_DECLSPEC int cci_sendv(cci_connection_t *connection,
 /*!
   Register memory for RMA operations.
 
-  The intent is that this function is invoked frequently -- "just
-  register everything" before invoking RMA operations.
+  Prior to accessing memory using RMA, the application must register
+  the memory with an endpoint. Memory registered with one endpoint may
+  not be accessed via another endpoint, unless also registered with
+  that endpoint (i.e. an endpoint serves as a protection domain).
 
-  In the best case, the implementation is cheap/fast enough that the
-  invocation time doesn't noticeably affect performance (e.g., MX and
-  PSM).  If the implementation is slow (e.g., IB/iWARP), this function
-  should probably have a registration cache so that at least repeated
-  registrations are fast.
+  If the connection is provided (and the endpoint's driver supports this
+  feature), the memory is only exposed to that connection. If it is NULL,
+  then any reliable connection on that endpoint can access that memory.
 
-  If the connection is provided, the memory is only exposed to that
-  connection. If it is NULL, then any reliable connection on that
-  endpoint can access that memory.
+  Registration may take awhile depending on the underlying device and
+  should not be in the critical path.
 
-  It is allowable to have overlapping registerations.
+  It is allowable to have overlapping registrations.
 
   \param[in]  endpoint      Local endpoint to use for RMA.
   \param[in]  connection    Restrict RMA to this connection.
@@ -1471,6 +1509,7 @@ CCI_DECLSPEC int cci_sendv(cci_connection_t *connection,
   \return CCI_SUCCESS   The memory is ready for RMA.
   \return CCI_EINVAL    endpoint, start, or rma_handle is NULL.
   \return CCI_EINVAL    connection is unreliable.
+  \return CCI_ENOTSUP   driver does not support setting a connection.
   \return CCI_EINVAL    length is 0.
   \return Each driver may have additional error codes.
 
@@ -1481,36 +1520,11 @@ CCI_DECLSPEC int cci_rma_register(cci_endpoint_t *endpoint,
                                   void *start, uint64_t length,
                                   uint64_t *rma_handle);
 
-/*! \private
-
-  This data structure should map to the native scatter/gather list
-  that is used down in the kernel.
-
-  \ingroup communications
- */
-typedef struct cci_sg {
-    /* JMS is this right?  Is it different than cci_iovec_t? */
-    uint64_t address;
-    uint32_t length;
-} cci_sg_t;
-
-/*! \private
-
-  This is just like cci_rma_register(), but it is to be used in the
-  kernel only.
-
-  \ingroup communications
- */
-CCI_DECLSPEC int cci_rma_register_phys(cci_endpoint_t *endpoint,
-                                       cci_connection_t *connection,
-                                       cci_sg_t *sg_list, uint32_t sg_cnt,
-                                       uint64_t *rma_handle);
-
 /*!
   Deregister memory.
 
   If an RMA is in progress that uses this handle, the RMA may abort or
-  the deregisteration may fail.
+  the deregistration may fail.
 
   Once deregistered, the handle is stale.
 

@@ -27,6 +27,7 @@
 int connect_done = 0, done = 0;
 int ready = 0;
 int is_server = 0;
+int accept = 1;
 int count = 0;
 int iters = ITERS;
 int warmup = WARMUP;
@@ -65,6 +66,7 @@ print_usage()
     fprintf(stderr, "where:\n");
     fprintf(stderr, "\t-h\tServer's URI\n");
     fprintf(stderr, "\t-s\tSet to run as the server\n");
+    fprintf(stderr, "\t-R\tServer option to reject connect request\n");
     fprintf(stderr, "\t-i\tRun this number of iterations\n");
     fprintf(stderr, "\t-W\tRun this number of warmup iterations\n");
     fprintf(stderr, "\t-c\tConnection type (UU, RU, or RO) set by client only\n");
@@ -101,6 +103,7 @@ poll_events(void)
         assert(event);
         switch (event->type) {
         case CCI_EVENT_SEND:
+            assert(event->send.status == CCI_SUCCESS);
             if (opts.method != AM) {
                 if (!is_server && event->send.context == (void*)1) {
                     count++;
@@ -154,12 +157,13 @@ poll_events(void)
                     if (ret)
                         fprintf(stderr, "%s: %s: send returned %s\n", __func__,
                                 is_server ? "server" : "client", cci_strerror(ret));
+                    check_return("cci_send", ret, 1);
                 }
             }
             break;
         }
         case CCI_EVENT_CONNECT_ACCEPTED:
-        case CCI_EVENT_CONNECT_TIMEDOUT:
+        case CCI_EVENT_CONNECT_FAILED:
         case CCI_EVENT_CONNECT_REJECTED:
             if (!is_server) {
                 connect_done = 1;
@@ -302,6 +306,11 @@ do_client()
     while (!done)
         poll_events();
 
+    if (opts.method != AM) {
+        ret = cci_rma_deregister(local_rma_handle);
+        check_return("cci_rma_deregister", ret, 1);
+    }
+
     printf("client done\n");
     sleep(1);
 
@@ -311,23 +320,30 @@ do_client()
 void
 do_server()
 {
-    int ret, accept = 0;
+    int ret;
 
-    while (!accept) {
+    while (!ready) {
         cci_event_t *event;
 
         ret = cci_get_event(endpoint, &event);
-        if (ret == 0 && event) {
+        if (ret == CCI_SUCCESS) {
             int len;
 
-            accept = 1;
-            ready = 1;
-            opts = *((options_t *)event->request.data_ptr);
-            ret = cci_accept(event, &connection);
-            check_return("cci_accept", ret, 1);
+	    if (accept) {
+		ready = 1;
+		opts = *((options_t *)event->request.data_ptr);
+		ret = cci_accept(event, NULL, &connection);
+		check_return("cci_accept", ret, 1);
+	    } else {
+		ret = cci_reject(event);
+		check_return("cci_accept", ret, 1);
+	    }
 
 	    ret = cci_return_event(event);
             check_return("cci_return_event", ret, 1);
+
+	    if (!accept)
+		    goto out;
 
             if (opts.method == AM)
                 len = connection->max_send_size;
@@ -353,6 +369,12 @@ do_server()
     while (!done)
         poll_events();
 
+    if (opts.method != AM) {
+        ret = cci_rma_deregister(opts.server_rma_handle);
+        check_return("cci_rma_deregister", ret, 1);
+    }
+
+out:
     printf("server done\n");
     sleep(1);
 
@@ -367,7 +389,7 @@ int main(int argc, char *argv[])
 
     name = argv[0];
 
-    while ((c = getopt(argc, argv, "h:sc:nwrm:Ci:W:")) != -1) {
+    while ((c = getopt(argc, argv, "h:sRc:nwrm:Ci:W:")) != -1) {
         switch (c) {
         case 'h':
             server_uri = strdup(optarg);
@@ -375,6 +397,9 @@ int main(int argc, char *argv[])
         case 's':
             is_server = 1;
             break;
+	case 'R':
+	    accept = 0;
+	    break;
         case 'i':
             iters = strtoul(optarg, NULL, 0);
             break;

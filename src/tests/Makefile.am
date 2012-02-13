@@ -9,7 +9,6 @@ TESTS = \
         init	\
 	server	\
 	client	\
-	pingpong_rma	\
 	pingpong	\
 	stream	\
 	register

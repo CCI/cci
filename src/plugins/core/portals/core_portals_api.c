@@ -122,6 +122,7 @@ static int portals_create_endpoint(  cci_device_t         *device,
                                      cci_os_handle_t      *fd );
 static int portals_destroy_endpoint( cci_endpoint_t       *endpoint );
 static int portals_accept(           union cci_event      *event,
+                                     void                 *context,
                                      cci_connection_t     **connection );
 static int portals_reject(           union cci_event      *event );
 static int portals_connect(          cci_endpoint_t       *endpoint,
@@ -162,11 +163,6 @@ static int portals_rma_register(     cci_endpoint_t       *endpoint,
                                      cci_connection_t     *connection,
                                      void                 *start,
                                      uint64_t             length,
-                                     uint64_t             *rma_handle );
-static int portals_rma_register_phys(cci_endpoint_t       *endpoint,
-                                     cci_connection_t     *connection,
-                                     cci_sg_t             *sg_list,
-                                     uint32_t             sg_cnt,
                                      uint64_t             *rma_handle );
 static int portals_rma_deregister(   uint64_t             rma_handle );
 static int portals_rma(              cci_connection_t     *connection,
@@ -232,7 +228,6 @@ cci_plugin_core_t cci_core_portals_plugin={
     portals_send,
     portals_sendv,
     portals_rma_register,
-    portals_rma_register_phys,
     portals_rma_deregister,
     portals_rma
 };
@@ -1181,6 +1176,7 @@ static int portals_destroy_endpoint(cci_endpoint_t *endpoint)
 
 static int portals_accept(
     union cci_event        *event,
+    void                   *context,
     cci_connection_t       **connection ) {
 
     int             ret;
@@ -1248,6 +1244,7 @@ static int portals_accept(
 
     conn->connection.attribute = event->request.attribute;
     conn->connection.endpoint = endpoint;
+    conn->connection.context = context;
     conn->connection.max_send_size = dev->device.max_send_size;
 
     pconn->idp = rx->pevent.initiator;
@@ -1536,6 +1533,7 @@ static int portals_connect(
     connection=&conn->connection;
     connection->attribute=attribute;
     connection->endpoint=endpoint;
+    connection->context=context;
 
     memset(&idp, 0, sizeof(idp)); /* satisfy -Wall -Werror */
     iRC=portals_getaddrinfo( server_uri, &idp, &idx );
@@ -1577,7 +1575,6 @@ static int portals_connect(
     evt->conn=conn;
     event=&evt->event;
     event->type=CCI_EVENT_CONNECT_ACCEPTED; /* for now */
-    event->accepted.context=context;
     event->accepted.connection=connection;
 
     /* pack the bits */
@@ -2445,20 +2442,6 @@ out:
 }
 
 
-// Todo
-static int portals_rma_register_phys(
-    cci_endpoint_t         *endpoint,
-    cci_connection_t       *connection,
-    cci_sg_t               *sg_list,
-    uint32_t               sg_cnt,
-    uint64_t               *rma_handle ) {
-
-    CCI_ENTER;
-    CCI_EXIT;
-
-    return CCI_ERR_NOT_IMPLEMENTED;
-}
-
 /* NOTE: caller should hold ep->lock */
 static void portals_rma_handle_decref(portals_rma_handle_t *handle)
 {
@@ -2876,7 +2859,6 @@ static void portals_handle_conn_reply(cci__ep_t *ep, ptl_event_t pevent)
     rx->am = am;
 
     evt = &rx->evt;
-    evt->event.accepted.context = pconn->tx->evt.event.send.context;
 
     if (pevent.mlength == sizeof(*accept)) {
         /* accept */

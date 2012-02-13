@@ -157,7 +157,7 @@ static void poll_events(void)
 			connection = event->accepted.connection;
 		}
 		break;
-	case CCI_EVENT_CONNECT_TIMEDOUT:
+	case CCI_EVENT_CONNECT_FAILED:
 	case CCI_EVENT_CONNECT_REJECTED:
 		if (!is_server) {
 			connect_done = 1;
@@ -166,7 +166,7 @@ static void poll_events(void)
 		break;
 	case CCI_EVENT_CONNECT_REQUEST:{
 			ready = 1;
-			cci_accept(event, &connection);
+			cci_accept(event, NULL, &connection);
 
 			buffer = calloc(1, connection->max_send_size);
 			if (!buffer) {

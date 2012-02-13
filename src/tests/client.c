@@ -51,7 +51,7 @@ poll_events(cci_endpoint_t * endpoint, cci_connection_t ** connection,
 			*done = 1;
 			*connection = event->accepted.connection;
 			break;
-		case CCI_EVENT_CONNECT_TIMEDOUT:
+		case CCI_EVENT_CONNECT_FAILED:
 		case CCI_EVENT_CONNECT_REJECTED:
 			*done = 1;
 			*connection = NULL;

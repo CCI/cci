@@ -42,6 +42,7 @@ typedef int (*cci_create_endpoint_fn_t)(cci_device_t *device,
                                         cci_os_handle_t *fd);
 typedef int (*cci_destroy_endpoint_fn_t)(cci_endpoint_t *endpoint);
 typedef int (*cci_accept_fn_t)(union cci_event *conn_req,
+                               void *context,
                                cci_connection_t **connection);
 typedef int (*cci_reject_fn_t)(union cci_event *conn_req);
 typedef int (*cci_connect_fn_t)(cci_endpoint_t *endpoint, char *server_uri,
@@ -70,10 +71,6 @@ typedef int (*cci_rma_register_fn_t)(cci_endpoint_t *endpoint,
                                      cci_connection_t *connection,
                                      void *start, uint64_t length,
                                      uint64_t *rma_handle);
-typedef int (*cci_rma_register_phys_fn_t)(cci_endpoint_t *endpoint,
-                                          cci_connection_t *connection,
-                                          cci_sg_t *sg_list, uint32_t sg_cnt,
-                                          uint64_t *rma_handle);
 typedef int (*cci_rma_deregister_fn_t)(uint64_t rma_handle);
 typedef int (*cci_rma_fn_t)(cci_connection_t *connection,
                             void *msg_ptr, uint32_t msg_len,
@@ -105,7 +102,6 @@ typedef struct {
     cci_send_fn_t send;
     cci_sendv_fn_t sendv;
     cci_rma_register_fn_t rma_register;
-    cci_rma_register_phys_fn_t rma_register_phys;
     cci_rma_deregister_fn_t rma_deregister;
     cci_rma_fn_t rma;
 } cci_plugin_core_t;

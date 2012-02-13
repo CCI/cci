@@ -60,6 +60,7 @@ static int sock_create_endpoint(cci_device_t *device,
                                     cci_os_handle_t *fd);
 static int sock_destroy_endpoint(cci_endpoint_t *endpoint);
 static int sock_accept(union cci_event *event,
+                       void *context,
                            cci_connection_t **connection);
 static int sock_reject(union cci_event *conn_req);
 static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
@@ -88,10 +89,6 @@ static int sock_rma_register(cci_endpoint_t *endpoint,
                              cci_connection_t *connection,
                              void *start, uint64_t length,
                              uint64_t *rma_handle);
-static int sock_rma_register_phys(cci_endpoint_t *endpoint,
-                                  cci_connection_t *connection,
-                                  cci_sg_t *sg_list, uint32_t sg_cnt,
-                                  uint64_t *rma_handle);
 static int sock_rma_deregister(uint64_t rma_handle);
 static int sock_rma(cci_connection_t *connection,
                         void *header_ptr, uint32_t header_len,
@@ -154,7 +151,6 @@ cci_plugin_core_t cci_core_sock_plugin = {
     sock_send,
     sock_sendv,
     sock_rma_register,
-    sock_rma_register_phys,
     sock_rma_deregister,
     sock_rma
 };
@@ -787,6 +783,7 @@ static uint8_t sock_ip_hash(in_addr_t ip, uint16_t port)
 }
 
 static int sock_accept(union cci_event *event,
+                       void *context,
                            cci_connection_t **connection)
 {
     uint8_t         a;
@@ -861,6 +858,7 @@ static int sock_accept(union cci_event *event,
 
     conn->connection.attribute = (enum cci_conn_attribute)a;
     conn->connection.endpoint = endpoint;
+    conn->connection.context = context;
     conn->connection.max_send_size = dev->device.max_send_size;
 
     hs = (sock_handshake_t *) (rx->buffer + (uintptr_t) sizeof(sock_header_r_t));
@@ -1171,7 +1169,6 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     sock_tx_t           *tx         = NULL;
     sock_header_r_t     *hdr_r      = NULL;
     cci__evt_t          *evt        = NULL;
-    cci_event_t         *event      = NULL;
     cci_connection_t    *connection = NULL;
     struct sockaddr_in  *sin        = NULL;
     void                *ptr        = NULL;
@@ -1212,6 +1209,7 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     connection = &conn->connection;
     connection->attribute = attribute;
     connection->endpoint = endpoint;
+    connection->context = context;
 
     /* set up sock specific info */
 
@@ -1272,9 +1270,7 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     evt = &tx->evt;
     evt->ep = ep;
     evt->conn = conn;
-    event = &evt->event;
     evt->event.type = CCI_EVENT_CONNECT_ACCEPTED; /* for now */
-    evt->event.accepted.context = context;
     evt->event.accepted.connection = connection;
 
     /* pack the msg */
@@ -1407,8 +1403,6 @@ static int sock_set_opt(cci_opt_handle_t *handle,
     int             ret     = CCI_SUCCESS;
     cci__ep_t       *ep     = NULL;
     cci__conn_t     *conn   = NULL;
-    sock_ep_t       *sep    = NULL;
-    sock_conn_t     *sconn  = NULL;
 
     CCI_ENTER;
 
@@ -1419,10 +1413,8 @@ static int sock_set_opt(cci_opt_handle_t *handle,
 
     if (CCI_OPT_LEVEL_ENDPOINT == level) {
         ep = container_of(handle->endpoint, cci__ep_t, endpoint);
-        sep = ep->priv;
     } else {
         conn = container_of(handle->connection, cci__conn_t, connection);
-        sconn = conn->priv;
     }
 
     switch (name) {
@@ -1493,7 +1485,6 @@ static int sock_get_event(cci_endpoint_t *endpoint,
     cci__ep_t       *ep;
     cci__evt_t      *ev = NULL, *e;
     cci__dev_t      *dev;
-    sock_ep_t       *sep;
 
     CCI_ENTER;
 
@@ -1503,7 +1494,6 @@ static int sock_get_event(cci_endpoint_t *endpoint,
     }
 
     ep = container_of(endpoint, cci__ep_t, endpoint);
-    sep = ep->priv;
     dev = ep->dev;
 
     sock_progress_dev(dev);
@@ -1722,7 +1712,8 @@ sock_progress_pending(cci__dev_t *dev)
                         int i;
                         struct s_active *active_list;
 
-                        event->type = CCI_EVENT_CONNECT_TIMEDOUT;
+                        event->type = CCI_EVENT_CONNECT_FAILED;
+                        event->conn_failed.status = CCI_ETIMEDOUT;
                         if (conn->uri)
                             free((char *) conn->uri);
                         sconn->status = SOCK_CONN_CLOSING;
@@ -1886,7 +1877,8 @@ sock_progress_queued(cci__dev_t *dev)
             case SOCK_MSG_CONN_REQUEST:
                 /* FIXME only CONN_REQUEST gets an event
                  * the other two need to disconnect the conn */
-                event->type = CCI_EVENT_CONNECT_TIMEDOUT;
+                event->type = CCI_EVENT_CONNECT_FAILED;
+                event->conn_failed.status = CCI_ETIMEDOUT;
                 break;
             case SOCK_MSG_RMA_WRITE:
                 pthread_mutex_lock(&ep->lock);
@@ -2265,23 +2257,6 @@ static int sock_rma_register(cci_endpoint_t *endpoint,
     CCI_EXIT;
 
     return CCI_SUCCESS;
-}
-
-
-static int sock_rma_register_phys(cci_endpoint_t *endpoint,
-                                  cci_connection_t *connection,
-                                  cci_sg_t *sg_list, uint32_t sg_cnt,
-                                  uint64_t *rma_handle)
-{
-    CCI_ENTER;
-
-    if (!sglobals) {
-        CCI_EXIT;
-        return CCI_ENODEV;
-    }
-
-    CCI_EXIT;
-    return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 
@@ -3203,7 +3178,6 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
     sock_tx_t       *tx = NULL, *tmp = NULL, *t = NULL;
     sock_header_r_t *hdr_r;     /* wire header */
     cci_event_t     *event;     /* generic CCI event */
-    cci_endpoint_t  *endpoint;  /* generic CCI endpoint */
     uint32_t        seq;        /* peer's seq */
     uint32_t        ts;         /* FIXME our original seq */
     sock_handshake_t    *hs = NULL;
@@ -3247,7 +3221,6 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
     }
 
     conn = sconn->conn;
-    endpoint = &ep->endpoint;
     dev = ep->dev;
     sdev = dev->priv;
 
@@ -3314,7 +3287,6 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
 
         event = (cci_event_t *) &evt->event;
         event->type = (enum cci_event_type)reply; /* CCI_EVENT_CONNECT_[SUCCESS|REJECTED] */
-        event->accepted.context = tx->evt.event.send.context;
 
         i = sock_ip_hash(sin.sin_addr.s_addr, 0);
         active_list = &sep->active_hash[i];
