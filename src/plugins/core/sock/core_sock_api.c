@@ -36,6 +36,13 @@
 #include "plugins/core/core.h"
 #include "core_sock.h"
 
+#define DEBUG_RNR 0
+
+#if DEBUG_RNR
+#include <stdbool.h>
+bool conn_established = false;
+#endif
+
 volatile int sock_shut_down = 0;
 sock_globals_t *sglobals = NULL;
 pthread_t progress_tid, recv_tid;
@@ -58,7 +65,7 @@ static int sock_reject(union cci_event *conn_req);
 static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
                             void *data_ptr, uint32_t data_len,
                             cci_conn_attribute_t attribute,
-                            void *context, char **flags,
+                            void *context, int flags,
                             struct timeval *timeout);
 static int sock_disconnect(cci_connection_t *connection);
 static int sock_set_opt(cci_opt_handle_t *handle,
@@ -213,6 +220,10 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps)
     cci_device_t **devices;
 
     CCI_ENTER;
+
+#if DEBUG_RNR
+    fprintf (stderr, "Warning, debug mode (RNR testing)!\n");
+#endif
 
     /* init sock globals */
     sglobals = calloc(1, sizeof(*sglobals));
@@ -1146,7 +1157,7 @@ sock_find_conn(sock_ep_t *sep, in_addr_t ip, uint16_t port, uint32_t id, sock_ms
 static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
                             void *data_ptr, uint32_t data_len,
                             cci_conn_attribute_t attribute,
-                            void *context, char **flags,
+                            void *context, int flags,
                             struct timeval *timeout)
 {
     int                 ret;
@@ -1176,28 +1187,6 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     if (!sglobals) {
         CCI_EXIT;
         return CCI_ENODEV;
-    }
-
-    /* Dealing with the flags:
-     * - for reliable connections, check whether the keepalive parameter is set
-     */
-    if ((((attribute & CCI_CONN_ATTR_RO) == CCI_CONN_ATTR_RO)
-        || ((attribute & CCI_CONN_ATTR_RU) == CCI_CONN_ATTR_RU))
-        && flags != NULL) {
-        int i = 0;
-        char *key;
-        char *val;
-        while (flags[i] != NULL) {
-            key = strtok (flags[i], "=");
-            if (key == NULL)
-                continue;
-            val = strtok (NULL, ";");
-            if (val == NULL)
-                continue;
-            if (strcmp (key, "keepalive") == 0)
-                keepalive = (uint32_t) atoi (val);
-            i++;
-        }
     }
 
     /* allocate a new connection */
@@ -1247,6 +1236,15 @@ static int sock_connect(cci_endpoint_t *endpoint, char *server_uri,
     sdev = dev->priv;
 
     connection->max_send_size = dev->device.max_send_size;
+
+    /* Dealing with keepalive, if set, include the keepalive timeout value into
+       the connection request */
+    if ((((attribute & CCI_CONN_ATTR_RO) == CCI_CONN_ATTR_RO)
+        || ((attribute & CCI_CONN_ATTR_RU) == CCI_CONN_ATTR_RU))
+        && ep->keepalive_timeout != 0UL)
+    {
+        keepalive = ep->keepalive_timeout;
+    }
 
     i = sock_ip_hash(ip, 0);
     active_list = &sep->active_hash[i];
@@ -1686,7 +1684,6 @@ sock_progress_pending(cci__dev_t *dev)
         assert(tx->last_attempt_us != 0ULL);
 
         /* has it timed out? */
-
         if (SOCK_U64_LT(tx->timeout_us, now)) {
             /* dequeue */
 
@@ -1700,6 +1697,19 @@ sock_progress_pending(cci__dev_t *dev)
             switch (tx->msg_type) {
                 case SOCK_MSG_SEND:
                     event->send.status = CCI_ETIMEDOUT;
+                    if (tx->rnr != 0) {
+                        event->send.status = CCI_ERR_RNR;
+                        /* If a message that is already marked RNR times out,
+                           and if the connection is reliable and ordered, we
+                           mark all following messages as RNR */
+                        if (conn->connection.attribute == CCI_CONN_ATTR_RO) {
+                            sock_tx_t *my_temp_tx;
+                            TAILQ_FOREACH_SAFE(my_temp_tx, &sdev->pending, dentry, tmp) {
+                                if (my_temp_tx->seq > tx->seq)
+                                    my_temp_tx->rnr = 1;
+                            }
+                        }
+                    }
                     break;
                 case SOCK_MSG_RMA_WRITE:
                     pthread_mutex_lock(&ep->lock);
@@ -1867,7 +1877,11 @@ sock_progress_queued(cci__dev_t *dev)
 
             switch (tx->msg_type) {
             case SOCK_MSG_SEND:
-                event->send.status = CCI_ETIMEDOUT;
+                if (tx->rnr != 0) {
+                    event->send.status = CCI_ERR_RNR;
+                } else {
+                    event->send.status = CCI_ETIMEDOUT;
+                }
                 break;
             case SOCK_MSG_CONN_REQUEST:
                 /* FIXME only CONN_REQUEST gets an event
@@ -1925,6 +1939,14 @@ sock_progress_queued(cci__dev_t *dev)
             pthread_mutex_lock(&ep->lock);
             TAILQ_INSERT_TAIL(&sconn->tx_seqs, tx, tx_seq);
             pthread_mutex_unlock(&ep->lock);
+        }
+
+        /* if reliable and ordered, we have to check whether the tx is marked
+           RNR */
+        if (is_reliable && conn->connection.attribute == CCI_CONN_ATTR_RO
+            && tx->rnr != 0)
+        {
+            event->send.status = CCI_ERR_RNR;
         }
 
         /* need to send it */
@@ -2755,10 +2777,14 @@ sock_handle_rnr (sock_conn_t *sconn,
     /* Find the corresponding SEQ/TS */
     TAILQ_FOREACH_SAFE(tx, &sconn->tx_seqs, tx_seq, tmp) {
         if (tx->seq == seq) {
-            debug (CCI_DB_MSG, "%s - Receiver not ready", __func__);
+            debug (CCI_DB_MSG, "[%s,%d] Receiver not ready (seq: %u)", __func__, __LINE__, seq);
             tx->rnr = 1;
         }
     }
+
+    /* We also mark the conn as RNR */
+    if (sconn->rnr == 0)
+        sconn->rnr = seq;
 }
 
 /*!
@@ -2846,7 +2872,16 @@ sock_handle_ack(sock_conn_t *sconn,
                         TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
                     } else {
                         tx->state = SOCK_TX_COMPLETED;
-                        tx->evt.event.send.status = CCI_SUCCESS;
+                        /* In the context of an ordered reliable connection,
+                           if the receiver was always ready to receive, the 
+                           complete the send with a success status. Otherwise,
+                           we complete the send with a RNR status */
+                        if (conn->connection.attribute == CCI_CONN_ATTR_RO 
+                            && tx->rnr != 0) {
+                            tx->evt.event.send.status = CCI_ERR_RNR;
+                        } else {
+                            tx->evt.event.send.status = CCI_SUCCESS;
+                        }
                         /* store locally until we can drop the locks */
                         TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
                     }
@@ -2880,7 +2915,16 @@ sock_handle_ack(sock_conn_t *sconn,
                         TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
                     } else {
                         tx->state = SOCK_TX_COMPLETED;
-                        tx->evt.event.send.status = CCI_SUCCESS;
+                        /* In the context of an ordered reliable connection,
+                           if the receiver was always ready to receive, the 
+                           complete the send with a success status. Otherwise,
+                           we complete the send with a RNR status */
+                        if (conn->connection.attribute == CCI_CONN_ATTR_RO 
+                            && tx->rnr != 0) {
+                            tx->evt.event.send.status = CCI_ERR_RNR;
+                        } else {
+                            tx->evt.event.send.status = CCI_SUCCESS;
+                        }
                         /* store locally until we can drop the locks */
                         TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
                     }
@@ -2919,7 +2963,17 @@ sock_handle_ack(sock_conn_t *sconn,
                             TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
                         } else {
                             tx->state = SOCK_TX_COMPLETED;
-                            tx->evt.event.send.status = CCI_SUCCESS;
+                            /* In the context of an ordered reliable connection
+                               if the receiver was always ready to receive, the
+                               complete the send with a success status.
+                               Otherwise, we complete the send with a RNR status
+                            */
+                            if (conn->connection.attribute == CCI_CONN_ATTR_RO
+                                && tx->rnr != 0) {
+                                tx->evt.event.send.status = CCI_ERR_RNR;
+                            } else {
+                                tx->evt.event.send.status = CCI_SUCCESS;
+                            }
                             /* store locally until we can drop the dev->lock */
                             TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
                         }
@@ -3370,6 +3424,10 @@ sock_handle_conn_reply(sock_conn_t *sconn, /* NULL if rejected */
     TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
     pthread_mutex_unlock(&dev->lock);
 
+#if DEBUG_RNR
+    conn_established = true;
+#endif
+
     /* try to progress txs */
 
     sock_progress_dev(dev);
@@ -3747,6 +3805,7 @@ sock_recvfrom_ep(cci__ep_t *ep)
     struct sockaddr_in sin;
     socklen_t sin_len = sizeof(sin);
     sock_conn_t *sconn = NULL;
+    cci__conn_t *conn  = NULL;
     sock_ep_t *sep;
     sock_msg_type_t type;
     uint32_t seq;
@@ -3777,6 +3836,17 @@ sock_recvfrom_ep(cci__ep_t *ep)
        the TS and the SEQ (so we can send the RNR msg), as well as the entire
        header so we can know if we are in the context of a reliable connection
        (otherwise RNR does not apply). */
+#if DEBUG_RNR
+    if (conn_established) {
+        /* We sumilate a case where we are not ready to receive 25% of the
+           time */
+        int n = (int)(4.0 * rand() / (RAND_MAX+1.0));
+        if (n == 0) {
+            fprintf (stderr, "Simulating lack of RX buffer...\n");
+            rx = NULL;
+        }
+    }
+#endif
     if (!rx) {
         char tmp_buff[SOCK_UDP_MAX];
         sock_header_t *hdr = NULL;
@@ -3801,6 +3871,7 @@ sock_recvfrom_ep(cci__ep_t *ep)
         hdr = (sock_header_t *)tmp_buff;
         sock_parse_header(hdr, &type, &a, &b, &id);
         sconn = sock_find_conn(sep, sin.sin_addr.s_addr, sin.sin_port, id, type);
+        conn = sconn->conn;
         if (sconn == NULL) {
             /* If the connection is not already established, we just drop the
                message */
@@ -3820,7 +3891,7 @@ sock_recvfrom_ep(cci__ep_t *ep)
                the only we need to deal with RNR) and will be used later on */
             header_r = (sock_header_r_t *)tmp_buff;
             sock_parse_seq_ts(&header_r->seq_ts, &seq, &ts);
-
+            sconn->rnr = seq;
             drop_msg = 1;
             goto out;
         } else {
@@ -3882,6 +3953,26 @@ sock_recvfrom_ep(cci__ep_t *ep)
         sock_handle_seq(sconn, seq);
     }
 
+    /* Make sure the connection is already established */
+    if (sconn) {
+        /* If the connection is RNR and the seq is superior to seq for which
+           the RNR was generated, we drop the msg */
+        conn = sconn->conn;
+        if (conn->connection.attribute == CCI_CONN_ATTR_RO 
+            && sconn->rnr != 0 && seq > sconn->rnr) 
+        {
+            /* We just drop the message */
+            debug (CCI_DB_MSG, "RNR connection, dropping msg (seq: %u)", seq);
+            drop_msg = 1;
+            goto out;
+        }
+
+        /* If we receive again the message that created the RNR status, we
+           resume normal operation */
+        if (sconn->rnr > 0 && sconn->rnr == seq)
+            sconn->rnr = 0;
+    }
+
     /* TODO handle types */
 
     switch (type) {
@@ -3935,31 +4026,42 @@ out:
         TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
         pthread_mutex_unlock(&ep->lock);
     }
-    if (drop_msg && cci_conn_is_reliable(sconn->conn)) {
-        char buffer[SOCK_MAX_HDR_SIZE];
-        int len = 0;
-        sock_header_r_t *hdr_r = NULL;
 
-        /* Getting here we already got the TS and SEQ from the message
-           header */
+    if (drop_msg) {
+        if (cci_conn_is_reliable(sconn->conn) && sconn->rnr == seq) {
+            char buffer[SOCK_MAX_HDR_SIZE];
+            int len = 0;
+            sock_header_r_t *hdr_r = NULL;
 
-        /* Send a RNR NACK back to the sender */
-        memset(buffer, 0, sizeof(buffer));
-        hdr_r = (sock_header_r_t *) buffer;
-        sock_pack_nack(hdr_r,
-                       SOCK_MSG_RNR,
-                       sconn->peer_id,
-                       seq,
-                       ts,
-                       0);
-        len = sizeof(*hdr_r);
+            /* 
+               Getting here, we are in the new RNR context on the receiver side.
+               Note that we already got the TS and SEQ from the message header 
+             */
 
-        /* XXX: Should we queue the message or we send it? 
-           I seems to me that it should be queued to maintain order as much as
-           possible (but what about RU connections? */
-        sock_sendto(sep->sock, buffer, len, sconn->sin);
+            /* Receiver side and reliable-ordered connections: we store the seq of
+               the msg for which we were RNR so we can drop all other following 
+               messages. */
+            if (conn->connection.attribute == CCI_CONN_ATTR_RO && sconn->rnr == 0) 
+                sconn->rnr = seq;
 
-        /* Then drop the message */
+            /* Send a RNR NACK back to the sender */
+            memset(buffer, 0, sizeof(buffer));
+            hdr_r = (sock_header_r_t *) buffer;
+            sock_pack_nack(hdr_r,
+                           SOCK_MSG_RNR,
+                           sconn->peer_id,
+                           seq,
+                           ts,
+                           0);
+            len = sizeof(*hdr_r);
+
+            /* XXX: Should we queue the message or we send it? 
+               I seems to me that it should be queued to maintain order as much as
+               possible (but what about RU connections? */
+            sock_sendto(sep->sock, buffer, len, sconn->sin);
+        }
+
+        /* Drop the message */
         sock_drop_msg(sep->sock);
     }
 
