@@ -1,2 +1,11 @@
 README file for CCI prototype.
 
+= Current Limitations =
+
+The current CCI prototype has the following limiations:
+- the following drivers are supported (more coming soon): UDP.
+- a CCI configuration file is required (but will become optional).
+
+== UDP driver ==
+
+- Missing features: fence
