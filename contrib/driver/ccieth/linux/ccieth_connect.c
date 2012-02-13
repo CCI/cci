@@ -1223,8 +1223,8 @@ ccieth_deferred_connect_recv_workfunc(struct work_struct *work)
 	dprintk("dequeueing queued skbs\n");
 
 	while ((skb = skb_dequeue(&ep->deferred_connect_recv_queue)) != NULL) {
-		struct ccieth_connect_skb_cb *scb = CCIETH_CONNECT_SKB_CB(skb);
-		__u8 type = scb->type;
+		struct ccieth_skb_cb *scb = CCIETH_SKB_CB(skb);
+		__u8 type = scb->connect.type;
 
 		switch (type) {
 		case CCIETH_PKT_CONNECT_REQUEST: {
@@ -1281,7 +1281,6 @@ int
 ccieth_defer_connect_recv(struct net_device *ifp, __u8 type, struct sk_buff *skb)
 {
 	struct ccieth_endpoint *ep;
-	struct ccieth_connect_skb_cb *scb;
 	__be32 dst_ep_id_n, *dst_ep_id_n_p;
 	int err;
 
@@ -1304,9 +1303,7 @@ ccieth_defer_connect_recv(struct net_device *ifp, __u8 type, struct sk_buff *skb
 		goto out_with_rculock;
 
 	/* save type for later reuse */
-	BUILD_BUG_ON(sizeof(*scb) > sizeof(skb->cb));
-	scb = CCIETH_CONNECT_SKB_CB(skb);
-	scb->type = type;
+	CCIETH_SKB_CB(skb)->connect.type = type;
 
 	dprintk("queueing skb %p\n", skb);
 	skb_queue_tail(&ep->deferred_connect_recv_queue, skb);

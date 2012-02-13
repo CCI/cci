@@ -542,6 +542,9 @@ ccieth_init(void)
 {
 	int ret;
 
+	/* sanity checks */
+	BUILD_BUG_ON(sizeof(struct ccieth_skb_cb) > sizeof(((struct sk_buff *) NULL)->cb));
+
 	idr_init(&ccieth_ep_idr);
 	spin_lock_init(&ccieth_ep_idr_lock);
 

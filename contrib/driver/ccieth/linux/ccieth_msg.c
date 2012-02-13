@@ -34,7 +34,7 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum)
 	skb = conn->send_queue_first_seqnum;
 	/* remove acked MSGs */
 	while (skb != NULL) {
-		if (CCIETH_MSG_SKB_CB(skb)->seqnum > acked_seqnum)
+		if (CCIETH_SKB_CB(skb)->reliable_send.seqnum > acked_seqnum)
 			/* queue is ordered by seqnum, no need to try further */
 			break;
 
@@ -66,7 +66,7 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum)
 	 */
 	if (conn->send_queue_next_resend && conn->send_queue_next_resend != old_next_resend)
 		mod_timer(&conn->send_resend_timer,
-			  CCIETH_MSG_SKB_CB(conn->send_queue_next_resend)->send.resend_jiffies);
+			  CCIETH_SKB_CB(conn->send_queue_next_resend)->reliable_send.resend_jiffies);
 
 	spin_unlock_bh(&conn->send_lock);
 }
@@ -82,10 +82,10 @@ ccieth_msg_resend(struct ccieth_connection *conn)
 	/* walk the resend_jiffies-ordered queue and resend everything needed */
 	while (1) {
 		struct sk_buff *skb = conn->send_queue_next_resend;
-		struct ccieth_msg_skb_cb *scb = CCIETH_MSG_SKB_CB(skb);
+		struct ccieth_skb_cb *scb = CCIETH_SKB_CB(skb);
 		struct net_device *ifp;
 
-		if (scb->send.resend_jiffies > jiffies)
+		if (scb->reliable_send.resend_jiffies > jiffies)
 			break;
 
 		CCIETH_STAT_INC(conn, send_resend);
@@ -106,7 +106,7 @@ ccieth_msg_resend(struct ccieth_connection *conn)
 		rcu_read_unlock();
 
 		/* plan next resend for this MSG */
-		scb->send.resend_jiffies = jiffies + CCIETH_MSG_RESEND_DELAY;
+		scb->reliable_send.resend_jiffies = jiffies + CCIETH_MSG_RESEND_DELAY;
 
 		/* switch to next packet, wrap-around if needed */
 		conn->send_queue_next_resend = skb->next ? skb->next : conn->send_queue_first_seqnum;
@@ -114,7 +114,7 @@ ccieth_msg_resend(struct ccieth_connection *conn)
 
 	/* update connection resend timer */
 	mod_timer(&conn->send_resend_timer,
-		  CCIETH_MSG_SKB_CB(conn->send_queue_next_resend)->send.resend_jiffies);
+		  CCIETH_SKB_CB(conn->send_queue_next_resend)->reliable_send.resend_jiffies);
 
 out_with_lock:
 	spin_unlock_bh(&conn->send_lock);
@@ -216,15 +216,14 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	CCIETH_STAT_INC(conn, send);
 
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
-		struct ccieth_msg_skb_cb *scb = CCIETH_MSG_SKB_CB(skb);
+		struct ccieth_skb_cb *scb = CCIETH_SKB_CB(skb);
 		__u32 seqnum;
-		BUILD_BUG_ON(sizeof(*scb) > sizeof(skb->cb));
 
 		spin_lock_bh(&conn->send_lock);
 		seqnum = conn->send_next_seqnum++;
 		hdr->msg_seqnum = htonl(seqnum);
-		scb->seqnum = seqnum;
-		scb->send.resend_jiffies = jiffies + CCIETH_MSG_RESEND_DELAY;
+		scb->reliable_send.seqnum = seqnum;
+		scb->reliable_send.resend_jiffies = jiffies + CCIETH_MSG_RESEND_DELAY;
 		if (conn->send_queue_last_seqnum) {
 			conn->send_queue_last_seqnum->next = skb;
 			skb->prev = conn->send_queue_last_seqnum;
@@ -233,7 +232,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 			conn->send_queue_first_seqnum
 			 = conn->send_queue_next_resend = skb;
 			skb->prev = NULL;
-			mod_timer(&conn->send_resend_timer, scb->send.resend_jiffies);
+			mod_timer(&conn->send_resend_timer, scb->reliable_send.resend_jiffies);
 		}
 		conn->send_queue_last_seqnum = skb;
 		skb->next = NULL;

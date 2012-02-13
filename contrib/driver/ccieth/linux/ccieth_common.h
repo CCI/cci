@@ -190,23 +190,23 @@ struct ccieth_connection {
 #define CCIETH_STAT_INC(conn, name) do { /* nothing */ } while (0)
 #endif
 
-/* stored in skbuff cb private field while queued for deferred processing */
-struct ccieth_connect_skb_cb {
-	__u8 type;
-};
-#define CCIETH_CONNECT_SKB_CB(__skb) ((struct ccieth_connect_skb_cb *)&((__skb)->cb[0]))
-
-/* stored in skbuff cb private field while queued for possible retransmit (RO or RU),
- * or while queued before delivery to userspace (RO connection only) */
-struct ccieth_msg_skb_cb {
-	__u32 seqnum;
+/* stored in skbuff cb private field when queued:
+ * - for deferred processing (incoming connect request/accept/reject packets)
+ * - for possible retransmit (RO or RU MSG sends)
+ * - before delivery to userspace (RO MSG recvs)
+ */
+struct ccieth_skb_cb {
 	union {
 		struct {
+			__u8 type;
+		} connect;
+		struct {
+			__u32 seqnum;
 			unsigned long resend_jiffies;
-		} send;
+		} reliable_send;
 	};
 };
-#define CCIETH_MSG_SKB_CB(__skb) ((struct ccieth_msg_skb_cb *)&((__skb)->cb[0]))
+#define CCIETH_SKB_CB(__skb) ((struct ccieth_skb_cb *)&((__skb)->cb[0]))
 
 extern struct idr ccieth_ep_idr; /* accessed under RCU read lock */
 #ifdef CONFIG_CCIETH_DEBUGFS
