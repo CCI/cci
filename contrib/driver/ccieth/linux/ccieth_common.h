@@ -203,6 +203,7 @@ struct ccieth_skb_cb {
 		struct {
 			__u32 seqnum;
 			unsigned long resend_jiffies;
+			struct ccieth_endpoint_event *event;
 		} reliable_send;
 	};
 };

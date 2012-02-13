@@ -34,7 +34,10 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum)
 	skb = conn->send_queue_first_seqnum;
 	/* remove acked MSGs */
 	while (skb != NULL) {
-		if (CCIETH_SKB_CB(skb)->reliable_send.seqnum > acked_seqnum)
+		struct ccieth_endpoint_event *event;
+		struct ccieth_skb_cb *scb = CCIETH_SKB_CB(skb);
+
+		if (scb->reliable_send.seqnum > acked_seqnum)
 			/* queue is ordered by seqnum, no need to try further */
 			break;
 
@@ -53,6 +56,12 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum)
 		/* if this MSG was the next to resend, update the pointer */
 		if (skb == conn->send_queue_next_resend)
 			conn->send_queue_next_resend = nskb ? nskb : conn->send_queue_first_seqnum;
+
+		event = scb->reliable_send.event;
+		event->event.send.status = 0;
+		spin_lock_bh(&conn->ep->event_list_lock);
+		list_add_tail(&event->list, &conn->ep->event_list);
+		spin_unlock_bh(&conn->ep->event_list_lock);
 
 		kfree_skb(skb);
 		dprintk("no need to resend MSG skb %p anymore\n", skb);
@@ -224,6 +233,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		hdr->msg_seqnum = htonl(seqnum);
 		scb->reliable_send.seqnum = seqnum;
 		scb->reliable_send.resend_jiffies = jiffies + CCIETH_MSG_RESEND_DELAY;
+		scb->reliable_send.event = event;
 		if (conn->send_queue_last_seqnum) {
 			conn->send_queue_last_seqnum->next = skb;
 			skb->prev = conn->send_queue_last_seqnum;
@@ -249,13 +259,13 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 #endif
 		skb->dev = ifp;
 		dev_queue_xmit(skb);
-	}
 
-	/* finalize and notify the event */
-	event->event.send.status = 0;
-	spin_lock_bh(&ep->event_list_lock);
-	list_add_tail(&event->list, &ep->event_list);
-	spin_unlock_bh(&ep->event_list_lock);
+		/* finalize and notify the event */
+		event->event.send.status = 0;
+		spin_lock_bh(&ep->event_list_lock);
+		list_add_tail(&event->list, &ep->event_list);
+		spin_unlock_bh(&ep->event_list_lock);
+	}
 
 	rcu_read_unlock();
 	return 0;

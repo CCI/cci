@@ -133,7 +133,12 @@ ccieth_conn_free(struct ccieth_connection *conn)
 		struct sk_buff *nskb, *skb = conn->send_queue_first_seqnum;
 		while (skb) {
 			nskb = skb->next;
+
+			spin_lock_bh(&conn->ep->free_event_list_lock);
+			list_add_tail(&CCIETH_SKB_CB(skb)->reliable_send.event->list, &conn->ep->free_event_list);
+			spin_unlock_bh(&conn->ep->free_event_list_lock);
 			kfree_skb(skb);
+
 			skb = nskb;
 		}
 	}
