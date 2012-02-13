@@ -64,6 +64,9 @@ struct ccieth_endpoint {
 
 #ifdef CONFIG_CCIETH_DEBUGFS
 	struct dentry *debugfs_dir;
+	struct {
+		__u32 event_free;
+	} stats;
 #endif
 };
 
@@ -185,9 +188,11 @@ struct ccieth_connection {
 };
 
 #ifdef CONFIG_CCIETH_DEBUGFS
-#define CCIETH_STAT_INC(conn, name) (conn)->stats.name++
+#define CCIETH_STAT_INC(obj, name) (obj)->stats.name++
+#define CCIETH_STAT_DEC(obj, name) (obj)->stats.name--
 #else
-#define CCIETH_STAT_INC(conn, name) do { /* nothing */ } while (0)
+#define CCIETH_STAT_INC(obj, name) do { /* nothing */ } while (0)
+#define CCIETH_STAT_DEC(obj, name) do { /* nothing */ } while (0)
 #endif
 
 /* stored in skbuff cb private field when queued:
@@ -242,6 +247,7 @@ ccieth_get_free_event(struct ccieth_endpoint *ep)
 	}
 	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
 	list_del(&event->list);
+	CCIETH_STAT_DEC(ep, event_free);
 	spin_unlock_bh(&ep->free_event_list_lock);
 	return event;
 }

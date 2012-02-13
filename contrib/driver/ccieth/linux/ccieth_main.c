@@ -79,7 +79,7 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 #ifdef CONFIG_CCIETH_DEBUGFS
 	/* no that connection debugfs entries are gone, remove the endpoint debugfs dir */
 	if (ep->debugfs_dir)
-		debugfs_remove(ep->debugfs_dir);
+		debugfs_remove_recursive(ep->debugfs_dir);
 #endif
 	kfree(ep);
 }
@@ -89,6 +89,7 @@ ccieth_event_destructor_recycle(struct ccieth_endpoint *ep,
 				struct ccieth_endpoint_event *event)
 {
 	spin_lock_bh(&ep->free_event_list_lock);
+	CCIETH_STAT_INC(ep, event_free);
 	list_add_tail(&event->list, &ep->free_event_list);
 	spin_unlock_bh(&ep->free_event_list_lock);
 }
@@ -168,13 +169,17 @@ retry:
 	BUG_ON(idr_replace(&ccieth_ep_idr, ep, id) != NULL);
 
 #ifdef CONFIG_CCIETH_DEBUGFS
+	memset(&ep->stats, 0, sizeof(ep->stats));
+	ep->stats.event_free = CCIETH_EVENT_SLOT_NR;
 	ep->debugfs_dir = NULL;
 	if (ccieth_debugfs_root) {
 		char * name = kasprintf(GFP_KERNEL, "ep%08x", id);
 		if (name) {
 			struct dentry *d = debugfs_create_dir(name, ccieth_debugfs_root);
-			if (!IS_ERR(d))
+			if (!IS_ERR(d)) {
 				ep->debugfs_dir = d;
+				debugfs_create_u32("event_free", 0444, d, &ep->stats.event_free);
+			}
 			kfree(name);
 		}
 	}
