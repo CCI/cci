@@ -143,17 +143,10 @@ static void poll_events(void)
 			}
 			break;
 		}
-	case CCI_EVENT_CONNECT_ACCEPTED:
+	case CCI_EVENT_CONNECT:
 		if (!is_server) {
 			connect_done = 1;
-			connection = event->accepted.connection;
-		}
-		break;
-	case CCI_EVENT_CONNECT_FAILED:
-	case CCI_EVENT_CONNECT_REJECTED:
-		if (!is_server) {
-			connect_done = 1;
-			connection = NULL;
+			connection = event->connect.connection;
 		}
 		break;
 	case CCI_EVENT_CONNECT_REQUEST:{

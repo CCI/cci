@@ -243,7 +243,10 @@ typedef enum cci_status {
 	CCI_ENOMSG = ENOMSG,
 
 	/*! Address not available */
-	CCI_EADDRNOTAVAIL = EADDRNOTAVAIL
+	CCI_EADDRNOTAVAIL = EADDRNOTAVAIL,
+
+	/*! Connection request rejected */
+	CCI_ECONNREFUSED = ECONNREFUSED
 	    /* ...more here, inspired from errno.h... */
 } cci_status_t;
 
@@ -817,17 +820,8 @@ typedef enum cci_event_type {
 	/*! A message has been received. */
 	CCI_EVENT_RECV,
 
-	/*! A new outgoing connection was successfully accepted at the
-	   peer; a connection is now available for data transfer. */
-	CCI_EVENT_CONNECT_ACCEPTED,
-
-	/*! A new outgoing connection could not complete the accept/connect
-	   handshake with the peer, either because the timeout expired, or
-	   for another driver specific reason. */
-	CCI_EVENT_CONNECT_FAILED,
-
-	/*! A new outgoing connection was rejected by the server. */
-	CCI_EVENT_CONNECT_REJECTED,
+	/*! A new outgoing connection request has completed. */
+	CCI_EVENT_CONNECT,
 
 	/*! An incoming connection request from a client. */
 	CCI_EVENT_CONNECT_REQUEST,
@@ -922,37 +916,28 @@ typedef struct cci_event_recv {
 } cci_event_recv_t;
 
 /*!
-  Connect success event.
+  Connect request completion event.
 
-  A connect has completed successfully and the new connection is
-  available for communication. The context is returned that was
-  passed to cci_connect().
+  The status field may contain the following values:
 
-  The number of fields in this struct is intentionally limited in
-  order to reduce costs associated with state storage, caching,
-  updating, copying.  For example, there is no field pointing to the
-  endpoint because it can be obtained from the cci_connection or
-  through the endpoint passed to the cci_get_event() call.
+  CCI_SUCCESS	The connection was accepted by the server and
+		successfully established. The corresponding
+		connection structure is available in the event
+		connection field.
 
-  The ordering of fields in this struct is intended to reduce memory
-  holes between fields.
+  CCI_ECONNREFUSED	The server rejected the connection request.
 
-  \ingroup events
-*/
-typedef struct cci_event_connect_accepted {
-	/*! Type of event - should equal CCI_EVENT_CONNECT_ACCEPTED. */
-	cci_event_type_t type;
+  CCI_ETIMEDOUT    The connection could not be established before
+                   the timeout expired.
 
-	/*! The new connection. Its context field contains the context
-	   that was given to cci_connect(). */
-	cci_connection_t *connection;
-} cci_event_connect_accepted_t;
+  Some drivers may also return specific return codes.
 
-/*!
-  Connect timeout event.
+  The connection field is only valid for use if status is
+  CCI_SUCCESS. It is set to NULL in any other case.
 
-  A connect has timed out. No new connection is available. The context
-  is returned that was passed to cci_connect().
+  The context field is always set to what was passed to
+  cci_connect(). On success, the connection structure context
+  field is also set accordingly.
 
   The number of fields in this struct is intentionally limited in
   order to reduce costs associated with state storage, caching,
@@ -965,44 +950,19 @@ typedef struct cci_event_connect_accepted {
 
   \ingroup events
 */
-typedef struct cci_event_connect_failed {
-	/*! Type of event - should equal CCI_EVENT_CONNECT_FAILED. */
+typedef struct cci_event_connect {
+	/*! Type of event - should equal CCI_EVENT_CONNECT. */
 	cci_event_type_t type;
 
-	/*! A status indicating why the connection failed.
-	   If the connection could not be setup before the timeout expired,
-	   status is CCI_ETIMEDOUT.
-	   Each driver may have additional error codes. */
+	/*! Result of the connect request. */
 	cci_status_t status;
 
 	/*! Context value that was passed to cci_connect() */
 	void *context;
-} cci_event_connect_failed_t;
 
-/*!
-  Connection rejected event.
-
-  The server rejected our connection request. No new connection is
-  available. The context is returned that was passed to cci_connect().
-
-  The number of fields in this struct is intentionally limited in
-  order to reduce costs associated with state storage, caching,
-  updating, copying.  For example, there is no field pointing to the
-  endpoint because it can be obtained from the cci_connection or
-  through the endpoint passed to the cci_get_event() call.
-
-  The ordering of fields in this struct is intended to reduce memory
-  holes between fields.
-
-  \ingroup events
-*/
-typedef struct cci_event_connect_rejected {
-	/*! Type of event - should equal CCI_EVENT_CONNECT_REJECTED. */
-	cci_event_type_t type;
-
-	/*! Context value that was passed to cci_connect() */
-	void *context;
-} cci_event_connect_rejected_t;
+	/*! The new connection, if the request successfully completed. */
+	cci_connection_t *connection;
+} cci_event_connect_t;
 
 /*!
   Connection request event.
@@ -1098,9 +1058,7 @@ typedef union cci_event {
 	cci_event_type_t type;
 	cci_event_send_t send;
 	cci_event_recv_t recv;
-	cci_event_connect_accepted_t accepted;
-	cci_event_connect_rejected_t rejected;
-	cci_event_connect_failed_t conn_failed;
+	cci_event_connect_t connect;
 	cci_event_connect_request_t request;
 	cci_event_keepalive_timedout_t keepalive;
 	cci_event_endpoint_device_failed_t dev_failed;

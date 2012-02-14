@@ -47,14 +47,9 @@ poll_events(cci_endpoint_t * endpoint, cci_connection_t ** connection,
 				recv_done++;
 				break;
 			}
-		case CCI_EVENT_CONNECT_ACCEPTED:
+		case CCI_EVENT_CONNECT:
 			*done = 1;
-			*connection = event->accepted.connection;
-			break;
-		case CCI_EVENT_CONNECT_FAILED:
-		case CCI_EVENT_CONNECT_REJECTED:
-			*done = 1;
-			*connection = NULL;
+			*connection = event->connect.connection;
 			break;
 		default:
 			fprintf(stderr, "ignoring event type %d\n",

@@ -1551,8 +1551,10 @@ static int portals_connect(cci_endpoint_t * endpoint,
 	evt->ep = ep;
 	evt->conn = conn;
 	event = &evt->event;
-	event->type = CCI_EVENT_CONNECT_ACCEPTED;	/* for now */
-	event->accepted.connection = connection;
+	event->type = CCI_EVENT_CONNECT;	/* for now */
+	event->status = CCI_SUCCESS;
+	event->connect.context = context;
+	event->connect.connection=connection;
 
 	/* pack the bits */
 	bits = ((ptl_match_bits_t) (data_len & 0xFFFF)) << 16;
@@ -2016,9 +2018,7 @@ static int portals_return_event(cci_event_t * event)
 			pthread_mutex_unlock(&ep->lock);
 		}
 		break;
-	case CCI_EVENT_CONNECT_REQUEST:
-	case CCI_EVENT_CONNECT_ACCEPTED:
-	case CCI_EVENT_CONNECT_REJECTED:
+	case CCI_EVENT_CONNECT:
 	case CCI_EVENT_RECV:
 		{
 			portals_am_buffer_t *am;
@@ -2843,8 +2843,9 @@ static void portals_handle_conn_reply(cci__ep_t * ep, ptl_event_t pevent)
 		pconn->peer_conn = ((uint64_t) accept->server_conn_upper) << 32;
 		pconn->peer_conn |= (uint64_t) accept->server_conn_lower;
 
-		evt->event.type = CCI_EVENT_CONNECT_ACCEPTED;
-		evt->event.accepted.connection = &conn->connection;
+		evt->event.type = CCI_EVENT_CONNECT;
+		evt->event.status = CCI_SUCCESS;
+		evt->event.connect.connection = &conn->connection;
 
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_INSERT_TAIL(&pep->conns, pconn, entry);
@@ -2855,7 +2856,10 @@ static void portals_handle_conn_reply(cci__ep_t * ep, ptl_event_t pevent)
 		if (conn->uri)
 			free((void *)conn->uri);
 		free(conn);
-		evt->event.type = CCI_EVENT_CONNECT_REJECTED;
+		evt->event.type = CCI_EVENT_CONNECT;
+		evt->event.status = CCI_ECONNREFUSED;
+		evt->event.connect.connection = NULL;
+
 		/* context already set in connect() */
 		debug(CCI_DB_CONN, "%s: recv'd reject", __func__);
 	}
