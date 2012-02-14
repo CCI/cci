@@ -129,7 +129,7 @@ static int gni_create_endpoint(cci_device_t * device,
 			       cci_os_handle_t * fd);
 static int gni_destroy_endpoint(cci_endpoint_t * endpoint);
 static int gni_accept(union cci_event *conn_req,
-		      void *context, cci_connection_t ** connection);
+		      void *context);
 static int gni_reject(union cci_event *conn_req);
 static int gni_connect(cci_endpoint_t * endpoint,
 		       char *server_uri,
@@ -1659,7 +1659,7 @@ static int gni_destroy_endpoint(cci_endpoint_t * endpoint)
 }
 
 static int gni_accept(union cci_event *event,
-		      void *context, cci_connection_t ** connection)
+		      void *context)
 {
 
 	int sd;
@@ -1783,7 +1783,7 @@ static int gni_accept(union cci_event *event,
 	TAILQ_INSERT_TAIL(&gep->gconn, gconn, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-	(*connection) = &conn->connection;
+#warning queue CCI_EVENT_ACCEPT with status=SUCCESS, the connection and the context
 
 FAIL:
 	if (dst_box)

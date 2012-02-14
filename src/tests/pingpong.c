@@ -352,8 +352,10 @@ void do_server()
 			if (accept) {
 				ready = 1;
 				opts = *((options_t *) event->request.data_ptr);
-				ret = cci_accept(event, NULL, &connection);
+				ret = cci_accept(event, NULL);
 				check_return("cci_accept", ret, 1);
+#warning wait for ACCEPT event with status SUCCESS and get the connection
+
 			} else {
 				ret = cci_reject(event);
 				check_return("cci_accept", ret, 1);

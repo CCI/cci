@@ -24,7 +24,7 @@ static int template_create_endpoint(cci_device_t * device,
 				    cci_os_handle_t * fd);
 static int template_destroy_endpoint(cci_endpoint_t * endpoint);
 static int template_accept(union cci_event *event,
-			   void *context, cci_connection_t ** connection);
+			   void *context);
 static int template_reject(union cci_event *event);
 static int template_connect(cci_endpoint_t * endpoint, char *server_uri,
 			    void *data_ptr, uint32_t data_len,
@@ -148,7 +148,7 @@ static int template_destroy_endpoint(cci_endpoint_t * endpoint)
 }
 
 static int template_accept(union cci_event *event,
-			   void *context, cci_connection_t ** connection)
+			   void *context)
 {
 	printf("In template_accept\n");
 	return CCI_ERR_NOT_IMPLEMENTED;

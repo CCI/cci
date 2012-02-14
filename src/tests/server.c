@@ -90,12 +90,15 @@ int main(int argc, char *argv[])
 			/* inspect conn_req_t and decide to accept or reject */
 			if (accept) {
 				/* associate this connect request with this endpoint */
-				cci_accept(event, NULL, &connection);
-
-				/* add new connection to connection list, etc. */
+				cci_accept(event, NULL);
 			} else {
 				cci_reject(event);
 			}
+			break;
+		case CCI_EVENT_ACCEPT:
+			if (event->connect.status == CCI_SUCCESS)
+				connection = event->connect.connection;
+			/* add new connection to connection list, etc. */
 			break;
 		default:
 			printf("event type %d\n", event->type);

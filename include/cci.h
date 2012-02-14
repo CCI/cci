@@ -678,13 +678,16 @@ union cci_event;
 
   Upon success, the incoming connection request is bound to the
   desired endpoint and a connection handle is filled in.  The
-  connection request event must still be returned to CCI via
+  desired endpoint and a connection handle is returned in a
+  CCI_EVENT_ACCEPT event.
+
+  The connection request event must still be returned to CCI via
   cci_return_event().
 
   \ingroup connection
 */
 CCI_DECLSPEC int cci_accept(union cci_event *conn_req,
-			    void *context, cci_connection_t ** connection);
+			    void *context);
 
 /*!
   Reject a connection request.
@@ -825,6 +828,9 @@ typedef enum cci_event_type {
 
 	/*! An incoming connection request from a client. */
 	CCI_EVENT_CONNECT_REQUEST,
+
+	/*! An incoming connection accept has completed. */
+	CCI_EVENT_ACCEPT,
 
 	/*! This event occurs when the keepalive timeout has expired (see
 	   CCI_OPT_ENDPT_KEEPALIVE_TIMEDOUT for more details). */
@@ -998,6 +1004,49 @@ typedef struct cci_event_connect_request {
 } cci_event_connect_request_t;
 
 /*!
+  Accept completion event.
+
+  The status field may contain the following values:
+
+  CCI_SUCCESS	The accepted connection was successfully established.
+		The corresponding connection structure is available
+		in the event connection field.
+
+  Some drivers may also return specific return codes.
+
+  The connection field is only valid for use if status is
+  CCI_SUCCESS. It is set to NULL in any other case.
+
+  The context field is always set to what was passed to
+  cci_accept(). On success, the connection structure context
+  field is also set accordingly.
+
+  The number of fields in this struct is intentionally limited in
+  order to reduce costs associated with state storage, caching,
+  updating, copying.  For example, there is no field pointing to the
+  endpoint because it can be obtained from the cci_connection or
+  through the endpoint passed to the cci_get_event() call.
+
+  The ordering of fields in this struct is intended to reduce memory
+  holes between fields.
+
+  \ingroup events
+*/
+typedef struct cci_event_accept {
+	/*! Type of event - should equal CCI_EVENT_ACCEPT. */
+	cci_event_type_t type;
+
+	/*! Result of the accept. */
+	cci_status_t status;
+
+	/*! The context that was passed to cci_accept() */
+	void *context;
+
+	/*! The new connection, if the request successfully completed. */
+	cci_connection_t *connection;
+} cci_event_accept_t;
+
+/*!
   Keepalive timeout event.
 
   The peer has not sent us anything within the timeout period.
@@ -1060,6 +1109,7 @@ typedef union cci_event {
 	cci_event_recv_t recv;
 	cci_event_connect_t connect;
 	cci_event_connect_request_t request;
+	cci_event_accept_t accept;
 	cci_event_keepalive_timedout_t keepalive;
 	cci_event_endpoint_device_failed_t dev_failed;
 } cci_event_t;

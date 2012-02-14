@@ -27,7 +27,7 @@ static int mx_bind(cci_device_t * device, int backlog, uint32_t * port,
 static int mx_unbind(cci_service_t * service, cci_device_t * device);
 static int mx_get_conn_req(cci_service_t * service, cci_conn_req_t ** conn_req);
 static int mx_accept(cci_conn_req_t * conn_req,
-		     void *context, cci_connection_t ** connection);
+		     void *context);
 static int mx_reject(cci_conn_req_t * conn_req);
 static int mx_connect(cci_endpoint_t * endpoint, char *server_uri,
 		      uint32_t port,
@@ -173,7 +173,7 @@ static int mx_get_conn_req(cci_service_t * service, cci_conn_req_t ** conn_req)
 }
 
 static int mx_accept(cci_conn_req_t * conn_req,
-		     void *context, cci_connection_t ** connection)
+		     void *context)
 {
 	printf("In mx_accept\n");
 	return CCI_ERR_NOT_IMPLEMENTED;

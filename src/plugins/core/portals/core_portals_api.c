@@ -121,7 +121,7 @@ static int portals_create_endpoint(cci_device_t * device,
 				   cci_os_handle_t * fd);
 static int portals_destroy_endpoint(cci_endpoint_t * endpoint);
 static int portals_accept(union cci_event *event,
-			  void *context, cci_connection_t ** connection);
+			  void *context);
 static int portals_reject(union cci_event *event);
 static int portals_connect(cci_endpoint_t * endpoint,
 			   char *server_uri,
@@ -1153,7 +1153,7 @@ static int portals_destroy_endpoint(cci_endpoint_t * endpoint)
 }
 
 static int portals_accept(union cci_event *event,
-			  void *context, cci_connection_t ** connection)
+			  void *context)
 {
 
 	int ret;
@@ -1292,7 +1292,7 @@ static int portals_accept(union cci_event *event,
 		goto out_with_queued;
 	}
 
-	*connection = &conn->connection;
+#warning queue CCI_EVENT_ACCEPT with status=SUCCESS, the connection and the context
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
