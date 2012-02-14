@@ -3,9 +3,12 @@ README file for CCI prototype.
 = Current Limitations =
 
 The current CCI prototype has the following limiations:
-- the following drivers are supported (more coming soon): UDP.
+- the following transports are supported (more coming soon): UDP.
 - a CCI configuration file is required (but will become optional).
+- The OS handle for blocking is not yet functional
+- UU sends should complete immediately (no send event) with the return
+  value set as the status
 
-== UDP driver ==
+== UDP Transport ==
 
 - Missing features: fence
