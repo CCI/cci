@@ -599,10 +599,10 @@ static int eth_accept(union cci_event *event,
 		      void *context, cci_connection_t ** connection)
 {
 	cci__evt_t *_ev = container_of(event, cci__evt_t, event);
-	eth__evt_t *eev = (void *)(_ev + 1);
+	eth__evt_t *eev = container_of(_ev, eth__evt_t, _ev);
+	struct ccieth_ioctl_get_event *ge = &eev->ioctl_event;
 	cci__ep_t *_ep = _ev->ep;
 	eth__ep_t *eep = _ep->priv;
-	struct ccieth_ioctl_get_event *ge = (void *)(eev + 1);
 	__u32 conn_id = ge->connect_request.conn_id;
 	struct ccieth_ioctl_connect_accept ac;
 	cci__conn_t *_conn;
@@ -644,10 +644,10 @@ static int eth_accept(union cci_event *event,
 static int eth_reject(union cci_event *event)
 {
 	cci__evt_t *_ev = container_of(event, cci__evt_t, event);
-	eth__evt_t *eev = (void *)(_ev + 1);
+	eth__evt_t *eev = container_of(_ev, eth__evt_t, _ev);
+	struct ccieth_ioctl_get_event *ge = &eev->ioctl_event;
 	cci__ep_t *_ep = _ev->ep;
 	eth__ep_t *eep = _ep->priv;
-	struct ccieth_ioctl_get_event *ge = (void *)(eev + 1);
 	__u32 conn_id = ge->connect_request.conn_id;
 	struct ccieth_ioctl_connect_reject rj;
 	int err;
@@ -749,16 +749,15 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 	char *data;
 	int ret;
 
-	_ev =
-	    malloc(sizeof(*_ev) + sizeof(*eev) + sizeof(*ge) +
-		   _ep->dev->device.max_send_size);
-	if (!_ev)
+	eev = malloc(sizeof(*eev) + _ep->dev->device.max_send_size);
+	if (!eev)
 		return CCI_ENOMEM;
-	_ev->ep = _ep;
+	_ev = &eev->_ev;
 	event = &_ev->event;
-	eev = (void *)(_ev + 1);
-	ge = (void *)(eev + 1);
-	data = (void *)(ge + 1);
+	ge = &eev->ioctl_event;
+	data = eev->data;
+
+	_ev->ep = _ep;
 
 	ret = ioctl(eep->fd, CCIETH_IOCTL_GET_EVENT, ge);
 	if (ret < 0) {
@@ -901,20 +900,20 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 	return CCI_SUCCESS;
 
 out_with_event:
-	free(_ev);
+	free(eev);
 	return CCI_EAGAIN;
 }
 
 static int eth_return_event(cci_event_t * event)
 {
 	cci__evt_t *_ev = container_of(event, cci__evt_t, event);
-	eth__evt_t *eev = (void *)(_ev + 1);
+	eth__evt_t *eev = container_of(_ev, eth__evt_t, _ev);
 
 	if (event->type == CCI_EVENT_CONNECT_REQUEST
 	    && eev->type_params.connect_request.need_reply)
 		return CCI_EINVAL;
 
-	free(_ev);
+	free(eev);
 	return 0;
 }
 

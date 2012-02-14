@@ -8,6 +8,7 @@
 #define CCI_CORE_ETH_H
 
 #include "cci/config.h"
+#include "ccieth_io.h"
 
 #include <netpacket/packet.h>
 
@@ -27,11 +28,14 @@ typedef struct eth__conn {
 } eth__conn_t;
 
 typedef struct eth__evt {
+	cci__evt_t _ev;
 	union {
 		struct {
 			int need_reply;	/* for connect request */
 		} connect_request;
 	} type_params;
+	struct ccieth_ioctl_get_event ioctl_event;
+	char data[0];
 } eth__evt_t;
 
 int cci_core_eth_post_load(cci_plugin_t * me);
