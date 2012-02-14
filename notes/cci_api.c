@@ -70,8 +70,7 @@
 
   \ingroup env
 */
-int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps);
-
+int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
 
 /* ================================================================== */
 /*                                                                    */
@@ -89,72 +88,71 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t *caps);
   \ingroup env
  */
 typedef enum cci_status {
-  
-  /*! Returned from most functions when they succeed. */
-  CCI_SUCCESS = 0,
-  
-  /* -------------------------------------------------------------
-     General error status codes
-     ------------------------------------------------------------- */
-  
-  /*! Invalid parameter passed to CCI function call */
-  CCI_EINVAL = EINVAL,
 
-  /* ...more here, inspired from errno.h... */
+	/*! Returned from most functions when they succeed. */
+	CCI_SUCCESS = 0,
 
-  
-  /* -------------------------------------------------------------
-     Send completion status codes
-     ------------------------------------------------------------- */
+	/* -------------------------------------------------------------
+	   General error status codes
+	   ------------------------------------------------------------- */
 
-  /*! For a reliable send, this error code means that the sender did
-     not get anything back from the receiver within a timeout (no
-     ACK, no NACK, etc.).  It is unknown whether the receiver
-     actually received the message or not.
+	/*! Invalid parameter passed to CCI function call */
+	CCI_EINVAL = EINVAL,
 
-     This error code won't occur for unreliable sends.
-  */
-  CCI_ETIMEDOUT = ETIMEDOUT,
+	/* ...more here, inspired from errno.h... */
 
-  /*! For both reliable and unreliable sends, this error code means
-     that cci_disconnect() has been invoked on the send side (in
-     which case this is an application error), or the receiver
-     replied that the receiver invoked cci_disconnect(). */
-  CCI_ERR_DISCONNECTED,
+	/* -------------------------------------------------------------
+	   Send completion status codes
+	   ------------------------------------------------------------- */
 
-  /*! For a reliable send, this error code means that a receiver
-     is reachable, the connection is connected but the receiver 
-     could not receive the incoming message during the timeout 
-     period. If a receiver cannot receive an incoming message for 
-     transient reasons (most likely out of resources), it returns 
-     an Receiver-Not-Ready NACK and drops the message.  The sender 
-     keeps retrying to send the message until the timeout expires, 
-     
-     If the timeout expires and the last control message received
-     from the receiver was an RNR NACK, then this message is
-     completed with the RNR status.  If the connection is both
-     reliable and ordered, then all successive sends are also
-     completed in the order in which they were issued with the RNR
-     status.
+	/*! For a reliable send, this error code means that the sender did
+	   not get anything back from the receiver within a timeout (no
+	   ACK, no NACK, etc.).  It is unknown whether the receiver
+	   actually received the message or not.
 
-     \todo We need a discussion somewhere in the docs of exactly what
-           happens for reliables with RNR, drops, ordering, ... etc.
+	   This error code won't occur for unreliable sends.
+	 */
+	CCI_ETIMEDOUT = ETIMEDOUT,
 
-     This error code will not be returned for unreliable sends.
-  */
-  CCI_ERR_RNR,
+	/*! For both reliable and unreliable sends, this error code means
+	   that cci_disconnect() has been invoked on the send side (in
+	   which case this is an application error), or the receiver
+	   replied that the receiver invoked cci_disconnect(). */
+	CCI_ERR_DISCONNECTED,
 
-  /*! the local device is gone, not coming back */
-  CCI_ERR_DEVICE_DEAD,
-  
-  /*! Error returned from remote peer indicating that the address was
-      either invalid or unable to be used for access / permissions
-      reasons. */
-  CCI_ERR_RMA_HANDLE,
+	/*! For a reliable send, this error code means that a receiver
+	   is reachable, the connection is connected but the receiver 
+	   could not receive the incoming message during the timeout 
+	   period. If a receiver cannot receive an incoming message for 
+	   transient reasons (most likely out of resources), it returns 
+	   an Receiver-Not-Ready NACK and drops the message.  The sender 
+	   keeps retrying to send the message until the timeout expires, 
 
-  /*! Error returned from remote peer indicating that it does not support
-     the operation that was requested. */
-  CCI_ERR_RMA_OP,
+	   If the timeout expires and the last control message received
+	   from the receiver was an RNR NACK, then this message is
+	   completed with the RNR status.  If the connection is both
+	   reliable and ordered, then all successive sends are also
+	   completed in the order in which they were issued with the RNR
+	   status.
+
+	   \todo We need a discussion somewhere in the docs of exactly what
+	   happens for reliables with RNR, drops, ordering, ... etc.
+
+	   This error code will not be returned for unreliable sends.
+	 */
+	CCI_ERR_RNR,
+
+	/*! the local device is gone, not coming back */
+	CCI_ERR_DEVICE_DEAD,
+
+	/*! Error returned from remote peer indicating that the address was
+	   either invalid or unable to be used for access / permissions
+	   reasons. */
+	CCI_ERR_RMA_HANDLE,
+
+	/*! Error returned from remote peer indicating that it does not support
+	   the operation that was requested. */
+	CCI_ERR_RMA_OP,
 } cci_status_t;
 
 /*!
@@ -167,7 +165,6 @@ typedef enum cci_status {
   \ingroup env
 */
 const char *cci_strerror(enum cci_status status);
-
 
 /* ================================================================== */
 /*                                                                    */
@@ -263,31 +260,31 @@ The config file forms the basis for the device discussion, below.
   \ingroup devices
 */
 typedef struct cci_device {
-  /*! Name of the device from the config file, e.g., "bob0" */
-  const char *name;
-  
-  /*! Human readable description string (to include newlines); should
-    contain debugging info, probably the network address of the
-    device at a bare minimum. */
-  const char *info; 
-  
-  /*! Array of "key=value" strings from the config file for this
-    device; the last pointer in the array is NULL. */
-  const char **conf_argv;
-  
-  /*! Maximum send size supported by the device */
-  uint32_t max_send_size;
-  
-  /*! Data rate per specitication: data bits per second (not the
-    signaling rate). */
-  uint64_t rate;
-  
-  /*! The PCI ID of this device as reported by the OS/hardware.  All
-    values will be ((uint32_t) -1) for non-PCI devices (e.g.,
-    shared memory) */
-  struct {
-    uint32_t domain, bus, dev, func;
-  } pci;
+	/*! Name of the device from the config file, e.g., "bob0" */
+	const char *name;
+
+	/*! Human readable description string (to include newlines); should
+	   contain debugging info, probably the network address of the
+	   device at a bare minimum. */
+	const char *info;
+
+	/*! Array of "key=value" strings from the config file for this
+	   device; the last pointer in the array is NULL. */
+	const char **conf_argv;
+
+	/*! Maximum send size supported by the device */
+	uint32_t max_send_size;
+
+	/*! Data rate per specitication: data bits per second (not the
+	   signaling rate). */
+	uint64_t rate;
+
+	/*! The PCI ID of this device as reported by the OS/hardware.  All
+	   values will be ((uint32_t) -1) for non-PCI devices (e.g.,
+	   shared memory) */
+	struct {
+		uint32_t domain, bus, dev, func;
+	} pci;
 } cci_device_t;
 
 /*! 
@@ -339,7 +336,6 @@ int cci_get_devices(cci_device_t const ***devices);
 */
 int cci_free_devices(cci_device_t const **devices);
 
-
 /*====================================================================*/
 /*                                                                    */
 /*                            ENDPOINTS                               */
@@ -375,7 +371,7 @@ int cci_free_devices(cci_device_t const **devices);
   \ingroup endpoints
  */
 typedef enum cci_endpoint_flags {
-    /*! For future expansion */
+	/*! For future expansion */
 } cci_endpoint_flags_t;
 
 /*! Endpoint. 
@@ -383,11 +379,11 @@ typedef enum cci_endpoint_flags {
   \ingroup endpoints
 */
 typedef struct cci_endpoint {
-  /*! Maximum number of receive buffers on this endpoint that can be
-      loaned to the application.  When this number of buffers have
-      been loaned to the application, incoming messages may be
-      dropped. */
-  uint32_t max_recv_buffer_count;
+	/*! Maximum number of receive buffers on this endpoint that can be
+	   loaned to the application.  When this number of buffers have
+	   been loaned to the application, incoming messages may be
+	   dropped. */
+	uint32_t max_recv_buffer_count;
 } cci_endpoint_t;
 
 /*! OS-native handles
@@ -438,11 +434,9 @@ typedef int cci_os_handle_t;
 
   \ingroup endpoints
 */
-int cci_create_endpoint(cci_device_t *device, 
-			int flags, 
-			cci_endpoint_t **endpoint, 
-			cci_os_handle_t *fd)
-
+int cci_create_endpoint(cci_device_t * device,
+			int flags,
+			cci_endpoint_t ** endpoint, cci_os_handle_t * fd)
 
 /*! Destroy an endpoint.
 
@@ -458,8 +452,7 @@ int cci_create_endpoint(cci_device_t *device,
 
   \ingroup endpoints
  */
-int cci_destroy_endpoint(cci_endpoint_t *endpoint);
-
+int cci_destroy_endpoint(cci_endpoint_t * endpoint);
 
 /*====================================================================*/
 /*                                                                    */
@@ -468,14 +461,12 @@ int cci_destroy_endpoint(cci_endpoint_t *endpoint);
 /*====================================================================*/
 
 /*! \defgroup connection Connections */
-  
 
 /********************/
 /*                  */
 /*      SERVER      */
 /*                  */
 /********************/
-
 
 /*!
   Connection request attributes.
@@ -501,24 +492,23 @@ int cci_destroy_endpoint(cci_endpoint_t *endpoint);
   \ingroup connection
 */
 typedef enum cci_conn_attribute {
-  CCI_CONN_ATTR_RO,		/*!< Reliable ordered.  Means that
-                                   both completions and delivery are
-                                   in the same order that they were
-                                   issued. */
-  CCI_CONN_ATTR_RU,		/*!< Reliable unordered.  Means that
-                                   delivery is guaranteed, but both
-                                   delivery and completion may be in a
-                                   different order than they were
-                                   issued. */
-  CCI_CONN_ATTR_UU,		/*!< Unreliable unordered (RMA
-                                   forbidden).  Delivery is not
-                                   guaranteed, and both delivery and
-                                   completions may be in a different
-                                   order than they were issued. */
-  CCI_CONN_ATTR_UU_MC_TX,	/*!< Multicast send (RMA forbidden) */
-  CCI_CONN_ATTR_UU_MC_RX,	/*!< Multicast recv (RMA forbidden) */
+	CCI_CONN_ATTR_RO,	/*!< Reliable ordered.  Means that
+				   both completions and delivery are
+				   in the same order that they were
+				   issued. */
+	CCI_CONN_ATTR_RU,	/*!< Reliable unordered.  Means that
+				   delivery is guaranteed, but both
+				   delivery and completion may be in a
+				   different order than they were
+				   issued. */
+	CCI_CONN_ATTR_UU,	/*!< Unreliable unordered (RMA
+				   forbidden).  Delivery is not
+				   guaranteed, and both delivery and
+				   completions may be in a different
+				   order than they were issued. */
+	CCI_CONN_ATTR_UU_MC_TX,	/*!< Multicast send (RMA forbidden) */
+	CCI_CONN_ATTR_UU_MC_RX,	/*!< Multicast recv (RMA forbidden) */
 } cci_conn_attribute_t;
-
 
 /*! 
   Connection request. 
@@ -526,18 +516,18 @@ typedef enum cci_conn_attribute {
   \ingroup connection
 */
 typedef struct cci_conn_req {
-  /*! Array of compatible devices */
-    cci_device_t *devices[];
-  /*! Number of compatible devices */
-  uint32_t devices_cnt;
+	/*! Array of compatible devices */
+	cci_device_t *devices[];
+	/*! Number of compatible devices */
+	uint32_t devices_cnt;
 
-  /*! Pointer to connection data received with the connection request */
-  const void *data_ptr;
-  /*! Length of connection data */
-  uint32_t data_len;
+	/*! Pointer to connection data received with the connection request */
+	const void *data_ptr;
+	/*! Length of connection data */
+	uint32_t data_len;
 
-  /*! Attribute of requested connection */
-  cci_conn_attribute_t attribute;
+	/*! Attribute of requested connection */
+	cci_conn_attribute_t attribute;
 } cci_conn_req_t;
 
 /*!
@@ -546,12 +536,12 @@ typedef struct cci_conn_req {
   \ingroup connection
 */
 typedef struct cci_connection {
-  /*! Maximum send size for the connection */
-  uint32_t max_send_size;
-  /*! Local endpoint associated to the connection */
-  cci_endpoint_t *endpoint;
-  /*! Attributes of the connection */
-  cci_conn_attribute_t attribute;
+	/*! Maximum send size for the connection */
+	uint32_t max_send_size;
+	/*! Local endpoint associated to the connection */
+	cci_endpoint_t *endpoint;
+	/*! Attributes of the connection */
+	cci_conn_attribute_t attribute;
 } cci_connection_t;
 
 /*!
@@ -560,9 +550,9 @@ typedef struct cci_connection {
   JMS Fill me in
 */
 typedef struct cci_service {
-    /* \todo When someone implements: We can't think of anything to
-       put in here right now, but let's see what happens when someone
-       does the first implementation. */
+	/* \todo When someone implements: We can't think of anything to
+	   put in here right now, but let's see what happens when someone
+	   does the first implementation. */
 } cci_service_t;
 
 /*!
@@ -595,8 +585,8 @@ typedef struct cci_service {
 
   \ingroup connection
 */
-int cci_bind(cci_device_t *device, int backlog, uint32_t *port, 
-	     cci_service_t **service, cci_os_handle_t *fd);
+int cci_bind(cci_device_t * device, int backlog, uint32_t * port,
+	     cci_service_t ** service, cci_os_handle_t * fd);
 
 /*! 
   Unbind a previously-bound service.
@@ -612,7 +602,7 @@ int cci_bind(cci_device_t *device, int backlog, uint32_t *port,
 
   \ingroup connection
 */
-int cci_unbind(cci_service_t *service, cci_device_t *device);
+int cci_unbind(cci_service_t * service, cci_device_t * device);
 
 /*! 
   Return the next connection request, if any.  
@@ -632,8 +622,7 @@ int cci_unbind(cci_service_t *service, cci_device_t *device);
 
   \ingroup connection
 */
-int cci_get_conn_req(cci_service_t *service, cci_conn_req_t **conn_req);
-
+int cci_get_conn_req(cci_service_t * service, cci_conn_req_t ** conn_req);
 
 /*! 
   Accept a connection request and establish a connection with a specific 
@@ -658,8 +647,8 @@ int cci_get_conn_req(cci_service_t *service, cci_conn_req_t **conn_req);
 
   \ingroup connection
 */
-int cci_accept(cci_conn_req_t *conn_req, cci_endpoint_t *endpoint, 
-	       cci_connection_t **connection);
+int cci_accept(cci_conn_req_t * conn_req, cci_endpoint_t * endpoint,
+	       cci_connection_t ** connection);
 
 /*! 
   Reject a connection request.
@@ -676,9 +665,7 @@ int cci_accept(cci_conn_req_t *conn_req, cci_endpoint_t *endpoint,
    
    \ingroup connection
  */
-int cci_reject(cci_conn_req_t *conn_req);
-
-
+int cci_reject(cci_conn_req_t * conn_req);
 
 /********************/
 /*                  */
@@ -744,8 +731,8 @@ int cci_reject(cci_conn_req_t *conn_req);
   from the client.
 */
 /* QUESTION: data is cached or not ? */
-int cci_connect(cci_endpoint_t *endpoint, char *server_uri, uint32_t port,
-		void *data_ptr, uint32_t data_len, 
+int cci_connect(cci_endpoint_t * endpoint, char *server_uri, uint32_t port,
+		void *data_ptr, uint32_t data_len,
 		cci_conn_attribute_t attribute,
 		void *context, int flags, struct timeval *timeout);
 
@@ -760,10 +747,7 @@ int cci_connect(cci_endpoint_t *endpoint, char *server_uri, uint32_t port,
 
   \ingroup connection
  */
-int cci_disconnect(cci_connection_t *connection);
-
-
-
+int cci_disconnect(cci_connection_t * connection);
 
 /*====================================================================*/
 /*                                                                    */
@@ -773,65 +757,65 @@ int cci_disconnect(cci_connection_t *connection);
 
 /*! Handle defining the scope of an option */
 typedef union cci_opt_handle {
-  /*! Endpoint */
-  cci_endpoint_t *endpoint;
-  /*! Connection */
-  cci_connection_t *connection;
+	/*! Endpoint */
+	cci_endpoint_t *endpoint;
+	/*! Connection */
+	cci_connection_t *connection;
 } cci_opt_handle_t;
 
 /*! Level defining the scope of an option */
 typedef enum cci_opt_level {
-  /*! Flag indicating that the union is an endpoint */
-  CCI_OPT_LEVEL_ENDPOINT,
-  /*! Flag indicating that the union is a connection */
-  CCI_OPT_LEVEL_CONNECTION,
+	/*! Flag indicating that the union is an endpoint */
+	CCI_OPT_LEVEL_ENDPOINT,
+	/*! Flag indicating that the union is a connection */
+	CCI_OPT_LEVEL_CONNECTION,
 } cci_opt_level_t;
 
 /*! Name of options */
 typedef enum cci_opt_name {
-  /*! Max header size (in bytes) on the endpoint, for both sends and
-      RMA operations. */
-  CCI_OPT_ENDPT_MAX_HEADER_SIZE, /* get */
+	/*! Max header size (in bytes) on the endpoint, for both sends and
+	   RMA operations. */
+	CCI_OPT_ENDPT_MAX_HEADER_SIZE,	/* get */
 
-  /*! default send timeout for all new connections */
-  CCI_OPT_ENDPT_SEND_TIMEOUT, /* set/get */
-  
-  /*! How many receiver buffers on the endpoint.  It is the max
-      number of messages the CCI layer can receive without dropping.  */
-  CCI_OPT_ENDPT_RECV_BUF_COUNT, /* set/get */
-  
-  /*! How many send buffers on the endpoint.  It is the max number of
-      pending messages the CCI layer can buffer before failing or
-      blocking (depending on reliability mode). */
-  CCI_OPT_ENDPT_SEND_BUF_COUNT, /* set/get */
-  
-  /*! The "keepalive" timeout is to prevent a client from connecting
-      to a server and then the client disappears without the server
-      noticing.  If the server never sends anything on the connection,
-      it'll never realize that the client is gone, but the connection
-      is still consuming resources.  But note that keepalive timers
-      apply to both clients and servers.
-     
-      The keepalive timeout is expressed in microseconds.  If the
-      keepalive timeout value is set:
-     
-      - If no traffic at all is received on a connection within the
-      keepalive timeout, the CCI_EVENT_KEEPALIVE_TIMEOUT event is
-      raised on that connection.
+	/*! default send timeout for all new connections */
+	CCI_OPT_ENDPT_SEND_TIMEOUT,	/* set/get */
 
-      - The CCI implementation will automatially send control
-      hearbeats across an inactive (but still alive) connection to
-      reset the peer's keepalive timer before it times out.
-     
-      If a keepalive event is raised, the keepalive timeout is set to
-      0 (i.e., it must be "re-armed" before it will timeout again),
-      but the connection is *not* disconnected.  Recovery decisions
-      are up to the application; it may choose to disconnect the
-      connection, re-arm the keepalive timeout, etc. */
-  CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT, /* set/get */
-  
-  /*! reliable send timeout in microseconds */
-  CCI_OPT_CONN_SEND_TIMEOUT, /* set/get */
+	/*! How many receiver buffers on the endpoint.  It is the max
+	   number of messages the CCI layer can receive without dropping.  */
+	CCI_OPT_ENDPT_RECV_BUF_COUNT,	/* set/get */
+
+	/*! How many send buffers on the endpoint.  It is the max number of
+	   pending messages the CCI layer can buffer before failing or
+	   blocking (depending on reliability mode). */
+	CCI_OPT_ENDPT_SEND_BUF_COUNT,	/* set/get */
+
+	/*! The "keepalive" timeout is to prevent a client from connecting
+	   to a server and then the client disappears without the server
+	   noticing.  If the server never sends anything on the connection,
+	   it'll never realize that the client is gone, but the connection
+	   is still consuming resources.  But note that keepalive timers
+	   apply to both clients and servers.
+
+	   The keepalive timeout is expressed in microseconds.  If the
+	   keepalive timeout value is set:
+
+	   - If no traffic at all is received on a connection within the
+	   keepalive timeout, the CCI_EVENT_KEEPALIVE_TIMEOUT event is
+	   raised on that connection.
+
+	   - The CCI implementation will automatially send control
+	   hearbeats across an inactive (but still alive) connection to
+	   reset the peer's keepalive timer before it times out.
+
+	   If a keepalive event is raised, the keepalive timeout is set to
+	   0 (i.e., it must be "re-armed" before it will timeout again),
+	   but the connection is *not* disconnected.  Recovery decisions
+	   are up to the application; it may choose to disconnect the
+	   connection, re-arm the keepalive timeout, etc. */
+	CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT,	/* set/get */
+
+	/*! reliable send timeout in microseconds */
+	CCI_OPT_CONN_SEND_TIMEOUT,	/* set/get */
 } cci_opt_name_t;
 
 /*! 
@@ -840,13 +824,12 @@ typedef enum cci_opt_name {
   Note that the set may fail if the CCI implementation cannot
   actually set the value.
 */
-int cci_set_opt(cci_opt_handle_t *handle, cci_opt_level_t level, 
-		cci_opt_name_t name, const void* val, int len);
+int cci_set_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
+		cci_opt_name_t name, const void *val, int len);
 
 /*! JMS Fill me in */
-int cci_get_opt(cci_opt_handle_t *handle, cci_opt_level_t level, 
-		cci_opt_name_t name, void** val, int *len);
-
+int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
+		cci_opt_name_t name, void **val, int *len);
 
 /* ================================================================== */
 /*                                                                    */
@@ -888,16 +871,15 @@ int cci_get_opt(cci_opt_handle_t *handle, cci_opt_level_t level,
   \ingroup events
 */
 typedef struct cci_event_send {
-  /*! Connection that the send was initiated on. */
-  cci_connection_t *connection;
-  
-  /*! Context value that was passed to cci_send() */
-  void *context;
-  
-  /*! Result of the send. */
-  cci_status_t status;
-} cci_event_sent_t;
+	/*! Connection that the send was initiated on. */
+	cci_connection_t *connection;
 
+	/*! Context value that was passed to cci_send() */
+	void *context;
+
+	/*! Result of the send. */
+	cci_status_t status;
+} cci_event_sent_t;
 
 /*! 
   Receive event.
@@ -916,28 +898,27 @@ typedef struct cci_event_send {
   \ingroup events
 */
 typedef struct cci_event_recv {
-  /*! The length of the header part of the message (in bytes). 
-    This value may be 0. */
-  uint32_t header_len;
-  
-  /*! The length of the data part of the message (in bytes). 
-    This value may be 0. */
-  uint32_t data_len;
-  
-  /*! Pointer to the header part of the received message.  The pointer
-    always points to an address that is 8-byte aligned, unless
-    (header_len == 0), in which case the value is undefined. */
-  void * const header_ptr;
-  
-  /*! Pointer to the data part of the received message.  The pointer
-    always points to an address that is 8-byte aligned, unless
-    (header_len == 0), in which case the value is undefined. */
-  void * const data_ptr;
-  
-  /*! Connection that this message was received on. */
-  cci_connection_t *connection;
-} cci_event_recv_t;
+	/*! The length of the header part of the message (in bytes). 
+	   This value may be 0. */
+	uint32_t header_len;
 
+	/*! The length of the data part of the message (in bytes). 
+	   This value may be 0. */
+	uint32_t data_len;
+
+	/*! Pointer to the header part of the received message.  The pointer
+	   always points to an address that is 8-byte aligned, unless
+	   (header_len == 0), in which case the value is undefined. */
+	void *const header_ptr;
+
+	/*! Pointer to the data part of the received message.  The pointer
+	   always points to an address that is 8-byte aligned, unless
+	   (header_len == 0), in which case the value is undefined. */
+	void *const data_ptr;
+
+	/*! Connection that this message was received on. */
+	cci_connection_t *connection;
+} cci_event_recv_t;
 
 /*! Other event
     JMS Fill me in
@@ -945,10 +926,9 @@ typedef struct cci_event_recv {
   \ingroup events
  */
 typedef struct cci_event_other {
-  /*! Context value */
-  void *context;
+	/*! Context value */
+	void *context;
 } cci_event_other_t;
-
 
 /*! JMS Fill me in
 
@@ -956,37 +936,36 @@ typedef struct cci_event_other {
  */
 typedef enum cci_event_type {
 
-  CCI_EVENT_NONE,
+	CCI_EVENT_NONE,
 
-  CCI_EVENT_SEND,
+	CCI_EVENT_SEND,
 
-  CCI_EVENT_RECV,
-  
-  /*! A new outgoing connection was successfully accepted at the
-     peer; a connection is now available for data transfer. */
-  CCI_EVENT_CONNECT_SUCCESS,
+	CCI_EVENT_RECV,
 
-  /*! A new outgoing connection did not complete the accept/connect
-     handshake with the peer in a finite time.  CCI has therefore
-     given up attempting to continue to create this connection. */
-  CCI_EVENT_CONNECT_TIMEOUT,
+	/*! A new outgoing connection was successfully accepted at the
+	   peer; a connection is now available for data transfer. */
+	CCI_EVENT_CONNECT_SUCCESS,
 
-  /*! A new outgoing connection was rejected by the server. */
-  CCI_EVENT_CONNECT_REJECTED,
-  
-  /*! This event occurs when the keepalive timeout has expired (see
-     CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT for more details). */
-  CCI_EVENT_KEEPALIVE_TIMEOUT,
-  
-  /*! A device on this endpoint has failed.
-     
-      \todo JMS What exactly do we do here?  Do all handles
-      (connections, etc.) on the endpoint become stale?  What about
-      sends that are in-flight -- do we complete them all with an
-      error?  And so on. */
-  CCI_EVENT_ENDPOINT_DEVICE_FAIL,
+	/*! A new outgoing connection did not complete the accept/connect
+	   handshake with the peer in a finite time.  CCI has therefore
+	   given up attempting to continue to create this connection. */
+	CCI_EVENT_CONNECT_TIMEOUT,
+
+	/*! A new outgoing connection was rejected by the server. */
+	CCI_EVENT_CONNECT_REJECTED,
+
+	/*! This event occurs when the keepalive timeout has expired (see
+	   CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT for more details). */
+	CCI_EVENT_KEEPALIVE_TIMEOUT,
+
+	/*! A device on this endpoint has failed.
+
+	   \todo JMS What exactly do we do here?  Do all handles
+	   (connections, etc.) on the endpoint become stale?  What about
+	   sends that are in-flight -- do we complete them all with an
+	   error?  And so on. */
+	CCI_EVENT_ENDPOINT_DEVICE_FAIL,
 } cci_event_type_t;
-
 
 /*! 
   Generic event
@@ -996,16 +975,15 @@ typedef enum cci_event_type {
   \ingroup events
 */
 typedef struct cci_event {
-  /*! Type of the event */
-  cci_event_type_t type;
-  
-  union {
-    cci_event_send_t send;
-    cci_event_recv_t recv;
-    cci_event_other_t other;
-  } info;
-} cci_event_t;
+	/*! Type of the event */
+	cci_event_type_t type;
 
+	union {
+		cci_event_send_t send;
+		cci_event_recv_t recv;
+		cci_event_other_t other;
+	} info;
+} cci_event_t;
 
 /********************/
 /*                  */
@@ -1024,7 +1002,7 @@ typedef struct cci_event {
 
   \ingroup events
 */
-int cci_arm_os_handle(cci_endpoint_t *endpoint, int flags);
+int cci_arm_os_handle(cci_endpoint_t * endpoint, int flags);
 
 /*!
   Get the next available CCI event.
@@ -1066,9 +1044,8 @@ int cci_arm_os_handle(cci_endpoint_t *endpoint, int flags);
 
   \ingroup events
 */
-int cci_get_event(cci_endpoint_t *endpoint, 
-		  cci_event_t ** const event,
-		  uint32_t flags);
+int cci_get_event(cci_endpoint_t * endpoint,
+		  cci_event_t ** const event, uint32_t flags);
 
 /*!
   This function returns the buffer associated with an event that was
@@ -1087,9 +1064,7 @@ int cci_get_event(cci_endpoint_t *endpoint,
 
   \ingroup events
 */
-int cci_return_event(cci_endpoint_t *endpoint, cci_event_t *event);
-
-
+int cci_return_event(cci_endpoint_t * endpoint, cci_event_t * event);
 
 /* ================================================================== */
 /*                                                                    */
@@ -1163,10 +1138,9 @@ int cci_return_event(cci_endpoint_t *endpoint, cci_event_t *event);
   completion of a non-SILENT send guarantees the completion of all
   previous SILENT sends.  
 */
-int cci_send(cci_connection_t *connection, 
-	     void *header_ptr, uint32_t header_len, 
-	     void *data_ptr, uint32_t data_len, 
-	     void *context, int flags);
+int cci_send(cci_connection_t * connection,
+	     void *header_ptr, uint32_t header_len,
+	     void *data_ptr, uint32_t data_len, void *context, int flags);
 
 /*! JMS Fill me in
 
@@ -1183,12 +1157,10 @@ int cci_send(cci_connection_t *connection,
         small.  Max header length is already an endpoint GET opt -- do
         we need another GET opt for the max length of the
         data_ptrs/data_lens arrays?  I think so. */
- */
-int cci_sendv(cci_connection_t *connection, 
-	      void *header_ptr, uint32_t header_len, 
-              char **data_ptrs, int *data_lens,
-	      uint segment_cnt, void *context, int flags);
-
+*/int cci_sendv(cci_connection_t * connection,
+		void *header_ptr, uint32_t header_len,
+		char **data_ptrs, int *data_lens,
+		uint segment_cnt, void *context, int flags);
 
 /* RMA Area operations */
 
@@ -1205,8 +1177,8 @@ int cci_sendv(cci_connection_t *connection,
 
   \ingroup communications
 */
-int cci_rma_register(cci_endpoint_t *endpoint, void *start, 
-                     uint64_t length, uint64_t *rma_handle);
+int cci_rma_register(cci_endpoint_t * endpoint, void *start,
+		     uint64_t length, uint64_t * rma_handle);
 
 /*! \private
 
@@ -1216,9 +1188,9 @@ int cci_rma_register(cci_endpoint_t *endpoint, void *start,
   \ingroup communications
  */
 typedef struct cci_sg {
-    /* JMS is this right?  Is it different than cci_iovec_t? */
-    uint64_t address;
-    uint32_t length;
+	/* JMS is this right?  Is it different than cci_iovec_t? */
+	uint64_t address;
+	uint32_t length;
 } cci_sg_t;
 
 /*! \private
@@ -1230,16 +1202,15 @@ typedef struct cci_sg {
 
   \ingroup communications
  */
-int cci_rma_register_phys(cci_endpoint_t *endpoint, 
-                          cci_sg_t *sg_list, uint32_t sg_cnt, 
-                          uint64_t *rma_handle);
+int cci_rma_register_phys(cci_endpoint_t * endpoint,
+			  cci_sg_t * sg_list, uint32_t sg_cnt,
+			  uint64_t * rma_handle);
 
 /*! JMS Fill me in
 
   \ingroup communications
  */
 int cci_rma_deregister(uint64_t rma_handle);
-
 
 /*! 
   Perform a RMA operation on remote RMA area.
@@ -1273,8 +1244,8 @@ int cci_rma_deregister(uint64_t rma_handle);
 
   FIXME: READ may not be performance efficient
 */
-int cci_rma(cci_connection_t *connection, 
-	    void *header_ptr, uint32_t header_len, 
-	    uint64_t local_handle, uint64_t local_offset, 
+int cci_rma(cci_connection_t * connection,
+	    void *header_ptr, uint32_t header_len,
+	    uint64_t local_handle, uint64_t local_offset,
 	    uint64_t remote_handle, uint64_t remote_offset,
-            uint64_t data_len, void *context, int flags);
+	    uint64_t data_len, void *context, int flags);

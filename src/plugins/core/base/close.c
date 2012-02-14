@@ -11,13 +11,12 @@
 #include "plugins/core/base/public.h"
 #include "plugins/core/base/private.h"
 
-
 int cci_plugins_core_close(void)
 {
-    if (NULL != cci_core) {
-        lt_dlclose(cci_plugins_core_handle);
-        cci_core = NULL;
-    }
+	if (NULL != cci_core) {
+		lt_dlclose(cci_plugins_core_handle);
+		cci_core = NULL;
+	}
 
-    return CCI_SUCCESS;
+	return CCI_SUCCESS;
 }

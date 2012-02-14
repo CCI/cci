@@ -16,13 +16,11 @@
 #include "cci.h"
 #include "plugins/core/core.h"
 
-
-int cci_sendv(cci_connection_t *connection,
-              struct iovec *data, uint32_t iovcnt,
-              void *context, int flags)
+int cci_sendv(cci_connection_t * connection,
+	      struct iovec *data, uint32_t iovcnt, void *context, int flags)
 {
-    if (NULL == connection)
-        return CCI_EINVAL;
+	if (NULL == connection)
+		return CCI_EINVAL;
 
-    return cci_core->sendv(connection, data, iovcnt, context, flags);
+	return cci_core->sendv(connection, data, iovcnt, context, flags);
 }

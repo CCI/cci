@@ -16,13 +16,12 @@
 #include "cci.h"
 #include "plugins/core/core.h"
 
-
-int cci_disconnect(cci_connection_t *connection)
+int cci_disconnect(cci_connection_t * connection)
 {
-    if (NULL == connection) {
-        return CCI_EINVAL;
-    }
+	if (NULL == connection) {
+		return CCI_EINVAL;
+	}
 
-    /* NOTE the driver does all connection cleanup */
-    return cci_core->disconnect(connection);
+	/* NOTE the driver does all connection cleanup */
+	return cci_core->disconnect(connection);
 }

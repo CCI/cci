@@ -16,8 +16,7 @@
 #include "cci.h"
 #include "plugins/core/core.h"
 
-
 int cci_reject(union cci_event *conn_req)
 {
-    return cci_core->reject(conn_req);
+	return cci_core->reject(conn_req);
 }

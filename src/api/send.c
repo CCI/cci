@@ -16,13 +16,11 @@
 #include "cci.h"
 #include "plugins/core/core.h"
 
-
-int cci_send(cci_connection_t *connection,
-             void *msg_ptr, uint32_t msg_len,
-             void *context, int flags)
+int cci_send(cci_connection_t * connection,
+	     void *msg_ptr, uint32_t msg_len, void *context, int flags)
 {
-    if (NULL == connection)
-        return CCI_EINVAL;
+	if (NULL == connection)
+		return CCI_EINVAL;
 
-    return cci_core->send(connection, msg_ptr, msg_len, context, flags);
+	return cci_core->send(connection, msg_ptr, msg_len, context, flags);
 }

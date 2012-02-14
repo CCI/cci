@@ -95,8 +95,8 @@ int main(int argc, char *argv[])
 					} else if (!buffer) {
 						buffer =
 						    calloc(1,
-							   connection->
-							   max_send_size + 1);
+							   connection->max_send_size
+							   + 1);
 						/* check for buffer ... */
 					}
 

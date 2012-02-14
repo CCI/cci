@@ -12,15 +12,14 @@
 
 #include "core_mx.h"
 
-
-int cci_core_mx_post_load(cci_plugin_t *me)
+int cci_core_mx_post_load(cci_plugin_t * me)
 {
-    debug( CCI_DB_DRVR, "In mx post_load");
-    return CCI_SUCCESS;
+	debug(CCI_DB_DRVR, "In mx post_load");
+	return CCI_SUCCESS;
 }
 
-int cci_core_mx_pre_unload(cci_plugin_t *me)
+int cci_core_mx_pre_unload(cci_plugin_t * me)
 {
-    debug( CCI_DB_DRVR, "In mx pre_unload");
-    return CCI_SUCCESS;
+	debug(CCI_DB_DRVR, "In mx pre_unload");
+	return CCI_SUCCESS;
 }
