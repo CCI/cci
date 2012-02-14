@@ -12,7 +12,7 @@ libcci_api_la_SOURCES = \
         create_endpoint.c \
         destroy_endpoint.c \
         disconnect.c \
-        free_devices.c \
+        finalize.c \
         get_devices.c \
         get_event.c \
         get_opt.c \

@@ -15,9 +15,9 @@
  * Local functions
  */
 static int template_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int template_finalize(void);
 static const char *template_strerror(cci_endpoint_t * endpoint, enum cci_status status);
 static int template_get_devices(cci_device_t const ***devices);
-static int template_free_devices(cci_device_t const **devices);
 static int template_create_endpoint(cci_device_t * device,
 				    int flags,
 				    cci_endpoint_t ** endpoint,
@@ -86,9 +86,9 @@ cci_plugin_core_t cci_core_template_plugin = {
 
 	/* API function pointers */
 	template_init,
+	template_finalize,
 	template_strerror,
 	template_get_devices,
-	template_free_devices,
 	template_create_endpoint,
 	template_destroy_endpoint,
 	template_accept,
@@ -113,6 +113,12 @@ static int template_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	return CCI_SUCCESS;
 }
 
+static int template_finalize(void)
+{
+	printf("In template_free_devices\n");
+	return CCI_ERR_NOT_IMPLEMENTED;
+}
+
 static const char *template_strerror(cci_endpoint_t * endpoint, enum cci_status status)
 {
 	printf("In template_sterrror\n");
@@ -122,12 +128,6 @@ static const char *template_strerror(cci_endpoint_t * endpoint, enum cci_status 
 static int template_get_devices(cci_device_t const ***devices)
 {
 	printf("In template_get_devices\n");
-	return CCI_ERR_NOT_IMPLEMENTED;
-}
-
-static int template_free_devices(cci_device_t const **devices)
-{
-	printf("In template_free_devices\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 

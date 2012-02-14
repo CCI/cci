@@ -51,10 +51,10 @@ pthread_t progress_tid, recv_tid;
  * Local functions
  */
 static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int sock_finalize(void);
 static const char *sock_strerror(cci_endpoint_t * endpoint,
 				 enum cci_status status);
 static int sock_get_devices(cci_device_t const ***devices);
-static int sock_free_devices(cci_device_t const **devices);
 static int sock_create_endpoint(cci_device_t * device,
 				int flags,
 				cci_endpoint_t ** endpoint,
@@ -130,9 +130,9 @@ cci_plugin_core_t cci_core_sock_plugin = {
 
 	/* API function pointers */
 	sock_init,
+	sock_finalize,
 	sock_strerror,
 	sock_get_devices,
-	sock_free_devices,
 	sock_create_endpoint,
 	sock_destroy_endpoint,
 	sock_accept,
@@ -362,7 +362,7 @@ static int sock_get_devices(cci_device_t const ***devices)
  *      and destroyed all endpoints.
  *      All we need to do if free dev->priv
  */
-static int sock_free_devices(cci_device_t const **devices)
+static int sock_finalize(void)
 {
 	cci__dev_t *dev = NULL;
 
