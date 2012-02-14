@@ -139,6 +139,17 @@ int cci__free_devs(void)
 	return CCI_ENOMEM;
 }
 
+void cci__init_dev(cci__dev_t *dev)
+{
+	cci_device_t *device = &dev->device;
+
+	dev->priority = 50; /* default */
+	dev->is_default = 0;
+	TAILQ_INIT(&dev->eps);
+	pthread_mutex_init(&dev->lock, NULL);
+	device->up = 1;
+}
+
 void cci__add_dev(cci__dev_t * dev)
 {
 	if (TAILQ_EMPTY(&globals->devs)) {
@@ -261,10 +272,7 @@ int cci__parse_config(const char *path)
 				      "calloc failed for device %s", open);
 				return cci__free_devs();
 			}
-			dev->priority = 50;	/* default */
-			/* dev->is_default = 0; */
-			TAILQ_INIT(&dev->eps);
-			pthread_mutex_init(&dev->lock, NULL);
+			cci__init_dev(dev);
 
 			d = &dev->device;
 			d->conf_argv = calloc(CCI_MAX_ARGS + 1, sizeof(char *));
