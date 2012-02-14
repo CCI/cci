@@ -2,9 +2,10 @@
 
 == From a tarball (.tar.gz) ==
 
-To install CCI from a tarball, simply execute the following commands:
-- untar the file by running "tar xzf cci-0.1b1.tar.gz",
-- execute "cd cci-0.1b1"
+To install CCI from a tarball, simply execute the following commands, where
+<version> is the CCI version you want to install:
+- untar the file by running "tar xzf cci-<version>.tar.gz"
+- execute "cd cci-<version>"
 - execute "./autogen.pl"
 - execute "./configure", for the list of available options, please executei
   "./configure --help"
