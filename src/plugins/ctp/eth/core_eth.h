@@ -14,12 +14,12 @@
 BEGIN_C_DECLS
 
 typedef struct eth__dev {
-  /*! Mac address of the interface */
-  struct sockaddr_ll addr;
+	/*! Mac address of the interface */
+	struct sockaddr_ll addr;
 } eth__dev_t;
 
 typedef struct eth__ep {
-  int fd;
+	int fd;
 } eth__ep_t;
 
 typedef struct eth__conn {
@@ -29,13 +29,13 @@ typedef struct eth__conn {
 typedef struct eth__evt {
 	union {
 		struct {
-			int need_reply; /* for connect request */
+			int need_reply;	/* for connect request */
 		} connect_request;
 	} type_params;
 } eth__evt_t;
 
-int cci_core_eth_post_load(cci_plugin_t *me);
-int cci_core_eth_pre_unload(cci_plugin_t *me);
+int cci_core_eth_post_load(cci_plugin_t * me);
+int cci_core_eth_pre_unload(cci_plugin_t * me);
 
 #ifdef CCIETH_VALGRIND_HOOKS
 #include <valgrind/memcheck.h>
@@ -45,11 +45,11 @@ int cci_core_eth_pre_unload(cci_plugin_t *me);
 #define CCIETH_VALGRIND_CHECK_DEFINED(p, s) VALGRIND_CHECK_VALUE_IS_DEFINED(p, s)
 #define CCIETH_VALGRIND_CHECK_WRITABLE(p, s) VALGRIND_CHECK_VALUE_IS_WRITABLE(p, s)
 #else /* !CCIETH_VALGRIND_HOOKS */
-#define CCIETH_VALGRIND_MEMORY_MAKE_NOACCESS(p, s) /* nothing */
-#define CCIETH_VALGRIND_MEMORY_MAKE_WRITABLE(p, s) /* nothing */
-#define CCIETH_VALGRIND_MEMORY_MAKE_READABLE(p, s) /* nothing */
-#define CCIETH_VALGRIND_CHECK_DEFINED(p, s) /* nothing */
-#define CCIETH_VALGRIND_CHECK_WRITABLE(p, s) /* nothing */
+#define CCIETH_VALGRIND_MEMORY_MAKE_NOACCESS(p, s)	/* nothing */
+#define CCIETH_VALGRIND_MEMORY_MAKE_WRITABLE(p, s)	/* nothing */
+#define CCIETH_VALGRIND_MEMORY_MAKE_READABLE(p, s)	/* nothing */
+#define CCIETH_VALGRIND_CHECK_DEFINED(p, s)	/* nothing */
+#define CCIETH_VALGRIND_CHECK_WRITABLE(p, s)	/* nothing */
 #endif /* !CCIETH_VALGRIND_HOOKS */
 
 END_C_DECLS

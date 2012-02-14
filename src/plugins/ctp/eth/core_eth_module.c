@@ -13,15 +13,14 @@
 
 #include "core_eth.h"
 
-
-int cci_core_eth_post_load(cci_plugin_t *me)
+int cci_core_eth_post_load(cci_plugin_t * me)
 {
-    debug( CCI_DB_DRVR, "In eth post_load");
-    return CCI_SUCCESS;
+	debug(CCI_DB_DRVR, "In eth post_load");
+	return CCI_SUCCESS;
 }
 
-int cci_core_eth_pre_unload(cci_plugin_t *me)
+int cci_core_eth_pre_unload(cci_plugin_t * me)
 {
-    debug( CCI_DB_DRVR, "In eth pre_unload");
-    return CCI_SUCCESS;
+	debug(CCI_DB_DRVR, "In eth pre_unload");
+	return CCI_SUCCESS;
 }
