@@ -193,7 +193,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	/* get an event */
 	event = ccieth_get_free_event(ep);
 	if (!event) {
-		err = -ENOMEM;
+		err = -ENOBUFS;
 		dprintk("ccieth: no event slot for send\n");
 		goto out_with_rculock;
 	}
@@ -283,9 +283,10 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 	int err;
 
 	/* get an event */
-	err = -ENOMEM;
 	event = ccieth_get_free_event(ep);
 	if (!event) {
+		/* don't ack, we need a resend */
+		err = -ENOBUFS;
 		dprintk("ccieth: no event slot for msg\n");
 		goto out;
 	}

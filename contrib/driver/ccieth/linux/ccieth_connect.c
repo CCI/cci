@@ -557,14 +557,16 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	 */
 
 	/* get an event */
-	err = -ENOMEM;
 	event = ccieth_get_free_event(ep);
 	if (!event) {
+		/* don't ack, we need a resend */
+		err = -ENOBUFS;
 		dprintk("ccieth: no event slot for connect request\n");
 		goto out;
 	}
 
 	/* get a connection */
+	err = -ENOMEM;
 	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn)
 		goto out_with_event;
@@ -761,9 +763,10 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	rcu_read_lock();
 
 	/* get an event */
-	err = -ENOMEM;
 	event = ccieth_get_free_event(ep);
 	if (!event) {
+		/* don't ack, we need a resend */
+		err = -ENOBUFS;
 		dprintk("ccieth: no event slot for connect accepted\n");
 		goto out_with_rculock;
 	}
