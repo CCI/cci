@@ -24,6 +24,7 @@
 int cci__debug = CCI_DB_DFLT;
 cci__globals_t *globals = NULL;
 int initialized = 0;
+int configfile = 0;
 
 static inline void cci__get_debug_env(void)
 {
@@ -467,17 +468,14 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		}
 
 		str = getenv("CCI_CONFIG");
-		if (!str || str[0] == '\0') {
-			debug(CCI_DB_WARN,
-			      "unable to find CCI_CONFIG environment variable.");
-			return CCI_ERR_NOT_FOUND;
-		}
-
-		ret = cci__parse_config(str);
-		if (ret) {
-			debug(CCI_DB_ERR, "unable to parse CCI_CONFIG file %s",
-			      str);
-			return CCI_ERROR;
+		if (str && str[0] != '\0') {
+			ret = cci__parse_config(str);
+			if (ret) {
+				debug(CCI_DB_ERR, "unable to parse CCI_CONFIG file %s",
+				      str);
+				return CCI_ERROR;
+			}
+			configfile = 1;
 		}
 
 		ret = cci_core->init(abi_ver, flags, caps);

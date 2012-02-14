@@ -369,6 +369,8 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	}
 	vglobals->ifaddrs = ifaddrs;
 
+/* FIXME: if configfile == 0, create default devices */
+
 	/* find devices we own */
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
 		if (0 == strcmp("verbs", dev->driver)) {

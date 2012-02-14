@@ -161,6 +161,7 @@ typedef struct cci__globals {
 } cci__globals_t;
 
 extern int initialized;
+extern int configfile;
 extern cci__globals_t *globals;
 
 /*! Obtain the private struct from the public struct

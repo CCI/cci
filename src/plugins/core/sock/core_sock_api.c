@@ -233,6 +233,8 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		goto out;
 	}
 
+/* FIXME: if configfile == 0, create default devices */
+
 	/* find devices that we own */
 
 	TAILQ_FOREACH(dev, &globals->devs, entry) {

@@ -296,6 +296,8 @@ static int portals_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
       false_alarm:
 
+/* FIXME: if configfile == 0, create default devices */
+
 /*
  * Start searching global configuration for portals devices.
  */
