@@ -165,13 +165,12 @@ static int eth__get_device_info(cci__dev_t * _dev, struct ifaddrs *addr)
 	ecmd.cmd = ETHTOOL_GSET;
 	ifr.ifr_data = (void *)&ecmd;
 	if (ioctl(sockfd, SIOCETHTOOL, &ifr) < 0) {
-		assert(errno != ENODEV);	/* caught above */
 		if (errno == EPERM) {
 			debug(CCI_DB_INFO,
 			      " ethtool get settings returned EPERM, falling back to custom ioctl");
 			goto fallback_ioctl;
 		}
-		if (errno != EOPNOTSUPP) {
+		if (errno != ENODEV && errno != EOPNOTSUPP) {
 			perror("SIOCETHTOOL ETHTOOL_GSET");
 			goto out_with_sockfd;
 		}
@@ -187,8 +186,7 @@ static int eth__get_device_info(cci__dev_t * _dev, struct ifaddrs *addr)
 	edi.cmd = ETHTOOL_GDRVINFO;
 	ifr.ifr_data = (void *)&edi;
 	if (ioctl(sockfd, SIOCETHTOOL, &ifr) < 0) {
-		assert(errno != ENODEV);	/* caught above */
-		if (errno != EOPNOTSUPP) {
+		if (errno != ENODEV && errno != EOPNOTSUPP) {
 			perror("SIOCETHTOOL ETHTOOL_GDRVINFO");
 			goto out_with_sockfd;
 		}
