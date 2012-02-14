@@ -922,6 +922,15 @@ static int eth_send(cci_connection_t * connection,
 	struct ccieth_ioctl_msg arg;
 	int ret;
 
+	/* ccieth always copies to kernel sk_buffs */
+	flags &= ~CCI_FLAG_NO_COPY;
+
+	/* FIXME */
+	if (flags & CCI_FLAG_BLOCKING)
+		return ENOSYS;
+	if (flags & CCI_FLAG_SILENT)
+		return ENOSYS;
+
 	arg.conn_id = econn->id;
 	arg.msg_ptr = (uintptr_t) msg_ptr;
 	arg.msg_len = msg_len;
