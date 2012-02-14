@@ -117,18 +117,6 @@ cci_plugin_core_t cci_core_eth_plugin = {
 	eth_rma
 };
 
-static int eth_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
-{
-	printf("In eth_init\n");
-	return CCI_SUCCESS;
-}
-
-static const char *eth_strerror(enum cci_status status)
-{
-	printf("In eth_sterrror\n");
-	return NULL;
-}
-
 static int eth__get_device_info(cci__dev_t * _dev, struct ifaddrs *addr)
 {
 	cci_device_t *device = &_dev->device;
@@ -267,11 +255,10 @@ out:
 	return -1;
 }
 
-static int eth_get_devices(cci_device_t const ***devices_p)
+static int eth__get_devices(void)
 {
 	int ret;
 	cci__dev_t *_dev, *maxrate_dev;
-	cci_device_t **devices;
 	unsigned count = 0;
 	cci_device_t *device;
 	eth__dev_t *edev;
@@ -281,12 +268,6 @@ static int eth_get_devices(cci_device_t const ***devices_p)
 	int maxrate;
 
 	CCI_ENTER;
-
-	devices = calloc(CCI_MAX_DEVICES, sizeof(*devices));
-	if (!devices) {
-		ret = CCI_ENOMEM;
-		goto out;
-	}
 
 	if (getifaddrs(&addrs) == -1) {
 		ret = errno;
@@ -346,8 +327,6 @@ static int eth_get_devices(cci_device_t const ***devices_p)
 			if (is_loopback)
 				_dev->is_default = 1;
 			TAILQ_INSERT_TAIL(&globals->devs, _dev, entry);
-			devices[count] = device;
-			count++;
 		}
 
 	} else {
@@ -420,9 +399,6 @@ static int eth_get_devices(cci_device_t const ***devices_p)
 					free(edev);
 					continue;
 				}
-
-				devices[count] = device;
-				count++;
 			}
 		}
 	}
@@ -452,31 +428,6 @@ static int eth_get_devices(cci_device_t const ***devices_p)
 	if (no_default && maxrate_dev)
 		maxrate_dev->is_default = 1;
 
-	{
-		int i;
-		debug(CCI_DB_INFO, "listing devices:");
-		for (i = 0; i < count; i++) {
-			cci_device_t *device = devices[i];
-			cci__dev_t *_dev =
-			    container_of(device, cci__dev_t, device);
-			eth__dev_t *edev = _dev->priv;
-			struct sockaddr_ll *addr = &edev->addr;
-			debug(CCI_DB_INFO,
-			      "  device `%s' has address %02x:%02x:%02x:%02x:%02x:%02x%s",
-			      device->name, addr->sll_addr[0],
-			      addr->sll_addr[1], addr->sll_addr[2],
-			      addr->sll_addr[3], addr->sll_addr[4],
-			      addr->sll_addr[5],
-			      _dev->is_default ? " (default)" : "");
-		}
-		debug(CCI_DB_INFO, "end of device list.");
-	}
-
-	devices = realloc(devices, (count + 1) * sizeof(cci_device_t *));
-	devices[count] = NULL;
-
-	*devices_p = (cci_device_t const **)devices;
-
 	CCI_EXIT;
 	return CCI_SUCCESS;
 
@@ -484,17 +435,73 @@ out:
 	if (addrs) {
 		freeifaddrs(addrs);
 	}
-	if (devices) {
-		cci_device_t const *device;
-		cci__dev_t *my_dev;
+	CCI_EXIT;
+	return ret;
+}
 
-		for (device = devices[0]; device != NULL; device++) {
-			my_dev = container_of(device, cci__dev_t, device);
-			if (my_dev->priv)
-				free(my_dev->priv);
-		}
-		free(devices);
+static int eth_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+{
+	CCI_ENTER;
+	eth__get_devices();
+	CCI_EXIT;
+	return CCI_SUCCESS;
+}
+
+static const char *eth_strerror(enum cci_status status)
+{
+	printf("In eth_sterrror\n");
+	return NULL;
+}
+
+static int eth_get_devices(cci_device_t const ***devices_p)
+{
+	cci_device_t **devices;
+	cci__dev_t *_dev;
+	unsigned count, i;
+	int ret;
+
+	CCI_ENTER;
+
+	count = 0;
+	TAILQ_FOREACH(_dev, &globals->devs, entry)
+		count++;
+
+	devices = calloc(count+1, sizeof(*devices));
+	if (!devices) {
+		ret = CCI_ENOMEM;
+		goto out;
 	}
+
+	i = 0;
+	TAILQ_FOREACH(_dev, &globals->devs, entry) {
+		devices[i] = &_dev->device;
+		i++;
+	}
+
+	debug(CCI_DB_INFO, "listing devices:");
+	for (i = 0; i < count; i++) {
+		cci_device_t *device;
+		eth__dev_t *edev;
+
+		device = devices[i];
+		_dev = container_of(device, cci__dev_t, device);
+		edev = _dev->priv;
+		struct sockaddr_ll *addr = &edev->addr;
+		debug(CCI_DB_INFO,
+		      "  device `%s' has address %02x:%02x:%02x:%02x:%02x:%02x%s",
+		      device->name, addr->sll_addr[0],
+		      addr->sll_addr[1], addr->sll_addr[2],
+		      addr->sll_addr[3], addr->sll_addr[4],
+		      addr->sll_addr[5],
+		      _dev->is_default ? " (default)" : "");
+	}
+	debug(CCI_DB_INFO, "end of device list.");
+
+	*devices_p = (cci_device_t const **)devices;
+	CCI_EXIT;
+	return CCI_SUCCESS;
+
+out:
 	CCI_EXIT;
 	return ret;
 }
@@ -834,7 +841,6 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 			    ge->connect_accepted.max_send_size;
 
 			event->type = CCI_EVENT_CONNECT_ACCEPTED;
-			event->accepted.context = _conn->connection.context;
 			event->accepted.connection = &_conn->connection;
 			break;
 		}
@@ -862,9 +868,10 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 			_conn =
 			    (void *)(uintptr_t) ge->
 			    connect_timedout.user_conn_id;
-			event->type = CCI_EVENT_CONNECT_TIMEDOUT;
-			event->conn_timedout.context =
+			event->type = CCI_EVENT_CONNECT_FAILED;
+			event->conn_failed.context =
 			    _conn->connection.context;
+			event->conn_failed.status = ETIMEDOUT;
 
 			free(_conn);
 			break;
