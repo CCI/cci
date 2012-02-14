@@ -106,12 +106,12 @@ struct ccieth_ioctl_connect_request {
 	__u8 pad2[3];
 	__u32 flags;
 	/* 32 */
-	__u64 user_conn_id; /* give it back in incoming events on this connection */
+	__u64 user_conn_id;	/* give it back in incoming events on this connection */
 	/* 40 */
 	__u64 timeout_sec;
 	/* 48 */
 	__u32 timeout_usec;
-	__u32 conn_id; /* output */
+	__u32 conn_id;		/* output */
 	/* 56 */
 };
 #define CCIETH_IOCTL_CONNECT_REQUEST _IOWR(CCIETH_IOCTL_MAGIC, 0x5, struct ccieth_ioctl_connect_request)
@@ -125,7 +125,7 @@ struct ccieth_ioctl_connect_accept {
 	__u32 conn_id;
 	__u32 max_send_size;
 	/* 8 */
-	__u64 user_conn_id; /* give it back in incoming events on this connection */
+	__u64 user_conn_id;	/* give it back in incoming events on this connection */
 	/* 16 */
 };
 #define CCIETH_IOCTL_CONNECT_ACCEPT _IOR(CCIETH_IOCTL_MAGIC, 0x6, struct ccieth_ioctl_connect_accept)
@@ -164,7 +164,7 @@ struct ccieth_ioctl_msg {
 static inline __u32
 ccieth_max_send_size(__u32 mtu)
 {
-        return mtu >= 9000 ? 8192 : 1024;
+	return mtu >= 9000 ? 8192 : 1024;
 }
 
 #endif /* CCIETH_IO_H */

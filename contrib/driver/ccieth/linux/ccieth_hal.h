@@ -18,7 +18,7 @@
 #else
 #include "linux/rtnetlink.h"
 #define ccieth_dev_getbyhwaddr_lock() rtnl_lock()
-#define ccieth_dev_getbyhwaddr(net, type, ha) dev_getbyhwaddr(net, type, (char *) ha)
+#define ccieth_dev_getbyhwaddr(net, type, ha) dev_getbyhwaddr(net, type, (char *)ha)
 #define ccieth_dev_getbyhwaddr_unlock() rtnl_unlock()
 #endif
 
@@ -36,11 +36,11 @@
 #ifndef CCIETH_HAVE_KFREE_RCU
 static inline void ccieth_kfree_rcu_call(struct rcu_head *rcu_head)
 {
-	kfree((void*) rcu_head);
+	kfree((void *)rcu_head);
 }
 #define kfree_rcu(ptr, field) do {				\
 	BUILD_BUG_ON(offsetof(typeof(*ptr), field) != 0);	\
-	call_rcu((void*) ptr, ccieth_kfree_rcu_call);		\
+	call_rcu((void *)ptr, ccieth_kfree_rcu_call);		\
 } while (0)
 #endif
 

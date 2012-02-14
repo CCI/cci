@@ -32,7 +32,7 @@ struct ccieth_pkt_header_msg;
 struct ccieth_endpoint_event {
 	struct list_head list;
 	struct ccieth_ioctl_get_event event;
-	void (*destructor)(struct ccieth_endpoint *, struct ccieth_endpoint_event *);
+	void (*destructor) (struct ccieth_endpoint *, struct ccieth_endpoint_event *);
 };
 
 struct ccieth_endpoint {
@@ -55,7 +55,7 @@ struct ccieth_endpoint {
 	struct idr connection_idr;
 	spinlock_t connection_idr_lock;
 	atomic_t connection_req_seqnum;
-	atomic_t connection_received; /* up to CCIETH_MAX_CONNECTION_RECEIVED */
+	atomic_t connection_received;	/* up to CCIETH_MAX_CONNECTION_RECEIVED */
 
 	struct rcu_head release_ifp_rcu_head;
 	struct net_device *release_ifp;
@@ -99,22 +99,22 @@ struct ccieth_endpoint {
  */
 enum ccieth_connection_status {
 	/* status for both sides */
-	CCIETH_CONNECTION_READY,     /* connection is running */
-	CCIETH_CONNECTION_CLOSING,   /* timeout'ing, being disconnected, or endpoint being destroyed, already unhashed */
+	CCIETH_CONNECTION_READY,	/* connection is running */
+	CCIETH_CONNECTION_CLOSING,	/* timeout'ing, being disconnected, or endpoint being destroyed, already unhashed */
 	/* initiator side */
-	CCIETH_CONNECTION_REQUESTED, /* request sent, maybe acked, but not replied or rejected yet */
+	CCIETH_CONNECTION_REQUESTED,	/* request sent, maybe acked, but not replied or rejected yet */
 	/* target side */
-	CCIETH_CONNECTION_RECEIVED,  /* request received, not accepted or rejected yet */
-	CCIETH_CONNECTION_REJECTED,  /* reject sent and not acked yet */
+	CCIETH_CONNECTION_RECEIVED,	/* request received, not accepted or rejected yet */
+	CCIETH_CONNECTION_REJECTED,	/* reject sent and not acked yet */
 };
 
-#define CCIETH_CONNECT_RESEND_DELAY (HZ) /* resend connect request/accept/reject every second until acked */
-#define CCIETH_MSG_RESEND_DELAY (HZ/2) /* resend MSG every half-second until acked */
-#define CCIETH_DEFERRED_MSG_ACK_DELAY (HZ/10) /* ack after 100ms if some msgs were not acked yet */
-#define CCIETH_IMMEDIATE_MSG_ACK_NR 8 /* ack after 8 msgs not acked yet */
+#define CCIETH_CONNECT_RESEND_DELAY (HZ)	/* resend connect request/accept/reject every second until acked */
+#define CCIETH_MSG_RESEND_DELAY (HZ/2)	/* resend MSG every half-second until acked */
+#define CCIETH_DEFERRED_MSG_ACK_DELAY (HZ/10)	/* ack after 100ms if some msgs were not acked yet */
+#define CCIETH_IMMEDIATE_MSG_ACK_NR 8	/* ack after 8 msgs not acked yet */
 
 struct ccieth_connection {
-	int id; /* always valid */ /* FIXME keep in network order too? */
+	int id;			/* FIXME keep in network order too? */
 	enum ccieth_connection_status status;
 	struct ccieth_endpoint *ep;
 
@@ -153,9 +153,9 @@ struct ccieth_connection {
 
 	/* resending of connect request, accept or reject */
 	int connect_needack;
-	unsigned long connect_expire; /* in jiffies, only for request because it has a timeout */
+	unsigned long connect_expire;	/* in jiffies, only for request because it has a timeout */
 	struct timer_list connect_timer;
-	struct sk_buff *connect_skb; /* cached skb, to be cloned for resending */
+	struct sk_buff *connect_skb;	/* cached skb, to be cloned for resending */
 
 	/* dest fields are valid when status RECEIVED, READY or REJECTED */
 	/* FIXME: store in network order? */
@@ -214,7 +214,7 @@ struct ccieth_skb_cb {
 };
 #define CCIETH_SKB_CB(__skb) ((struct ccieth_skb_cb *)&((__skb)->cb[0]))
 
-extern struct idr ccieth_ep_idr; /* accessed under RCU read lock */
+extern struct idr ccieth_ep_idr;	/* accessed under RCU read lock */
 #ifdef CONFIG_CCIETH_DEBUGFS
 extern struct dentry *ccieth_debugfs_root;
 #endif

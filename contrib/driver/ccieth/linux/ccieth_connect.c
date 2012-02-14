@@ -35,7 +35,7 @@ ccieth_send_resend_workfunc(struct work_struct *work)
 static void
 ccieth_send_resend_timer_hdlr(unsigned long _data)
 {
-	struct ccieth_connection *conn = (void *) _data;
+	struct ccieth_connection *conn = (void *)_data;
 	schedule_work(&conn->send_resend_work);
 }
 
@@ -49,7 +49,7 @@ ccieth_recv_needack_workfunc(struct work_struct *work)
 static void
 ccieth_recv_needack_timer_hdlr(unsigned long _data)
 {
-	struct ccieth_connection *conn = (void *) _data;
+	struct ccieth_connection *conn = (void *)_data;
 	if (conn->recv_needack_nr)
 		schedule_work(&conn->recv_needack_work);
 }
@@ -63,7 +63,7 @@ ccieth_conn_uu_recv_deferred_msgs(struct ccieth_connection *conn)
 		struct ccieth_pkt_header_msg _hdr, *hdr;
 		dprintk("processing deferred msg\n");
 		hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
-		BUG_ON(!hdr); /* would have failed in ccieth_recv_msg() */
+		BUG_ON(!hdr);	/* would have failed in ccieth_recv_msg() */
 		ccieth__recv_msg(conn->ep, conn, hdr, skb);
 	}
 }
@@ -111,13 +111,13 @@ ccieth_conn_init(struct ccieth_connection *conn, struct ccieth_endpoint *ep, int
 		conn->send_queue_first_seqnum
 		 = conn->send_queue_last_seqnum
 		 = conn->send_queue_next_resend = NULL;
-		setup_timer(&conn->send_resend_timer, ccieth_send_resend_timer_hdlr, (unsigned long) conn);
+		setup_timer(&conn->send_resend_timer, ccieth_send_resend_timer_hdlr, (unsigned long)conn);
 		INIT_WORK(&conn->send_resend_work, ccieth_send_resend_workfunc);
 		/* recv side */
 		spin_lock_init(&conn->recv_lock);
 		conn->recv_next_bitmap = 0;
 		conn->recv_needack_nr = 0;
-		setup_timer(&conn->recv_needack_timer, ccieth_recv_needack_timer_hdlr, (unsigned long) conn);
+		setup_timer(&conn->recv_needack_timer, ccieth_recv_needack_timer_hdlr, (unsigned long)conn);
 		INIT_WORK(&conn->recv_needack_work, ccieth_recv_needack_workfunc);
 	}
 	if (conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG)
@@ -164,7 +164,7 @@ ccieth_conn_stats_init(struct ccieth_connection *conn, const char *prefix)
 	memset(&conn->stats, 0, sizeof(conn->stats));
 	conn->debugfs_dir = NULL;
 	if (conn->ep->debugfs_dir) {
-		char * name = kasprintf(GFP_KERNEL, "%s%08x", prefix, conn->id);
+		char *name = kasprintf(GFP_KERNEL, "%s%08x", prefix, conn->id);
 		if (name) {
 			struct dentry *d = debugfs_create_dir(name, conn->ep->debugfs_dir);
 			if (!IS_ERR(d)) {
@@ -244,9 +244,9 @@ ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
  */
 
 static
-void ccieth_connect_request_timer_hdlr(unsigned long data)
+void ccieth_connect_request_timer_hdlr(unsigned long _data)
 {
-	struct ccieth_connection *conn = (void*) data;
+	struct ccieth_connection *conn = (void *)_data;
 	struct ccieth_endpoint *ep = conn->ep;
 	enum ccieth_connection_status status = conn->status;
 	struct sk_buff *skb;
@@ -305,9 +305,9 @@ void ccieth_connect_request_timer_hdlr(unsigned long data)
 }
 
 static
-void ccieth_connect_reply_timer_hdlr(unsigned long data)
+void ccieth_connect_reply_timer_hdlr(unsigned long _data)
 {
-	struct ccieth_connection *conn = (void*) data;
+	struct ccieth_connection *conn = (void *)_data;
 	struct ccieth_endpoint *ep = conn->ep;
 	struct sk_buff *skb;
 
@@ -370,7 +370,7 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	ccieth_conn_init(conn, ep, arg->attribute);
 
 	/* initialize the timer to make destroy easier */
-	setup_timer(&conn->connect_timer, ccieth_connect_request_timer_hdlr, (unsigned long) conn);
+	setup_timer(&conn->connect_timer, ccieth_connect_request_timer_hdlr, (unsigned long)conn);
 
 	/* get a connection id (only reserve it) */
 retry:
@@ -403,7 +403,7 @@ retry:
 	/* setup as much as possible of the skb
 	 * so that things don't fail later once the connection is hashed
 	 */
-	hdr = (struct ccieth_pkt_header_connect_request *) skb_mac_header(skb);
+	hdr = (struct ccieth_pkt_header_connect_request *)skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &arg->dest_addr, 6);
 	memcpy(&hdr->eth.h_source, ep->addr, 6);
 	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
@@ -457,7 +457,7 @@ retry:
 		__u64 msecs = arg->timeout_sec * 1000 + arg->timeout_usec / 1000;
 		conn->connect_expire = now + msecs_to_jiffies(msecs);
 	} else {
-		conn->connect_expire = -1; /* that's MAX_LONG now */
+		conn->connect_expire = -1;	/* that's MAX_LONG now */
 	}
 	next = now + CCIETH_CONNECT_RESEND_DELAY;
 	if (next > conn->connect_expire)
@@ -490,7 +490,7 @@ static int ccieth_recv_connect_idrforeach_cb(int id, void *p, void *data)
 	/* return -EBUSY in case of duplicate incoming connect.
 	 * it may even already be accepted or rejcted.
 	 */
-	if (conn->status != CCIETH_CONNECTION_REQUESTED /* so that dest_id is valid */
+	if (conn->status != CCIETH_CONNECTION_REQUESTED	/* so that dest_id is valid */
 	    && !memcmp(&conn->dest_addr, &new->dest_addr, 6)
 	    && conn->dest_eid == new->dest_eid
 	    && conn->dest_id == new->dest_id
@@ -573,7 +573,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	conn->connect_needack = 0;
 
 	/* initialize the timer to make destroy easier */
-	setup_timer(&conn->connect_timer, ccieth_connect_reply_timer_hdlr, (unsigned long) conn);
+	setup_timer(&conn->connect_timer, ccieth_connect_reply_timer_hdlr, (unsigned long)conn);
 
 	/* allocate and initialize the connect reply skb now so that we don't fail with ENOMEM later */
 	replyskblen = max(sizeof(struct ccieth_pkt_header_connect_accept),
@@ -595,7 +595,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	conn->dest_eid = src_ep_id;
 	conn->dest_id = src_conn_id;
 	conn->req_seqnum = req_seqnum;
-	conn->recv_last_full_seqnum = first_seqnum-1;
+	conn->recv_last_full_seqnum = first_seqnum - 1;
 
 	/* get a connection id (only reserve it for now) */
 retry:
@@ -639,7 +639,7 @@ retry:
 	ccieth_queue_busy_event(ep, event);
 
 	ccieth_connect_ack_from_endpoint(ep, -1,
-					 (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
+					 (__u8 *)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
 					 ack_status);
 	dev_kfree_skb(skb);
 	return 0;
@@ -653,7 +653,7 @@ out_with_event:
 out:
 	if (need_ack)
 		ccieth_connect_ack_from_endpoint(ep, -1,
-						 (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
+						 (__u8 *)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
 						 ack_status);
 	dev_kfree_skb(skb);
 	return err;
@@ -685,7 +685,7 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 
 	/* fill headers */
 	skb = conn->connect_skb;
-	hdr = (struct ccieth_pkt_header_connect_accept *) skb_mac_header(skb);
+	hdr = (struct ccieth_pkt_header_connect_accept *)skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
 	memcpy(&hdr->eth.h_source, ep->addr, 6);
 	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
@@ -703,12 +703,12 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	/* setup resend or timeout timer */
 	mod_timer(&conn->connect_timer, jiffies + CCIETH_CONNECT_RESEND_DELAY);
 
-	rcu_read_unlock(); /* end of rcu read access to ep conn idr only */
+	rcu_read_unlock();	/* end of rcu read access to ep conn idr only */
 
 	/* try to send a clone. if we can't, we'll resend later. */
 	skb = skb_clone(skb, GFP_KERNEL);
 	if (skb) {
-		rcu_read_lock(); /* start of another rcu read access for ep->ifp only */
+		rcu_read_lock();	/* start of another rcu read access for ep->ifp only */
 		/* is the interface still available? */
 		ifp = rcu_dereference(ep->ifp);
 		if (!ifp) {
@@ -795,7 +795,7 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	/* setup connection */
 	conn->dest_id = src_conn_id;
 	conn->max_send_size = max_send_size;
-	conn->recv_last_full_seqnum = first_seqnum-1;
+	conn->recv_last_full_seqnum = first_seqnum - 1;
 
 	/* finalize and notify the event */
 	event->event.connect_accepted.max_send_size = max_send_size;
@@ -809,7 +809,7 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	rcu_read_unlock();
 
 	ccieth_connect_ack_from_endpoint(ep, dst_conn_id,
-					 (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
+					 (__u8 *)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
 					 ack_status);
 	dev_kfree_skb(skb);
 	return 0;
@@ -822,7 +822,7 @@ out_with_rculock:
 	rcu_read_unlock();
 	if (need_ack)
 		ccieth_connect_ack_from_endpoint(ep, dst_conn_id,
-						 (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
+						 (__u8 *)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
 						 ack_status);
 	dev_kfree_skb(skb);
 	return err;
@@ -852,7 +852,7 @@ ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_re
 
 	/* fill headers */
 	skb = conn->connect_skb;
-	hdr = (struct ccieth_pkt_header_connect_reject *) skb_mac_header(skb);
+	hdr = (struct ccieth_pkt_header_connect_reject *)skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
 	memcpy(&hdr->eth.h_source, ep->addr, 6);
 	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
@@ -868,12 +868,12 @@ ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_re
 	/* setup resend or timeout timer */
 	mod_timer(&conn->connect_timer, jiffies + CCIETH_CONNECT_RESEND_DELAY);
 
-	rcu_read_unlock(); /* end of rcu read access to ep conn idr only */
+	rcu_read_unlock();	/* end of rcu read access to ep conn idr only */
 
 	/* try to send a clone. if we can't, we'll resend later. */
 	skb = skb_clone(skb, GFP_KERNEL);
 	if (skb) {
-		rcu_read_lock(); /* start of another rcu read access for ep->ifp only */
+		rcu_read_lock();	/* start of another rcu read access for ep->ifp only */
 		/* is the interface still available? */
 		ifp = rcu_dereference(ep->ifp);
 		if (!ifp) {
@@ -953,7 +953,7 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 	ccieth_queue_busy_event(ep, &conn->embedded_event);
 
 	ccieth_connect_ack_from_endpoint(ep, dst_conn_id,
-					 (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
+					 (__u8 *)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
 					 ack_status);
 	dev_kfree_skb(skb);
 	return 0;
@@ -962,7 +962,7 @@ out_with_rculock:
 	rcu_read_unlock();
 	if (need_ack)
 		ccieth_connect_ack_from_endpoint(ep, dst_conn_id,
-						 (__u8*)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
+						 (__u8 *)&hdr->eth.h_source, src_ep_id, src_conn_id, req_seqnum,
 						 ack_status);
 	dev_kfree_skb(skb);
 	return err;
@@ -1004,7 +1004,7 @@ ccieth_connect_ack_from_endpoint(struct ccieth_endpoint *ep, __u32 src_conn_id,
 	skb->dev = ifp;
 
 	/* fill headers */
-	hdr = (struct ccieth_pkt_header_connect_ack *) skb_mac_header(skb);
+	hdr = (struct ccieth_pkt_header_connect_ack *)skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, dst_addr, 6);
 	memcpy(&hdr->eth.h_source, ep->addr, 6);
 	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
@@ -1055,7 +1055,7 @@ ccieth_connect_ack_without_endpoint(struct net_device *ifp,
 	skb->dev = ifp;
 
 	/* fill headers */
-	hdr = (struct ccieth_pkt_header_connect_ack *) skb_mac_header(skb);
+	hdr = (struct ccieth_pkt_header_connect_ack *)skb_mac_header(skb);
 	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);
 	hdr->type = CCIETH_PKT_CONNECT_ACK;
 	hdr->status = ack_status;

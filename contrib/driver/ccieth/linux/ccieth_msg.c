@@ -104,7 +104,7 @@ ccieth_msg_resend(struct ccieth_connection *conn)
 		if (ifp) {
 			struct sk_buff *newskb = skb_clone(skb, GFP_ATOMIC);
 			if (newskb) {
-				struct ccieth_pkt_header_msg *hdr = (struct ccieth_pkt_header_msg *) skb_mac_header(skb);
+				struct ccieth_pkt_header_msg *hdr = (struct ccieth_pkt_header_msg *)skb_mac_header(skb);
 				ccieth_conn_send_ack(conn, &hdr->acked_seqnum);
 				newskb->dev = ifp;
 				dev_queue_xmit(newskb);
@@ -165,7 +165,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	}
 
 	/* copy data while not holding RCU read lock yet */
-	hdr = (struct ccieth_pkt_header_msg *) skb_mac_header(skb);
+	hdr = (struct ccieth_pkt_header_msg *)skb_mac_header(skb);
 	err = copy_from_user(&hdr->msg, (const void __user *)(uintptr_t) arg->msg_ptr, arg->msg_len);
 	if (err) {
 		err = -EFAULT;
@@ -451,7 +451,7 @@ ccieth_msg_ack(struct ccieth_connection *conn)
 	skb_put(skb, skblen);
 
 	/* fill headers */
-	hdr = (struct ccieth_pkt_header_msg_ack *) skb_mac_header(skb);
+	hdr = (struct ccieth_pkt_header_msg_ack *)skb_mac_header(skb);
 	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
 	memcpy(&hdr->eth.h_source, ep->addr, 6);
 	hdr->eth.h_proto = __constant_cpu_to_be16(ETH_P_CCI);

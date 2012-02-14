@@ -29,7 +29,7 @@ union ccieth_pkt_header {
 		__u8 pad1;
 		/* 16 */
 		__be32 dst_ep_id;
-		__be32 dst_conn_id; /* except in request */
+		__be32 dst_conn_id;	/* except in request */
 		/* 24 */
 		__be32 src_ep_id;
 		__be32 src_conn_id;
@@ -44,7 +44,7 @@ union ccieth_pkt_header {
 		__u8 attribute;
 		/* 16 */
 		__be32 dst_ep_id;
-		__be32 pad2_no_dst_conn_id; /* dst_conn_id N/A yet */
+		__be32 pad2_no_dst_conn_id;	/* dst_conn_id N/A yet */
 		/* 24 */
 		__be32 src_ep_id;
 		__be32 src_conn_id;
@@ -65,7 +65,7 @@ union ccieth_pkt_header {
 		__be32 dst_ep_id;
 		__be32 dst_conn_id;
 		/* 24 */
-		__be32 src_ep_id; /* not really required? */
+		__be32 src_ep_id;	/* not really required? */
 		__be32 src_conn_id;
 		/* 32 */
 		__be32 req_seqnum;
@@ -83,7 +83,7 @@ union ccieth_pkt_header {
 		__be32 dst_ep_id;
 		__be32 dst_conn_id;
 		/* 24 */
-		__be32 src_ep_id; /* not really required? */
+		__be32 src_ep_id;	/* not really required? */
 		__be32 src_conn_id;
 		/* 32 */
 		__be32 req_seqnum;
@@ -98,7 +98,7 @@ union ccieth_pkt_header {
 		__be32 dst_ep_id;
 		__be32 dst_conn_id;
 		/* 24 */
-		__be32 src_ep_id; /* not really required? */
+		__be32 src_ep_id;	/* not really required? */
 		__be32 src_conn_id;
 		/* 32 */
 		__be32 req_seqnum;

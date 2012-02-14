@@ -105,7 +105,7 @@ ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *a
 
 	ccieth_dev_getbyhwaddr_lock();
 	ifp = ccieth_dev_getbyhwaddr(&init_net, ARPHRD_ETHER, (const char *)&arg->addr);
-	if (!ifp) /* allow loopback to ease development */
+	if (!ifp)		/* allow loopback to ease development */
 		ifp = ccieth_dev_getbyhwaddr(&init_net, ARPHRD_LOOPBACK, (const char *)&arg->addr);
 	if (!ifp) {
 		ccieth_dev_getbyhwaddr_unlock();
@@ -128,7 +128,7 @@ ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *a
 	spin_lock_init(&ep->event_list_lock);
 	INIT_LIST_HEAD(&ep->free_event_list);
 	spin_lock_init(&ep->free_event_list_lock);
-	for(i=0; i<CCIETH_EVENT_SLOT_NR; i++) {
+	for (i = 0; i < CCIETH_EVENT_SLOT_NR; i++) {
 		event = kmalloc(sizeof(*event) + ep->max_send_size, GFP_KERNEL);
 		if (!event)
 			break;
@@ -140,7 +140,7 @@ ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *a
 
 	idr_init(&ep->connection_idr);
 	spin_lock_init(&ep->connection_idr_lock);
-	atomic_set(&ep->connection_req_seqnum, jiffies); /* a bit of random just for fun */
+	atomic_set(&ep->connection_req_seqnum, jiffies);	/* a bit of random just for fun */
 	atomic_set(&ep->connection_received, 0);
 
 	skb_queue_head_init(&ep->deferred_connect_recv_queue);
@@ -173,7 +173,7 @@ retry:
 	ep->stats.event_free = CCIETH_EVENT_SLOT_NR;
 	ep->debugfs_dir = NULL;
 	if (ccieth_debugfs_root) {
-		char * name = kasprintf(GFP_KERNEL, "ep%08x", id);
+		char *name = kasprintf(GFP_KERNEL, "ep%08x", id);
 		if (name) {
 			struct dentry *d = debugfs_create_dir(name, ccieth_debugfs_root);
 			if (!IS_ERR(d)) {
@@ -270,7 +270,7 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 
 		ccieth_dev_getbyhwaddr_lock();
 		ifp = ccieth_dev_getbyhwaddr(&init_net, ARPHRD_ETHER, (const char *)&gi_arg.addr);
-		if (!ifp) /* allow loopback to ease development */
+		if (!ifp)		/* allow loopback to ease development */
 			ifp = ccieth_dev_getbyhwaddr(&init_net, ARPHRD_LOOPBACK, (const char *)&gi_arg.addr);
 		if (ifp) {
 			struct device *dev = ifp->dev.parent;
@@ -339,7 +339,7 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 
 		ret = copy_to_user((__user void *)arg, &event->event, sizeof(event->event));
 		if (!ret && event->event.data_length > 0)
-			ret = copy_to_user(((__user void *) arg)+sizeof(struct ccieth_ioctl_get_event),
+			ret = copy_to_user(((__user void *)arg)+sizeof(struct ccieth_ioctl_get_event),
 					   event+1, event->event.data_length);
 
 		if (event->destructor)
@@ -521,7 +521,7 @@ ccieth_netdevice_notifier_cb(struct notifier_block *unused,
 	case NETDEV_UNREGISTER:
 		/* close endpoints and connections */
 		dprintk("ccieth notifier event %ld\n", event);
-		data.ifp = (struct net_device *) ptr;
+		data.ifp = (struct net_device *)ptr;
 		data.event = event;
 		rcu_read_lock();
 		idr_for_each(&ccieth_ep_idr, ccieth_netdevice_notifier_idrforeach_cb, &data);
@@ -592,7 +592,7 @@ ccieth_exit(void)
 	debugfs_remove(ccieth_debugfs_root);
 #endif
 	idr_destroy(&ccieth_ep_idr);
-	rcu_barrier(); /* wait for rcu calls to be done */
+	rcu_barrier();		/* wait for rcu calls to be done */
 }
 
 module_init(ccieth_init);
