@@ -21,6 +21,10 @@ int cci_finalize(void)
 {
 	cci__dev_t *dev = NULL;
 
+	initialized--;
+	if (initialized > 0)
+		return CCI_SUCCESS;
+
 	/* for each device
 	 *     for each endpoint
 	 *         close_endpoint

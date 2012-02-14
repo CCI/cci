@@ -23,6 +23,7 @@
 
 int cci__debug = CCI_DB_DFLT;
 cci__globals_t *globals = NULL;
+int initialized = 0;
 
 static inline void cci__get_debug_env(void)
 {
@@ -424,7 +425,6 @@ int cci__parse_config(const char *path)
 int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	int ret;
-	static int once = 0;
 
 	cci__get_debug_env();
 
@@ -437,10 +437,10 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	if (!caps)
 		return CCI_EINVAL;
 
-	if (0 == once) {
+	if (0 == initialized) {
 		char *str;
 
-		once++;
+		initialized++;
 
 		/* init globals */
 
