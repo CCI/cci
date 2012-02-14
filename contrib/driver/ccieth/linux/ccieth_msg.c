@@ -329,6 +329,9 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 		if (unlikely(relseqnum > 0)) {
 			CCIETH_STAT_INC(conn, recv_misorder);
 		}
+		/* deliver the event now that we verified everything ... */
+		ccieth_queue_busy_event(ep, event);
+		/* ... and update connection then */
 		conn->recv_next_bitmap |= 1ULL << relseqnum;
 		/* how many new fully received packets? */
 		relfull = find_first_zero_bit(&conn->recv_next_bitmap, CCIETH_CONN_RECV_BITMAP_BITS);
@@ -349,10 +352,9 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 
 		/* piggyback acks */
 		ccieth_conn_handle_ack(conn, ntohl(hdr->acked_seqnum));
+	} else {
+		ccieth_queue_busy_event(ep, event);
 	}
-
-	/* FIXME: deliver the event before doing all the reliability thing ? */
-	ccieth_queue_busy_event(ep, event);
 
 	dev_kfree_skb(skb);
 	return 0;
