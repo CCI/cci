@@ -1160,6 +1160,9 @@ static int gni_get_devices(const cci_device_t *** devices)
 	debug(CCI_DB_INFO, "%8s.%5d %s: devices=                   %8d",
 	      gdev->nodename, gdev->INST, __func__, gglobals->count);
 
+/* FIXME: update the devices list (up field, ...).
+   add new devices if !configfile */
+
 	CCI_EXIT;
 	return (CCI_SUCCESS);
 }

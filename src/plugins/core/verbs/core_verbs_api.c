@@ -578,6 +578,9 @@ static int verbs_get_devices(cci_device_t const ***devices)
 		return CCI_ENODEV;
 	}
 
+/* FIXME: update the devices list (up field, ...).
+   add new devices if !configfile */
+
 	*devices = vglobals->devices;
 
 	CCI_EXIT;

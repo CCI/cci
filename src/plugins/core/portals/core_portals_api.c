@@ -502,6 +502,9 @@ static int portals_get_devices(cci_device_t const ***devices)
 	debug(CCI_DB_INFO, "Got portals ID of: %u:%hu",
 	      pdev->idp.nid, pdev->idp.pid);
 
+/* FIXME: update the devices list (up field, ...).
+   add new devices if !configfile */
+
 	CCI_EXIT;
 	return CCI_SUCCESS;
 }
