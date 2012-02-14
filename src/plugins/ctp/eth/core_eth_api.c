@@ -613,11 +613,10 @@ static int eth_accept(union cci_event *event,
 	    || !eev->type_params.connect_request.need_reply)
 		return CCI_EINVAL;
 
-	_conn = malloc(sizeof(*_conn) + sizeof(*econn));
-	if (!_conn)
+	econn = malloc(sizeof(*econn));
+	if (!econn)
 		return CCI_ENOMEM;
-	econn = (void *)(_conn + 1);
-	_conn->priv = econn;
+	_conn = &econn->_conn;
 	econn->id = conn_id;
 
 	ac.conn_id = conn_id;
@@ -626,7 +625,7 @@ static int eth_accept(union cci_event *event,
 	err = ioctl(eep->fd, CCIETH_IOCTL_CONNECT_ACCEPT, &ac);
 	if (err < 0) {
 		perror("ioctl connect accept");
-		free(_conn);
+		free(econn);
 		return errno;
 	}
 
@@ -684,11 +683,10 @@ static int eth_connect(cci_endpoint_t * endpoint, char *server_uri,
 	    (server_uri, (uint8_t *) & arg.dest_addr, &arg.dest_eid) < 0)
 		return CCI_EINVAL;
 
-	_conn = malloc(sizeof(*_conn) + sizeof(*econn));
-	if (!_conn)
+	econn = malloc(sizeof(*econn));
+	if (!econn)
 		return CCI_ENOMEM;
-	econn = (void *)(_conn + 1);
-	_conn->priv = econn;
+	_conn = &econn->_conn;
 	_conn->connection.endpoint = endpoint;
 	_conn->connection.attribute = attribute;
 	_conn->connection.context = context;
@@ -703,7 +701,7 @@ static int eth_connect(cci_endpoint_t * endpoint, char *server_uri,
 	ret = ioctl(eep->fd, CCIETH_IOCTL_CONNECT_REQUEST, &arg);
 	if (ret < 0) {
 		perror("ioctl connect request");
-		free(_conn);
+		free(econn);
 		return errno;
 	}
 
@@ -832,7 +830,7 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 			_conn =
 			    (void *)(uintptr_t) ge->
 			    connect_accepted.user_conn_id;
-			econn = (void *)(_conn + 1);
+			econn = container_of(_conn, eth__conn_t, _conn);
 			econn->id = ge->connect_accepted.conn_id;
 			_conn->connection.max_send_size =
 			    ge->connect_accepted.max_send_size;
@@ -843,6 +841,7 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 		}
 	case CCIETH_IOCTL_EVENT_CONNECT_REJECTED:{
 			cci__conn_t *_conn;
+			eth__conn_t *econn;
 
 			CCIETH_VALGRIND_MEMORY_MAKE_READABLE
 			    (&ge->connect_rejected.user_conn_id,
@@ -853,11 +852,13 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 			event->type = CCI_EVENT_CONNECT_REJECTED;
 			event->rejected.context = _conn->connection.context;
 
-			free(_conn);
+			econn = container_of(_conn, eth__conn_t, _conn);
+			free(econn);
 			break;
 		}
 	case CCIETH_IOCTL_EVENT_CONNECT_TIMEDOUT:{
 			cci__conn_t *_conn;
+			eth__conn_t *econn;
 
 			CCIETH_VALGRIND_MEMORY_MAKE_READABLE
 			    (&ge->connect_timedout.user_conn_id,
@@ -870,7 +871,8 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 			    _conn->connection.context;
 			event->conn_failed.status = ETIMEDOUT;
 
-			free(_conn);
+			econn = container_of(_conn, eth__conn_t, _conn);
+			free(econn);
 			break;
 		}
 	case CCIETH_IOCTL_EVENT_DEVICE_FAILED:
@@ -887,7 +889,7 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 			_conn =
 			    (void *)(uintptr_t) ge->
 			    connection_closed.user_conn_id;
-			econn = (void *)(_conn + 1);
+			econn = container_of(_conn, eth__conn_t, _conn);
 			econn->id = -1;	/* keep the connection, but make it unusable */
 			printf("marked connection as closed\n");
 			break;
@@ -921,7 +923,7 @@ static int eth_send(cci_connection_t * connection,
 		    void *msg_ptr, uint32_t msg_len, void *context, int flags)
 {
 	cci__conn_t *_conn = container_of(connection, cci__conn_t, connection);
-	eth__conn_t *econn = _conn->priv;
+	eth__conn_t *econn = container_of(_conn, eth__conn_t, _conn);
 	cci_endpoint_t *endpoint = connection->endpoint;
 	cci__ep_t *_ep = container_of(endpoint, cci__ep_t, endpoint);
 	eth__ep_t *eep = _ep->priv;

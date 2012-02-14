@@ -25,6 +25,7 @@ typedef struct eth__ep {
 
 typedef struct eth__conn {
 	int id;
+	cci__conn_t _conn;
 } eth__conn_t;
 
 typedef struct eth__evt {
