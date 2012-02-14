@@ -140,7 +140,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	int err;
 
 	err = -EINVAL;
-	if (arg->msg_len > ep->max_send_size)
+	if (unlikely(arg->msg_len > ep->max_send_size))
 		goto out;
 
 	/* allocate and initialize the skb */
@@ -151,7 +151,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		skb = alloc_skb_fclone(skblen, GFP_KERNEL);
 	else
 		skb = alloc_skb(skblen, GFP_KERNEL);
-	if (!skb)
+	if (unlikely(!skb))
 		goto out;
 	skb_reset_mac_header(skb);
 	skb_reset_network_header(skb);
@@ -160,14 +160,14 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	/* reliable sends need a clone */
 	if (arg->internal_flags & CCIETH_MSG_FLAG_RELIABLE) {
 		skb2 = skb_clone(skb, GFP_KERNEL);
-		if (!skb2)
+		if (unlikely(!skb2))
 			goto out_with_skb;
 	}
 
 	/* copy data while not holding RCU read lock yet */
 	hdr = (struct ccieth_pkt_header_msg *)skb_mac_header(skb);
 	err = copy_from_user(&hdr->msg, (const void __user *)(uintptr_t) arg->msg_ptr, arg->msg_len);
-	if (err) {
+	if (unlikely(err)) {
 		err = -EFAULT;
 		goto out_with_skb2;
 	}
@@ -176,23 +176,23 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 	/* is the interface still available? */
 	ifp = rcu_dereference(ep->ifp);
-	if (!ifp) {
+	if (unlikely(!ifp)) {
 		err = -ENODEV;
 		goto out_with_rculock;
 	}
 
 	/* find connection */
 	conn = idr_find(&ep->connection_idr, arg->conn_id);
-	if (!conn || conn->status != CCIETH_CONNECTION_READY)
+	if (unlikely(!conn || conn->status != CCIETH_CONNECTION_READY))
 		goto out_with_rculock;
 	/* check that the user-space reliable hint was valid */
-	if (!!(arg->internal_flags & CCIETH_MSG_FLAG_RELIABLE)
-	    != !!(conn->flags & CCIETH_CONN_FLAG_RELIABLE))
+	if (unlikely(!!(arg->internal_flags & CCIETH_MSG_FLAG_RELIABLE)
+		     != !!(conn->flags & CCIETH_CONN_FLAG_RELIABLE)))
 		goto out_with_rculock;
 
 	/* get an event */
 	event = ccieth_get_free_event(ep);
-	if (!event) {
+	if (unlikely(!event)) {
 		err = -ENOBUFS;
 		dprintk("ccieth: no event slot for send\n");
 		goto out_with_rculock;
@@ -284,7 +284,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 
 	/* get an event */
 	event = ccieth_get_free_event(ep);
-	if (!event) {
+	if (unlikely(!event)) {
 		/* don't ack, we need a resend */
 		err = -ENOBUFS;
 		dprintk("ccieth: no event slot for msg\n");
@@ -312,7 +312,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 		dprintk("got %d while we have %d+%lx\n",
 			msg_seqnum, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
 		relseqnum = msg_seqnum - conn->recv_last_full_seqnum - 1;
-		if (relseqnum > CCIETH_CONN_RECV_BITMAP_BITS) {
+		if (unlikely(relseqnum > CCIETH_CONN_RECV_BITMAP_BITS)) {
 			if (relseqnum <= 65536)
 				/* way in advance, drop */
 				CCIETH_STAT_INC(conn, recv_tooearly);
@@ -321,12 +321,12 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 				CCIETH_STAT_INC(conn, recv_duplicate);
 			goto out_with_recv_lock;
 		}
-		if (conn->recv_next_bitmap & (1ULL << relseqnum)) {
+		if (unlikely(conn->recv_next_bitmap & (1ULL << relseqnum))) {
 			/* recent misordered duplicate, ignore */
 			CCIETH_STAT_INC(conn, recv_duplicate);
 			goto out_with_recv_lock;
 		}
-		if (relseqnum > 0) {
+		if (unlikely(relseqnum > 0)) {
 			CCIETH_STAT_INC(conn, recv_misorder);
 		}
 		conn->recv_next_bitmap |= 1ULL << relseqnum;
@@ -337,7 +337,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 		dprintk("found %d new fully received, now have %d+%lx\n",
 			relfull, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
 		conn->recv_needack_nr += relfull;
-		if (conn->recv_needack_nr >= CCIETH_IMMEDIATE_MSG_ACK_NR) {
+		if (unlikely(conn->recv_needack_nr >= CCIETH_IMMEDIATE_MSG_ACK_NR)) {
 			/* many non acked packets, we need to ack now */
 			schedule_work(&conn->recv_needack_work);
 		} else if (relfull) {
@@ -380,7 +380,7 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 	/* copy the entire header */
 	err = -EINVAL;
 	hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
-	if (!hdr)
+	if (unlikely(!hdr))
 		goto out;
 
 	dst_ep_id = ntohl(hdr->dst_ep_id);
@@ -394,21 +394,21 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 
 	/* find endpoint and check that it's attached to this ifp */
 	ep = idr_find(&ccieth_ep_idr, dst_ep_id);
-	if (!ep || rcu_access_pointer(ep->ifp) != ifp)
+	if (unlikely(!ep || rcu_access_pointer(ep->ifp) != ifp))
 		goto out_with_rculock;
 
 	/* check msg length */
-	if (msg_len > ep->max_send_size
-	    || skb->len < sizeof(*hdr) + msg_len)
+	if (unlikely(msg_len > ep->max_send_size
+		     || skb->len < sizeof(*hdr) + msg_len))
 		goto out_with_rculock;
 
 	/* find the connection */
 	err = -EINVAL;
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
-	if (!conn)
+	if (unlikely(!conn))
 		goto out_with_rculock;
 
-	if (conn->status == CCIETH_CONNECTION_READY) {
+	if (likely(conn->status == CCIETH_CONNECTION_READY)) {
 		err = ccieth__recv_msg(ep, conn, hdr, skb);
 	} else if (conn->status == CCIETH_CONNECTION_REQUESTED
 		   && (conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG)) {
@@ -444,7 +444,7 @@ ccieth_msg_ack(struct ccieth_connection *conn)
 		skblen = ETH_ZLEN;
 	err = -ENOMEM;
 	skb = alloc_skb(skblen, GFP_KERNEL);
-	if (!skb)
+	if (unlikely(!skb))
 		goto out;
 	skb_reset_mac_header(skb);
 	skb_reset_network_header(skb);
@@ -462,7 +462,7 @@ ccieth_msg_ack(struct ccieth_connection *conn)
 	hdr->conn_seqnum = htonl(conn->req_seqnum);
 
 	err = ccieth_conn_send_ack(conn, &hdr->acked_seqnum);
-	if (err < 0)
+	if (unlikely(err < 0))
 		goto out_with_skb;
 
 	CCIETH_STAT_INC(conn, ack_explicit);
@@ -470,7 +470,7 @@ ccieth_msg_ack(struct ccieth_connection *conn)
 	rcu_read_lock();
 	/* is the interface still available? */
 	ifp = rcu_dereference(ep->ifp);
-	if (!ifp) {
+	if (unlikely(!ifp)) {
 		err = -ENODEV;
 		goto out_with_rculock;
 	}
@@ -501,7 +501,7 @@ ccieth_recv_msg_ack(struct net_device *ifp, struct sk_buff *skb)
 	/* copy the entire header */
 	err = -EINVAL;
 	hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
-	if (!hdr)
+	if (unlikely(!hdr))
 		goto out;
 
 	dst_ep_id = ntohl(hdr->dst_ep_id);
@@ -515,13 +515,13 @@ ccieth_recv_msg_ack(struct net_device *ifp, struct sk_buff *skb)
 
 	/* find endpoint and check that it's attached to this ifp */
 	ep = idr_find(&ccieth_ep_idr, dst_ep_id);
-	if (!ep || rcu_access_pointer(ep->ifp) != ifp)
+	if (unlikely(!ep || rcu_access_pointer(ep->ifp) != ifp))
 		goto out_with_rculock;
 
 	/* find the connection */
 	err = -EINVAL;
 	conn = idr_find(&ep->connection_idr, dst_conn_id);
-	if (!conn || !(conn->flags & CCIETH_CONN_FLAG_RELIABLE))
+	if (unlikely(!conn || !(conn->flags & CCIETH_CONN_FLAG_RELIABLE)))
 		goto out_with_rculock;
 
 	ccieth_conn_handle_ack(conn, acked_seqnum);
@@ -554,7 +554,7 @@ ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt,
 
 	/* get type */
 	typep = skb_header_pointer(skb, offsetof(struct ccieth_pkt_header_generic, type), sizeof(type), &type);
-	if (!typep)
+	if (unlikely(!typep))
 		goto out;
 
 	dprintk("got a packet with type %d\n", *typep);
