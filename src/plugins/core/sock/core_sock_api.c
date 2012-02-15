@@ -3579,37 +3579,6 @@ sock_handle_conn_ack(sock_conn_t * sconn,
 		 * but we have a sconn */
 		debug((CCI_DB_MSG | CCI_DB_CONN), "received conn_ack and no matching tx " "(seq %u ack %u)", seq, ts);	//FIXME
 	} else {
-#if 0
-		sock_header_t *hdr = NULL;
-		sock_msg_type_t type;
-		uint8_t a;
-		uint16_t b;
-		uint32_t c;
-		cci__evt_t *evt;
-		cci_event_t *event;
-
-		hdr = (sock_header_t *) tx->buffer;
-		sock_parse_header(hdr, &type, &a, &b, &c);
-		if (a == CCI_EVENT_CONNECT_ACCEPTED) {
-			/* We generate an event to the app for the notification
-			   of the final connect accept */
-			evt = &rx->evt;
-			event = (cci_event_t *) & evt->event;
-			evt->event.type = CCI_EVENT_CONNECT_ACCEPTED;	/* for now */
-			*((uint32_t *) & event->recv.len) = sizeof(uint32_t);
-			*((void **)&event->recv.ptr) = &(sconn->id);
-			event->recv.connection = &conn->connection;
-		} else {
-			/* We generate an event to the app for the notification
-			   of the rejection */
-			evt = &rx->evt;
-			event = (cci_event_t *) & evt->event;
-			evt->event.type = CCI_EVENT_CONNECT_REJECTED;
-			*((uint32_t *) & event->recv.len) = 0;
-			*((void **)&event->recv.ptr) = NULL;
-			event->recv.connection = &conn->connection;
-		}
-#endif
 		pthread_mutex_lock(&ep->lock);
 		if (tx->evt.event.accept.connection) {
 			TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
