@@ -32,14 +32,6 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	/* get devices */
-	ret = cci_get_devices((cci_device_t const ***const)&devices);
-	if (ret) {
-		fprintf(stderr, "cci_get_devices() failed with %s\n",
-			cci_strerror(ret));
-		exit(EXIT_FAILURE);
-	}
-
 	/* create an endpoint */
 	ret = cci_create_endpoint(NULL, 0, &endpoint, &ep_fd);
 	if (ret) {
@@ -87,22 +79,23 @@ int main(int argc, char *argv[])
 				int accept = 1;
 
 				if (accept) {
-					ret = cci_accept(event, &connection);
+					ret = cci_accept(event, NULL);
 					if (ret != CCI_SUCCESS) {
 						fprintf(stderr,
 							"cci_accept() returned %s",
 							cci_strerror(ret));
-					} else if (!buffer) {
-						buffer =
-						    calloc(1,
-							   connection->max_send_size
-							   + 1);
-						/* check for buffer ... */
 					}
 
 				} else {
 					cci_reject(conn_req);
 				}
+			}
+			break;
+		case CCI_EVENT_ACCEPT:
+			connection = event->accept.connection;
+			if (!buffer) {
+				buffer = calloc(1, connection->max_send_size + 1);
+				/* check for buffer ... */
 			}
 			break;
 		default:
@@ -114,7 +107,7 @@ int main(int argc, char *argv[])
 
 	/* clean up */
 	cci_destroy_endpoint(endpoint);
-	cci_free_devices((cci_device_t const **)devices);
+	/* add cci_finalize() here */
 
 	return 0;
 }

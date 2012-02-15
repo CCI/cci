@@ -169,12 +169,13 @@ to discuss how CCI can meet the goals outlined above.
 
 Before calling any function, the application must call cci_init(). The
 application may call cci_init() multiple times with different
-parameters. The application thens calls cci_get_devices() to obtain an
-array of available devices. The devices are parsed from a config file
-and each device has a name, an array keyword/value strings, a maximum
-send size in bytes, and PCI information if needed. Each device’s maximum
-send size is equivalent to the network MTU (less wire headers). When no
-more communication is needed, the application calls cci_free_devices().
+parameters. The application then optionally calls cci_get_devices() to
+obtain an array of available devices. The devices are parsed from a
+config file and each device has a name, an array keyword/value strings,
+a maximum send size in bytes, and PCI information if needed. Each
+device’s maximum send size is equivalent to the network MTU (less wire
+headers). When no more communication is needed, the application calls
+cci_finalize().
 
 \subsection endpts Communication Endpoints
 
@@ -250,13 +251,20 @@ application payload and its length if the client sent it, and the
 requested connection attribute.
 
 The server then calls either cci_accept() or cci_reject(). The
-cci_accept() call returns a new connection pointer. The client gets an
-CCI_EVENT_CONNECT_ACCEPTED event.  If the server calls cci_reject(), the
-client get a CCI_EVENT_CONNECT_REJECTED event.  On the server, the
-connection request event must then be returned using cci_return_event()
-just like every other event. If the server does not reply within the
-timeout set in the client’s cci_connect(), the client gets an
-CCI_EVENT_CONNECT_TIMEDOUT event.  When a process no longer needs a
+cci_accept() call will initiate the accept portion of the connection
+handshake. When the handshake is complete, the server will get a
+CCI_EVENT_ACCEPT with a status of CCI_SUCCESS and the new connection
+pointer or the status will indicate why the accept failed and the
+connection pointer will not be valid. The client gets an
+CCI_EVENT_CONNECT event with a status of CCI_SUCCESS, the context passed
+to cci_connect(), and the new connection pointer.  If the server calls
+cci_reject(), the client gets a CCI_EVENT_CONNECT event with a status of
+CCI_ECONNREFUSED and the context passed to cci_connect().  On the
+server, the connection request event must then be returned using
+cci_return_event() just like every other event. If the server does not
+reply within the timeout set in the client’s cci_connect(), the client
+gets an CCI_EVENT_CONNECT event with a status of CCI_ETIMEDOUT and the
+context passed to cci_connect().  When a process no longer needs a
 connection, it can call cci_disconnect().
 
 \subsection msgs Messages
