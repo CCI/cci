@@ -662,24 +662,22 @@ typedef struct cci_connection {
 union cci_event;
 
 /*!
-  Accept a connection request and establish a connection with a specific
-  endpoint.
+  Accept a connection request.
 
   \param[in] conn_req		A connection request event previously returned by
 				cci_get_event().
   \param[in] context		Cookie to be used to identify the connection in
 				incoming events.
-  \param[in,out] connection	Connection pointer to a connection request structure.
 
-  \return CCI_SUCCESS   The connection has been established.
+  \return CCI_SUCCESS   CCI has started completing the connection handshake.
   \return CCI_EINVAL    The event is not a connection request or it has
                         already been accepted or rejected.
   \return Each driver may have additional error codes.
 
-  Upon success, the incoming connection request is bound to the
-  desired endpoint and a connection handle is filled in.  The
-  desired endpoint and a connection handle is returned in a
-  CCI_EVENT_ACCEPT event.
+  Upon success, CCI has initiated the accept portion of the connection
+  handshake.  Once completed, CCI will return a CCI_EVENT_ACCEPT event.
+  If successful, the event will contain a pointer to the new connection.
+  It will always contain the context passed in here.
 
   The connection request event must still be returned to CCI via
   cci_return_event().
@@ -823,7 +821,7 @@ typedef enum cci_event_type {
 	/*! A message has been received. */
 	CCI_EVENT_RECV,
 
-	/*! A new outgoing connection request has completed. */
+	/*! An outgoing connection request has completed. */
 	CCI_EVENT_CONNECT,
 
 	/*! An incoming connection request from a client. */

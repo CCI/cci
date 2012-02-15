@@ -347,46 +347,52 @@ void do_server()
 
 		ret = cci_get_event(endpoint, &event);
 		if (ret == CCI_SUCCESS) {
-			int len;
+			switch (event->type) {
+			case CCI_EVENT_CONNECT_REQUEST:
+				if (accept) {
+					opts = *((options_t *) event->request.data_ptr);
+					ret = cci_accept(event, NULL);
+					check_return("cci_accept", ret, 1);
+				} else {
+					ret = cci_reject(event);
+					check_return("cci_accept", ret, 1);
+				}
+				break;
+			case CCI_EVENT_ACCEPT:
+			{
+				int len;
 
-			if (accept) {
 				ready = 1;
-				opts = *((options_t *) event->request.data_ptr);
-				ret = cci_accept(event, NULL);
-				check_return("cci_accept", ret, 1);
-#warning wait for ACCEPT event with status SUCCESS and get the connection
+				connection = event->accept.connection;
 
-			} else {
-				ret = cci_reject(event);
-				check_return("cci_accept", ret, 1);
-			}
+				if (opts.method == AM)
+					len = connection->max_send_size;
+				else
+					len = opts.max_rma_size;
 
-			ret = cci_return_event(event);
-			check_return("cci_return_event", ret, 1);
+				ret = posix_memalign((void **)&buffer, 4096, len);
+				check_return("memalign buffer", ret, 1);
 
-			if (!accept)
-				goto out;
+				memset(buffer, 'a', len);
 
-			if (opts.method == AM)
-				len = connection->max_send_size;
-			else
-				len = opts.max_rma_size;
-
-			ret = posix_memalign((void **)&buffer, 4096, len);
-			check_return("memalign buffer", ret, 1);
-
-			memset(buffer, 'a', len);
-
-			if (opts.method != AM) {
+				if (opts.method != AM) {
+					ret =
+					    cci_rma_register(endpoint, connection,
+							     buffer, opts.max_rma_size,
+							     &opts.server_rma_handle);
+					check_return("cci_rma_register", ret, 1);
+				}
 				ret =
-				    cci_rma_register(endpoint, connection,
-						     buffer, opts.max_rma_size,
-						     &opts.server_rma_handle);
-				check_return("cci_rma_register", ret, 1);
+				    cci_send(connection, &opts, sizeof(opts), NULL, 0);
+				check_return("cci_send", ret, 1);
+				break;
 			}
-			ret =
-			    cci_send(connection, &opts, sizeof(opts), NULL, 0);
-			check_return("cci_send", ret, 1);
+			default:
+				fprintf(stderr, "%s: ignoring unexpected event %d\n",
+						__func__, event->type);
+				break;
+			}
+
 		}
 	}
 
@@ -398,7 +404,6 @@ void do_server()
 		check_return("cci_rma_deregister", ret, 1);
 	}
 
-out:
 	printf("server done\n");
 	sleep(1);
 

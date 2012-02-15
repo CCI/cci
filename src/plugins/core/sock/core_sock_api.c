@@ -895,9 +895,10 @@ static int sock_accept(union cci_event *event,
 	evt = &tx->evt;
 	evt->ep = ep;
 	evt->conn = conn;
-	evt->event.type = CCI_EVENT_SEND;	/* for now */
-	evt->event.send.context = NULL;	/* FIXME */
-	evt->event.send.connection = &conn->connection;
+	evt->event.type = CCI_EVENT_ACCEPT;
+	evt->event.accept.status = CCI_SUCCESS;	/* for now */
+	evt->event.accept.context = context;
+	evt->event.accept.connection = &conn->connection;
 
 	/* pack the msg */
 
@@ -926,8 +927,6 @@ static int sock_accept(union cci_event *event,
 	/* try to progress txs */
 
 	sock_progress_dev(dev);
-
-#warning queue CCI_EVENT_ACCEPT with status=SUCCESS, the connection and the context
 
 	CCI_EXIT;
 
@@ -1357,7 +1356,7 @@ static int sock_disconnect(cci_connection_t * connection)
 
 	/* GV: we should do the same if set_opt is used to put the keepalive back
 	   to 0 */
-	if (conn->keepalive_timeout != 0UL && is_reliable(conn)) {
+	if (conn->keepalive_timeout != 0UL && cci_conn_is_reliable(conn)) {
 		/* Remove the connection is the list of connections using keepalive */
 		TAILQ_REMOVE(&sglobals->ka_conns, sconn, entry);
 	}
@@ -2537,12 +2536,12 @@ static int sock_rma(cci_connection_t * connection,
 
 		ret = CCI_SUCCESS;
 	} else if (flags & CCI_FLAG_READ) {
-		int len;
-		char buffer[SOCK_MAX_HDR_SIZE];
+		//int len;
+		//char buffer[SOCK_MAX_HDR_SIZE];
 		sock_tx_t *tx = NULL;
 		sock_rma_header_t *read = NULL;
 		uint32_t seq;
-		uint64_t addr;
+		//uint64_t addr;
 		uint64_t context_id;
 
 		/* RMA_READ is implemented using RMA_WRITE: we send a request to the
@@ -3612,10 +3611,11 @@ sock_handle_conn_ack(sock_conn_t * sconn,
 		}
 #endif
 		pthread_mutex_lock(&ep->lock);
-#if 0
-		TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
-#endif
-		TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
+		if (tx->evt.event.accept.connection) {
+			TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
+		} else {
+			TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
+		}
 		pthread_mutex_unlock(&ep->lock);
 	}
 
@@ -3648,7 +3648,7 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	sock_rma_header_t *read = rx->buffer;
 	cci_connection_t *connection = NULL;
 	/* GV TO TEST */
-	char buffer[SOCK_MAX_HDR_SIZE];
+	//char buffer[SOCK_MAX_HDR_SIZE];
 	sock_rma_header_t *write = NULL;
 	sock_tx_t *tx = NULL;
 	sock_ep_t *sep = NULL;
@@ -3667,7 +3667,7 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	uint64_t remote_handle;
 	uint64_t remote_offset;
 	uint32_t seq;
-	int len;
+	//int len;
 	int rc;
 	cci__dev_t *dev = NULL;
 	sock_dev_t *sdev = NULL;
@@ -3697,7 +3697,7 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 		      local_handle, local_offset,
 		      remote_handle, remote_offset, data_len, context, flags);
 	if (rc != CCI_SUCCESS)
-		debug(CCI_DB_MSG, "RMA Write failed", __func__);
+		debug(CCI_DB_MSG, "%s: RMA Write failed", __func__);
 
 	pthread_mutex_lock(&ep->lock);
 	if (!TAILQ_EMPTY(&sep->idle_txs)) {
@@ -3868,7 +3868,7 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 	uint8_t a;
 	uint16_t b;
 	uint32_t id;
-	uint32_t keepalive;
+	//uint32_t keepalive;
 	sock_rx_t *rx = NULL;
 	struct sockaddr_in sin;
 	socklen_t sin_len = sizeof(sin);
@@ -4155,7 +4155,7 @@ static void sock_keepalive(void)
 */
 	uint64_t now = 0ULL;
 	uint32_t ka_timeout;
-	int i;
+	//int i;
 
 	CCI_ENTER;
 
@@ -4180,7 +4180,7 @@ static void sock_keepalive(void)
 			sock_header_t *hdr = NULL;
 			cci_event_keepalive_timedout_t *event = NULL;
 			cci__evt_t *evt = NULL;
-			cci_endpoint_t *endpoint = NULL;
+			//cci_endpoint_t *endpoint = NULL;
 			cci__ep_t *ep = NULL;
 			sock_ep_t *sep = NULL;
 			sock_tx_t *tx = NULL;
