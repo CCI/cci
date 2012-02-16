@@ -132,6 +132,9 @@ union ccieth_pkt_header {
 		__be32 conn_seqnum;
 		__be32 acked_seqnum;
 		/* 32 */
+		__be32 acked_bitmap;
+		__be32 pad2;
+		/* 40 */
 	} msg_ack;
 };
 

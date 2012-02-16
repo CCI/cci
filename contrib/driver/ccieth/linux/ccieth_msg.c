@@ -12,19 +12,21 @@
 #include <ccieth_wire.h>
 
 static inline int
-ccieth_conn_send_ack(struct ccieth_connection *conn, __be32 *seqnum)
+ccieth_conn_send_ack(struct ccieth_connection *conn, __be32 *seqnum, __be32 *bitmap)
 {
 	int ret;
 	spin_lock_bh(&conn->recv_lock);
 	ret = conn->recv_needack_nr;
 	*seqnum = htonl(conn->recv_last_full_seqnum);
+	if (bitmap)
+		*bitmap = htonl(conn->recv_next_bitmap);
 	conn->recv_needack_nr = 0;
 	spin_unlock_bh(&conn->recv_lock);
 	return ret ? 0 : -EAGAIN;
 }
 
 static void
-ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum)
+ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32 acked_bitmap)
 {
 	struct sk_buff *skb, *nskb, *old_next_resend;
 
@@ -105,7 +107,7 @@ ccieth_msg_resend(struct ccieth_connection *conn)
 			struct sk_buff *newskb = skb_clone(skb, GFP_ATOMIC);
 			if (newskb) {
 				struct ccieth_pkt_header_msg *hdr = (struct ccieth_pkt_header_msg *)skb_mac_header(skb);
-				ccieth_conn_send_ack(conn, &hdr->acked_seqnum);
+				ccieth_conn_send_ack(conn, &hdr->acked_seqnum, NULL);
 				newskb->dev = ifp;
 				dev_queue_xmit(newskb);
 			}
@@ -243,7 +245,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		dprintk("need to resend MSG skb %p\n", skb);
 		spin_unlock_bh(&conn->send_lock);
 
-		ccieth_conn_send_ack(conn, &hdr->acked_seqnum);
+		ccieth_conn_send_ack(conn, &hdr->acked_seqnum, NULL);
 
 		skb2->dev = ifp;
 		dev_queue_xmit(skb2);
@@ -354,7 +356,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 		spin_unlock_bh(&conn->recv_lock);
 
 		/* piggyback acks */
-		ccieth_conn_handle_ack(conn, ntohl(hdr->acked_seqnum));
+		ccieth_conn_handle_ack(conn, ntohl(hdr->acked_seqnum), 0);
 	} else {
 		ccieth_queue_busy_event(ep, event);
 	}
@@ -363,7 +365,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 	return 0;
 
 out_with_recv_lock:
-	ccieth_conn_handle_ack(conn, ntohl(hdr->acked_seqnum));
+	ccieth_conn_handle_ack(conn, ntohl(hdr->acked_seqnum), 0);
 	spin_unlock_bh(&conn->recv_lock);
 	ccieth_putback_free_event(ep, event);
 out:
@@ -466,7 +468,7 @@ ccieth_msg_ack(struct ccieth_connection *conn)
 	hdr->dst_conn_id = htonl(conn->dest_id);
 	hdr->conn_seqnum = htonl(conn->req_seqnum);
 
-	err = ccieth_conn_send_ack(conn, &hdr->acked_seqnum);
+	err = ccieth_conn_send_ack(conn, &hdr->acked_seqnum, &hdr->acked_bitmap);
 	if (unlikely(err < 0))
 		goto out_with_skb;
 
@@ -501,6 +503,7 @@ ccieth_recv_msg_ack(struct net_device *ifp, struct sk_buff *skb)
 	__u32 dst_ep_id;
 	__u32 dst_conn_id;
 	__u32 acked_seqnum;
+	__u32 acked_bitmap;
 	int err;
 
 	/* copy the entire header */
@@ -512,9 +515,10 @@ ccieth_recv_msg_ack(struct net_device *ifp, struct sk_buff *skb)
 	dst_ep_id = ntohl(hdr->dst_ep_id);
 	dst_conn_id = ntohl(hdr->dst_conn_id);
 	acked_seqnum = ntohl(hdr->acked_seqnum);
+	acked_bitmap = ntohl(hdr->acked_bitmap);
 
-	dprintk("got msg ack for seqnum %d to eid %d conn id %d\n",
-		acked_seqnum, dst_ep_id, dst_conn_id);
+	dprintk("got msg ack for seqnum %u bitmap %04x to eid %d conn id %d\n",
+		acked_seqnum, acked_bitmap, dst_ep_id, dst_conn_id);
 
 	rcu_read_lock();
 
@@ -529,7 +533,7 @@ ccieth_recv_msg_ack(struct net_device *ifp, struct sk_buff *skb)
 	if (unlikely(!conn || !(conn->flags & CCIETH_CONN_FLAG_RELIABLE)))
 		goto out_with_rculock;
 
-	ccieth_conn_handle_ack(conn, acked_seqnum);
+	ccieth_conn_handle_ack(conn, acked_seqnum, acked_bitmap);
 
 	rcu_read_unlock();
 
