@@ -63,8 +63,8 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32
 		event->event.send.status = 0;
 		ccieth_queue_busy_event(conn->ep, event);
 
+		dprintk("no need to resend MSG %u anymore\n", scb->reliable_send.seqnum);
 		kfree_skb(skb);
-		dprintk("no need to resend MSG skb %p anymore\n", skb);
 
 		skb = nskb;
 	}
@@ -242,7 +242,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		}
 		conn->send_queue_last_seqnum = skb;
 		skb->next = NULL;
-		dprintk("need to resend MSG skb %p\n", skb);
+		dprintk("need to resend MSG %u\n", seqnum);
 		spin_unlock_bh(&conn->send_lock);
 
 		ccieth_conn_send_ack(conn, &hdr->acked_seqnum, NULL);
@@ -309,10 +309,10 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 		/* reliable, look for obsolete, duplicates, ... */
 		unsigned long bitmap;
 		unsigned relseqnum;
-		int relfull;
+		unsigned relfull;
 
 		spin_lock_bh(&conn->recv_lock);
-		dprintk("got %d while we have %d+%lx\n",
+		dprintk("got MSG seqnum %u while we have %u+%lx\n",
 			msg_seqnum, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
 		relseqnum = msg_seqnum - conn->recv_last_full_seqnum - 1;
 		if (unlikely(relseqnum >= CCIETH_CONN_RECV_BITMAP_BITS)) {
@@ -342,7 +342,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 		relfull = ffz(bitmap); /* no need to compare against ~0UL if we know there are some zeros */
 		conn->recv_next_bitmap >>= relfull;
 		conn->recv_last_full_seqnum += relfull;
-		dprintk("found %d new fully received, now have %d+%lx\n",
+		dprintk("found %u new fully received, now have %u+%lx\n",
 			relfull, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
 		conn->recv_needack_nr += relfull;
 		if (unlikely(conn->recv_needack_nr >= CCIETH_IMMEDIATE_MSG_ACK_NR)) {
@@ -394,7 +394,7 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 	dst_conn_id = ntohl(hdr->dst_conn_id);
 	msg_len = ntohl(hdr->msg_len);
 
-	dprintk("got msg len %d to eid %d conn id %d seqnum %d\n",
+	dprintk("got msg len %d to eid %d conn id %d seqnum %u\n",
 		msg_len, dst_ep_id, dst_conn_id, ntohl(hdr->msg_seqnum));
 
 	rcu_read_lock();
