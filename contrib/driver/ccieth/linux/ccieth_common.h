@@ -144,8 +144,8 @@ struct ccieth_connection {
 	/* recv-side reliability */
 	spinlock_t recv_lock;
 	__u32 recv_last_full_seqnum;
-#define CCIETH_CONN_RECV_BITMAP_BITS BITS_PER_LONG
-	unsigned long recv_next_bitmap;
+#define CCIETH_CONN_RECV_BITMAP_BITS 32
+	__u32 recv_next_bitmap;
 	/* recv-side deferred acking */
 	int recv_needack_nr;
 	struct timer_list recv_needack_timer;
