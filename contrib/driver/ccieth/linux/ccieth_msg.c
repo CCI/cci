@@ -220,7 +220,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
 		struct ccieth_skb_cb *scb = CCIETH_SKB_CB(skb);
-		__u32 seqnum;
+		unsigned seqnum;
 
 		spin_lock_bh(&conn->send_lock);
 		seqnum = conn->send_next_seqnum++;
@@ -305,7 +305,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
 		/* reliable, look for obsolete, duplicates, ... */
-		__u32 relseqnum;
+		unsigned relseqnum;
 		int relfull;
 
 		spin_lock_bh(&conn->recv_lock);
