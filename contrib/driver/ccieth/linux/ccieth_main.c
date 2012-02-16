@@ -51,16 +51,21 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 	 * isn't already doing it inside a call_rcu */
 	rcu_read_lock();
 	ifp = rcu_dereference(ep->ifp);
-	if (ifp && cmpxchg((struct net_device __force **)&ep->ifp, ifp, NULL) == ifp) {
-		rcu_read_unlock();
+	if (ifp && cmpxchg((struct net_device __force **)&ep->ifp, ifp, NULL) == ifp)
 		dev_put(ifp);
-	} else {
-		rcu_read_unlock();
-		/* wait for the pending rcu_call() to finish */
-		rcu_barrier();
-	}
+	rcu_read_unlock();
 
-	/* we're safe now */
+	/* no new users now, but some possible deferred works for connections */
+
+	idr_for_each(&ep->connection_idr, ccieth_destroy_connection_idrforeach_cb,
+		     &destroyed_conn);
+	dprintk("destroyed %d connections on endpoint destroy\n", destroyed_conn);
+	idr_remove_all(&ep->connection_idr);
+
+	/* some rcu callbacks may be in flight, either users of ep->ifp,
+	 * or because of deferred connection destruction (which may release endpoint events)
+	 */
+	rcu_barrier();
 
 	list_for_each_entry_safe(event, nevent, &ep->event_list, list) {
 		list_del(&event->list);
@@ -71,10 +76,6 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 		kfree(event);
 	}
 
-	idr_for_each(&ep->connection_idr, ccieth_destroy_connection_idrforeach_cb,
-		     &destroyed_conn);
-	dprintk("destroyed %d connections on endpoint destroy\n", destroyed_conn);
-	idr_remove_all(&ep->connection_idr);
 	idr_destroy(&ep->connection_idr);
 #ifdef CONFIG_CCIETH_DEBUGFS
 	/* no that connection debugfs entries are gone, remove the endpoint debugfs dir */
