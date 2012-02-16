@@ -148,6 +148,7 @@ struct ccieth_connection {
 	__u32 recv_next_bitmap;
 	/* recv-side deferred acking */
 	int recv_needack_nr;
+	int recv_needack_force;
 	struct timer_list recv_needack_timer;
 	struct work_struct recv_needack_work;
 

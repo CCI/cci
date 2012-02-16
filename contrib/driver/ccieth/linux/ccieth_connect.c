@@ -50,7 +50,7 @@ static void
 ccieth_recv_needack_timer_hdlr(unsigned long _data)
 {
 	struct ccieth_connection *conn = (void *)_data;
-	if (conn->recv_needack_nr)
+	if (conn->recv_needack_nr || conn->recv_needack_force)
 		schedule_work(&conn->recv_needack_work);
 }
 
@@ -117,6 +117,7 @@ ccieth_conn_init(struct ccieth_connection *conn, struct ccieth_endpoint *ep, int
 		spin_lock_init(&conn->recv_lock);
 		conn->recv_next_bitmap = 0;
 		conn->recv_needack_nr = 0;
+		conn->recv_needack_force = 0;
 		setup_timer(&conn->recv_needack_timer, ccieth_recv_needack_timer_hdlr, (unsigned long)conn);
 		INIT_WORK(&conn->recv_needack_work, ccieth_recv_needack_workfunc);
 	}
