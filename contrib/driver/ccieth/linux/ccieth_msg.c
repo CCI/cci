@@ -312,7 +312,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 		dprintk("got %d while we have %d+%lx\n",
 			msg_seqnum, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
 		relseqnum = msg_seqnum - conn->recv_last_full_seqnum - 1;
-		if (unlikely(relseqnum > CCIETH_CONN_RECV_BITMAP_BITS)) {
+		if (unlikely(relseqnum >= CCIETH_CONN_RECV_BITMAP_BITS)) {
 			if (relseqnum <= 65536)
 				/* way in advance, drop */
 				CCIETH_STAT_INC(conn, recv_tooearly);
