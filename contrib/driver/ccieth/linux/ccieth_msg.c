@@ -30,6 +30,12 @@ static void
 ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32 acked_bitmap)
 {
 	struct sk_buff *skb, *nskb, *old_next_resend;
+	unsigned last_acked = acked_seqnum;
+
+	if (acked_bitmap) {
+		last_acked += fls(acked_bitmap);
+		dprintk("marking acked %u-%u %04x\n", acked_seqnum, last_acked, acked_bitmap);
+	}
 
 	spin_lock_bh(&conn->send_lock);
 
@@ -40,9 +46,18 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32
 		struct ccieth_endpoint_event *event;
 		struct ccieth_skb_cb *scb = CCIETH_SKB_CB(skb);
 
-		if (scb->reliable_send.seqnum > acked_seqnum)
+		if (scb->reliable_send.seqnum > last_acked) /* FIXME: wraparound */
 			/* queue is ordered by seqnum, no need to try further */
 			break;
+
+		if (scb->reliable_send.seqnum > acked_seqnum) { /* FIXME: wraparound */
+			/* handle acked bitmap */
+			unsigned offset = scb->reliable_send.seqnum - acked_seqnum -1;
+			if (!(acked_bitmap & (1 << offset))) {
+				skb = skb->next;
+				continue;
+			}
+		}
 
 		nskb = skb->next;
 
