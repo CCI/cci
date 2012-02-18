@@ -146,9 +146,16 @@ ccieth_conn_free(struct ccieth_connection *conn)
 static void
 ccieth_conn_stop_sync(struct ccieth_connection *conn)
 {
+	/* connection status should be CLOSING so that we can actually stop deferred works */
+	BUG_ON(conn->status != CCIETH_CONNECTION_CLOSING);
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
+		/* stop deferred recv_needack */
 		del_timer_sync(&conn->recv_needack_timer);
+		/* timer isn't running anymore, and can't be rescheduled because conn->status is CLOSING */
 		cancel_work_sync(&conn->recv_needack_work);
+		/* deferred work not running anymore either */
+
+		/* stop deferred send_resend (same mode) */
 		del_timer_sync(&conn->send_resend_timer);
 		cancel_work_sync(&conn->send_resend_work);
 	}

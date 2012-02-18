@@ -89,7 +89,9 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32
 	 * - some MSGs still have not been acked
 	 * - the first one has changed
 	 */
-	if (conn->send_queue_next_resend && conn->send_queue_next_resend != old_next_resend)
+	if (conn->send_queue_next_resend
+	    && conn->send_queue_next_resend != old_next_resend
+	    && conn->status == CCIETH_CONNECTION_READY)
 		mod_timer(&conn->send_resend_timer,
 			  CCIETH_SKB_CB(conn->send_queue_next_resend)->reliable_send.resend_jiffies);
 
@@ -138,8 +140,9 @@ ccieth_msg_resend(struct ccieth_connection *conn)
 	}
 
 	/* update connection resend timer */
-	mod_timer(&conn->send_resend_timer,
-		  CCIETH_SKB_CB(conn->send_queue_next_resend)->reliable_send.resend_jiffies);
+	if (conn->status == CCIETH_CONNECTION_READY)
+		mod_timer(&conn->send_resend_timer,
+			  CCIETH_SKB_CB(conn->send_queue_next_resend)->reliable_send.resend_jiffies);
 
 out_with_lock:
 	spin_unlock_bh(&conn->send_lock);
