@@ -326,7 +326,6 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
 		/* reliable, look for obsolete, duplicates, ... */
-		unsigned long bitmap;
 		unsigned relseqnum;
 		unsigned relfull = 0;
 
@@ -360,13 +359,14 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 		/* ... and update connection then */
 		conn->recv_next_bitmap |= 1U << relseqnum;
 		/* how many new fully received packets? */
-		bitmap = conn->recv_next_bitmap;  /* ffz wants a ulong */
-#if CCIETH_CONN_RECV_BITMAP_BITS == BITS_PER_LONG
-		relfull = bitmap == ~0UL ? CCIETH_CONN_RECV_BITMAP_BITS : ffz(bitmap);
-#else
-		relfull = ffz(bitmap); /* no need to compare against ~0UL, we added zeros when casting from __u32 to ulong */
-#endif
-		conn->recv_next_bitmap >>= relfull;
+		if (conn->recv_next_bitmap == ~0U) {
+			relfull = 32;
+			conn->recv_next_bitmap = 0;
+		} else {
+			unsigned long bitmap = conn->recv_next_bitmap;  /* ffz wants a ulong */
+			relfull = ffz(bitmap); /* we know we have at least one zero, find the first one */
+			conn->recv_next_bitmap >>= relfull;
+		}
 		conn->recv_last_full_seqnum += relfull;
 		dprintk("found %u new fully received, now have %u+%lx\n",
 			relfull, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
