@@ -34,6 +34,7 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 	struct ccieth_endpoint_event *event, *nevent;
 	struct net_device *ifp;
 	int destroyed_conn = 0;
+	int must_put_ifp = 0;
 
 	spin_lock(&ccieth_ep_idr_lock);
 	idr_remove(&ccieth_ep_idr, ep->id);
@@ -52,7 +53,7 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 	rcu_read_lock();
 	ifp = rcu_dereference(ep->ifp);
 	if (ifp && cmpxchg((struct net_device __force **)&ep->ifp, ifp, NULL) == ifp)
-		dev_put(ifp);
+		must_put_ifp = 1;
 	rcu_read_unlock();
 
 	/* no new users now, but some possible deferred works for connections */
@@ -66,6 +67,9 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 	 * or because of deferred connection destruction (which may release endpoint events)
 	 */
 	rcu_barrier();
+
+	if (must_put_ifp)
+		dev_put(ifp);
 
 	list_for_each_entry_safe(event, nevent, &ep->event_list, list) {
 		list_del(&event->list);
