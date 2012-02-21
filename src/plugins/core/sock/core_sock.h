@@ -642,7 +642,7 @@ sock_pack_rma_write(sock_rma_header_t * write, uint16_t data_len,
     <---------- 32 bits ---------->
     <- 8 -> <- 8 -> <---- 16 ----->
    +-------+-----------------------+
-   | type  |   a   |   data_len    |
+   | type  |   a   |       b       |
    +-------+-----------------------+
    |            peer id            |
    +-------------------------------+
@@ -684,7 +684,7 @@ sock_pack_rma_write(sock_rma_header_t * write, uint16_t data_len,
  */
 
 static inline void
-sock_pack_rma_read(sock_rma_header_t * read, uint16_t data_len,
+sock_pack_rma_read(sock_rma_header_t * read, uint64_t data_len,
 		   uint32_t peer_id, uint32_t seq, uint32_t ts,
 		   uint64_t local_handle, uint64_t local_offset,
 		   uint64_t remote_handle, uint64_t remote_offset)
@@ -697,8 +697,21 @@ sock_pack_rma_read(sock_rma_header_t * read, uint16_t data_len,
 				    remote_offset);
 }
 
-/***
- * FIXME Describe packet format
+/* RMA WRITE DONE message
+    <---------- 32 bits ---------->
+    <- 8 -> <- 8 -> <---- 16 ----->
+   +-------+-----------------------+
+   | type  |   a   |  context_id   |
+   +-------+-----------------------+
+   |            peer id            |
+   +-------------------------------+
+
+   +-------------------------------+
+   |              seq              |
+   +-------------------------------+
+   |           timestamp           |
+   +-------------------------------+
+
  */
 
 static inline void
