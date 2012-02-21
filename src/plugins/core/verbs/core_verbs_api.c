@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <inttypes.h>
 #include <ifaddrs.h>
@@ -547,21 +548,7 @@ out:
 static const char *
 verbs_strerror(enum cci_status status)
 {
-	char *str	= NULL;
-
-	CCI_ENTER;
-
-	switch (status) {
-		case EIO:
-			str = "";
-			break;
-		default:
-			CCI_EXIT;
-			return strerror(status);
-	}
-
-	CCI_EXIT;
-	return str;
+	return strerror(status);
 }
 
 
@@ -632,28 +619,154 @@ verbs_free_devices(cci_device_t const **devices)
 }
 
 static int
+verbs_destroy_rx_pool(cci__ep_t *ep, verbs_rx_pool_t *rx_pool);
+
+static int
 verbs_post_rx(cci__ep_t *ep, verbs_rx_t *rx)
 {
-	int			ret	= CCI_SUCCESS;
-	verbs_ep_t		*vep	= ep->priv;
+	int			ret		= CCI_SUCCESS;
+	verbs_ep_t		*vep		= ep->priv;
 	struct ibv_sge		list;
 	struct ibv_recv_wr	wr, *bad_wr;
+	verbs_rx_pool_t		*rx_pool	= rx->rx_pool;
 
 	CCI_ENTER;
 
+	if (rx_pool->repost == 0) {
+		/* do not repost - see if we need to tear-down rx_pool */
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_REMOVE(&rx_pool->rxs, rx, entry);
+		free(rx);
+		if (TAILQ_EMPTY(&rx_pool->rxs)) {
+			int	rc	= 0;
+
+			TAILQ_REMOVE(&vep->rx_pools, rx_pool, entry);
+			rc = verbs_destroy_rx_pool(ep,rx_pool);
+			if (rc)
+				debug(CCI_DB_EP, "%s: verbs_destroy_rx_pool() "
+					"returned %s", __func__, cci_strerror(rc));
+		}
+		pthread_mutex_unlock(&ep->lock);
+		/* return SUCCESS so that the caller does not continue
+		 * using the rx */
+		return CCI_SUCCESS;
+	}
+
 	memset(&list, 0, sizeof(list));
-	list.addr = (uintptr_t) vep->rx_buf + rx->offset;
+	list.addr = (uintptr_t) rx_pool->buf + rx->offset;
 	list.length = ep->buffer_len;
-	list.lkey = vep->rx_mr->lkey;
+	list.lkey = rx_pool->mr->lkey;
 
 	memset(&wr, 0, sizeof(wr));
 	wr.wr_id = (uintptr_t) rx;
 	wr.sg_list = &list;
 	wr.num_sge = 1;
 
+	rx_pool->posted++;
 	ret = ibv_post_srq_recv(vep->srq, &wr, &bad_wr);
-	if (ret == -1)
+	if (ret == -1) {
 		ret = errno;
+		rx_pool->posted--;
+	}
+	CCI_EXIT;
+	return ret;
+}
+
+static int
+verbs_create_rx_pool(cci__ep_t *ep, int rx_buf_cnt)
+{
+	int		ret		= CCI_SUCCESS;
+	int		i		= 0;
+	cci__dev_t	*dev		= NULL;
+	verbs_ep_t	*vep		= NULL;
+	verbs_rx_pool_t	*rx_pool	= NULL;
+	size_t		len		= 0;
+
+	CCI_ENTER;
+
+	dev = ep->dev;
+	vep = ep->priv;
+
+	rx_pool = calloc(1, sizeof(*rx_pool));
+	if (!rx_pool) {
+		CCI_EXIT;
+		return CCI_ENOMEM;
+	}
+
+	TAILQ_INIT(&rx_pool->rxs);
+	rx_pool->repost = 1;
+	rx_pool->size = rx_buf_cnt;
+	len = rx_buf_cnt * dev->device.max_send_size;
+	ret = posix_memalign((void **) &rx_pool->buf, getpagesize(), len);
+	if (ret)
+		goto out;
+	memset(rx_pool->buf, 0, len); /* silence valgrind */
+
+	rx_pool->mr = ibv_reg_mr(vep->pd, rx_pool->buf, len, IBV_ACCESS_LOCAL_WRITE);
+	if (!rx_pool->mr) {
+		ret = errno;
+		goto out;
+	}
+
+	for (i = 0; i < rx_buf_cnt; i++) {
+		uintptr_t		offset = i * ep->buffer_len;
+		verbs_rx_t		*rx	= NULL;
+
+		rx = calloc(1, sizeof(*rx));
+		if (!rx) {
+			ret = CCI_ENOMEM;
+			goto out;
+		}
+
+		rx->evt.ep = ep;
+		rx->offset = offset;
+		rx->rx_pool = rx_pool;
+		TAILQ_INSERT_TAIL(&rx_pool->rxs, rx, entry);
+
+		ret = verbs_post_rx(ep, rx);
+		if (ret)
+			goto out;
+	}
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_HEAD(&vep->rx_pools, rx_pool, entry);
+	ep->rx_buf_cnt = rx_buf_cnt;
+	pthread_mutex_unlock(&ep->lock);
+out:
+	if (ret && rx_pool) {
+		rx_pool->repost = 0;
+		if (rx_pool->posted) {
+			/* we can't free anything since we posted some rxs.
+			 * add this to the tail of the ep->rx_pools and tear
+			 * down after the last rx completes
+			 */
+			pthread_mutex_lock(&ep->lock);
+			TAILQ_INSERT_TAIL(&vep->rx_pools, rx_pool, entry);
+			pthread_mutex_unlock(&ep->lock);
+		} else {
+			/* FIXME There is a race here - rx_pool->posted might be 0 if
+			 * we posted 1 or more rxs and they all completed before
+			 * reaching here.
+			 */
+			while (!TAILQ_EMPTY(&rx_pool->rxs)) {
+				verbs_rx_t	*rx	= NULL;
+
+				rx = TAILQ_FIRST(&rx_pool->rxs);
+				TAILQ_REMOVE(&rx_pool->rxs, rx, entry);
+				free(rx);
+			}
+			if (rx_pool->mr) {
+				int rc = 0;
+				rc = ibv_dereg_mr(rx_pool->mr);
+				if (rc) {
+					/* TODO */
+				}
+			}
+			if (rx_pool->buf)
+				free(rx_pool->buf);
+			free(rx_pool);
+		}
+	}
 	CCI_EXIT;
 	return ret;
 }
@@ -708,7 +821,8 @@ verbs_create_endpoint(cci_device_t *device,
 
 	TAILQ_INIT(&vep->txs);
 	TAILQ_INIT(&vep->idle_txs);
-	TAILQ_INIT(&vep->rxs);
+	//TAILQ_INIT(&vep->rxs);
+	TAILQ_INIT(&vep->rx_pools);
 	TAILQ_INIT(&vep->conns);
 	TAILQ_INIT(&vep->active);
 	TAILQ_INIT(&vep->passive);
@@ -783,7 +897,8 @@ verbs_create_endpoint(cci_device_t *device,
 		goto out;
 	}
 
-	vep->cq = ibv_create_cq(vdev->context, VERBS_EP_CQ_CNT, ep, NULL, 0);
+	vep->cq_size = VERBS_EP_CQ_CNT;
+	vep->cq = ibv_create_cq(vdev->context, vep->cq_size, ep, NULL, 0);
 	if (!vep->cq) {
 		ret = errno;
 		goto out;
@@ -818,20 +933,8 @@ verbs_create_endpoint(cci_device_t *device,
 		TAILQ_INSERT_TAIL(&vep->idle_txs, tx, entry);
 	}
 
-	len = VERBS_EP_RX_CNT * dev->device.max_send_size;
-	ret = posix_memalign((void **) &vep->rx_buf, pg_sz, len);
-	if (ret)
-		goto out;
-	memset(vep->rx_buf, 0, len); /* silence valgrind */
-
-	vep->rx_mr = ibv_reg_mr(vep->pd, vep->rx_buf, len, IBV_ACCESS_LOCAL_WRITE);
-	if (!vep->rx_mr) {
-		ret = errno;
-		goto out;
-	}
-
 	memset(&srq_attr, 0, sizeof(srq_attr));
-	srq_attr.attr.max_wr = VERBS_EP_CQ_CNT * 2;
+	srq_attr.attr.max_wr = ep->rx_buf_cnt;
 	srq_attr.attr.max_sge = 1;
 	vep->srq = ibv_create_srq(vep->pd, &srq_attr);
 	if (!vep->srq) {
@@ -839,24 +942,8 @@ verbs_create_endpoint(cci_device_t *device,
 		goto out;
 	}
 
-	for (i = 0; i < VERBS_EP_RX_CNT; i++) {
-		uintptr_t		offset = i * ep->buffer_len;
-		verbs_rx_t		*rx	= NULL;
-
-		rx = calloc(1, sizeof(*rx));
-		if (!rx) {
-			ret = CCI_ENOMEM;
-			goto out;
-		}
-
-		rx->evt.ep = ep;
-		rx->offset = offset;
-		TAILQ_INSERT_TAIL(&vep->rxs, rx, entry);
-
-		ret = verbs_post_rx(ep, rx);
-		if (ret)
-			goto out;
-	}
+	vep->rdma_msg_total = VERBS_EP_RMSG_CONNS;
+	ret = verbs_create_rx_pool(ep, ep->rx_buf_cnt);
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -869,21 +956,24 @@ out:
 		if (vep->srq)
 			ibv_destroy_srq(vep->srq);
 
-		while (!TAILQ_EMPTY(&vep->rxs)) {
-			verbs_rx_t *rx = TAILQ_FIRST(&vep->rxs);
-			TAILQ_REMOVE(&vep->rxs, rx, entry);
-			free(rx);
-		}
+		while (!TAILQ_EMPTY(&vep->rx_pools)) {
+			verbs_rx_pool_t	*rx_pool = TAILQ_FIRST(&vep->rx_pools);
 
-		if (vep->rx_mr) {
-			ret = ibv_dereg_mr(vep->rx_mr);
-			if (ret)
-				debug(CCI_DB_WARN, "deregistering new endpoint rx_mr "
-					"failed with %s\n", strerror(ret));
+			TAILQ_REMOVE(&vep->rx_pools, rx_pool, entry);
+			while (!TAILQ_EMPTY(&rx_pool->rxs)) {
+				verbs_rx_t *rx = TAILQ_FIRST(&rx_pool->rxs);
+				TAILQ_REMOVE(&rx_pool->rxs, rx, entry);
+				free(rx);
+			}
+			if (rx_pool->mr) {
+				ret = ibv_dereg_mr(rx_pool->mr);
+				if (ret)
+					debug(CCI_DB_WARN, "deregistering endpoint rx_mr "
+						"failed with %s\n", strerror(ret));
+			}
+			if (rx_pool->buf)
+				free(rx_pool->buf);
 		}
-
-		if (vep->rx_buf)
-			free(vep->rx_buf);
 
 		while (!TAILQ_EMPTY(&vep->txs)) {
 			verbs_tx_t *tx = TAILQ_FIRST(&vep->txs);
@@ -934,6 +1024,30 @@ static int
 verbs_get_cq_event(cci__ep_t *ep);
 
 static int
+verbs_destroy_rx_pool(cci__ep_t *ep, verbs_rx_pool_t *rx_pool)
+{
+	int	ret	= CCI_SUCCESS;
+
+	while (!TAILQ_EMPTY(&rx_pool->rxs)) {
+		verbs_rx_t *rx = TAILQ_FIRST(&rx_pool->rxs);
+		TAILQ_REMOVE(&rx_pool->rxs, rx, entry);
+		free(rx);
+	}
+
+	if (rx_pool->mr) {
+		ret = ibv_dereg_mr(rx_pool->mr);
+		if (ret)
+			debug(CCI_DB_WARN, "deregistering endpoint rx_mr "
+				"failed with %s\n", strerror(ret));
+	}
+	if (rx_pool->buf)
+		free(rx_pool->buf);
+
+	CCI_EXIT;
+	return ret;
+}
+
+static int
 verbs_destroy_endpoint(cci_endpoint_t *endpoint)
 {
 	int		ret	= CCI_SUCCESS;
@@ -969,21 +1083,12 @@ verbs_destroy_endpoint(cci_endpoint_t *endpoint)
 
 	ep->priv = NULL;
 
-	while (!TAILQ_EMPTY(&vep->rxs)) {
-		verbs_rx_t *rx = TAILQ_FIRST(&vep->rxs);
-		TAILQ_REMOVE(&vep->rxs, rx, entry);
-		free(rx);
-	}
+	while (!TAILQ_EMPTY(&vep->rx_pools)) {
+		verbs_rx_pool_t	*rx_pool = TAILQ_FIRST(&vep->rx_pools);
 
-	if (vep->rx_mr) {
-		ret = ibv_dereg_mr(vep->rx_mr);
-		if (ret)
-			debug(CCI_DB_WARN, "deregistering endpoint rx_mr "
-				"failed with %s\n", strerror(ret));
+		TAILQ_REMOVE(&vep->rx_pools, rx_pool, entry);
+		verbs_destroy_rx_pool(ep, rx_pool);
 	}
-
-	if (vep->rx_buf)
-		free(vep->rx_buf);
 
 	while (!TAILQ_EMPTY(&vep->txs)) {
 		verbs_tx_t *tx = TAILQ_FIRST(&vep->txs);
@@ -1047,8 +1152,20 @@ verbs_msg_type_str(verbs_msg_type_t msg_type)
 		case VERBS_MSG_SEND:
 			str = "send";
 			break;
+		case VERBS_MSG_RMA_REMOTE_REQUEST:
+			str = "rma_remote_request";
+			break;
+		case VERBS_MSG_RMA_REMOTE_REPLY:
+			str = "rma_remote_reply";
+			break;
 		case VERBS_MSG_KEEPALIVE:
 			str = "keepalive";
+			break;
+		case VERBS_MSG_RDMA_MSG_ACK:
+			str = "rdma_msg_ack";
+			break;
+		case VERBS_MSG_RMA:
+			str = "rma";
 			break;
 		default:
 			str = "invalid";
@@ -1078,6 +1195,35 @@ out:
 	return ret;
 }
 
+typedef union verbs_u64 {
+	uint64_t	ull;
+	uint32_t	ul[2];
+} verbs_u64_t;
+
+static uint64_t
+verbs_ntohll(uint64_t val)
+{
+	verbs_u64_t	net = { .ull = val };
+	verbs_u64_t	host;
+
+	host.ul[0] = ntohl(net.ul[1]);
+	host.ul[1] = ntohl(net.ul[0]);
+
+	return host.ull;
+}
+
+static uint64_t
+verbs_htonll(uint64_t val)
+{
+	verbs_u64_t	host = { .ull = val };
+	verbs_u64_t	net;
+
+	net.ul[0] = htonl(host.ul[1]);
+	net.ul[1] = htonl(host.ul[0]);
+
+	return net.ull;
+}
+
 static int
 verbs_post_send(cci__conn_t *conn, uint64_t id, void *buffer, uint32_t len, uint32_t header)
 {
@@ -1085,35 +1231,104 @@ verbs_post_send(cci__conn_t *conn, uint64_t id, void *buffer, uint32_t len, uint
 	cci__ep_t	*ep	= NULL;
 	verbs_conn_t	*vconn	= conn->priv;
 	verbs_ep_t	*vep	= NULL;
-	struct ibv_sge	list;
+	struct ibv_sge	list[2];
 	struct ibv_send_wr wr, *bad_wr;
+	int		rdma_send	= VERBS_MSG_SEND | (1 << 4);
+	int		use_rdma	= header == rdma_send ? 1: 0;
+	uint32_t	orig_len	= len;
 
 	CCI_ENTER;
 
 	ep = container_of(conn->connection.endpoint, cci__ep_t, endpoint);
 	vep = ep->priv;
 
+	debug(CCI_DB_MSG, "sending msg 0x%x", header);
+
 	memset(&wr, 0, sizeof(wr));
 	wr.wr_id = id;
 	if (buffer && len) {
-		memset(&list, 0, sizeof(list));
-		list.addr = (uintptr_t) buffer;
-		list.length = len;
-		list.lkey = vep->tx_mr->lkey;
+		memset(list, 0, sizeof(list));
+		list[0].addr = (uintptr_t) buffer;
+		list[0].length = len;
+		list[0].lkey = vep->tx_mr->lkey;
 
-		wr.sg_list = &list;
+		wr.sg_list = list;
 		wr.num_sge = 1;
 	} else {
 		wr.sg_list = NULL;
 		wr.num_sge = 0;
 	}
 	if (header) {
-		wr.opcode = IBV_WR_SEND_WITH_IMM;
-		wr.imm_data = htonl(header);
+		if (use_rdma) {
+			/* write at the end of the peer's slot.
+			 * we allocated an extra 4 bytes for the header
+			 * which we will poll on.
+			 * we need to ensure the user data is 8 byte aligned. */
+
+			uint32_t h2 = header;
+			uint32_t pad = len % 8 == 0 ? 0 : 8 - (len % 8);
+			uint64_t addr = vconn->raddr;
+
+			h2 |= (orig_len << 5);
+			h2 |= (1 << 31); /* set highest bit to make sure
+						we can poll on last byte
+						when swapped to net order */
+
+			h2 = htonl(h2);
+
+			/* move to the end of the slot, then back up 4 bytes */
+			addr += ((vconn->mss + 4) * (vconn->send_next + 1)) - 4;
+
+			/* asuming this is faster than modulo */
+			vconn->send_next++;
+			if (vconn->send_next == vconn->num_slots)
+				vconn->send_next = 0;
+#if 0
+			vconn->send_next =
+				vconn->send_next == (vconn->num_slots - 1) ?
+				0 : vconn->send_next++;
+#endif
+
+			if (len == 0) {
+				/* SEND_INLINE must be used */
+				memset(list, 0, sizeof(list));
+				list[0].addr = (uintptr_t) &h2;
+				list[0].length = 4;
+
+				wr.sg_list = list;
+				wr.num_sge = 1;
+			} else if (len < vconn->inline_size - 4) {
+				/* SEND_INLINE must be used */
+				debug(CCI_DB_MSG, "adding second list[1]");
+				list[0].length += pad;
+				list[1].addr = (uintptr_t) &h2;
+				list[1].length = 4; /* we will fix below */
+				wr.num_sge = 2;
+			} else {
+				/* need to copy to registered buffer */
+				debug(CCI_DB_MSG, "copying header to buffer");
+				memcpy(buffer + len, &h2, 4);
+				list[0].length = len + 4; /* header after message */
+			}
+
+			len += pad;
+			addr -= len;
+
+			debug(CCI_DB_MSG, "using RDMA MSG send 0x%x 0x%x len %u "
+					"orig_len %u pad %u", header, h2, len, orig_len, pad);
+			wr.opcode = IBV_WR_RDMA_WRITE;
+			wr.wr.rdma.remote_addr = addr;
+			wr.wr.rdma.rkey = vconn->rkey;
+		} else {
+			wr.opcode = IBV_WR_SEND_WITH_IMM;
+			wr.imm_data = htonl(header);
+		}
 	} else {
 		wr.opcode = IBV_WR_SEND;
 	}
 	wr.send_flags = IBV_SEND_SIGNALED;
+	if (len <= vconn->inline_size - 4)
+		wr.send_flags |= IBV_SEND_INLINE;
 
 	ret = ibv_post_send(vconn->id->qp, &wr, &bad_wr);
 	if (ret == -1) {
@@ -1136,6 +1351,9 @@ verbs_accept(union cci_event *event,
 	verbs_ep_t	*vep		= NULL;
 	verbs_conn_t	*vconn		= NULL;
 	uint32_t	header		= 0;
+	void		*ptr		= NULL;
+	int		len		= 0;
+	verbs_tx_t	*tx		= NULL;
 
 	CCI_ENTER;
 
@@ -1153,14 +1371,83 @@ verbs_accept(union cci_event *event,
 	}
 	conn->connection.max_send_size = vconn->mss;
 
+	if (vconn->num_slots) {
+		pthread_mutex_lock(&ep->lock);
+		if (vep->rdma_msg_used < vep->rdma_msg_total) {
+			tx = verbs_get_tx_locked(vep);
+			if (!tx)
+				vconn->num_slots = 0;
+			else
+				vep->rdma_msg_used++;
+		} else {
+			vconn->num_slots = 0;
+		}
+		pthread_mutex_unlock(&ep->lock);
+	}
+
+	{
+		struct ibv_qp_attr attr;
+		struct ibv_qp_init_attr init;
+
+		ret = ibv_query_qp(vconn->id->qp, &attr, IBV_QP_CAP, &init);
+		if (!ret)
+			vconn->inline_size = init.cap.max_inline_data;
+	}
+
+	if (vconn->num_slots) {
+		int i;
+		verbs_rx_t	*rx;
+		uint64_t addr;
+		uint32_t rkey;
+
+		len = vconn->num_slots * (vconn->mss + sizeof(uint32_t));
+		ret = posix_memalign((void **) &vconn->rbuf, getpagesize(), len);
+		if (ret)
+			goto out;
+
+		memset(vconn->rbuf, 0, len); /* silence valgrind */
+		vconn->rxs = calloc(vconn->num_slots, sizeof(*rx));
+		if (!vconn->rxs)
+			goto out;
+		vconn->slots = calloc(vconn->num_slots, sizeof(*vconn->slots));
+		if (!vconn->slots)
+			goto out;
+		for (i = 0; i < vconn->num_slots; i++) {
+			rx = &vconn->rxs[i];
+			rx->evt.ep = ep;
+			rx->evt.conn = conn;
+			rx->evt.event.type = CCI_EVENT_RECV;
+			rx->evt.event.recv.connection = &conn->connection;
+			rx->offset = i;
+			vconn->slots[i]  = (uint32_t *) ((vconn->rbuf) +
+						(uintptr_t)(((vconn->mss + 4) * (i + 1)) - 4));
+		}
+		vconn->rmr = ibv_reg_mr(vep->pd, vconn->rbuf, len,
+				IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+		if (!vconn->rmr)
+			goto out;
+		//vconn->avail = (1 << vconn->num_slots) - 1;
+
+		len = 12; /* magic number => uint64_t + uint32_t */
+		addr = verbs_htonll((uintptr_t)vconn->rmr->addr);
+		memcpy(tx->buffer, &addr, sizeof(addr));
+		rkey = htonl(vconn->rmr->rkey);
+		memcpy(tx->buffer + (uintptr_t)sizeof(addr), &rkey, sizeof(rkey));
+		ptr = tx->buffer;
+	}
+
 	header = VERBS_MSG_CONN_REPLY;
 	header |= (CCI_EVENT_CONNECT_ACCEPTED << 4);
+	if (vconn->num_slots)
+		header |= (1 << 8);	/* magic number */
+
+	vconn->state = VERBS_CONN_ESTABLISHED;
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&vep->conns, vconn, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-	ret = verbs_post_send(conn, 0, NULL, 0, header);
+	ret = verbs_post_send(conn, 0, ptr, len, header);
 	if (ret) {
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_REMOVE(&vep->conns, vconn, entry);
@@ -1340,8 +1627,9 @@ verbs_connect(cci_endpoint_t *endpoint, char *server_uri,
 	attr.recv_cq = vep->cq;
 	attr.srq = vep->srq;
 	attr.cap.max_send_wr = VERBS_EP_TX_CNT;
-	attr.cap.max_send_sge = 1;
+	attr.cap.max_send_sge = 2;
 	attr.cap.max_recv_sge = 1;
+	attr.cap.max_inline_data = VERBS_INLINE_BYTES;
 
 #if HAVE_RDMA_ADDRINFO
 	memset(&hints, 0, sizeof(hints));
@@ -1461,6 +1749,7 @@ verbs_connect(cci_endpoint_t *endpoint, char *server_uri,
 	memset(&param, 0, sizeof(param));
 	param.srq = 1;
 	param.initiator_depth = param.responder_resources = 16;
+	param.retry_count = 7; /* infinite retry */
 	param.rnr_retry_count = 7; /* infinite retry */
 	param.private_data = &header;
 	param.private_data_len = sizeof(header);
@@ -1530,15 +1819,125 @@ verbs_disconnect(cci_connection_t *connection)
 	return ret;
 }
 
-
 static int
 verbs_set_opt(cci_opt_handle_t *handle,
 		cci_opt_level_t level,
 		cci_opt_name_t name, const void* val, int len)
 {
+	int		ret		= CCI_ERR_NOT_IMPLEMENTED;
+	cci_endpoint_t	*endpoint	= NULL;
+	cci__ep_t	*ep		= NULL;
+	cci__dev_t	*dev		= NULL;
+	verbs_ep_t	*vep		= NULL;
+	verbs_dev_t	*vdev		= NULL;
+
 	CCI_ENTER;
+
+	if (!vglobals) {
+		CCI_EXIT;
+		return CCI_ENODEV;
+	}
+
+	endpoint = handle->endpoint;
+	ep = container_of(endpoint, cci__ep_t, endpoint);
+	vep = ep->priv;
+	dev = ep->dev;
+	vdev = dev->priv;
+
+	switch (name) {
+	case CCI_OPT_ENDPT_SEND_TIMEOUT:
+	case CCI_OPT_CONN_SEND_TIMEOUT:
+		/* not implemented */
+		break;
+	case CCI_OPT_ENDPT_RECV_BUF_COUNT:
+	{
+		uint32_t new_count;
+		struct ibv_device_attr dev_attr;
+		verbs_rx_pool_t *rx_pool = TAILQ_FIRST(&vep->rx_pools);
+
+		/* Does device allow resizing of srq and cq? */
+		ret = ibv_query_device(vdev->context, &dev_attr);
+		if (ret) {
+			ret = errno;
+			debug(CCI_DB_EP, "%s: could not query device", __func__);
+			break;
+		}
+		if (!(dev_attr.device_cap_flags & IBV_DEVICE_SRQ_RESIZE)) {
+			debug(CCI_DB_EP, "%s: this device does not support "
+				"resizing the srq", __func__);
+			ret = EOPNOTSUPP;
+			break; /* ret = CCI_ERR_NOT_IMPLEMENTED */
+		}
+
+		if (len != sizeof(new_count)) {
+			ret = CCI_EINVAL;
+			break;
+		}
+		memcpy(&new_count, val, len);
+
+		/* Is new count supportable (i.e. < max_srq_wr)? */
+		if (dev_attr.max_srq_wr < new_count) {
+			debug(CCI_DB_EP, "%s: requested recv buffer size %u "
+				"is larger than the max_cq_wr %u", __func__,
+				new_count, dev_attr.max_srq_wr);
+			ret = CCI_ERANGE;
+			break;
+		}
+
+		/* Modify cq first */
+		ret = ibv_resize_cq(vep->cq, new_count);
+		if (ret) {
+			ret = errno;
+			debug(CCI_DB_EP, "%s: unable to resize completion queue", __func__);
+			if (new_count > ep->rx_buf_cnt) {
+				/* we couldn't enlarge the cq, return error */
+				break;
+			} else {
+				/* we couldn't shrink the cq, but we might be able
+				 * to shrink the rx_pool. Let's continue. */
+				ret = CCI_SUCCESS;
+			}
+		}
+
+		/* Create new rx_pool based on new_count */
+		ret = verbs_create_rx_pool(ep, new_count);
+		if (ret == CCI_SUCCESS) {
+			/* set the old rx_pool to not repost.
+			 * the old rxs will clean up as we reap them from
+			 * ibv_poll_cq() and eventually cleanup the old rx_pool. */
+			pthread_mutex_lock(&ep->lock);
+			rx_pool->repost = 0;
+			pthread_mutex_unlock(&ep->lock);
+		}
+		break;
+	}
+	case CCI_OPT_ENDPT_SEND_BUF_COUNT:
+		break;
+	case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
+	{
+		uint32_t new_time;
+
+		if (len != sizeof(new_time)) {
+			ret = CCI_EINVAL;
+			break;
+		}
+		memcpy(&new_time, val, len);
+
+		/* we don't do anything for keepalives.
+		 * If the connection breaks, we will generate a
+		 * keepalive timeout. When the app tries to send,
+		 * it will fail. */
+		ep->keepalive_timeout = new_time;
+		ret = CCI_SUCCESS;
+		break;
+	}
+	default:
+		debug(CCI_DB_INFO, "unknown option %u", (enum cci_opt_name)name);
+		ret = CCI_EINVAL;
+	}
+
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 
@@ -1559,35 +1958,6 @@ verbs_arm_os_handle(cci_endpoint_t *endpoint, int flags)
 	CCI_ENTER;
 	CCI_EXIT;
 	return CCI_ERR_NOT_IMPLEMENTED;
-}
-
-typedef union verbs_u64 {
-	uint64_t	ull;
-	uint32_t	ul[2];
-} verbs_u64_t;
-
-static uint64_t
-verbs_ntohll(uint64_t val)
-{
-	verbs_u64_t	net = { .ull = val };
-	verbs_u64_t	host;
-
-	host.ul[0] = ntohl(net.ul[1]);
-	host.ul[1] = ntohl(net.ul[0]);
-
-	return host.ull;
-}
-
-static uint64_t
-verbs_htonll(uint64_t val)
-{
-	verbs_u64_t	host = { .ull = val };
-	verbs_u64_t	net;
-
-	net.ul[0] = htonl(host.ul[1]);
-	net.ul[1] = htonl(host.ul[0]);
-
-	return net.ull;
 }
 
 /* A peer is trying to connect. Always accept and let them send the full
@@ -1614,8 +1984,9 @@ verbs_handle_conn_request(cci__ep_t *ep, struct rdma_cm_event *cm_evt)
 	attr.recv_cq = vep->cq;
 	attr.srq = vep->srq;
 	attr.cap.max_send_wr = VERBS_EP_TX_CNT;
-	attr.cap.max_send_sge = 1;
+	attr.cap.max_send_sge = 2;
 	attr.cap.max_recv_sge = 1;
+	attr.cap.max_inline_data = VERBS_INLINE_BYTES;
 
 	ret = rdma_create_qp(peer, vep->pd, &attr);
 	if (ret == -1) {
@@ -1696,11 +2067,13 @@ verbs_conn_est_active(cci__ep_t *ep, struct rdma_cm_event *cm_evt)
 {
 	int			ret	= CCI_SUCCESS;
 	cci__conn_t		*conn	= NULL;
+	verbs_ep_t		*vep	= ep->priv;
 	verbs_conn_t		*vconn	= NULL;
 	verbs_conn_request_t	*cr	= NULL;
 	verbs_tx_t		*tx	= NULL;
 	uint32_t		header	= 0;
 	uint32_t		len	= 0;
+	int			need_rdma = 0;
 
 	CCI_ENTER;
 
@@ -1711,6 +2084,13 @@ verbs_conn_est_active(cci__ep_t *ep, struct rdma_cm_event *cm_evt)
 	verbs_vconn_set_mss(vconn);
 	conn->connection.max_send_size = vconn->mss;
 
+	pthread_mutex_lock(&ep->lock);
+	if (vep->rdma_msg_used < vep->rdma_msg_total) {
+		vep->rdma_msg_used++;
+		need_rdma = 1;
+	}
+	pthread_mutex_unlock(&ep->lock);
+
 	tx = verbs_get_tx(ep);
 	if (!tx) {
 		ret = CCI_ENOBUFS;
@@ -1720,16 +2100,60 @@ verbs_conn_est_active(cci__ep_t *ep, struct rdma_cm_event *cm_evt)
 	tx->evt.event.type = CCI_EVENT_NONE; /* never hand to application */
 	tx->evt.conn = conn;
 
+	if (need_rdma) {
+		int i;
+		verbs_rx_t *rx;
+		uint64_t addr;
+		uint32_t rkey;
+
+		vconn->num_slots = VERBS_CONN_RMSG_DEPTH;
+		len = vconn->num_slots * (vconn->mss + sizeof(uint32_t));
+		ret = posix_memalign((void **) &vconn->rbuf, getpagesize(), len);
+		if (ret)
+			goto out;
+		memset(vconn->rbuf, 0, len); /* silence valgrind */
+		vconn->rxs = calloc(vconn->num_slots, sizeof(*rx));
+		if (!vconn->rxs)
+			goto out;
+		vconn->slots = calloc(vconn->num_slots, sizeof(*vconn->slots));
+		if (!vconn->slots)
+			goto out;
+		for (i = 0; i < vconn->num_slots; i++) {
+			rx = &vconn->rxs[i];
+			rx->evt.ep = ep;
+			rx->evt.conn = conn;
+			rx->evt.event.type = CCI_EVENT_RECV;
+			rx->evt.event.recv.connection = &conn->connection;
+			rx->offset = i;
+			vconn->slots[i]  = (uint32_t *) ((vconn->rbuf) +
+						(uintptr_t)(((vconn->mss + 4) * (i + 1)) - 4));
+		}
+		vconn->rmr = ibv_reg_mr(vep->pd, vconn->rbuf, len,
+				IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+		if (!vconn->rmr)
+			goto out;
+		//vconn->avail = (1 << vconn->num_slots) - 1;
+
+		len = 12; /* magic number => uint64_t + uint32_t */
+		addr = verbs_htonll((uintptr_t)vconn->rmr->addr);
+		memcpy(tx->buffer, &addr, sizeof(addr));
+		rkey = htonl(vconn->rmr->rkey);
+		memcpy(tx->buffer + (uintptr_t)sizeof(addr), &rkey, sizeof(rkey));
+	}
+
+
 	/* if application has a conn request payload, send it */
 	if (cr && cr->len) {
-		memcpy(tx->buffer, cr->ptr, cr->len);
-		len = cr->len;
+		memcpy(tx->buffer + (uintptr_t) len, cr->ptr, cr->len);
+		len += cr->len;
 	}
 
 	header = VERBS_MSG_CONN_PAYLOAD;
 	header |= (conn->connection.attribute & 0xF) << 4;	/* magic number */
+	if (need_rdma)
+		header |= (1 << 8);	/* magic number */
 	if (cr && cr->len)
-		header |= (cr->len & 0xFFF) << 8;	/* magic number */
+		header |= (cr->len & 0xFFF) << 9;	/* magic number */
 
 	ret = verbs_post_send(conn, (uintptr_t) tx, tx->buffer, len, header);
 
@@ -1846,6 +2270,8 @@ verbs_handle_conn_payload(cci__ep_t *ep, struct ibv_wc wc)
 	verbs_conn_t	*vc		= NULL;
 	verbs_ep_t	*vep		= ep->priv;
 	verbs_rx_t	*rx		= NULL;
+	int		need_rdma	= 0;
+	void		*ptr		= NULL;
 
 	CCI_ENTER;
 
@@ -1870,8 +2296,10 @@ verbs_handle_conn_payload(cci__ep_t *ep, struct ibv_wc wc)
 
 	header = ntohl(wc.imm_data);
 	conn->connection.attribute = (header >> 4) & 0xF;
-	len = (header >> 8) & 0xFFF;
-	if (len != wc.byte_len)
+	need_rdma = (header >> 8) & 0x1;
+	len = (header >> 9) & 0xFFF;
+	if (((len != wc.byte_len) && !need_rdma) ||
+		(need_rdma && (len != (wc.byte_len - 12))))
 		debug(CCI_DB_WARN, "%s: len %u != wc.byte_len %u",
 			__func__, len, wc.byte_len);
 
@@ -1879,9 +2307,20 @@ verbs_handle_conn_payload(cci__ep_t *ep, struct ibv_wc wc)
 	rx->evt.conn = conn;
 	rx->evt.event.type = CCI_EVENT_CONNECT_REQUEST;
 	rx->evt.event.request.attribute = conn->connection.attribute;
+	ptr = rx->rx_pool->buf + rx->offset;
+	if (need_rdma) {
+		len -= 12;	/* magic number => uint64_t + uint32_t */
+		ptr = ptr + (uintptr_t) 12;
+		vconn->num_slots = VERBS_CONN_RMSG_DEPTH; /* indicate peer wants RDMA */
+
+		vconn->raddr = *((uint64_t*)(rx->rx_pool->buf + rx->offset));
+		vconn->raddr = verbs_ntohll(vconn->raddr);
+		vconn->rkey = *((uint32_t*)(rx->rx_pool->buf + rx->offset + 8));
+		vconn->rkey = ntohl(vconn->rkey);
+	}
 	*((uint32_t *) &rx->evt.event.request.data_len) = len;
 	if (len)
-		*((void **) &rx->evt.event.request.data_ptr) = vep->rx_buf + rx->offset;
+		*((void **) &rx->evt.event.request.data_ptr) = ptr;
 	else
 		*((void **) &rx->evt.event.request.data_ptr) = NULL;
 
@@ -1930,9 +2369,29 @@ verbs_handle_conn_reply(cci__ep_t *ep, struct ibv_wc wc)
 	rx = (verbs_rx_t *) (uintptr_t) wc.wr_id;
 	rx->evt.event.type = (header >> 4) & 0xF;	/* magic number */
 	if (rx->evt.event.type == CCI_EVENT_CONNECT_ACCEPTED) {
+		int use_rdma = (header >> 8) & 0x1;
+		struct ibv_qp_attr attr;
+		struct ibv_qp_init_attr init;
+
+		vconn->state = VERBS_CONN_ESTABLISHED;
 		rx->evt.event.accepted.context = vconn->conn_req ?
 			vconn->conn_req->context : NULL;
 		rx->evt.event.accepted.connection = &conn->connection;
+		if (vconn->num_slots) {
+			if (use_rdma) {
+				vconn->raddr = *((uint64_t*)(rx->rx_pool->buf + rx->offset));
+				vconn->raddr = verbs_ntohll(vconn->raddr);
+				vconn->rkey = *((uint32_t*)(rx->rx_pool->buf + rx->offset + 8));
+				vconn->rkey = ntohl(vconn->rkey);
+			} else {
+				/* TODO clean up and use Send/Recv path for sends */
+			}
+		}
+
+		ret = ibv_query_qp(vconn->id->qp, &attr, IBV_QP_CAP, &init);
+		if (!ret)
+			vconn->inline_size = init.cap.max_inline_data;
+
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_INSERT_TAIL(&vep->conns, vconn, entry);
 		pthread_mutex_unlock(&ep->lock);
@@ -1940,6 +2399,7 @@ verbs_handle_conn_reply(cci__ep_t *ep, struct ibv_wc wc)
 		rx->evt.event.rejected.context = vconn->conn_req ?
 			vconn->conn_req->context : NULL;
 		rx->evt.conn = conn;
+		/* the rejected conn is cleaned up after return event */
 	} else {
 		debug(CCI_DB_WARN, "%s: invalid reply %u", __func__, rx->evt.event.type);
 	}
@@ -1978,13 +2438,56 @@ verbs_qp_num_to_conn(cci__ep_t *ep, uint32_t qp_num)
 }
 
 static int
+verbs_poll_rdma_msgs(verbs_conn_t *vconn)
+{
+	int		ret	= CCI_EAGAIN;
+	int		i	= 0;
+	cci__conn_t	*conn	= vconn->conn;
+	cci_endpoint_t	*endpoint = conn->connection.endpoint;
+	cci__ep_t	*ep	= container_of(endpoint, cci__ep_t, endpoint);
+	void		*ptr	= NULL;
+
+	for (i = 0; i < vconn->num_slots; i++) {
+		if (*(vconn->slots[i])) {
+			uint32_t header = ntohl(*vconn->slots[i]);
+			verbs_rx_t	*rx	= &vconn->rxs[i];
+			uint32_t	len	= (header >> 5) & 0xFFFF;
+			uint32_t	pad	= len % 8 == 0 ?
+						  0 : 8 - (len % 8);
+
+			debug(CCI_DB_MSG, "%s: recv'd 0x%x len %u slot %d", __func__, header, len, i);
+
+			//ptr = vconn->rbuf + (uintptr_t)(((i + 1) * (vconn->mss + 4)) - 4);
+			ptr = (void *) vconn->slots[i];
+			ptr -= (len + pad);
+			*vconn->slots[i] = 0;
+
+			*((uint32_t *) &rx->evt.event.recv.len) = len;
+			if (rx->evt.event.recv.len)
+				*((void **) &rx->evt.event.request.data_ptr) = ptr;
+			else
+				*((void **) &rx->evt.event.request.data_ptr) = NULL;
+
+			pthread_mutex_lock(&ep->lock);
+			TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
+			pthread_mutex_unlock(&ep->lock);
+			return CCI_SUCCESS;
+		}
+	}
+
+	return ret;
+}
+
+static int
 verbs_handle_msg(cci__ep_t *ep, struct ibv_wc wc)
 {
 	int		ret		= CCI_SUCCESS;
+	uint32_t	header		= ntohl(wc.imm_data);
 	cci__conn_t	*conn		= NULL;
 	verbs_conn_t	*vconn		= NULL;
-	verbs_ep_t	*vep		= ep->priv;
 	verbs_rx_t	*rx		= NULL;
+	int		rdma_msg	= (header >> 4) & 0x1;
+	void		*ptr		= NULL;
 
 	CCI_ENTER;
 
@@ -1995,14 +2498,25 @@ verbs_handle_msg(cci__ep_t *ep, struct ibv_wc wc)
 			__func__, wc.qp_num);
 		goto out;
 	}
+	conn = vconn->conn;
 
-	rx = (verbs_rx_t *) (uintptr_t) wc.wr_id;
+	if (rdma_msg) {
+		int index = (header >> 5) & 0xFFFF;
+
+		index = ffs(index - 1);
+		rx = &vconn->rxs[index];
+		ptr = vconn->rbuf + (uintptr_t)(index * sizeof(*rx));
+	} else {
+		rx = (verbs_rx_t *) (uintptr_t) wc.wr_id;
+		ptr = rx->rx_pool->buf + rx->offset;
+	}
+
 	rx->evt.conn = conn;
 	rx->evt.event.type = CCI_EVENT_RECV;
 	rx->evt.event.recv.connection = &conn->connection;
 	*((uint32_t *) &rx->evt.event.recv.len) = wc.byte_len;
 	if (rx->evt.event.recv.len)
-		*((void **) &rx->evt.event.request.data_ptr) = vep->rx_buf + rx->offset;
+		*((void **) &rx->evt.event.request.data_ptr) = ptr;
 	else
 		*((void **) &rx->evt.event.request.data_ptr) = NULL;
 
@@ -2011,6 +2525,34 @@ verbs_handle_msg(cci__ep_t *ep, struct ibv_wc wc)
 	pthread_mutex_unlock(&ep->lock);
 out:
 	CCI_EXIT;
+	return ret;
+}
+
+static int
+verbs_handle_rdma_msg_ack(cci__ep_t *ep, struct ibv_wc wc)
+{
+	int		ret		= CCI_SUCCESS;
+	int		i		= 0;
+	int		index		= 0;
+	uint32_t	header		= ntohl(wc.imm_data);
+	verbs_conn_t	*vconn		= NULL;
+
+	/* find the conn for this message */
+	vconn = verbs_qp_num_to_conn(ep, wc.qp_num);
+	if (!vconn) {
+		debug(CCI_DB_WARN, "%s: no conn found for message from qp_num %u",
+			__func__, wc.qp_num);
+		goto out;
+	}
+
+	index = (header >> 5) & 0xFFFF;
+	i = (1 < index);
+
+	//pthread_mutex_lock(&ep->lock);
+	//vconn->avail |= index;
+	//pthread_mutex_unlock(&ep->lock);
+
+out:
 	return ret;
 }
 
@@ -2051,7 +2593,7 @@ verbs_handle_rma_remote_request(cci__ep_t *ep, struct ibv_wc wc)
 	conn = vconn->conn;
 
 	/* find the RMA handle */
-	memcpy(&request, vep->rx_buf + rx->offset, sizeof(request));
+	memcpy(&request, rx->rx_pool->buf + rx->offset, sizeof(request));
 	request = verbs_ntohll(request);
 
 	pthread_mutex_lock(&ep->lock);
@@ -2121,7 +2663,7 @@ verbs_handle_rma_remote_reply(cci__ep_t *ep, struct ibv_wc wc)
 			goto out;
 		}
 
-		memcpy(&remote->info, vep->rx_buf + rx->offset, sizeof(remote->info));
+		memcpy(&remote->info, rx->rx_pool->buf + rx->offset, sizeof(remote->info));
 		remote->info.remote_handle = verbs_ntohll(remote->info.remote_handle);
 		remote->info.remote_addr = verbs_ntohll(remote->info.remote_addr);
 		remote->info.rkey = ntohl(remote->info.rkey);
@@ -2187,6 +2729,9 @@ verbs_handle_recv(cci__ep_t *ep, struct ibv_wc wc)
 	case VERBS_MSG_RMA_REMOTE_REPLY:
 		ret = verbs_handle_rma_remote_reply(ep, wc);
 		break;
+	case VERBS_MSG_RDMA_MSG_ACK:
+		ret = verbs_handle_rdma_msg_ack(ep, wc);
+		break;
 	default:
 		debug(CCI_DB_INFO, "%s: ignoring %s msg",
 			__func__, verbs_msg_type_str(type));
@@ -2196,6 +2741,50 @@ verbs_handle_recv(cci__ep_t *ep, struct ibv_wc wc)
 	CCI_EXIT;
 	return ret;
 }
+
+#if 0
+static int
+verbs_handle_rma_recv(cci__ep_t *ep, struct ibv_wc wc)
+{
+	int			ret	= CCI_SUCCESS;
+	uint32_t		header	= 0;
+	verbs_msg_type_t	type	= 0;
+	verbs_conn_t		*vconn	= NULL;
+	verbs_rx_t		*rx	= NULL;
+	int			index	= (header >> 5) & 0xFFFF;
+
+	CCI_ENTER;
+
+	header = ntohl(wc.imm_data);
+	debug(CCI_DB_INFO, "recv'd RDMA MSG header 0x%x", header);
+	type = header & 0xF; /* magic number */
+
+	if (type != VERBS_MSG_SEND) {
+		debug(CCI_DB_WARN, "ignoring bad RDMA MSG recv 0x%u", header);
+		goto out;
+	}
+
+	/* find the conn for this message */
+	vconn = verbs_qp_num_to_conn(ep, wc.qp_num);
+	if (!vconn) {
+		debug(CCI_DB_WARN, "%s: no conn found for message from qp_num %u",
+			__func__, wc.qp_num);
+		goto out;
+	}
+
+	rx = &vconn->rxs[index];
+	*((uint32_t *) &rx->evt.event.recv.len) = wc.byte_len;
+	if (rx->evt.event.recv.len)
+		*((void **) &rx->evt.event.request.data_ptr) =
+			vconn->rbuf + (uintptr_t)(index * sizeof(*rx));
+	else
+		*((void **) &rx->evt.event.request.data_ptr) = NULL;
+
+out:
+	CCI_EXIT;
+	return ret;
+}
+#endif
 
 static int
 verbs_complete_send_msg(cci__ep_t *ep, struct ibv_wc wc)
@@ -2362,6 +2951,18 @@ verbs_get_cq_event(cci__ep_t *ep)
 
 	CCI_ENTER;
 
+	{
+		verbs_conn_t	*vconn	= NULL;
+
+		TAILQ_FOREACH(vconn, &vep->conns, entry) {
+			if (vconn->raddr) {
+				ret = verbs_poll_rdma_msgs(vconn);
+				if (ret == CCI_SUCCESS)
+					return ret;
+			}
+		}
+	}
+
 	memset(wc, 0, sizeof(wc)); /* silence valgrind */
 
 	ret = ibv_poll_cq(vep->cq, VERBS_WC_CNT, wc);
@@ -2387,6 +2988,14 @@ verbs_get_cq_event(cci__ep_t *ep)
 				ret = verbs_handle_send_completion(ep, wc[i]);
 				break;
 			case IBV_WC_RDMA_WRITE:
+			{
+				verbs_rma_op_t	*rma_op	=
+					(verbs_rma_op_t *)(uintptr_t) wc[i].wr_id;
+				if (rma_op->msg_type != VERBS_MSG_RMA) {
+					ret = verbs_handle_send_completion(ep, wc[i]);
+					break;
+				}
+			}
 			case IBV_WC_RDMA_READ:
 				ret = verbs_handle_rma_completion(ep, wc[i]);
 				break;
@@ -2526,6 +3135,7 @@ verbs_return_event(cci_event_t *event)
 		cci__conn_t	*conn	= evt->conn;
 		verbs_conn_t	*vconn	= conn->priv;
 
+		/* TODO if RDMA MSGs requested, clean up as well */
 		rdma_disconnect(vconn->id);
 		rdma_destroy_ep(vconn->id);
 		free(vconn);
@@ -2533,7 +3143,6 @@ verbs_return_event(cci_event_t *event)
 	}
 	/* fall through */
 	case CCI_EVENT_CONNECT_ACCEPTED:
-	case CCI_EVENT_RECV:
 	{
 		cci__evt_t	*evt	= container_of(event, cci__evt_t, event);
 		cci__ep_t	*ep	= evt->ep;
@@ -2543,6 +3152,28 @@ verbs_return_event(cci_event_t *event)
 		if (ret) {
 			ret = errno;
 			debug(CCI_DB_MSG, "%s: post_rx() returned %s", __func__, strerror(ret));
+		}
+	}
+		break;
+	case CCI_EVENT_RECV:
+	{
+		cci__evt_t	*evt	= container_of(event, cci__evt_t, event);
+		cci__ep_t	*ep	= evt->ep;
+		verbs_rx_t	*rx	= container_of(evt, verbs_rx_t, evt);
+
+		if (rx->rx_pool) {
+			ret = verbs_post_rx(ep, rx);
+			if (ret) {
+				ret = errno;
+				debug(CCI_DB_MSG, "%s: post_rx() returned %s", __func__, strerror(ret));
+			}
+#if 0
+		} else if (rx->evt.conn) {
+			uint32_t header = VERBS_MSG_RDMA_MSG_ACK;
+			//header |= (1 << 4);
+			header |= ((1 << rx->offset) << 5);
+			verbs_post_send(rx->evt.conn, 0, NULL, 0, header);
+#endif
 		}
 	}
 		break;
@@ -2590,8 +3221,10 @@ verbs_send_common(cci_connection_t *connection, struct iovec *iov, uint32_t iovc
 	cci__conn_t	*conn		= NULL;
 	cci__ep_t	*ep		= NULL;
 	verbs_ep_t	*vep		= NULL;
+	verbs_conn_t	*vconn		= NULL;
 	verbs_tx_t	*tx		= NULL;
 	uint32_t	header		= VERBS_MSG_SEND;
+	void		*ptr		= NULL;
 
 	CCI_ENTER;
 
@@ -2613,6 +3246,7 @@ verbs_send_common(cci_connection_t *connection, struct iovec *iov, uint32_t iovc
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 	vep = ep->priv;
 	conn = container_of(connection, cci__conn_t, connection );
+	vconn = conn->priv;
 
 	is_reliable = cci_conn_is_reliable(conn);
 
@@ -2637,18 +3271,39 @@ verbs_send_common(cci_connection_t *connection, struct iovec *iov, uint32_t iovc
 	tx->evt.event.send.context = context;
 	tx->evt.event.send.status = CCI_SUCCESS; /* for now */
 
+	if (vconn->raddr && iovcnt < 2) {
+		pthread_mutex_lock(&ep->lock);
+#if 1
+		header |= (1 << 4); /* set RDMA bit */
+#else
+		if (vconn->avail) {
+			i = ffs(vconn->avail);
+			i--; /* convert to index */
+			vconn->avail ^= (1 << i);
+			header |= (1 << 4); /* set RDMA bit */
+			header |= (1 << (5 + i)); /* add index */
+		}
+#endif
+		pthread_mutex_unlock(&ep->lock);
+	}
+
 	/* always copy into tx's buffer */
 	if (len) {
-		uint32_t	offset	= 0;
+		if (len > vconn->inline_size || iovcnt != 1) {
+			uint32_t	offset	= 0;
 
-		for (i = 0; i < iovcnt; i++) {
-			memcpy(tx->buffer + offset, iov[i].iov_base, iov[i].iov_len);
-			offset += iov[i].iov_len;
+			ptr = tx->buffer;
+			for (i = 0; i < iovcnt; i++) {
+				memcpy(ptr + offset, iov[i].iov_base, iov[i].iov_len);
+				offset += iov[i].iov_len;
+			}
+		} else if (iovcnt == 1) {
+			ptr = iov[0].iov_base;
 		}
 	}
 	tx->len = len;
 
-	ret = verbs_post_send(conn, (uintptr_t) tx, tx->buffer, tx->len, header);
+	ret = verbs_post_send(conn, (uintptr_t) tx, ptr, tx->len, header);
 	if (ret) {
 		debug(CCI_DB_CONN, "%s: unable to send", __func__);
 		goto out;
@@ -2903,6 +3558,8 @@ verbs_post_rma(verbs_rma_op_t *rma_op)
 	wr.num_sge = 1;
 	wr.opcode = rma_op->flags & CCI_FLAG_WRITE ? IBV_WR_RDMA_WRITE : IBV_WR_RDMA_READ;
 	wr.send_flags = IBV_SEND_SIGNALED;
+	if (rma_op->len && (rma_op->len <= VERBS_INLINE_BYTES))
+		wr.send_flags |= IBV_SEND_INLINE;
 	if (rma_op->flags & CCI_FLAG_FENCE)
 		wr.send_flags |= IBV_SEND_FENCE;
 	wr.wr.rdma.remote_addr = rma_op->remote_addr;
@@ -2952,6 +3609,7 @@ verbs_rma(cci_connection_t *connection,
 		return CCI_ENOMEM;
 	}
 
+	rma_op->msg_type = VERBS_MSG_RMA;
 	rma_op->local_handle = local_handle;
 	rma_op->local_offset = local_offset;
 	rma_op->remote_handle = remote_handle;
