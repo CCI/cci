@@ -18,17 +18,16 @@
 
 #include "core_sock.h"
 
-
-int cci_core_sock_post_load(cci_plugin_t *me)
+int cci_core_sock_post_load(cci_plugin_t * me)
 {
-    assert(me);
-    debug( CCI_DB_DRVR, "In sock post_load");
-    return CCI_SUCCESS;
+	assert(me);
+	debug(CCI_DB_DRVR, "In sock post_load");
+	return CCI_SUCCESS;
 }
 
-int cci_core_sock_pre_unload(cci_plugin_t *me)
+int cci_core_sock_pre_unload(cci_plugin_t * me)
 {
-    assert(me);
-    debug( CCI_DB_DRVR, "In sock pre_unload");
-    return CCI_SUCCESS;
+	assert(me);
+	debug(CCI_DB_DRVR, "In sock pre_unload");
+	return CCI_SUCCESS;
 }

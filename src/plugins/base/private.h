@@ -13,9 +13,7 @@
 #include "cci.h"
 #include "ltdl.h"
 
-
 BEGIN_C_DECLS
-
 /* From init.c */
 extern int cci_plugins_initialized;
 extern lt_dladvise cci_plugins_dladvise;
@@ -24,5 +22,4 @@ extern lt_dladvise cci_plugins_dladvise;
 extern char **cci_plugins_filename_cache;
 
 END_C_DECLS
-
 #endif /* CCI_PLUGINS_BASE_PRIVATE_H */

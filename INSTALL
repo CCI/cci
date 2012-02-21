@@ -1,0 +1,73 @@
+= Common Communication Infrastructure Installation Guide =
+
+== From a tarball (.tar.gz) ==
+
+To install CCI from a tarball, simply execute the following commands, where
+<version> is the CCI version you want to install:
+- untar the file by running "tar xzf cci-<version>.tar.gz"
+- execute "cd cci-<version>"
+- execute "./autogen.pl"
+- execute "./configure", for the list of available options, please executei
+  "./configure --help"
+- execute "make && make install"
+
+From here CCI is installed on your system
+
+== Configuration & Testing ==
+
+The current version of CCI requires a configuration file. The configuration
+file specifies the network interface to use, as well as CCI parameters.
+
+The configuration file, based on a INI format, follows the following pattern:
+
+[<config_name>]
+driver = <cci_driver>
+ip = <ip_to_use>
+default = <0 or 1>
+
+Where:
+- <cci_driver> is the driver to use. The available drivers are: sock.
+- <ip> is the IP associated to the network interface to use.
+- default specifies if the configuration is the default one (1) or not (0).
+
+For instance, the configuration file when using CCI over UDP and the loopback
+interface will look like the following:
+
+[lo]
+driver = sock
+ip = 127.0.0.1
+default = 1
+
+Once the configuration file in place, the environment must be updated to
+specify its path:
+export CCI_CONFIG=<path_to_my_cci_config_file>
+
+It is then possible to run a simple pingpong to test the installation:
+- execute "cd src/test"
+- execute "make pingpong"
+- launch the server side of the pingpong "./pingpong -s", the server will
+  it URI (e.g., "ip://127.0.0.1:60160"), which is need to start the client
+- launch the client side of the pingpong with a reliable ordered connection and
+  no parameters for performance evaluation:
+    "./pingpong -h <server_uri> -i 1 -W 1 -c ro"
+  The client should give you an output similar to:
+
+Using RO connection
+Opened ip://127.0.0.1:65381
+Bytes   Latency (one-way)   Throughput
+       0       39.50 us         0.00 MB/s
+       1      537.50 us         0.00 MB/s
+       2       30.00 us         0.07 MB/s
+       4       30.00 us         0.13 MB/s
+       8     4131.50 us         0.00 MB/s
+      16     1057.00 us         0.02 MB/s
+      32       30.50 us         1.05 MB/s
+      64      537.50 us         0.12 MB/s
+     128       36.50 us         3.51 MB/s
+     256     2028.00 us         0.13 MB/s
+     512      542.00 us         0.94 MB/s
+    1024     1044.00 us         0.98 MB/s
+    2048       33.50 us        61.13 MB/s
+    4096       36.50 us       112.22 MB/s
+    8192       42.00 us       195.05 MB/s
+client done

@@ -16,9 +16,7 @@
 #include "cci.h"
 #include "plugins/core/core.h"
 
-
-int cci_get_event(cci_endpoint_t *endpoint,
-                  cci_event_t ** const event)
+int cci_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
 {
-    return cci_core->get_event(endpoint, event);
+	return cci_core->get_event(endpoint, event);
 }

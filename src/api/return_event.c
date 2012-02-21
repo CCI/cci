@@ -16,8 +16,7 @@
 #include "cci.h"
 #include "plugins/core/core.h"
 
-
-int cci_return_event(cci_event_t *event)
+int cci_return_event(cci_event_t * event)
 {
-    return cci_core->return_event(event);
+	return cci_core->return_event(event);
 }

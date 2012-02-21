@@ -38,7 +38,6 @@
 #endif
 
 BEGIN_C_DECLS
-
  /**
   * Append a string (by value) to an new or existing NULL-terminated
   * argv array.
@@ -68,7 +67,9 @@ BEGIN_C_DECLS
   * value into the argv array; there is no need to keep the original
   * string (i.e., the arg parameter) after invoking this function.
   */
-CCI_DECLSPEC int cci_argv_append(int *argc, char ***argv, const char *arg) __cci_attribute_nonnull__(1) __cci_attribute_nonnull__(3);
+CCI_DECLSPEC int cci_argv_append(int *argc, char ***argv,
+				 const char *arg) __cci_attribute_nonnull__(1)
+__cci_attribute_nonnull__(3);
 
  /**
   * Append to an argv-style array, but ignore the size of the array.
@@ -102,7 +103,8 @@ CCI_DECLSPEC int cci_argv_append_nosize(char ***argv, const char *arg);
  * except that it only appends the provided argument if it does not already
  * exist in the provided array, or overwrites it if it is.
  */
-CCI_DECLSPEC int cci_argv_append_unique_nosize(char ***argv, const char *arg, int overwrite);
+CCI_DECLSPEC int cci_argv_append_unique_nosize(char ***argv, const char *arg,
+					       int overwrite);
 
 /**
    * Free a NULL-terminated argv array.
@@ -135,7 +137,7 @@ CCI_DECLSPEC void cci_argv_free(char **argv);
   * without invalidating the output argv).
   */
 CCI_DECLSPEC char **cci_argv_split(const char *src_string, int delimiter)
-    __cci_attribute_malloc__ __cci_attribute_warn_unused_result__;
+__cci_attribute_malloc__ __cci_attribute_warn_unused_result__;
 
  /**
   * Split a string into a NULL-terminated argv array. Include empty
@@ -152,8 +154,9 @@ CCI_DECLSPEC char **cci_argv_split(const char *src_string, int delimiter)
   * argument (i.e., it can be freed after calling this function
   * without invalidating the output argv).
   */
-    CCI_DECLSPEC char **cci_argv_split_with_empty(const char *src_string, int delimiter)
-    __cci_attribute_malloc__ __cci_attribute_warn_unused_result__;
+CCI_DECLSPEC char **cci_argv_split_with_empty(const char *src_string,
+					      int delimiter)
+__cci_attribute_malloc__ __cci_attribute_warn_unused_result__;
 
  /**
   * Return the length of a NULL-terminated argv array.
@@ -165,7 +168,7 @@ CCI_DECLSPEC char **cci_argv_split(const char *src_string, int delimiter)
   *
   * The argv array must be NULL-terminated.
   */
-    CCI_DECLSPEC int cci_argv_count(char **argv);
+CCI_DECLSPEC int cci_argv_count(char **argv);
 
  /**
   * Join all the elements of an argv array into a single
@@ -183,11 +186,12 @@ CCI_DECLSPEC char **cci_argv_split(const char *src_string, int delimiter)
   *
   * It is the callers responsibility to free the returned string.
   */
-    CCI_DECLSPEC char *cci_argv_join(char **argv, int delimiter)
-    __cci_attribute_malloc__ __cci_attribute_warn_unused_result__;
+CCI_DECLSPEC char *cci_argv_join(char **argv, int delimiter)
+__cci_attribute_malloc__ __cci_attribute_warn_unused_result__;
 
-    CCI_DECLSPEC char *cci_argv_join_range(char **argv, size_t start, size_t end, int delimiter)
-    __cci_attribute_malloc__ __cci_attribute_warn_unused_result__;
+CCI_DECLSPEC char *cci_argv_join_range(char **argv, size_t start, size_t end,
+				       int delimiter)
+__cci_attribute_malloc__ __cci_attribute_warn_unused_result__;
 
  /**
   * Return the number of bytes consumed by an argv array.
@@ -198,7 +202,7 @@ CCI_DECLSPEC char **cci_argv_split(const char *src_string, int delimiter)
   * array.  This includes the number of bytes used by each of the
   * strings as well as the pointers used in the argv array.
   */
-    CCI_DECLSPEC size_t cci_argv_len(char **argv);
+CCI_DECLSPEC size_t cci_argv_len(char **argv);
 
  /**
   * Copy a NULL-terminated argv array.
@@ -212,8 +216,8 @@ CCI_DECLSPEC char **cci_argv_split(const char *src_string, int delimiter)
   * Specifically, the output argv will be an array of the same length
   * as the input argv, and strcmp(argv_in[i], argv_out[i]) will be 0.
   */
-    CCI_DECLSPEC char **cci_argv_copy(char **argv)
-    __cci_attribute_malloc__ __cci_attribute_warn_unused_result__;
+CCI_DECLSPEC char **cci_argv_copy(char **argv)
+__cci_attribute_malloc__ __cci_attribute_warn_unused_result__;
 
  /**
   * Delete one or more tokens from the middle of an argv.
@@ -240,8 +244,8 @@ CCI_DECLSPEC char **cci_argv_split(const char *src_string, int delimiter)
   * free()ed (it is assumed that the argv "owns" the memory that
   * the pointer points to).
   */
-    CCI_DECLSPEC int cci_argv_delete(int *argc, char ***argv,
-				      int start, int num_to_delete);
+CCI_DECLSPEC int cci_argv_delete(int *argc, char ***argv,
+				 int start, int num_to_delete);
 
  /**
   * Insert one argv array into the middle of another
@@ -264,7 +268,7 @@ CCI_DECLSPEC char **cci_argv_split(const char *src_string, int delimiter)
   * source points to are strdup'ed into the new locations in
   * target).
   */
-    CCI_DECLSPEC int cci_argv_insert(char ***target, int start, char **source);
+CCI_DECLSPEC int cci_argv_insert(char ***target, int start, char **source);
 
 END_C_DECLS
-#endif				       /* CCI_ARGV_H */
+#endif /* CCI_ARGV_H */

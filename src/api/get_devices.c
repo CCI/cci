@@ -16,11 +16,10 @@
 #include "cci.h"
 #include "plugins/core/core.h"
 
-
-int cci_get_devices(cci_device_t const *** const devices)
+int cci_get_devices(cci_device_t const ***const devices)
 {
-    if (NULL == devices)
-        return CCI_EINVAL;
+	if (NULL == devices)
+		return CCI_EINVAL;
 
-    return cci_core->get_devices(devices);
+	return cci_core->get_devices(devices);
 }

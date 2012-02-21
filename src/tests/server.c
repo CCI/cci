@@ -90,7 +90,7 @@ int main(int argc, char *argv[])
 			/* inspect conn_req_t and decide to accept or reject */
 			if (accept) {
 				/* associate this connect request with this endpoint */
-				cci_accept(event, &connection);
+				cci_accept(event, NULL, &connection);
 
 				/* add new connection to connection list, etc. */
 			} else {

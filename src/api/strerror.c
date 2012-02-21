@@ -16,71 +16,70 @@
 #include "cci.h"
 #include "plugins/core/core.h"
 
-
 const char *cci_strerror(enum cci_status status)
 {
-    switch (status) {
-    case CCI_SUCCESS:
-        return "CCI_SUCCESS";
+	switch (status) {
+	case CCI_SUCCESS:
+		return "CCI_SUCCESS";
 
-    case CCI_ERROR:
-        return "CCI_ERROR";
+	case CCI_ERROR:
+		return "CCI_ERROR";
 
-    case CCI_ERR_DISCONNECTED:
-        return "CCI_ERR_DISCONNECTED";
+	case CCI_ERR_DISCONNECTED:
+		return "CCI_ERR_DISCONNECTED";
 
-    case CCI_ERR_RNR:
-        return "CCI_ERR_RNR";
+	case CCI_ERR_RNR:
+		return "CCI_ERR_RNR";
 
-    case CCI_ERR_DEVICE_DEAD:
-        return "CCI_ERR_DEVICE_DEAD";
+	case CCI_ERR_DEVICE_DEAD:
+		return "CCI_ERR_DEVICE_DEAD";
 
-    case CCI_ERR_RMA_HANDLE:
-        return "CCI_ERR_RMA_HANDLE";
+	case CCI_ERR_RMA_HANDLE:
+		return "CCI_ERR_RMA_HANDLE";
 
-    case CCI_ERR_RMA_OP:
-        return "CCI_ERR_RMA_OP";
+	case CCI_ERR_RMA_OP:
+		return "CCI_ERR_RMA_OP";
 
-    case CCI_ERR_NOT_IMPLEMENTED:
-        return "CCI_ERR_NOT_IMPLEMENTED";
+	case CCI_ERR_NOT_IMPLEMENTED:
+		return "CCI_ERR_NOT_IMPLEMENTED";
 
-    case CCI_ERR_NOT_FOUND:
-        return "CCI_ERR_NOT_FOUND";
+	case CCI_ERR_NOT_FOUND:
+		return "CCI_ERR_NOT_FOUND";
 
-    case CCI_EINVAL:
-        return "CCI_EINVAL";
+	case CCI_EINVAL:
+		return "CCI_EINVAL";
 
-    case CCI_ETIMEDOUT:
-        return "CCI_ETIMEDOUT";
+	case CCI_ETIMEDOUT:
+		return "CCI_ETIMEDOUT";
 
-    case CCI_ENOMEM:
-        return "CCI_ENOMEM";
+	case CCI_ENOMEM:
+		return "CCI_ENOMEM";
 
-    case CCI_ENODEV:
-        return "CCI_ENODEV";
+	case CCI_ENODEV:
+		return "CCI_ENODEV";
 
-    case CCI_EBUSY:
-        return "CCI_EBUSY";
+	case CCI_EBUSY:
+		return "CCI_EBUSY";
 
-    case CCI_ERANGE:
-        return "CCI_ERANGE";
+	case CCI_ERANGE:
+		return "CCI_ERANGE";
 
-    case CCI_EAGAIN:
-        return "CCI_EAGAIN";
+	case CCI_EAGAIN:
+		return "CCI_EAGAIN";
 
-    case CCI_ENOBUFS:
-        return "CCI_ENOBUFS";
+	case CCI_ENOBUFS:
+		return "CCI_ENOBUFS";
 
-    case CCI_EMSGSIZE:
-        return "CCI_EMSGSIZE";
+	case CCI_EMSGSIZE:
+		return "CCI_EMSGSIZE";
 
-    case CCI_ENOMSG:
-        return "CCI_ENOMSG";
+	case CCI_ENOMSG:
+		return "CCI_ENOMSG";
 
-    case CCI_EADDRNOTAVAIL:
-        return "CCI_EADDRNOTAVAIL";
+	case CCI_EADDRNOTAVAIL:
+		return "CCI_EADDRNOTAVAIL";
 
-    default:
-        return cci_core->strerror(status);
-    }
+	default:
+		return cci_core->strerror(status);
+	}
 }

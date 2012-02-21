@@ -104,10 +104,10 @@
 #ifdef QUEUE_MACRO_DEBUG
 /* Store the last 2 places the queue element or head was altered */
 struct qm_trace {
-        char * lastfile;
-        int lastline;
-        char * prevfile;
-        int prevline;
+	char *lastfile;
+	int lastline;
+	char *prevfile;
+	int prevline;
 };
 
 #define TRACEBUF        struct qm_trace trace;
@@ -134,7 +134,7 @@ struct qm_trace {
 #define QMD_SAVELINK(name, link)
 #define TRACEBUF
 #define TRASHIT(x)
-#endif  /* QUEUE_MACRO_DEBUG */
+#endif /* QUEUE_MACRO_DEBUG */
 
 /*
  * Singly-linked List declarations.
@@ -256,7 +256,6 @@ struct {                                                                \
            (var);                                                       \
            (var) = STAILQ_NEXT((var), field))
 
-
 #define STAILQ_FOREACH_SAFE(var, head, field, tvar)                     \
         for ((var) = STAILQ_FIRST((head));                              \
             (var) && ((tvar) = STAILQ_NEXT((var), field), 1);           \
@@ -331,7 +330,6 @@ struct {                                                                \
         if (STAILQ_EMPTY(head2))                                        \
                 (head2)->stqh_last = &STAILQ_FIRST(head2);              \
 } while (0)
-
 
 /*
  * List declarations.

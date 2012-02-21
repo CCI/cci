@@ -83,13 +83,6 @@ static void poll_events(void)
 	int ret;
 	cci_event_t *event;
 
-	LOCK;
-	if (!running) {
-		UNLOCK;
-		return;
-	}
-	UNLOCK;
-
 	ret = cci_get_event(endpoint, &event);
 	if (ret != 0) {
 		if (ret != CCI_EAGAIN) {
@@ -145,7 +138,6 @@ static void poll_events(void)
 					}
 					if (event->recv.len == 3) {
 						done = 1;
-						return;
 					}
 				}
 			}
@@ -157,7 +149,7 @@ static void poll_events(void)
 			connection = event->accepted.connection;
 		}
 		break;
-	case CCI_EVENT_CONNECT_TIMEDOUT:
+	case CCI_EVENT_CONNECT_FAILED:
 	case CCI_EVENT_CONNECT_REJECTED:
 		if (!is_server) {
 			connect_done = 1;
@@ -166,7 +158,7 @@ static void poll_events(void)
 		break;
 	case CCI_EVENT_CONNECT_REQUEST:{
 			ready = 1;
-			cci_accept(event, &connection);
+			cci_accept(event, NULL, &connection);
 
 			buffer = calloc(1, connection->max_send_size);
 			if (!buffer) {
@@ -249,7 +241,7 @@ void do_client()
 		}
 
 		LOCK;
-		while (running) {
+		while (running || send_completed < send) {
 			UNLOCK;
 			poll_events();
 			LOCK;
