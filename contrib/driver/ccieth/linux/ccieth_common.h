@@ -113,6 +113,16 @@ enum ccieth_connection_status {
 #define CCIETH_DEFERRED_MSG_ACK_DELAY (HZ/10)	/* ack after 100ms if some msgs were not acked yet */
 #define CCIETH_IMMEDIATE_MSG_ACK_NR 8	/* ack after 8 msgs not acked yet */
 
+/* seqnums are __u32 with wraparound. b is considered after a once when a<b<=a+65536.
+ * everything after 65536 is likely a very obsolete duplicate.
+ * b-a is unsigned, so we just check whether b-a<=65536
+ */
+#define CCIETH_SEQNUM_WRAPAROUND_GUARD 65536
+#define ccieth_seqnum_positive(a) ((a) <= CCIETH_SEQNUM_WRAPAROUND_GUARD)
+#define ccieth_seqnum_after(a, b) ccieth_seqnum_positive((b)-(a))
+#define ccieth_seqnum_positive_strict(a) ((a) > 0 && (a) <= CCIETH_SEQNUM_WRAPAROUND_GUARD)
+#define ccieth_seqnum_after_strict(a, b) ccieth_seqnum_positive_strict((b)-(a))
+
 struct ccieth_connection {
 	int id;			/* FIXME keep in network order too? */
 	enum ccieth_connection_status status;

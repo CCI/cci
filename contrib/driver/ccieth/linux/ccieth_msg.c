@@ -30,7 +30,7 @@ static void
 ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32 acked_bitmap)
 {
 	struct sk_buff *skb, *nskb, *old_next_resend;
-	unsigned last_acked = acked_seqnum;
+	__u32 last_acked = acked_seqnum;
 
 	if (acked_bitmap) {
 		last_acked += fls(acked_bitmap);
@@ -46,13 +46,13 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32
 		struct ccieth_endpoint_event *event;
 		struct ccieth_skb_cb *scb = CCIETH_SKB_CB(skb);
 
-		if (scb->reliable_send.seqnum > last_acked) /* FIXME: wraparound */
+		if (ccieth_seqnum_after_strict(last_acked, scb->reliable_send.seqnum))
 			/* queue is ordered by seqnum, no need to try further */
 			break;
 
-		if (scb->reliable_send.seqnum > acked_seqnum) { /* FIXME: wraparound */
+		if (ccieth_seqnum_after_strict(acked_seqnum, scb->reliable_send.seqnum)) {
 			/* handle acked bitmap */
-			unsigned offset = scb->reliable_send.seqnum - acked_seqnum -1;
+			__u32 offset = scb->reliable_send.seqnum - acked_seqnum -1;
 			if (!(acked_bitmap & (1 << offset))) {
 				skb = skb->next;
 				continue;
@@ -241,7 +241,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
 		struct ccieth_skb_cb *scb = CCIETH_SKB_CB(skb);
-		unsigned seqnum;
+		__u32 seqnum;
 
 		spin_lock_bh(&conn->send_lock);
 		seqnum = conn->send_next_seqnum++;
@@ -326,15 +326,16 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
 		/* reliable, look for obsolete, duplicates, ... */
-		unsigned relseqnum;
+		__u32 relseqnum;
 		unsigned relfull = 0;
 
 		spin_lock_bh(&conn->recv_lock);
 		dprintk("got MSG seqnum %u while we have %u+%lx\n",
 			msg_seqnum, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
-		relseqnum = msg_seqnum - conn->recv_last_full_seqnum - 1;
+		relseqnum = msg_seqnum - conn->recv_last_full_seqnum - 1; /* 0 if the next expected seqnum */
 		if (unlikely(relseqnum >= CCIETH_CONN_RECV_BITMAP_BITS)) {
-			if (relseqnum <= 65536)
+			/* not in the window of next expected seqnums */
+			if (ccieth_seqnum_positive(relseqnum))
 				/* way in advance, drop */
 				CCIETH_STAT_INC(conn, recv_tooearly);
 			else
@@ -354,6 +355,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 		if (unlikely(relseqnum > 0)) {
 			CCIETH_STAT_INC(conn, recv_misorder);
 		}
+
 		/* deliver the event now that we verified everything ... */
 		ccieth_queue_busy_event(ep, event);
 		/* ... and update connection then */
