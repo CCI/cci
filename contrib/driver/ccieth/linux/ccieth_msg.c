@@ -328,6 +328,8 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 		/* reliable, look for obsolete, duplicates, ... */
 		__u32 relseqnum;
 		unsigned relfull = 0;
+		int force_delayed_ack = 0;
+		int force_immediate_ack = 0;
 
 		spin_lock_bh(&conn->recv_lock);
 		dprintk("got MSG seqnum %u while we have %u+%lx\n",
@@ -342,18 +344,21 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 				/* old duplicate, ignore */
 				CCIETH_STAT_INC(conn, recv_duplicate);
 			ccieth_putback_free_event(ep, event);
-			conn->recv_needack_force = 1;
+			force_delayed_ack = 1;
 			goto done;
 		}
 		if (unlikely(conn->recv_next_bitmap & (1U << relseqnum))) {
 			/* recent misordered duplicate, ignore */
 			CCIETH_STAT_INC(conn, recv_duplicate);
 			ccieth_putback_free_event(ep, event);
-			conn->recv_needack_force = 1;
+			force_delayed_ack = 1;
 			goto done;
 		}
 		if (unlikely(relseqnum > 0)) {
 			CCIETH_STAT_INC(conn, recv_misorder);
+			/* force an immediate ack every once in a while when packets are out-of-order */
+			if (!(relseqnum % 8))
+				force_immediate_ack = 1;
 		}
 
 		/* deliver the event now that we verified everything ... */
@@ -375,10 +380,13 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 		conn->recv_needack_nr += relfull;
 
 done:
-		if (unlikely(conn->recv_needack_nr >= CCIETH_IMMEDIATE_MSG_ACK_NR)) {
+		if (force_immediate_ack || force_delayed_ack)
+			conn->recv_needack_force = 1;
+		if (unlikely(conn->recv_needack_nr >= CCIETH_IMMEDIATE_MSG_ACK_NR
+			     || force_immediate_ack)) {
 			/* many non acked packets, we need to ack now */
 			schedule_work(&conn->recv_needack_work);
-		} else if (relfull || conn->recv_needack_force) {
+		} else if (relfull || force_delayed_ack) {
 			/* some new non acked packets, we need to ack at some point in the future */
 			mod_timer(&conn->recv_needack_timer,
 				  jiffies + CCIETH_DEFERRED_MSG_ACK_DELAY);
