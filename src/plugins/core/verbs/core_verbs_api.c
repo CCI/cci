@@ -3603,7 +3603,7 @@ static int verbs_post_rma(verbs_rma_op_t * rma_op)
 	wr.send_flags = IBV_SEND_SIGNALED;
 	if (VERBS_INLINE_BYTES &&
         (rma_op->flags & IBV_WR_RDMA_WRITE) &&
-        (rma_op->len && (rma_op->len <= VERBS_INLINE_BYTES)))
+        (rma_op->len && (rma_op->len <= vconn->inline_size)))
 		wr.send_flags |= IBV_SEND_INLINE;
 	if (rma_op->flags & CCI_FLAG_FENCE)
 		wr.send_flags |= IBV_SEND_FENCE;
