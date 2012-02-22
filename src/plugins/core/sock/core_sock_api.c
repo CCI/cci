@@ -2261,7 +2261,7 @@ static int sock_rma_register(cci_endpoint_t * endpoint,
 static int sock_rma_deregister(uint64_t rma_handle)
 {
 	int ret = CCI_EINVAL;
-	sock_rma_handle_t *handle = (sock_rma_handle_t *) rma_handle;
+	sock_rma_handle_t *handle = (sock_rma_handle_t *) ((uintptr_t) rma_handle);
 	cci__ep_t *ep = NULL;
 	sock_ep_t *sep = NULL;
 	sock_rma_handle_t *h = NULL;
@@ -3047,7 +3047,7 @@ sock_handle_ack(sock_conn_t * sconn,
 		rma_op = tx->rma_op;
 		if (rma_op && rma_op->status == CCI_SUCCESS) {
 			sock_rma_handle_t *local =
-			    (sock_rma_handle_t *) rma_op->local_handle;
+                (sock_rma_handle_t *)((uintptr_t)rma_op->local_handle);
 			rma_op->completed++;
 
 			/* progress RMA */
