@@ -784,7 +784,7 @@ static int verbs_create_rx_pool(cci__ep_t * ep, int rx_buf_cnt)
 #if HAVE_RDMA_ADDRINFO
 void rdma_destroy_ep(struct rdma_cm_id *id)
 {
-	struct cma_id_private *id_priv;
+	//struct cma_id_private *id_priv;
 
 	if (id->qp)
 		rdma_destroy_qp(id);
@@ -1337,7 +1337,7 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 		wr.opcode = IBV_WR_SEND;
 	}
 	wr.send_flags = IBV_SEND_SIGNALED;
-	if (len <= vconn->inline_size - 4)
+	if (vconn->inline_size && (len <= vconn->inline_size - 4))
 		wr.send_flags |= IBV_SEND_INLINE;
 
 	ret = ibv_post_send(vconn->id->qp, &wr, &bad_wr);
@@ -3601,7 +3601,9 @@ static int verbs_post_rma(verbs_rma_op_t * rma_op)
 	    rma_op->
 	    flags & CCI_FLAG_WRITE ? IBV_WR_RDMA_WRITE : IBV_WR_RDMA_READ;
 	wr.send_flags = IBV_SEND_SIGNALED;
-	if (rma_op->len && (rma_op->len <= VERBS_INLINE_BYTES))
+	if (VERBS_INLINE_BYTES &&
+        (rma_op->flags & IBV_WR_RDMA_WRITE) &&
+        (rma_op->len && (rma_op->len <= VERBS_INLINE_BYTES)))
 		wr.send_flags |= IBV_SEND_INLINE;
 	if (rma_op->flags & CCI_FLAG_FENCE)
 		wr.send_flags |= IBV_SEND_FENCE;
