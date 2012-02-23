@@ -1843,8 +1843,9 @@ static int verbs_disconnect(cci_connection_t * connection)
 			ret = ibv_dereg_mr(vconn->rmr);
 			if (ret) {
 				ret = errno;
-				debug(CCI_DB_WARN, "%s: ibv_dereg_mr() returned %s",
-					__func__, strerror(ret));
+				debug(CCI_DB_WARN,
+				      "%s: ibv_dereg_mr() returned %s",
+				      __func__, strerror(ret));
 			}
 		}
 		free(vconn->rxs);
@@ -3615,9 +3616,8 @@ static int verbs_post_rma(verbs_rma_op_t * rma_op)
 	    rma_op->
 	    flags & CCI_FLAG_WRITE ? IBV_WR_RDMA_WRITE : IBV_WR_RDMA_READ;
 	wr.send_flags = IBV_SEND_SIGNALED;
-	if (VERBS_INLINE_BYTES &&
-        (rma_op->flags & IBV_WR_RDMA_WRITE) &&
-        (rma_op->len && (rma_op->len <= vconn->inline_size)))
+	if ((rma_op->flags & CCI_FLAG_WRITE)
+	    && (rma_op->len && (rma_op->len <= vconn->inline_size)))
 		wr.send_flags |= IBV_SEND_INLINE;
 	if (rma_op->flags & CCI_FLAG_FENCE)
 		wr.send_flags |= IBV_SEND_FENCE;
