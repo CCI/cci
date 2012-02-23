@@ -954,7 +954,8 @@ verbs_create_endpoint(cci_device_t * device,
 
 	vep->rdma_msg_total = VERBS_EP_RMSG_CONNS;
 	ret = verbs_create_rx_pool(ep, ep->rx_buf_cnt);
-	/* FIXME */
+	if (ret)
+		goto out;
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -1835,6 +1836,19 @@ static int verbs_disconnect(cci_connection_t * connection)
 		ret = errno;
 		debug(CCI_DB_WARN, "%s: rdma_disconnect() returned %s",
 		      __func__, strerror(ret));
+	}
+
+	if (vconn->rbuf) {
+		if (vconn->rmr) {
+			ret = ibv_dereg_mr(vconn->rmr);
+			if (ret) {
+				ret = errno;
+				debug(CCI_DB_WARN, "%s: ibv_dereg_mr() returned %s",
+					__func__, strerror(ret));
+			}
+		}
+		free(vconn->rxs);
+		free(vconn->rbuf);
 	}
 
 	rdma_destroy_ep(vconn->id);
