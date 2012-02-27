@@ -131,6 +131,8 @@ CCI_DECLSPEC int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
   CCI_EINVAL).  Error status codes that are unique to CCI are of the
   form CCI_ERR_<foo>.
 
+  These status codes may be stringified with cci_strerror().
+
   \ingroup env
 
   IF YOU ADD TO THESE ENUM CODES, ALSO EXTEND src/api/strerror.c!!
@@ -249,18 +251,6 @@ typedef enum cci_status {
 	CCI_ECONNREFUSED = ECONNREFUSED
 	    /* ...more here, inspired from errno.h... */
 } cci_status_t;
-
-/*!
-  Returns a string corresponding to a CCI status enum.
-
-  \param[in] status: A CCI status enum.
-
-  \return A string when the status is valid.
-  \return NULL if not valid.
-
-  \ingroup env
-*/
-CCI_DECLSPEC const char *cci_strerror(enum cci_status status);
 
 /* ================================================================== */
 /*                                                                    */
@@ -581,6 +571,21 @@ CCI_DECLSPEC int cci_create_endpoint(cci_device_t * device,
   \ingroup endpoints
  */
 CCI_DECLSPEC int cci_destroy_endpoint(cci_endpoint_t * endpoint);
+
+/*!
+  Returns a string corresponding to a CCI status enum.
+
+  \param[in] endpoint: The CCI endpoint that returned this status,
+                       NULL if none applicable.
+  \param[in] status:   A CCI status enum.
+
+  \return A string when the status is valid.
+  \return NULL if not valid.
+
+  \ingroup env
+*/
+CCI_DECLSPEC const char *cci_strerror(cci_endpoint_t *endpoint,
+				      enum cci_status status);
 
 /*====================================================================*/
 /*                                                                    */

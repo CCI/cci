@@ -32,7 +32,8 @@ BEGIN_C_DECLS
  */
 typedef int (*cci_init_fn_t) (uint32_t abi_ver, uint32_t flags,
 			      uint32_t * caps);
-typedef const char *(*cci_strerror_fn_t) (enum cci_status status);
+typedef const char *(*cci_strerror_fn_t) (cci_endpoint_t * endpoint,
+					  enum cci_status status);
 typedef int (*cci_get_devices_fn_t) (cci_device_t const ***devices);
 typedef int (*cci_free_devices_fn_t) (cci_device_t const **devices);
 typedef int (*cci_create_endpoint_fn_t) (cci_device_t * device,

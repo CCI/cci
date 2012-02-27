@@ -112,7 +112,7 @@ do {                                                        \
  * Local functions
  */
 static int portals_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static const char *portals_strerror(enum cci_status status);
+static const char *portals_strerror(cci_endpoint_t * endpoint, enum cci_status status);
 static int portals_get_devices(cci_device_t const ***devices);
 static int portals_free_devices(cci_device_t const **devices);
 static int portals_create_endpoint(cci_device_t * device,
@@ -288,7 +288,7 @@ static int portals_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			break;
 		default:	/* Undocumented portals error */
 			debug(CCI_DB_WARN, "NI: %s",
-			      portals_strerror((enum cci_status)iRC));
+			      portals_strerror(NULL, (enum cci_status)iRC));
 			iRC = CCI_ERROR;
 		}
 		goto out_with_init;
@@ -464,7 +464,7 @@ static int portals_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	return iRC;
 }
 
-static const char *portals_strerror(enum cci_status status)
+static const char *portals_strerror(cci_endpoint_t * endpoint, enum cci_status status)
 {
 	const char *cp;
 
@@ -2035,8 +2035,8 @@ static int portals_return_event(cci_event_t * event)
 					debug(CCI_DB_WARN,
 					      "%s: post_am_buffer() returned %s",
 					      __func__,
-					      cci_strerror((enum cci_status)
-							   iRC));
+					      cci_strerror(&ep->endpoint,
+							   (enum cci_status)iRC));
 				}
 			}
 			pthread_mutex_unlock(&ep->lock);

@@ -27,7 +27,7 @@ int main(int argc, char *argv[])
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
 	if (ret) {
 		fprintf(stderr, "cci_init() failed with %s\n",
-			cci_strerror(ret));
+			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
 
@@ -35,7 +35,7 @@ int main(int argc, char *argv[])
 	ret = cci_create_endpoint(NULL, 0, &endpoint, &ep_fd);
 	if (ret) {
 		fprintf(stderr, "cci_create_endpoint() failed with %s\n",
-			cci_strerror(ret));
+			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
 	printf("opened %s\n", endpoint->name);
@@ -48,7 +48,7 @@ int main(int argc, char *argv[])
 		if (ret != 0) {
 			if (ret != CCI_EAGAIN)
 				fprintf(stderr, "cci_get_event() returned %s\n",
-					cci_strerror(ret));
+					cci_strerror(endpoint, ret));
 			continue;
 		}
 		switch (event->type) {
@@ -73,7 +73,7 @@ int main(int argc, char *argv[])
 				    cci_send(connection, buf, offset, NULL, 0);
 				if (ret)
 					fprintf(stderr, "send returned %s\n",
-						cci_strerror(ret));
+						cci_strerror(endpoint, ret));
 				break;
 			}
 		case CCI_EVENT_SEND:

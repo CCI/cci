@@ -92,16 +92,15 @@ int main(int argc, char *argv[])
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
 	if (ret) {
 		fprintf(stderr, "cci_init() failed with %s\n",
-			cci_strerror(ret));
+			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
-
 
 	/* create an endpoint */
 	ret = cci_create_endpoint(NULL, 0, &endpoint, &fd);
 	if (ret) {
 		fprintf(stderr, "cci_create_endpoint() failed with %s\n",
-			cci_strerror(ret));
+			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
 
@@ -111,7 +110,7 @@ int main(int argc, char *argv[])
 		    (void *)&timeout, (int)sizeof(timeout));
 	if (ret) {
 		fprintf(stderr, "cci_set_opt() failed with %s\n",
-			cci_strerror(ret));
+			cci_strerror(endpoint, ret));
 		exit(EXIT_FAILURE);
 	}
 
@@ -121,7 +120,7 @@ int main(int argc, char *argv[])
 			CCI_CONN_ATTR_UU, NULL, 0, NULL);
 	if (ret) {
 		fprintf(stderr, "cci_connect() failed with %s\n",
-			cci_strerror(ret));
+			cci_strerror(endpoint, ret));
 		exit(EXIT_FAILURE);
 	}
 
@@ -145,7 +144,7 @@ int main(int argc, char *argv[])
 			       (void *)(uintptr_t) i, 0);
 		if (ret)
 			fprintf(stderr, "send %d failed with %s\n", i,
-				cci_strerror(ret));
+				cci_strerror(endpoint, ret));
 	}
 	while (!done)
 		poll_events(endpoint, &connection, &done);
@@ -153,7 +152,7 @@ int main(int argc, char *argv[])
 	ret = cci_send(connection, "bye", 3, NULL, 0);
 	if (ret)
 		fprintf(stderr, "sending \"bye\" failed with %s\n",
-			cci_strerror(ret));
+			cci_strerror(endpoint, ret));
 
 	while (done != 2)
 		poll_events(endpoint, &connection, &done);
@@ -162,7 +161,7 @@ int main(int argc, char *argv[])
 	ret = cci_destroy_endpoint(endpoint);
 	if (ret) {
 		fprintf(stderr, "cci_destroy_endpoint() failed with %s\n",
-			cci_strerror(ret));
+			cci_strerror(endpoint, ret));
 		exit(EXIT_FAILURE);
 	}
     /* ad cci_finalize() here when available */

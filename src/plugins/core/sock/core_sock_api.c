@@ -51,7 +51,8 @@ pthread_t progress_tid, recv_tid;
  * Local functions
  */
 static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static const char *sock_strerror(enum cci_status status);
+static const char *sock_strerror(cci_endpoint_t * endpoint,
+				 enum cci_status status);
 static int sock_get_devices(cci_device_t const ***devices);
 static int sock_free_devices(cci_device_t const **devices);
 static int sock_create_endpoint(cci_device_t * device,
@@ -332,7 +333,8 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	return ret;
 }
 
-static const char *sock_strerror(enum cci_status status)
+static const char *sock_strerror(cci_endpoint_t * endpoint,
+				 enum cci_status status)
 {
 	CCI_ENTER;
 
@@ -1766,7 +1768,7 @@ static void sock_progress_pending(cci__dev_t * dev)
 		if (ret != tx->len) {
 			debug((CCI_DB_MSG | CCI_DB_INFO),
 			      "sendto() failed with %s",
-			      cci_strerror((enum cci_status)errno));
+			      cci_strerror(&ep->endpoint, (enum cci_status)errno));
 			continue;
 		}
 	}
@@ -3311,7 +3313,7 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,	/* NULL if rejected */
 				debug((CCI_DB_CONN | CCI_DB_MSG),
 				      "ep %d failed to send conn_ack with %s",
 				      sep->sock,
-				      cci_strerror((enum cci_status)ret));
+				      cci_strerror(&ep->endpoint, (enum cci_status)ret));
 			}
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
@@ -3443,7 +3445,7 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,	/* NULL if rejected */
 				debug((CCI_DB_CONN | CCI_DB_MSG),
 				      "ep %d failed to send conn_ack with %s",
 				      sep->sock,
-				      cci_strerror((enum cci_status)ret));
+				      cci_strerror(&ep->endpoint, (enum cci_status)ret));
 			}
 		}
 		/* add rx->evt to ep->evts */

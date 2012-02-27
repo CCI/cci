@@ -35,7 +35,7 @@ pthread_t progress_tid;
  * Local functions
  */
 static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static const char *verbs_strerror(enum cci_status status);
+static const char *verbs_strerror(cci_endpoint_t * endpoint, enum cci_status status);
 static int verbs_get_devices(cci_device_t const ***devices);
 static int verbs_free_devices(cci_device_t const **devices);
 static int verbs_create_endpoint(cci_device_t * device,
@@ -562,7 +562,7 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	return ret;
 }
 
-static const char *verbs_strerror(enum cci_status status)
+static const char *verbs_strerror(cci_endpoint_t * endpoint, enum cci_status status)
 {
 	return strerror(status);
 }

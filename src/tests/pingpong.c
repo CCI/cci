@@ -81,10 +81,10 @@ void print_usage()
 	exit(EXIT_FAILURE);
 }
 
-void check_return(char *func, int ret, int need_exit)
+void check_return(cci_endpoint_t * endpoint, char *func, int ret, int need_exit)
 {
 	if (ret) {
-		fprintf(stderr, "%s() returned %s\n", func, cci_strerror(ret));
+		fprintf(stderr, "%s() returned %s\n", func, cci_strerror(endpoint, ret));
 		if (need_exit)
 			exit(EXIT_FAILURE);
 	}
@@ -117,7 +117,7 @@ static void poll_events(void)
 							    0, current_size,
 							    (void *)1,
 							    opts.flags);
-						check_return("cci_rma", ret, 1);
+						check_return(endpoint, "cci_rma", ret, 1);
 					}
 				}
 			}
@@ -141,7 +141,7 @@ static void poll_events(void)
 							    0, current_size,
 							    (void *)1,
 							    opts.flags);
-						check_return("cci_rma", ret, 1);
+						check_return(endpoint, "cci_rma", ret, 1);
 					}
 				}
 				if (!ready) {
@@ -179,8 +179,8 @@ static void poll_events(void)
 								"server" :
 								"client",
 								cci_strerror
-								(ret));
-						check_return("cci_send", ret,
+								(endpoint, ret));
+						check_return(endpoint, "cci_send", ret,
 							     1);
 					}
 				}
@@ -219,7 +219,7 @@ void do_client()
 	ret =
 	    cci_connect(endpoint, server_uri, &opts, sizeof(opts), attr, NULL,
 			0, NULL);
-	check_return("cci_connect", ret, 1);
+	check_return(endpoint, "cci_connect", ret, 1);
 
 	/* poll for connect completion */
 	while (!connect_done)
@@ -242,14 +242,14 @@ void do_client()
 	}
 
 	ret = posix_memalign((void **)&buffer, 4096, max);
-	check_return("memalign buffer", ret, 1);
+	check_return(endpoint, "memalign buffer", ret, 1);
 
 	memset(buffer, 'b', max);
 
 	if (opts.method != MSGS) {
 		ret = cci_rma_register(endpoint, connection, buffer,
 				       max, &local_rma_handle);
-		check_return("cci_rma_register", ret, 1);
+		check_return(endpoint, "cci_rma_register", ret, 1);
 		fprintf(stderr, "local_rma_handle is 0x%" PRIx64 "\n",
 			local_rma_handle);
 		min = 1;
@@ -283,7 +283,7 @@ void do_client()
 				      local_rma_handle, 0,
 				      opts.server_rma_handle, 0,
 				      current_size, (void *)1, opts.flags);
-		check_return(func, ret, 1);
+		check_return(endpoint, func, ret, 1);
 
 		while (count < warmup)
 			poll_events();
@@ -322,14 +322,14 @@ void do_client()
 	}
 
 	ret = cci_send(connection, "bye", 3, (void *)0xdeadbeef, opts.flags);
-	check_return("cci_send", ret, 0);
+	check_return(endpoint, "cci_send", ret, 0);
 
 	while (!done)
 		poll_events();
 
 	if (opts.method != MSGS) {
 		ret = cci_rma_deregister(local_rma_handle);
-		check_return("cci_rma_deregister", ret, 1);
+		check_return(endpoint, "cci_rma_deregister", ret, 1);
 	}
 
 	printf("client done\n");
@@ -354,10 +354,10 @@ void do_server()
 					    *((options_t *) event->request.
 					      data_ptr);
 					ret = cci_accept(event, NULL);
-					check_return("cci_accept", ret, 1);
+					check_return(endpoint, "cci_accept", ret, 1);
 				} else {
 					ret = cci_reject(event);
-					check_return("cci_accept", ret, 1);
+					check_return(endpoint, "cci_accept", ret, 1);
 				}
 				break;
 			case CCI_EVENT_ACCEPT:
@@ -375,7 +375,7 @@ void do_server()
 					ret =
 					    posix_memalign((void **)&buffer,
 							   4096, len);
-					check_return("memalign buffer", ret, 1);
+					check_return(endpoint, "memalign buffer", ret, 1);
 
 					memset(buffer, 'a', len);
 
@@ -388,13 +388,13 @@ void do_server()
 								     max_rma_size,
 								     &opts.
 								     server_rma_handle);
-						check_return("cci_rma_register",
+						check_return(endpoint, "cci_rma_register",
 							     ret, 1);
 					}
 					ret =
 					    cci_send(connection, &opts,
 						     sizeof(opts), NULL, 0);
-					check_return("cci_send", ret, 1);
+					check_return(endpoint, "cci_send", ret, 1);
 					break;
 				}
 			default:
@@ -412,7 +412,7 @@ void do_server()
 
 	if (opts.method != MSGS) {
 		ret = cci_rma_deregister(opts.server_rma_handle);
-		check_return("cci_rma_deregister", ret, 1);
+		check_return(endpoint, "cci_rma_deregister", ret, 1);
 	}
 
 	printf("server done\n");
@@ -509,7 +509,7 @@ int main(int argc, char *argv[])
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
 	if (ret) {
 		fprintf(stderr, "cci_init() failed with %s\n",
-			cci_strerror(ret));
+			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
 
@@ -517,7 +517,7 @@ int main(int argc, char *argv[])
 	ret = cci_create_endpoint(NULL, 0, &endpoint, &ep_fd);
 	if (ret) {
 		fprintf(stderr, "cci_create_endpoint() failed with %s\n",
-			cci_strerror(ret));
+			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
 	printf("Opened %s\n", endpoint->name);
@@ -531,7 +531,7 @@ int main(int argc, char *argv[])
 	ret = cci_destroy_endpoint(endpoint);
 	if (ret) {
 		fprintf(stderr, "cci_destroy_endpoint() failed with %s\n",
-			cci_strerror(ret));
+			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
 	if (buffer)
