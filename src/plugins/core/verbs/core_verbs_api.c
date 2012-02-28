@@ -237,6 +237,8 @@ verbs_ifa_to_context(struct ibv_context *context, struct sockaddr *sa)
 	}
 	rdma_destroy_id(id);
 
+	rdma_destroy_event_channel(ch);
+
       out:
 	CCI_EXIT;
 	return ret;
@@ -1056,6 +1058,8 @@ static int verbs_destroy_rx_pool(cci__ep_t * ep, verbs_rx_pool_t * rx_pool)
 	if (rx_pool->buf)
 		free(rx_pool->buf);
 
+	free(rx_pool);
+
 	CCI_EXIT;
 	return ret;
 }
@@ -1274,6 +1278,7 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 			 * which we will poll on.
 			 * we need to ensure the user data is 8 byte aligned. */
 
+			uint32_t slot = (header >> 21) & 0xFF;
 			uint32_t h2 = header;
 			uint32_t pad = len % 8 == 0 ? 0 : 8 - (len % 8);
 			uint64_t addr = vconn->raddr;
@@ -1286,17 +1291,7 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 			h2 = htonl(h2);
 
 			/* move to the end of the slot, then back up 4 bytes */
-			addr += ((vconn->mss + 4) * (vconn->send_next + 1)) - 4;
-
-			/* asuming this is faster than modulo */
-			vconn->send_next++;
-			if (vconn->send_next == vconn->num_slots)
-				vconn->send_next = 0;
-#if 0
-			vconn->send_next =
-			    vconn->send_next == (vconn->num_slots - 1) ?
-			    0 : vconn->send_next++;
-#endif
+			addr += ((vconn->mss + 4) * (slot + 1)) - 4;
 
 			if (len == 0) {
 				/* SEND_INLINE must be used */
@@ -1442,7 +1437,8 @@ static int verbs_accept(union cci_event *event,
 					IBV_ACCESS_REMOTE_WRITE);
 		if (!vconn->rmr)
 			goto out;
-		//vconn->avail = (1 << vconn->num_slots) - 1;
+
+		vconn->avail = (1 << vconn->num_slots) - 1;
 
 		len = 12;	/* magic number => uint64_t + uint32_t */
 		addr = verbs_htonll((uintptr_t) vconn->rmr->addr);
@@ -1848,6 +1844,7 @@ static int verbs_disconnect(cci_connection_t * connection)
 				      __func__, strerror(ret));
 			}
 		}
+		free(vconn->slots);
 		free(vconn->rxs);
 		free(vconn->rbuf);
 	}
@@ -2170,17 +2167,18 @@ static int verbs_conn_est_active(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 			rx->offset = i;
 			vconn->slots[i] = (uint32_t *) ((vconn->rbuf) +
 							(uintptr_t) (((vconn->
-								       mss +
-								       4) * (i +
-									     1))
-								     - 4));
+								       mss + 4)
+								      * (i +
+									 1)) -
+								     4));
 		}
 		vconn->rmr = ibv_reg_mr(vep->pd, vconn->rbuf, len,
 					IBV_ACCESS_LOCAL_WRITE |
 					IBV_ACCESS_REMOTE_WRITE);
 		if (!vconn->rmr)
 			goto out;
-		//vconn->avail = (1 << vconn->num_slots) - 1;
+
+		vconn->avail = (1 << vconn->num_slots) - 1;
 
 		len = 12;	/* magic number => uint64_t + uint32_t */
 		addr = verbs_htonll((uintptr_t) vconn->rmr->addr);
@@ -2532,11 +2530,9 @@ static int verbs_poll_rdma_msgs(verbs_conn_t * vconn)
 static int verbs_handle_msg(cci__ep_t * ep, struct ibv_wc wc)
 {
 	int ret = CCI_SUCCESS;
-	uint32_t header = ntohl(wc.imm_data);
 	cci__conn_t *conn = NULL;
 	verbs_conn_t *vconn = NULL;
 	verbs_rx_t *rx = NULL;
-	int rdma_msg = (header >> 4) & 0x1;
 	void *ptr = NULL;
 
 	CCI_ENTER;
@@ -2551,16 +2547,8 @@ static int verbs_handle_msg(cci__ep_t * ep, struct ibv_wc wc)
 	}
 	conn = vconn->conn;
 
-	if (rdma_msg) {
-		int index = (header >> 5) & 0xFFFF;
-
-		index = ffs(index - 1);
-		rx = &vconn->rxs[index];
-		ptr = vconn->rbuf + (uintptr_t) (index * sizeof(*rx));
-	} else {
-		rx = (verbs_rx_t *) (uintptr_t) wc.wr_id;
-		ptr = rx->rx_pool->buf + rx->offset;
-	}
+	rx = (verbs_rx_t *) (uintptr_t) wc.wr_id;
+	ptr = rx->rx_pool->buf + rx->offset;
 
 	rx->evt.conn = conn;
 	rx->evt.event.type = CCI_EVENT_RECV;
@@ -2586,6 +2574,7 @@ static int verbs_handle_rdma_msg_ack(cci__ep_t * ep, struct ibv_wc wc)
 	int index = 0;
 	uint32_t header = ntohl(wc.imm_data);
 	verbs_conn_t *vconn = NULL;
+	verbs_rx_t *rx = (verbs_rx_t *) (uintptr_t) wc.wr_id;
 
 	/* find the conn for this message */
 	vconn = verbs_qp_num_to_conn(ep, wc.qp_num);
@@ -2596,14 +2585,15 @@ static int verbs_handle_rdma_msg_ack(cci__ep_t * ep, struct ibv_wc wc)
 		goto out;
 	}
 
-	index = (header >> 5) & 0xFFFF;
-	i = (1 < index);
+	index = (header >> 21) & 0xFF;
+	i = (1 << index);
 
-	//pthread_mutex_lock(&ep->lock);
-	//vconn->avail |= index;
-	//pthread_mutex_unlock(&ep->lock);
+	pthread_mutex_lock(&ep->lock);
+	vconn->avail |= i;
+	pthread_mutex_unlock(&ep->lock);
 
       out:
+	verbs_post_rx(ep, rx);
 	return ret;
 }
 
@@ -2794,50 +2784,6 @@ static int verbs_handle_recv(cci__ep_t * ep, struct ibv_wc wc)
 	CCI_EXIT;
 	return ret;
 }
-
-#if 0
-static int verbs_handle_rma_recv(cci__ep_t * ep, struct ibv_wc wc)
-{
-	int ret = CCI_SUCCESS;
-	uint32_t header = 0;
-	verbs_msg_type_t type = 0;
-	verbs_conn_t *vconn = NULL;
-	verbs_rx_t *rx = NULL;
-	int index = (header >> 5) & 0xFFFF;
-
-	CCI_ENTER;
-
-	header = ntohl(wc.imm_data);
-	debug(CCI_DB_INFO, "recv'd RDMA MSG header 0x%x", header);
-	type = header & 0xF;	/* magic number */
-
-	if (type != VERBS_MSG_SEND) {
-		debug(CCI_DB_WARN, "ignoring bad RDMA MSG recv 0x%u", header);
-		goto out;
-	}
-
-	/* find the conn for this message */
-	vconn = verbs_qp_num_to_conn(ep, wc.qp_num);
-	if (!vconn) {
-		debug(CCI_DB_WARN,
-		      "%s: no conn found for message from qp_num %u", __func__,
-		      wc.qp_num);
-		goto out;
-	}
-
-	rx = &vconn->rxs[index];
-	*((uint32_t *) & rx->evt.event.recv.len) = wc.byte_len;
-	if (rx->evt.event.recv.len)
-		*((void **)&rx->evt.event.request.data_ptr) =
-		    vconn->rbuf + (uintptr_t) (index * sizeof(*rx));
-	else
-		*((void **)&rx->evt.event.request.data_ptr) = NULL;
-
-      out:
-	CCI_EXIT;
-	return ret;
-}
-#endif
 
 static int verbs_complete_send_msg(cci__ep_t * ep, struct ibv_wc wc)
 {
@@ -3224,14 +3170,11 @@ static int verbs_return_event(cci_event_t * event)
 					      "%s: post_rx() returned %s",
 					      __func__, strerror(ret));
 				}
-#if 0
 			} else if (rx->evt.conn) {
 				uint32_t header = VERBS_MSG_RDMA_MSG_ACK;
-				//header |= (1 << 4);
-				header |= ((1 << rx->offset) << 5);
+				header |= ((rx->offset) << 21);
 				verbs_post_send(rx->evt.conn, 0, NULL, 0,
 						header);
-#endif
 			}
 		}
 		break;
@@ -3333,17 +3276,13 @@ verbs_send_common(cci_connection_t * connection, struct iovec *iov,
 
 	if (vconn->raddr && iovcnt < 2) {
 		pthread_mutex_lock(&ep->lock);
-#if 1
-		header |= (1 << 4);	/* set RDMA bit */
-#else
 		if (vconn->avail) {
 			i = ffs(vconn->avail);
 			i--;	/* convert to index */
-			vconn->avail ^= (1 << i);
+			vconn->avail &= ~(1 << i);
 			header |= (1 << 4);	/* set RDMA bit */
-			header |= (1 << (5 + i));	/* add index */
+			header |= (i << 21);	/* add index */
 		}
-#endif
 		pthread_mutex_unlock(&ep->lock);
 	}
 

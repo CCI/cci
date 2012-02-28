@@ -348,8 +348,7 @@ typedef struct verbs_conn {
 	uint64_t raddr;		/* peer's remote_addr */
 	uint32_t rkey;		/* peer's rkey */
 	uint32_t num_slots;	/* number of MSG slots */
-	uint32_t send_next;	/* send to this slot */
-	uint32_t poll_next;	/* poll this slot */
+	uint32_t avail;		/* bitmask of available peer slots */
 	uint32_t **slots;	/* pointers to buffer headers
 				   to poll */
 
