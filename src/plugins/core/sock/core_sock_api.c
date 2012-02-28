@@ -1354,8 +1354,6 @@ static int sock_disconnect(cci_connection_t * connection)
 	ep = container_of(connection->endpoint, cci__ep_t, endpoint);
 	sep = ep->priv;
 
-	/* GV: we should do the same if set_opt is used to put the keepalive back
-	   to 0 */
 	if (conn->keepalive_timeout != 0UL && cci_conn_is_reliable(conn)) {
 		/* Remove the connection is the list of connections using keepalive */
 		TAILQ_REMOVE(&sglobals->ka_conns, sconn, entry);
@@ -1652,7 +1650,6 @@ static void sock_progress_pending(cci__dev_t * dev)
 
 		/* has it timed out? */
 		if (SOCK_U64_LT(tx->timeout_us, now)) {
-            fprintf (stderr, "[%s:%d] Timeout (%s, seq: %d)!\n", __func__, __LINE__, sock_msg_type(tx->msg_type), tx->seq);
 			/* dequeue */
 
 			TAILQ_REMOVE(&sdev->pending, tx, dentry);
@@ -1854,12 +1851,9 @@ static void sock_progress_queued(cci__dev_t * dev)
 			tx->timeout_us = now + (uint64_t) timeout;
 		}
 
-#if 0
 		if (SOCK_U64_LT(tx->timeout_us, now)) {
 
 			/* set status and add to completed events */
-            fprintf (stderr, "TIMEOUT!\n");
-
 			switch (tx->msg_type) {
 			case SOCK_MSG_SEND:
 				if (tx->rnr != 0) {
@@ -1906,7 +1900,6 @@ static void sock_progress_queued(cci__dev_t * dev)
 			}
 			continue;
 		}
-#endif
 
 		if ((tx->last_attempt_us + (SOCK_RESEND_TIME_SEC * 1000000)) >
 		    now)
@@ -2098,7 +2091,6 @@ static int sock_sendv(cci_connection_t * connection,
 		/* If the connection is not reliable, it cannot be a RMA operation */
 		tx->rma_op = NULL;
 	} else {
-		/* GV: not sure last_attempt_us is correctly set here */
 		tx->last_attempt_us = 0ULL;
 		tx->timeout_us =
 		    sock_get_usecs() + SOCK_EP_TX_TIMEOUT_SEC * 1000000;
@@ -2540,12 +2532,9 @@ static int sock_rma(cci_connection_t * connection,
 
 		ret = CCI_SUCCESS;
 	} else if (flags & CCI_FLAG_READ) {
-		//int len;
-		//char buffer[SOCK_MAX_HDR_SIZE];
 		sock_tx_t *tx = NULL;
 		sock_rma_header_t *read = NULL;
 		uint32_t seq;
-		//uint64_t addr;
 		uint64_t context_id;
         void *msg_ptr = NULL;
 
@@ -3128,10 +3117,8 @@ sock_handle_ack(sock_conn_t * sconn,
 
 					rma_op->tx = tx;
 					tx->msg_type = SOCK_MSG_SEND;
-/*
 					tx->flags =
 					    rma_op->flags | CCI_FLAG_SILENT;
-*/
 					tx->state = SOCK_TX_QUEUED;
 					/* payload size for now */
 					tx->len = (uint16_t) rma_op->msg_len;
@@ -3153,15 +3140,6 @@ sock_handle_ack(sock_conn_t * sconn,
                     context_id = (uint64_t)rma_op->context;
                     sock_pack_rma_write_done (write, sconn->peer_id, tx->seq, 0);
                     /* Include the context id */
-#if 0
-					sock_pack_send(&hdr_r->header, tx->len,
-						       sconn->peer_id);
-					sock_pack_seq_ts(&hdr_r->seq_ts,
-							 tx->seq, 0);
-                    tx->len = sizeof(sock_rma_header_t);
-                    memcpy(write->data, &context_id, sizeof(uint64_t));
-                    tx->len += sizeof(uint64_t);
-#endif
                     memcpy(&hdr_r->data, &context_id, sizeof(uint64_t));
                     msg_ptr = (void*)(hdr_r->data + sizeof (uint64_t));
 					memcpy(msg_ptr, rma_op->msg_ptr,
@@ -3710,37 +3688,6 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
     pthread_mutex_lock(&ep->lock);
     TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
     pthread_mutex_unlock(&ep->lock);
-
-#if 0
-	pthread_mutex_lock(&ep->lock);
-	if (!TAILQ_EMPTY(&sep->idle_txs)) {
-		tx = TAILQ_FIRST(&sep->idle_txs);
-		TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
-	}
-	pthread_mutex_unlock(&ep->lock);
-
-	memset(tx->buffer, 0, sizeof(sock_rma_header_t));
-	tx->state = SOCK_TX_QUEUED;
-	tx->flags = tx->flags | CCI_FLAG_SILENT;
-	tx->rma_op = NULL;
-	tx->evt.ep = ep;
-	tx->evt.event.type = CCI_EVENT_SEND;
-	tx->evt.event.send.connection = connection;
-	tx->evt.conn = conn;
-	seq = ++(sconn->seq);
-	write = (sock_rma_header_t *) tx->buffer;
-    fprintf (stderr, "Sending RMA WRITE DONE\n");
-	sock_pack_rma_write_done(write, sconn->peer_id, seq, 0);
-	/* XXX is it really the size of a sock_rma_header here? */
-	tx->len = sizeof(sock_rma_header_t);
-	memcpy(write->data, &addr, sizeof(uint64_t));
-	tx->len += sizeof(uint64_t);
-	tx->seq = sconn->seq;
-	tx->msg_type = SOCK_MSG_SEND;
-	pthread_mutex_lock(&dev->lock);
-	TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
-	pthread_mutex_unlock(&dev->lock);
-#endif
 }
 
 static void
@@ -4170,12 +4117,8 @@ static void sock_keepalive(void)
 {
 	sock_conn_t *sconn;
 	cci__conn_t *conn;
-/*
-    cci_connection_t pub_conn;
-*/
 	uint64_t now = 0ULL;
 	uint32_t ka_timeout;
-	//int i;
 
 	CCI_ENTER;
 
@@ -4200,7 +4143,6 @@ static void sock_keepalive(void)
 			sock_header_t *hdr = NULL;
 			cci_event_keepalive_timedout_t *event = NULL;
 			cci__evt_t *evt = NULL;
-			//cci_endpoint_t *endpoint = NULL;
 			cci__ep_t *ep = NULL;
 			sock_ep_t *sep = NULL;
 			sock_tx_t *tx = NULL;
