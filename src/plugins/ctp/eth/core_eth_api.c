@@ -813,64 +813,40 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 		event->request.attribute = ge->connect_request.attribute;
 		eev->type_params.connect_request.need_reply = 1;
 		break;
-	case CCIETH_IOCTL_EVENT_CONNECT_ACCEPTED:{
+	case CCIETH_IOCTL_EVENT_CONNECT:{
 			eth__conn_t *econn;
 
 			CCIETH_VALGRIND_MEMORY_MAKE_READABLE
-			    (&ge->connect_accepted.conn_id,
-			     sizeof(ge->connect_accepted.conn_id));
+				(&ge->connect.status,
+			     sizeof(ge->connect.status));
 			CCIETH_VALGRIND_MEMORY_MAKE_READABLE
-			    (&ge->connect_accepted.max_send_size,
-			     sizeof(ge->connect_accepted.max_send_size));
-			CCIETH_VALGRIND_MEMORY_MAKE_READABLE
-			    (&ge->connect_accepted.user_conn_id,
-			     sizeof(ge->connect_accepted.user_conn_id));
+			    (&ge->connect.user_conn_id,
+			     sizeof(ge->connect.user_conn_id));
 			econn =
-			    (void *)(uintptr_t) ge->
-			    connect_accepted.user_conn_id;
-			econn->id = ge->connect_accepted.conn_id;
-			econn->_conn.connection.max_send_size =
-			    ge->connect_accepted.max_send_size;
+			    (void *)(uintptr_t) ge->connect.user_conn_id;
 
 			event->type = CCI_EVENT_CONNECT;
-			event->connect.status = CCI_SUCCESS;
+			event->connect.status = ge->connect.status;
 			event->connect.context = econn->_conn.connection.context;
-			event->connect.connection = &econn->_conn.connection;
-			break;
-		}
-	case CCIETH_IOCTL_EVENT_CONNECT_REJECTED:{
-			eth__conn_t *econn;
 
-			CCIETH_VALGRIND_MEMORY_MAKE_READABLE
-			    (&ge->connect_rejected.user_conn_id,
-			     sizeof(ge->connect_rejected.user_conn_id));
-			econn =
-			    (void *)(uintptr_t) ge->
-			    connect_rejected.user_conn_id;
-			event->type = CCI_EVENT_CONNECT;
-			event->connect.status = CCI_ECONNREFUSED;
-			event->connect.context = econn->_conn.connection.context;
-			event->connect.connection = NULL;
+			if (ge->connect.status != 0) {
+				/* failed */
+				event->connect.connection = NULL;
+				free(econn);
+			} else {
+				/* success */
+				CCIETH_VALGRIND_MEMORY_MAKE_READABLE
+					(&ge->connect.max_send_size,
+					 sizeof(ge->connect.max_send_size));
+				CCIETH_VALGRIND_MEMORY_MAKE_READABLE
+					(&ge->connect.conn_id,
+					 sizeof(ge->connect.conn_id));
+				econn->id = ge->connect.conn_id;
+				econn->_conn.connection.max_send_size =
+					ge->connect.max_send_size;
 
-			free(econn);
-			break;
-		}
-	case CCIETH_IOCTL_EVENT_CONNECT_TIMEDOUT:{
-			eth__conn_t *econn;
-
-			CCIETH_VALGRIND_MEMORY_MAKE_READABLE
-			    (&ge->connect_timedout.user_conn_id,
-			     sizeof(ge->connect_timedout.user_conn_id));
-			econn =
-			    (void *)(uintptr_t) ge->
-			    connect_timedout.user_conn_id;
-
-			event->type = CCI_EVENT_CONNECT;
-			event->connect.status = ETIMEDOUT;
-			event->connect.context = econn->_conn.connection.context;
-			event->connect.connection = NULL;
-
-			free(econn);
+				event->connect.connection = &econn->_conn.connection;
+			}
 			break;
 		}
 	case CCIETH_IOCTL_EVENT_DEVICE_FAILED:

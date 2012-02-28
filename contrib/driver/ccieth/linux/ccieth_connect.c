@@ -306,8 +306,9 @@ void ccieth_connect_request_timer_hdlr(unsigned long _data)
 	/* ccieth_conn_stop_sync() not needed, the connection has never been ready */
 
 	dprintk("delivering connection %p timeout\n", conn);
-	conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECT_TIMEDOUT;
-	conn->embedded_event.event.connect_timedout.user_conn_id = conn->user_conn_id;
+	conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECT;
+	conn->embedded_event.event.connect.user_conn_id = conn->user_conn_id;
+	conn->embedded_event.event.connect.status = ETIMEDOUT;
 	/* destroy the connection after the event */
 	ccieth_queue_busy_event(ep, &conn->embedded_event);
 }
@@ -780,9 +781,10 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	}
 
 	/* setup the event */
-	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_ACCEPTED;
+	event->event.type = CCIETH_IOCTL_EVENT_CONNECT;
 	event->event.data_length = 0;
-	event->event.connect_accepted.conn_id = dst_conn_id;
+	event->event.connect.status = 0;
+	event->event.connect.conn_id = dst_conn_id;
 
 	/* find the connection and update it */
 	err = -EINVAL;
@@ -809,8 +811,8 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	conn->recv_last_full_seqnum = first_seqnum - 1;
 
 	/* finalize and notify the event */
-	event->event.connect_accepted.max_send_size = max_send_size;
-	event->event.connect_accepted.user_conn_id = conn->user_conn_id;
+	event->event.connect.max_send_size = max_send_size;
+	event->event.connect.user_conn_id = conn->user_conn_id;
 	ccieth_queue_busy_event(ep, event);
 
 	/* handle deferred msgs */
@@ -958,8 +960,9 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 	spin_unlock(&ep->connection_idr_lock);
 
 	/* setup the event */
-	conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECT_REJECTED;
-	conn->embedded_event.event.connect_rejected.user_conn_id = conn->user_conn_id;
+	conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECT;
+	conn->embedded_event.event.connect.user_conn_id = conn->user_conn_id;
+	conn->embedded_event.event.connect.status = ECONNREFUSED;
 	/* destroy the connection after the event */
 	ccieth_queue_busy_event(ep, &conn->embedded_event);
 

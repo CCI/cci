@@ -60,26 +60,19 @@ struct ccieth_ioctl_get_event {
 			/* 16 */
 		} recv;
 		struct {
+			__u64 user_conn_id;
+			/* 16 */
+			__u32 status;
+			__u32 conn_id;
+			/* 24 */
+			__u32 max_send_size;
+		} connect;
+		struct {
 			__u32 conn_id;
 			__u32 attribute;
 			/* 16 */
 			__u32 max_send_size;
 		} connect_request;
-		struct {
-			__u32 conn_id;
-			__u32 max_send_size;
-			/* 16 */
-			__u64 user_conn_id;
-			/* 24 */
-		} connect_accepted;
-		struct {
-			__u64 user_conn_id;
-			/* 16 */
-		} connect_timedout;
-		struct {
-			__u64 user_conn_id;
-			/* 16 */
-		} connect_rejected;
 		struct {
 			__u64 user_conn_id;
 			/* 16 */
@@ -153,10 +146,8 @@ struct ccieth_ioctl_msg {
 /* FIXME: enforce matching with enum cci_event_type */
 #define CCIETH_IOCTL_EVENT_SEND 1
 #define CCIETH_IOCTL_EVENT_RECV 2
-#define CCIETH_IOCTL_EVENT_CONNECT_ACCEPTED 3
-#define CCIETH_IOCTL_EVENT_CONNECT_TIMEDOUT 4
-#define CCIETH_IOCTL_EVENT_CONNECT_REJECTED 5
-#define CCIETH_IOCTL_EVENT_CONNECT_REQUEST 6
+#define CCIETH_IOCTL_EVENT_CONNECT 3
+#define CCIETH_IOCTL_EVENT_CONNECT_REQUEST 4
 #define CCIETH_IOCTL_EVENT_DEVICE_FAILED 8
 
 #define CCIETH_IOCTL_EVENT_CONNECTION_CLOSED 20
