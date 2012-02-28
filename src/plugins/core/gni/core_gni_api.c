@@ -129,7 +129,7 @@ static int gni_create_endpoint(cci_device_t * device,
 			       cci_os_handle_t * fd);
 static int gni_destroy_endpoint(cci_endpoint_t * endpoint);
 static int gni_accept(union cci_event *conn_req,
-		      void *context, cci_connection_t ** connection);
+		      void *context);
 static int gni_reject(union cci_event *conn_req);
 static int gni_connect(cci_endpoint_t * endpoint,
 		       char *server_uri,
@@ -197,9 +197,7 @@ static char *gni_cci_event_to_str(const cci_event_type_t event)
 		"CCI_EVENT_NONE",
 		"CCI_EVENT_SEND",
 		"CCI_EVENT_RECV",
-		"CCI_EVENT_CONNECT_ACCEPTED",
-		"CCI_EVENT_CONNECT_FAILED",
-		"CCI_EVENT_CONNECT_REJECTED",
+		"CCI_EVENT_CONNECT",
 		"CCI_EVENT_CONNECT_REQUEST",
 		"CCI_EVENT_KEEPALIVE_TIMEDOUT",
 		"CCI_EVENT_ENDPOINT_DEVICE_FAILED"
@@ -1661,7 +1659,7 @@ static int gni_destroy_endpoint(cci_endpoint_t * endpoint)
 }
 
 static int gni_accept(union cci_event *event,
-		      void *context, cci_connection_t ** connection)
+		      void *context)
 {
 
 	int sd;
@@ -1773,7 +1771,9 @@ static int gni_accept(union cci_event *event,
 
 	evt = calloc(1, sizeof(*evt));	// Create CCI event
 	evt->ep = ep;
-	evt->event.type = CCI_EVENT_CONNECT_ACCEPTED;
+	evt->event.type = CCI_EVENT_CONNECT;
+	evt->event.status = CCI_SUCCESS;
+	evt->event.context = context;
 	evt->event.accepted.connection = &conn->connection;
 	debug(CCI_DB_CONN, "%8s.%5d %s: posting event: %s", gdev->nodename,
 	      gdev->INST, __func__, gni_cci_event_to_str(evt->event.type));
@@ -1783,7 +1783,7 @@ static int gni_accept(union cci_event *event,
 	TAILQ_INSERT_TAIL(&gep->gconn, gconn, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-	(*connection) = &conn->connection;
+#warning queue CCI_EVENT_ACCEPT with status=SUCCESS, the connection and the context
 
       FAIL:
 	if (dst_box)
@@ -2192,9 +2192,7 @@ static int gni_return_event(cci_event_t * event)
 		free(buffer);
 
 	case CCI_EVENT_NONE:
-	case CCI_EVENT_CONNECT_FAILED:
-	case CCI_EVENT_CONNECT_REJECTED:
-	case CCI_EVENT_CONNECT_ACCEPTED:
+	case CCI_EVENT_CONNECT:
 	case CCI_EVENT_KEEPALIVE_TIMEDOUT:
 	case CCI_EVENT_ENDPOINT_DEVICE_FAILED:
 		free_evt = 1;
@@ -2967,25 +2965,22 @@ static void gni_progress_connection_request(cci__dev_t * dev)
 		if (len)	// Don't retain data
 			free(gconn->data_ptr);
 
+		evt->event.type = CCI_EVENT_CONNECT;
+		evt->event.connect.context = connection->context;
+
 		if (gconn->status == GNI_CONN_ACCEPTED) {
 
 			gni_finish_smsg(connection);
-			evt->event.type = CCI_EVENT_CONNECT_ACCEPTED;
+			evt->event.staus = CCI_SUCCESS;
 			evt->event.accepted.connection = connection;
-//          evt->event.accepted.context=connection->context;
+			evt->event.accepted.context = connection->context;
 		} else {
-
+			evt->event.connect.connection = NULL;
 //          ### Need to destroy src_box, gconn.
 			if (gconn->status == GNI_CONN_REJECTED) {
-
-				evt->event.type = CCI_EVENT_CONNECT_REJECTED;
-				evt->event.rejected.context =
-				    connection->context;
+				evt->event.status = CCI_ECONNREFUSED;
 			} else if (gconn->status == GNI_CONN_FAILED) {
-
-				evt->event.type = CCI_EVENT_CONNECT_FAILED;
-				evt->event.conn_failed.context =
-				    connection->context;
+				evt->event.status = CCI_ETIMEDOUT;
 			}
 		}
 
