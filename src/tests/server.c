@@ -31,13 +31,6 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	ret = cci_get_devices((cci_device_t const ***const)&devices);
-	if (ret) {
-		fprintf(stderr, "cci_get_devices() failed with %s\n",
-			cci_strerror(ret));
-		exit(EXIT_FAILURE);
-	}
-
 	/* create an endpoint */
 	ret = cci_create_endpoint(NULL, 0, &endpoint, &ep_fd);
 	if (ret) {
@@ -90,12 +83,14 @@ int main(int argc, char *argv[])
 			/* inspect conn_req_t and decide to accept or reject */
 			if (accept) {
 				/* associate this connect request with this endpoint */
-				cci_accept(event, NULL, &connection);
-
-				/* add new connection to connection list, etc. */
+				cci_accept(event, NULL);
 			} else {
 				cci_reject(event);
 			}
+			break;
+		case CCI_EVENT_ACCEPT:
+			fprintf(stderr, "completed accept\n");
+            connection = event->accept.connection;
 			break;
 		default:
 			printf("event type %d\n", event->type);
@@ -106,7 +101,6 @@ int main(int argc, char *argv[])
 
 	/* clean up */
 	cci_destroy_endpoint(endpoint);
-	cci_free_devices((cci_device_t const **)devices);
 
 	return 0;
 }

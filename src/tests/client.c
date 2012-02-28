@@ -47,14 +47,9 @@ poll_events(cci_endpoint_t * endpoint, cci_connection_t ** connection,
 				recv_done++;
 				break;
 			}
-		case CCI_EVENT_CONNECT_ACCEPTED:
+		case CCI_EVENT_CONNECT:
 			*done = 1;
-			*connection = event->accepted.connection;
-			break;
-		case CCI_EVENT_CONNECT_FAILED:
-		case CCI_EVENT_CONNECT_REJECTED:
-			*done = 1;
-			*connection = NULL;
+			*connection = event->connect.connection;
 			break;
 		default:
 			fprintf(stderr, "ignoring event type %d\n",
@@ -101,12 +96,6 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	ret = cci_get_devices((const cci_device_t *** const)&devices);
-	if (ret) {
-		fprintf(stderr, "cci_get_devices() failed with %s\n",
-			cci_strerror(ret));
-		exit(EXIT_FAILURE);
-	}
 
 	/* create an endpoint */
 	ret = cci_create_endpoint(NULL, 0, &endpoint, &fd);
@@ -170,24 +159,13 @@ int main(int argc, char *argv[])
 		poll_events(endpoint, &connection, &done);
 
 	/* clean up */
-	ret = cci_disconnect(connection);
-	if (ret) {
-		fprintf(stderr, "cci_disconnect() failed with %s\n",
-			cci_strerror(ret));
-		exit(EXIT_FAILURE);
-	}
 	ret = cci_destroy_endpoint(endpoint);
 	if (ret) {
 		fprintf(stderr, "cci_destroy_endpoint() failed with %s\n",
 			cci_strerror(ret));
 		exit(EXIT_FAILURE);
 	}
-	ret = cci_free_devices((const cci_device_t ** const)devices);
-	if (ret) {
-		fprintf(stderr, "cci_free_devices() failed with %s\n",
-			cci_strerror(ret));
-		exit(EXIT_FAILURE);
-	}
+    /* ad cci_finalize() here when available */
 
 	return 0;
 }
