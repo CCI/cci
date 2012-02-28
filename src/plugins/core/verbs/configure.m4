@@ -34,9 +34,7 @@ AC_DEFUN([PLUGINS_cci_core_verbs_CONFIG],[
                              [$1],
                              [$2])
     AC_CHECK_TYPE([struct rdma_addrinfo],
-        [HAVE_RDMA_ADDRINFO=1],
-        [HAVE_RDMA_ADDRINFO=0],
-        [rdma/rdma_cma.h])
-    AC_DEFINE([HAVE_RDMA_ADDRINFO], [$HAVE_RDMA_ADDRINFO], [Define if struct rdma_addinfo has been detected])
+        [AC_DEFINE([HAVE_RDMA_ADDRINFO], [1])],
+        [AC_DEFINE([HAVE_RDMA_ADDRINFO], [0], [Define if struct rdma_addrinfo detected])],
+        [#include <rdma/rdma_cma.h>])
 ])dnl
-# This verbs is designed to evade compile.
