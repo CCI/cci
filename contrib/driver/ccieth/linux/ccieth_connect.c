@@ -320,7 +320,7 @@ void ccieth_connect_reply_timer_hdlr(unsigned long _data)
 	struct ccieth_endpoint *ep = conn->ep;
 	struct sk_buff *skb;
 
-	if (conn->status != CCIETH_CONNECTION_READY && conn->status != CCIETH_CONNECTION_REJECTED)
+	if (conn->status != CCIETH_CONNECTION_ACCEPTING && conn->status != CCIETH_CONNECTION_REJECTING)
 		return;
 
 	if (!conn->connect_needack)
@@ -697,7 +697,7 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	if (!conn)
 		goto out_with_rculock;
 
-	if (cmpxchg(&conn->status, CCIETH_CONNECTION_RECEIVED, CCIETH_CONNECTION_READY)
+	if (cmpxchg(&conn->status, CCIETH_CONNECTION_RECEIVED, CCIETH_CONNECTION_ACCEPTING)
 	    != CCIETH_CONNECTION_RECEIVED)
 		goto out_with_rculock;
 	atomic_dec(&ep->connection_received);
@@ -878,7 +878,7 @@ ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_re
 	if (!conn)
 		goto out_with_rculock;
 
-	if (cmpxchg(&conn->status, CCIETH_CONNECTION_RECEIVED, CCIETH_CONNECTION_REJECTED)
+	if (cmpxchg(&conn->status, CCIETH_CONNECTION_RECEIVED, CCIETH_CONNECTION_REJECTING)
 	    != CCIETH_CONNECTION_RECEIVED)
 		goto out_with_rculock;
 	atomic_dec(&ep->connection_received);
@@ -1174,21 +1174,51 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 	/* packet was received, stop resending */
 	conn->connect_needack = 0;
 
-	/* reject ack status doesn't matter, just destroy the connection */
-	if (cmpxchg(&conn->status, CCIETH_CONNECTION_REJECTED, CCIETH_CONNECTION_CLOSING)
-	    == CCIETH_CONNECTION_REJECTED)
-		destroy = 1;
+	if (ack_status == CCIETH_PKT_ACK_SUCCESS) {
+		/* ACK */
+		if (cmpxchg(&conn->status, CCIETH_CONNECTION_ACCEPTING, CCIETH_CONNECTION_READY)
+		      == CCIETH_CONNECTION_ACCEPTING) {
+			/* FIXME: report ACCEPT event here */
 
-	else if (ack_status != CCIETH_PKT_ACK_SUCCESS) {
-		if (cmpxchg(&conn->status, CCIETH_CONNECTION_READY, CCIETH_CONNECTION_CLOSING)
+		} else if (cmpxchg(&conn->status, CCIETH_CONNECTION_REJECTING, CCIETH_CONNECTION_CLOSING)
+		    == CCIETH_CONNECTION_REJECTING) {
+			/* reject ack status doesn't matter, just destroy the connection */
+			destroy = 1;
+
+		} else {
+			/* request ack does nothing, recv accept does the job */
+			/* ready ack does nothing */
+			/* ack on CLOSING is ignored */
+		}
+
+	} else {
+		/* NACK */
+		if (cmpxchg(&conn->status, CCIETH_CONNECTION_REJECTING, CCIETH_CONNECTION_CLOSING)
+		    == CCIETH_CONNECTION_REJECTING) {
+			/* reject ack status doesn't matter, just destroy the connection */
+			destroy = 1;
+
+		} else if (cmpxchg(&conn->status, CCIETH_CONNECTION_ACCEPTING, CCIETH_CONNECTION_CLOSING)
+		    == CCIETH_CONNECTION_ACCEPTING) {
+			/* FIXME: report ACCEPT event with status error instead */
+			/* accept nack likely means that the remote side closed in the meantime, maybe because of the timeout.
+			 * tell user-space that the connection isn't ready anymore */
+			notify_close = 1;
+			conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECTION_CLOSED;
+			conn->embedded_event.event.connection_closed.user_conn_id = conn->user_conn_id;
+
+		} else if (cmpxchg(&conn->status, CCIETH_CONNECTION_READY, CCIETH_CONNECTION_CLOSING)
 		    == CCIETH_CONNECTION_READY) {
 			/* ready nack likely means that the remote side closed in the meantime, maybe because of the timeout.
 			 * tell user-space that the connection isn't ready anymore */
 			notify_close = 1;
 			conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECTION_CLOSED;
 			conn->embedded_event.event.connection_closed.user_conn_id = conn->user_conn_id;
+
+		} else {
+			/* request nack does nothing, the application will get a timeout */
+			/* nack on CLOSING is ignored */
 		}
-		/* request nack does nothing, the application will get a timeout */
 	}
 
 	rcu_read_unlock();

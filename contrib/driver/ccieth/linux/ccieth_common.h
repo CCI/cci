@@ -105,7 +105,8 @@ enum ccieth_connection_status {
 	CCIETH_CONNECTION_REQUESTED,	/* request sent, maybe acked, but not replied or rejected yet */
 	/* target side */
 	CCIETH_CONNECTION_RECEIVED,	/* request received, not accepted or rejected yet */
-	CCIETH_CONNECTION_REJECTED,	/* reject sent and not acked yet */
+	CCIETH_CONNECTION_ACCEPTING,	/* accept sent and not acked yet */
+	CCIETH_CONNECTION_REJECTING,	/* reject sent and not acked yet */
 };
 
 #define CCIETH_CONNECT_RESEND_DELAY (HZ)	/* resend connect request/accept/reject every second until acked */
