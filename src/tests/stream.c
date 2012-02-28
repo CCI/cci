@@ -151,7 +151,7 @@ static void poll_events(void)
 		break;
 	case CCI_EVENT_CONNECT_REQUEST:{
 			ready = 1;
-            ret = cci_accept(event, NULL);
+			ret = cci_accept(event, NULL);
 
 /*
 			cci_accept(event, NULL);
@@ -167,19 +167,19 @@ static void poll_events(void)
 */
 			break;
 		}
-    case CCI_EVENT_ACCEPT:{
-        ready = 1;
-        connection = event->accept.connection;
-        buffer = calloc(1, connection->max_send_size);
-        if (!buffer) {
-            fprintf(stderr, "unable to alloc buffer\n");
-            return;
-        }
-        gettimeofday(&start, NULL);
-        cci_send(connection, buffer, current_size, NULL, 0);
-        printf("Bytes\t\t# Rcvd\t\tRcvd\n");
-        break;
-    }
+	case CCI_EVENT_ACCEPT:{
+			ready = 1;
+			connection = event->accept.connection;
+			buffer = calloc(1, connection->max_send_size);
+			if (!buffer) {
+				fprintf(stderr, "unable to alloc buffer\n");
+				return;
+			}
+			gettimeofday(&start, NULL);
+			cci_send(connection, buffer, current_size, NULL, 0);
+			printf("Bytes\t\t# Rcvd\t\tRcvd\n");
+			break;
+		}
 	default:
 		fprintf(stderr, "ignoring event type %d (\n", event->type);
 	}

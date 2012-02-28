@@ -231,7 +231,7 @@ static int open_plugin(const char *filename,
 	/* Alles gut */
 	return CCI_SUCCESS;
 
-bad:
+      bad:
 	lt_dlclose(*handle);
 	return CCI_ERROR;
 }

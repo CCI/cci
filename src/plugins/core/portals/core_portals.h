@@ -437,4 +437,4 @@ typedef struct portals_conn {
 int cci_core_portals_post_load(cci_plugin_t * me);
 int cci_core_portals_pre_unload(cci_plugin_t * me);
 END_C_DECLS
-#endif /* CCI_CORE_PORTALS_H */
+#endif				/* CCI_CORE_PORTALS_H */

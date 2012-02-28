@@ -16,8 +16,7 @@
 #include "cci.h"
 #include "plugins/core/core.h"
 
-int cci_accept(union cci_event *conn_req,
-           void *context)
+int cci_accept(union cci_event *conn_req, void *context)
 {
-    return cci_core->accept(conn_req, context);
+	return cci_core->accept(conn_req, context);
 }

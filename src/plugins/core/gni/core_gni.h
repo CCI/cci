@@ -259,4 +259,4 @@ int cci_core_gni_post_load(cci_plugin_t * me);
 int cci_core_gni_pre_unload(cci_plugin_t * me);
 
 END_C_DECLS
-#endif // CCI_CORE_GNI_H
+#endif				// CCI_CORE_GNI_H

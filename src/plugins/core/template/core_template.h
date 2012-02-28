@@ -12,4 +12,4 @@ BEGIN_C_DECLS int cci_core_template_post_load(cci_plugin_t * me);
 int cci_core_template_pre_unload(cci_plugin_t * me);
 
 END_C_DECLS
-#endif /* CCI_CORE_TEMPLATE_H */
+#endif				/* CCI_CORE_TEMPLATE_H */

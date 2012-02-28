@@ -40,4 +40,4 @@ int cci_plugins_recache_files(const char *dir, int flush_cache);
 int cci_plugins_finalize(void);
 
 END_C_DECLS
-#endif /* CCI_PLUGINS_BASE_PUBLIC_H */
+#endif				/* CCI_PLUGINS_BASE_PUBLIC_H */

@@ -15,7 +15,7 @@
 #pragma warning(disable:981)
 #pragma warning(disable:1338)
 #pragma warning(disable:2259)
-#endif //   __INTEL_COMPILER
+#endif				//   __INTEL_COMPILER
 
 #include "cci/config.h"
 
@@ -312,7 +312,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	CCI_EXIT;
 	return CCI_SUCCESS;
 
-out:
+      out:
 	if (devices) {
 		cci_device_t const *device;
 		cci__dev_t *my_dev;
@@ -576,7 +576,7 @@ static int sock_create_endpoint(cci_device_t * device,
 	CCI_EXIT;
 	return CCI_SUCCESS;
 
-out:
+      out:
 	pthread_mutex_lock(&dev->lock);
 	if (!TAILQ_EMPTY(&dev->eps)) {
 		TAILQ_REMOVE(&dev->eps, ep, entry);
@@ -1025,7 +1025,7 @@ static int sock_reject(union cci_event *event)
 	debug((CCI_DB_MSG | CCI_DB_CONN), "ep %d sending reject to %s",
 	      sep->sock, name);
 
-out:
+      out:
 	CCI_EXIT;
 	return ret;
 }
@@ -1312,7 +1312,7 @@ static int sock_connect(cci_endpoint_t * endpoint, char *server_uri,
 	CCI_EXIT;
 	return CCI_SUCCESS;
 
-out:
+      out:
 	if (conn) {
 		if (conn->uri)
 			free((char *)conn->uri);
@@ -1669,13 +1669,14 @@ static void sock_progress_pending(cci__dev_t * dev)
 					    CCI_CONN_ATTR_RO) {
 						sock_tx_t *my_temp_tx;
 						TAILQ_FOREACH_SAFE(my_temp_tx,
-								   &sdev->pending,
+								   &sdev->
+								   pending,
 								   dentry,
 								   tmp) {
 							if (my_temp_tx->seq >
 							    tx->seq)
-								my_temp_tx->rnr
-								    = 1;
+								my_temp_tx->
+								    rnr = 1;
 						}
 					}
 				}
@@ -2970,7 +2971,8 @@ sock_handle_ack(sock_conn_t * sconn,
 								     __func__,
 								     sconn->cwnd
 								     - 1,
-								     sconn->cwnd);
+								     sconn->
+								     cwnd);
 							} else {
 								sconn->cwnd++;
 							}
@@ -2997,18 +2999,19 @@ sock_handle_ack(sock_conn_t * sconn,
 							    == CCI_CONN_ATTR_RO
 							    && tx->rnr != 0) {
 								tx->evt.
-								    event.send.status
-								    =
+								    event.send.
+								    status =
 								    CCI_ERR_RNR;
 							} else {
 								tx->evt.
-								    event.send.status
-								    =
+								    event.send.
+								    status =
 								    CCI_SUCCESS;
 							}
 							/* store locally until we can drop the dev->lock */
 							TAILQ_INSERT_TAIL(&evts,
-									  &tx->evt,
+									  &tx->
+									  evt,
 									  entry);
 						}
 					}
@@ -3086,9 +3089,8 @@ sock_handle_ack(sock_conn_t * sconn,
 				}
 				tx->seq = ++(sconn->seq);
 
-				offset =
-				    (uint64_t) i *(uint64_t)
-				    connection->max_send_size;
+				offset = (uint64_t) i *(uint64_t)
+				 connection->max_send_size;
 
 				sock_pack_rma_write(write, tx->len,
 						    sconn->peer_id, tx->seq, 0,
@@ -3650,9 +3652,9 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	uint64_t context_id;
 	uint64_t toto;
 	//cci__evt_t *evt;
-	//sock_header_t *hdr;	/* wire header */
-	//cci_event_t *event;	/* generic CCI event */
-	//cci_endpoint_t *endpoint;	/* generic CCI endpoint */
+	//sock_header_t *hdr;   /* wire header */
+	//cci_event_t *event;   /* generic CCI event */
+	//cci_endpoint_t *endpoint;     /* generic CCI endpoint */
 	sock_header_r_t *hdr_r;
 
 	connection = &conn->connection;
@@ -3766,7 +3768,7 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 	debug(CCI_DB_INFO, "%s: copying data into target buffer", __func__);
 	memcpy(remote->start + (uintptr_t) remote_offset, &write->data, len);
 
-out:
+      out:
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
 	pthread_mutex_unlock(&ep->lock);
@@ -4070,7 +4072,7 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		      (enum sock_msg_type)type);
 	}
 
-out:
+      out:
 	if (q_rx) {
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
@@ -4422,7 +4424,7 @@ static void *sock_recv_thread(void *arg)
 			}
 			i = (i + 1) % nfds;
 		} while (i != start);
-relock:
+	      relock:
 		pthread_mutex_lock(&globals->lock);
 	}
 	pthread_mutex_unlock(&globals->lock);

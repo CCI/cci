@@ -271,4 +271,4 @@ CCI_DECLSPEC int cci_argv_delete(int *argc, char ***argv,
 CCI_DECLSPEC int cci_argv_insert(char ***target, int start, char **source);
 
 END_C_DECLS
-#endif /* CCI_ARGV_H */
+#endif				/* CCI_ARGV_H */

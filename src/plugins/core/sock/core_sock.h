@@ -1107,4 +1107,4 @@ int cci_core_sock_post_load(cci_plugin_t * me);
 int cci_core_sock_pre_unload(cci_plugin_t * me);
 
 END_C_DECLS
-#endif /* CCI_CORE_SOCK_H */
+#endif				/* CCI_CORE_SOCK_H */

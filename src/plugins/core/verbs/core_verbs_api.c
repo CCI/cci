@@ -43,8 +43,7 @@ static int verbs_create_endpoint(cci_device_t * device,
 				 cci_endpoint_t ** endpoint,
 				 cci_os_handle_t * fd);
 static int verbs_destroy_endpoint(cci_endpoint_t * endpoint);
-static int verbs_accept(union cci_event *event,
-			void *context);
+static int verbs_accept(union cci_event *event, void *context);
 static int verbs_reject(union cci_event *event);
 static int verbs_connect(cci_endpoint_t * endpoint, char *server_uri,
 			 void *data_ptr, uint32_t data_len,
@@ -1347,8 +1346,7 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 	return ret;
 }
 
-static int verbs_accept(union cci_event *event,
-			void *context)
+static int verbs_accept(union cci_event *event, void *context)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
@@ -1379,7 +1377,7 @@ static int verbs_accept(union cci_event *event,
 	tx->flags = 0;
 	tx->rma_op = NULL;
 	tx->evt.event.type = CCI_EVENT_ACCEPT;
-	tx->evt.event.accept.status = CCI_SUCCESS; /* for now */
+	tx->evt.event.accept.status = CCI_SUCCESS;	/* for now */
 	tx->evt.event.accept.context = context;
 	tx->evt.event.accept.connection = &conn->connection;
 	tx->evt.conn = conn;
@@ -2422,7 +2420,8 @@ static int verbs_handle_conn_reply(cci__ep_t * ep, struct ibv_wc wc)
 	rx = (verbs_rx_t *) (uintptr_t) wc.wr_id;
 	rx->evt.event.type = CCI_EVENT_CONNECT;
 	rx->evt.event.connect.status = (header >> 4) & 0xF;	/* magic number */
-	rx->evt.event.connect.context = vconn->conn_req ? vconn->conn_req->context : NULL;
+	rx->evt.event.connect.context =
+	    vconn->conn_req ? vconn->conn_req->context : NULL;
 	rx->evt.conn = conn;
 	if (rx->evt.event.connect.status == CCI_SUCCESS) {
 		int use_rdma = (header >> 8) & 0x1;

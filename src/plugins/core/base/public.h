@@ -13,4 +13,4 @@ int cci_plugins_core_verify(cci_plugin_t * plugin);
 int cci_plugins_core_close(void);
 
 END_C_DECLS
-#endif /* PLUGINS_CORE_BASE_PUBLIC_H */
+#endif				/* PLUGINS_CORE_BASE_PUBLIC_H */

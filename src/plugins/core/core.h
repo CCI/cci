@@ -40,8 +40,7 @@ typedef int (*cci_create_endpoint_fn_t) (cci_device_t * device,
 					 cci_endpoint_t ** endpoint,
 					 cci_os_handle_t * fd);
 typedef int (*cci_destroy_endpoint_fn_t) (cci_endpoint_t * endpoint);
-typedef int (*cci_accept_fn_t) (union cci_event * conn_req,
-				void *context);
+typedef int (*cci_accept_fn_t) (union cci_event * conn_req, void *context);
 typedef int (*cci_reject_fn_t) (union cci_event * conn_req);
 typedef int (*cci_connect_fn_t) (cci_endpoint_t * endpoint, char *server_uri,
 				 void *data_ptr, uint32_t data_len,
@@ -119,4 +118,4 @@ extern cci_plugin_core_t *cci_core;
     CCI_CORE_API_VERSION_RELEASE
 
 END_C_DECLS
-#endif /* CCI_PLUGINS_CORE_H */
+#endif				/* CCI_PLUGINS_CORE_H */

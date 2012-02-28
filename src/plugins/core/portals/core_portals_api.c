@@ -10,7 +10,7 @@
 #pragma warning(disable:981)
 #pragma warning(disable:1338)
 #pragma warning(disable:2259)
-#endif //   __INTEL_COMPILER
+#endif				//   __INTEL_COMPILER
 
 #include "cci/config.h"
 #include <stdio.h>
@@ -98,14 +98,14 @@ do {                                                        \
     }                                                       \
 } while (0)
 
-#else /* ENABLE_PORTALS_SAMPLING == 1 */
+#else				/* ENABLE_PORTALS_SAMPLING == 1 */
 #define PORTALS_SAMPLE_INIT
 #define PORTALS_SAMPLE_START
 #define PORTALS_SAMPLE_END
 #define PORTALS_SAMPLE_PRINT
 #define PORTALS_SAMPLE_FREE
 #define PORTALS_IS_SERVER
-#endif /* ENABLE_PORTALS_SAMPLING == 1 */
+#endif				/* ENABLE_PORTALS_SAMPLING == 1 */
 /******* end cycle counting sampling code ****/
 
 /*
@@ -294,7 +294,7 @@ static int portals_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		goto out_with_init;
 	}
 
-false_alarm:
+      false_alarm:
 
 /*
  * Start searching global configuration for portals devices.
@@ -455,9 +455,9 @@ false_alarm:
 	CCI_EXIT;
 	return CCI_SUCCESS;
 
-out_with_ni_init:
+      out_with_ni_init:
 	PtlNIFini(niHandle);
-out_with_init:
+      out_with_init:
 	PtlFini();
 
 	CCI_EXIT;
@@ -661,7 +661,7 @@ static int portals_add_tx(cci__ep_t * ep)
 
 	TAILQ_INSERT_TAIL(&pep->txs, tx, tentry);
 	TAILQ_INSERT_TAIL(&pep->idle_txs, tx, dentry);
-out:
+      out:
 	if (!ret) {
 		if (tx) {
 			if (tx->buffer)
@@ -690,7 +690,7 @@ static int portals_add_rx(cci__ep_t * ep)
 	TAILQ_INSERT_TAIL(&pep->rxs, rx, gentry);
 	TAILQ_INSERT_TAIL(&pep->idle_rxs, rx, entry);
 
-out:
+      out:
 	return ret;
 }
 
@@ -820,7 +820,7 @@ static int portals_create_am_buffer(cci__ep_t * ep, uint64_t length)
 	if (ret == 0)
 		TAILQ_INSERT_TAIL(&pep->ams, am, entry);
 
-out:
+      out:
 	if (ret) {
 		if (am) {
 			if (am->buffer)
@@ -1001,7 +1001,7 @@ static int portals_create_endpoint(cci_device_t * device,
 	CCI_EXIT;
 	return CCI_SUCCESS;
 
-out:
+      out:
 	pthread_mutex_lock(&dev->lock);
 	if (token)
 		pdev->is_progressing = 0;
@@ -1297,14 +1297,14 @@ static int portals_accept(union cci_event *event,
 	CCI_EXIT;
 	return CCI_SUCCESS;
 
-out_with_queued:
+      out_with_queued:
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_REMOVE(&pep->conns, pconn, entry);
 	pthread_mutex_unlock(&ep->lock);
 	free(pconn);
-out_with_conn:
+      out_with_conn:
 	free(conn);
-out_with_rx:
+      out_with_rx:
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_HEAD(&pep->idle_rxs, rx, entry);
 	pthread_mutex_unlock(&ep->lock);
@@ -1393,7 +1393,7 @@ static int portals_reject(union cci_event *event)
 		}
 	}
 
-cleanup:
+      cleanup:
 	CCI_EXIT;
 	return ret;
 }
@@ -1601,7 +1601,7 @@ static int portals_connect(cci_endpoint_t * endpoint,
 	CCI_EXIT;
 	return CCI_SUCCESS;
 
-out:
+      out:
 	if (conn) {
 		if (conn->uri)
 			free((char *)conn->uri);
@@ -1723,7 +1723,7 @@ static int portals_orphan_am_buffer(cci__ep_t * ep, portals_am_buffer_t * am)
 	/* add to orphan AM list */
 	TAILQ_INSERT_TAIL(&pep->orphan_ams, am, entry);
 
-out:
+      out:
 	CCI_EXIT;
 	return CCI_SUCCESS;
 }
@@ -1796,7 +1796,7 @@ static int portals_set_ep_rx_buf_cnt(cci__ep_t * ep, uint32_t new_count)
 			ep->rx_buf_cnt += portals_add_rx(ep);
 	}
 
-out:
+      out:
 	CCI_EXIT;
 	return ret;
 }
@@ -2182,7 +2182,7 @@ static int portals_send_common(cci_connection_t * connection,
 				   0,	/* remote offset */
 				   *hdr_data);	/* hdr_data */
 	} else
-#endif // PORTALS_8B_OOB
+#endif				// PORTALS_8B_OOB
 		ret = PtlPutRegion(tx->mdh,	/* Handle to MD */
 				   0,	/* local offset */
 				   data_len,	/* length */
@@ -2240,7 +2240,7 @@ static int portals_send_common(cci_connection_t * connection,
 		}
 	}
 
-out:
+      out:
 	if (ret) {
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_INSERT_HEAD(&pep->idle_txs, tx, dentry);
@@ -2397,7 +2397,7 @@ static int portals_rma_register(cci_endpoint_t * endpoint,
 
 	CCI_EXIT;
 
-out:
+      out:
 	return iRC;
 }
 
@@ -2633,7 +2633,7 @@ static int portals_rma(cci_connection_t * connection,
 		} while (evt == NULL);
 	}
 
-out:
+      out:
 	if (ret != CCI_SUCCESS || flags & CCI_FLAG_BLOCKING) {
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_REMOVE(&local->rma_ops, rma_op, hentry);
@@ -2874,7 +2874,7 @@ static void portals_handle_active_msg(cci__ep_t * ep, ptl_event_t pevent)
 {
 #ifdef    PORTALS_8B_OOB
 	int len;
-#endif // PORTALS_8B_OOB
+#endif				// PORTALS_8B_OOB
 	portals_ep_t *pep = ep->priv;
 	portals_rx_t *rx = NULL;
 	cci__evt_t *evt = NULL;
@@ -2935,7 +2935,7 @@ static void portals_handle_active_msg(cci__ep_t * ep, ptl_event_t pevent)
 	len = evt->event.recv.len;
 	if (len < 9)		/* Receive to 8B OOB */
 		memcpy(pevent.md.start + pevent.offset, &pevent.hdr_data, len);
-#endif // PORTALS_8B_OOB
+#endif				// PORTALS_8B_OOB
 
 	/* queue event on endpoint's completed event queue */
 
@@ -3343,7 +3343,7 @@ static void portals_get_event_ep(cci__ep_t * ep)
 		break;
 	}
 
-out:
+      out:
 	pthread_mutex_lock(&ep->lock);
 	pep->in_use = 0;
 	pthread_mutex_unlock(&ep->lock);

@@ -9,7 +9,7 @@
 #pragma warning(disable:981)
 #pragma warning(disable:1338)
 #pragma warning(disable:2259)
-#endif // __INTEL_COMPILER
+#endif				// __INTEL_COMPILER
 
 #include <pmi.h>
 #include "cci/config.h"
@@ -26,10 +26,10 @@ size_t gni_line;		// Data cacheline size
 char *cpPTAG = "PMI_GNI_PTAG";
 char *cpCOOKIE = "PMI_GNI_COOKIE";
 char *cpLOC_ADDR = "PMI_GNI_LOC_ADDR";
-#else // USE_PMI
+#else				// USE_PMI
 char *cpPTAG = "SHARED_PD_PTAG";
 char *cpCOOKIE = "SHARED_PD_COOKIE";
-#endif // USE_PMI
+#endif				// USE_PMI
 
 // Cycle count sampling code -- START
 #define   ENABLE_GNI_SAMPLING 0
@@ -108,14 +108,14 @@ do {                                                                  \
     }                                                                 \
 } while(0)
 
-#else // ENABLE_GNI_SAMPLING
+#else				// ENABLE_GNI_SAMPLING
 #define   GNI_SAMPLE_INIT
 #define   GNI_SAMPLE_START
 #define   GNI_SAMPLE_END
 #define   GNI_SAMPLE_PRINT
 #define   GNI_SAMPLE_FREE
 #define   GNI_IS_SERVER
-#endif // ENABLE_GNI_SAMPLING
+#endif				// ENABLE_GNI_SAMPLING
 // Cycle count sampling code -- FINISH
 
 // Local functions
@@ -274,7 +274,7 @@ static void gni_log_sys(	// Convenience function to
 		debug(CCI_DB_WARN, "%8s.%5d %s: %s: %s\n", gdev->nodename,
 		      gdev->INST, pcW, pcA, strerror(errno));
 
-FAIL:
+      FAIL:
 	CCI_EXIT;
 	return;
 }
@@ -301,7 +301,7 @@ static void gni_log_gni(	// Convenience function to
 		debug(CCI_DB_WARN, "%8s.%5d %s: %s: %s\n", gdev->nodename,
 		      gdev->INST, pcW, pcA, gni_err_str[gRv]);
 
-FAIL:
+      FAIL:
 	CCI_EXIT;
 	return;
 }
@@ -330,7 +330,7 @@ static char *colon_tok(		// Return i'th token
 	CCI_EXIT;
 	return (cpTok);
 }
-#endif // USE_PMI
+#endif				// USE_PMI
 
 static uint8_t gni_get_ptag(void)
 {				// Return ptag
@@ -343,9 +343,9 @@ static uint8_t gni_get_ptag(void)
 	assert((cp = getenv(cpPTAG)));	// Environment must exist
 #ifdef    USE_PMI
 	ptag = (uint8_t) atoi(colon_tok(cp, 0));
-#else // USE_PMI
+#else				// USE_PMI
 	ptag = (uint8_t) strtol(cp, NULL, 0);
-#endif // USE_PMI
+#endif				// USE_PMI
 
 	CCI_EXIT;
 	return (ptag);
@@ -362,9 +362,9 @@ static uint32_t gni_get_cookie(void)
 	assert((cp = getenv(cpCOOKIE)));	// Environment must exist
 #ifdef    USE_PMI
 	cookie = (uint32_t) atoi(colon_tok(cp, 0));
-#else // USE_PMI
+#else				// USE_PMI
 	cookie = (uint32_t) strtol(cp, NULL, 0);
-#endif // USE_PMI
+#endif				// USE_PMI
 
 	CCI_EXIT;
 	return (cookie);
@@ -377,10 +377,10 @@ static uint32_t gni_get_nic_addr(	// Return NIC address
 	uint32_t NIC;		// Return value
 #ifdef    USE_PMI
 	char *cp;		// Character temp
-#else // USE_PMI
+#else				// USE_PMI
 	uint32_t iPE;
 	gni_return_t gRv;
-#endif // USE_PMI
+#endif				// USE_PMI
 
 	CCI_ENTER;
 
@@ -391,15 +391,15 @@ static uint32_t gni_get_nic_addr(	// Return NIC address
 	assert((cp = getenv(cpLOC_ADDR)));	// Environment must exist
 	assert((cp = colon_tok(cp, i)));	// Bad if entry not found
 	NIC = (uint32_t) atoi(cp);
-#else // USE_PMI
+#else				// USE_PMI
 	gRv = GNI_CdmGetNicAddress(i,	// device kernel ID
 				   &NIC,	// Only physical address
 				   &iPE);	// PE directly connected
 	gni_log_gni(__func__, "GNI_CdmGetNicAddress", gRv);
 	assert(gRv == GNI_RC_SUCCESS);
-#endif // USE_PMI
+#endif				// USE_PMI
 
-FAIL:
+      FAIL:
 	CCI_EXIT;
 	return (NIC);
 }
@@ -509,7 +509,7 @@ static int gni_get_socket(	// To initialize GNI, we
 
 	cRv = CCI_SUCCESS;
 
-FAIL:
+      FAIL:
 	if (pif0)
 		freeifaddrs(pif0);
 
@@ -669,7 +669,7 @@ static inline int gni_create_smsg(cci_connection_t * connection)
 	gconn->src_box.gconn = gconn;
 	gconn->src_box.info.length = gconn->data_len;
 
-FAIL:
+      FAIL:
 	return (CCI_SUCCESS);
 }
 
@@ -743,7 +743,7 @@ static inline int gni_destroy_smsg(cci_connection_t * connection)
 	debug(CCI_DB_CONN, "%8s.%5d %s: dst_cq_hndl= 0x%.8zx",
 	      gdev->nodename, gdev->INST, __func__, gconn->dst_cq_hndl);
 
-FAIL:
+      FAIL:
 	return (CCI_SUCCESS);
 }
 
@@ -806,7 +806,7 @@ static inline int gni_finish_smsg(cci_connection_t * connection)
 	debug(CCI_DB_CONN, "%8s.%5d %s: SMSG at ep_hndl=%zp",
 	      gdev->nodename, gdev->INST, __func__, gconn->ep_hndl);
 
-FAIL:
+      FAIL:
 	return (CCI_SUCCESS);
 }
 
@@ -894,7 +894,7 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 //  Get page size.
 #ifdef    linux
 	gni_page = sysconf(_SC_PAGESIZE);	// Get page size attribute
-#else // linux
+#else				// linux
 	gni_page = GNI_PAGE_SIZE;	// Default if no OS tuning
 #endif
 	debug(CCI_DB_INFO,
@@ -905,7 +905,7 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 #ifdef    linux
 	gni_line =		// Get L1 dcache line size
 	    sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
-#else // linux
+#else				// linux
 	gni_line = GNI_LINE_SIZE;	// Default if no OS tuning
 #endif
 	debug(CCI_DB_INFO,
@@ -1087,7 +1087,7 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	}
 	cRv = CCI_SUCCESS;
 
-FAIL:
+      FAIL:
 	if (cRv != CCI_SUCCESS) {	// Failed
 
 		if (device_all) {	// Free GNI device(s)
@@ -1225,7 +1225,7 @@ static int gni_free_devices(const cci_device_t ** devices)
 	fflush(stdout);
 	PMI_Barrier();		// Ensure everyone is done
 	PMI_Finalize();
-#endif // USE_PMI
+#endif				// USE_PMI
 	return (CCI_SUCCESS);
 }
 
@@ -1321,7 +1321,7 @@ static int gni_add_rx(int i, cci_endpoint_t * endpoint)
 	TAILQ_INSERT_TAIL(&gep->rx, rx, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-FAIL:
+      FAIL:
 	if (!ret) {
 		if (rx)
 			free(rx);
@@ -1364,7 +1364,7 @@ static int gni_add_tx(		// Caller holds ep->lock
 	TAILQ_INSERT_TAIL(&gep->tx, tx, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-FAIL:
+      FAIL:
 	if (!ret) {
 		if (tx) {
 			if (tx->evt.event.recv.ptr)
@@ -1515,7 +1515,7 @@ static int gni_create_endpoint(cci_device_t * device,
 	      __func__, (*endpoint)->name);
 	cRv = CCI_SUCCESS;
 
-FAIL:
+      FAIL:
 	if (cRv != CCI_SUCCESS && gep) {
 
 		gni_rx_t *rx;
@@ -1785,7 +1785,7 @@ static int gni_accept(union cci_event *event,
 
 	(*connection) = &conn->connection;
 
-FAIL:
+      FAIL:
 	if (dst_box)
 		free(dst_box);
 
@@ -1950,7 +1950,7 @@ static int gni_connect(cci_endpoint_t * endpoint,
 
 	cRv = CCI_SUCCESS;
 
-FAIL:
+      FAIL:
 	if (hostname)
 		free(hostname);
 //  Note: gni_progress_connection_request takes it from here.
@@ -2199,7 +2199,7 @@ static int gni_return_event(cci_event_t * event)
 	case CCI_EVENT_ENDPOINT_DEVICE_FAILED:
 		free_evt = 1;
 
-event_next:
+	      event_next:
 		pthread_mutex_lock(&ep->lock);	// Get evt
 		TAILQ_REMOVE(&ep->evts, evt, entry);
 		pthread_mutex_unlock(&ep->lock);
@@ -2360,7 +2360,7 @@ static int gni_send(cci_connection_t * connection,
 		pthread_mutex_unlock(&ep->lock);	// Release for queued path
 	}			// Note: disable "hot path"
 
-FAIL:
+      FAIL:
 	assert(tx);
 	CCI_EXIT;
 	return (cRv);
@@ -2471,7 +2471,7 @@ static int gni_rma_register(cci_endpoint_t * endpoint,
 	CCI_EXIT;
 	return (CCI_SUCCESS);
 
-FAIL:
+      FAIL:
 	free(vmd);
 	return (CCI_ERROR);
 }
@@ -2574,7 +2574,7 @@ static int gni_rma(cci_connection_t * connection,
 
 	cRv = CCI_SUCCESS;
 
-FAIL:
+      FAIL:
 	CCI_EXIT;
 	return (cRv);
 }
@@ -2712,7 +2712,7 @@ static int gni_reap_recv(cci__dev_t * dev)
 		pthread_mutex_unlock(&ep->lock);
 		continue;
 
-INTERNAL:
+	      INTERNAL:
 		pthread_mutex_lock(&ep->lock);	// Queue evt
 		gconn->in_use = 0;
 		pthread_mutex_unlock(&ep->lock);
@@ -2955,7 +2955,7 @@ static void gni_progress_connection_request(cci__dev_t * dev)
 //      Update status so that we do not retry.
 		gconn->status = gconn->dst_box.info.reply;
 
-FAIL:
+	      FAIL:
 		if (sd != -1)	// Finished with socket
 			close(sd);
 
@@ -3086,7 +3086,7 @@ static void gni_progress_connection_reply(cci__dev_t * dev)
 	evt->event.request.attribute = dst_box->cci_attr;
 	cRv = CCI_SUCCESS;
 
-FAIL:
+      FAIL:
 	if (cRv != CCI_SUCCESS) {
 
 		if (data_ptr)
@@ -3113,7 +3113,7 @@ FAIL:
 	TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
 	pthread_mutex_unlock(&ep->lock);	//
 
-RETRY:
+      RETRY:
 	CCI_EXIT;
 	return;
 }
@@ -3131,7 +3131,7 @@ static void gni_progress_dev(cci__dev_t * dev)
 	gni_reap_send(dev);
 //  gni_reap_recv(dev);
 
-FAIL:
+      FAIL:
 	CCI_EXIT;
 	return;
 }

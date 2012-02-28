@@ -189,7 +189,7 @@ static void poll_events(void)
 		case CCI_EVENT_CONNECT:
 			if (!is_server) {
 				connect_done = 1;
-			    connection = event->connect.connection;
+				connection = event->connect.connection;
 			}
 			break;
 		default:
@@ -347,51 +347,62 @@ void do_server()
 
 		ret = cci_get_event(endpoint, &event);
 		if (ret == CCI_SUCCESS) {
-            switch (event->type) {
-            case CCI_EVENT_CONNECT_REQUEST:
-                if (accept) {
-                    opts = *((options_t *) event->request.data_ptr);
-                    ret = cci_accept(event, NULL);
-                    check_return("cci_accept", ret, 1);
-                } else {
-                    ret = cci_reject(event);
-                    check_return("cci_accept", ret, 1);
-                }
-                break;
-            case CCI_EVENT_ACCEPT:
-            {
-                int len;
+			switch (event->type) {
+			case CCI_EVENT_CONNECT_REQUEST:
+				if (accept) {
+					opts =
+					    *((options_t *) event->request.
+					      data_ptr);
+					ret = cci_accept(event, NULL);
+					check_return("cci_accept", ret, 1);
+				} else {
+					ret = cci_reject(event);
+					check_return("cci_accept", ret, 1);
+				}
+				break;
+			case CCI_EVENT_ACCEPT:
+				{
+					int len;
 
-			    ready = 1;
-                connection = event->accept.connection;
+					ready = 1;
+					connection = event->accept.connection;
 
-			    if (opts.method == MSGS)
-				    len = connection->max_send_size;
-			    else
-				    len = opts.max_rma_size;
+					if (opts.method == MSGS)
+						len = connection->max_send_size;
+					else
+						len = opts.max_rma_size;
 
-			    ret = posix_memalign((void **)&buffer, 4096, len);
-			    check_return("memalign buffer", ret, 1);
+					ret =
+					    posix_memalign((void **)&buffer,
+							   4096, len);
+					check_return("memalign buffer", ret, 1);
 
-			    memset(buffer, 'a', len);
+					memset(buffer, 'a', len);
 
-			    if (opts.method != MSGS) {
-				    ret =
-				        cci_rma_register(endpoint, connection,
-						        buffer, opts.max_rma_size,
-						        &opts.server_rma_handle);
-				    check_return("cci_rma_register", ret, 1);
-                }
-			    ret =
-			        cci_send(connection, &opts, sizeof(opts), NULL, 0);
-			    check_return("cci_send", ret, 1);
-                break;
-            }
-            default:
-                fprintf(stderr, "%s: ignoring unexpected event %d\n",
-                        __func__, event->type);
-                break;
-            }
+					if (opts.method != MSGS) {
+						ret =
+						    cci_rma_register(endpoint,
+								     connection,
+								     buffer,
+								     opts.
+								     max_rma_size,
+								     &opts.
+								     server_rma_handle);
+						check_return("cci_rma_register",
+							     ret, 1);
+					}
+					ret =
+					    cci_send(connection, &opts,
+						     sizeof(opts), NULL, 0);
+					check_return("cci_send", ret, 1);
+					break;
+				}
+			default:
+				fprintf(stderr,
+					"%s: ignoring unexpected event %d\n",
+					__func__, event->type);
+				break;
+			}
 
 		}
 	}
@@ -481,8 +492,7 @@ int main(int argc, char *argv[])
 			print_usage();
 		}
 		if (opts.max_rma_size) {
-			printf
-			    ("ignoring max_rma_size (-m) with MSGs\n");
+			printf("ignoring max_rma_size (-m) with MSGs\n");
 			opts.max_rma_size = 0;
 		}
 	} else {

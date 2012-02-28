@@ -247,8 +247,7 @@ typedef enum cci_status {
 
 	/*! Connection request rejected */
 	CCI_ECONNREFUSED = ECONNREFUSED
-
-	/* ...more here, inspired from errno.h... */
+	    /* ...more here, inspired from errno.h... */
 } cci_status_t;
 
 /*!
@@ -685,8 +684,7 @@ union cci_event;
 
   \ingroup connection
 */
-CCI_DECLSPEC int cci_accept(union cci_event *conn_req,
-			    void *context);
+CCI_DECLSPEC int cci_accept(union cci_event *conn_req, void *context);
 
 /*!
   Reject a connection request.
@@ -1588,4 +1586,4 @@ CCI_DECLSPEC int cci_rma(cci_connection_t * connection,
 			 uint64_t remote_handle, uint64_t remote_offset,
 			 uint64_t data_len, void *context, int flags);
 
-#endif /* CCI_H */
+#endif				/* CCI_H */

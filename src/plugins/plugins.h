@@ -50,4 +50,4 @@ typedef struct cci_plugin_t {
 } cci_plugin_t;
 
 END_C_DECLS
-#endif /* CCI_PLUGINS_H */
+#endif				/* CCI_PLUGINS_H */

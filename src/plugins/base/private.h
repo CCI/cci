@@ -22,4 +22,4 @@ extern lt_dladvise cci_plugins_dladvise;
 extern char **cci_plugins_filename_cache;
 
 END_C_DECLS
-#endif /* CCI_PLUGINS_BASE_PRIVATE_H */
+#endif				/* CCI_PLUGINS_BASE_PRIVATE_H */
