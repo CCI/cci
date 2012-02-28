@@ -47,7 +47,7 @@ uint32_t rmt_comp_len = 0;
 typedef struct options {
 	uint64_t server_rma_handle;
 	uint32_t max_rma_size;
-#define AM        0
+#define MSGS      0
 #define RMA_WRITE 1
 #define RMA_READ  2
 	uint32_t method;
@@ -55,7 +55,7 @@ typedef struct options {
 	int pad;
 } options_t;
 
-options_t opts = { 0ULL, 0, 0, 0 };
+options_t opts = { 0ULL, 0, 0, 0, 0 };
 
 void print_usage()
 {
@@ -71,8 +71,8 @@ void print_usage()
 	fprintf(stderr,
 		"\t-c\tConnection type (UU, RU, or RO) set by client only\n");
 	fprintf(stderr, "\t-n\tSet CCI_FLAG_NO_COPY ito avoid copying\n");
-	fprintf(stderr, "\t-w\tUse RMA WRITE instead of active messages\n");
-	fprintf(stderr, "\t-r\tUse RMA READ instead of active messages\n");
+	fprintf(stderr, "\t-w\tUse RMA WRITE instead of MSGs\n");
+	fprintf(stderr, "\t-r\tUse RMA READ instead of MSGs\n");
 	fprintf(stderr, "\t-m\tTest RMA messages up to max_rma_size\n");
 	fprintf(stderr, "\t-C\tSend RMA remote completion message\n\n");
 	fprintf(stderr, "Example:\n");
@@ -102,7 +102,7 @@ static void poll_events(void)
 		switch (event->type) {
 		case CCI_EVENT_SEND:
 			assert(event->send.status == CCI_SUCCESS);
-			if (opts.method != AM) {
+			if (opts.method != MSGS) {
 				if (!is_server
 				    && event->send.context == (void *)1) {
 					count++;
@@ -127,7 +127,7 @@ static void poll_events(void)
 			break;
 		case CCI_EVENT_RECV:
 			{
-				if (!is_server && opts.method != AM
+				if (!is_server && opts.method != MSGS
 				    && event->recv.ptr == (void *)1) {
 					count++;
 					if (count < warmup + iters) {
@@ -146,7 +146,7 @@ static void poll_events(void)
 				}
 				if (!ready) {
 					ready = 1;
-					if (opts.method != AM && !is_server) {
+					if (opts.method != MSGS && !is_server) {
 						/* get server_rma_handle */
 						opts =
 						    *((options_t *) event->recv.
@@ -155,7 +155,7 @@ static void poll_events(void)
 				} else if (is_server && event->recv.len == 3) {
 					done = 1;
 					break;
-				} else if (opts.method == AM) {
+				} else if (opts.method == MSGS) {
 					if (is_server) {
 						if (event->recv.len >
 						    current_size)
@@ -186,15 +186,10 @@ static void poll_events(void)
 				}
 				break;
 			}
-		case CCI_EVENT_CONNECT_ACCEPTED:
-		case CCI_EVENT_CONNECT_FAILED:
-		case CCI_EVENT_CONNECT_REJECTED:
+		case CCI_EVENT_CONNECT:
 			if (!is_server) {
 				connect_done = 1;
-				if (event->type == CCI_EVENT_CONNECT_ACCEPTED)
-					connection = event->accepted.connection;
-				else
-					connection = NULL;
+			    connection = event->connect.connection;
 			}
 			break;
 		default:
@@ -238,7 +233,7 @@ void do_client()
 	while (!ready)
 		poll_events();
 
-	if (opts.method == AM) {
+	if (opts.method == MSGS) {
 		func = "cci_send";
 		max = connection->max_send_size;
 	} else {
@@ -251,7 +246,7 @@ void do_client()
 
 	memset(buffer, 'b', max);
 
-	if (opts.method != AM) {
+	if (opts.method != MSGS) {
 		ret = cci_rma_register(endpoint, connection, buffer,
 				       max, &local_rma_handle);
 		check_return("cci_rma_register", ret, 1);
@@ -269,7 +264,7 @@ void do_client()
 		rmt_comp_len = 4;
 	}
 
-	if (opts.method == AM)
+	if (opts.method == MSGS)
 		printf("Bytes\t\tLatency (one-way)\tThroughput\n");
 	else
 		printf("Bytes\t\tLatency (round-trip)\tThroughput\n");
@@ -279,7 +274,7 @@ void do_client()
 		double lat = 0.0;
 		double bw = 0.0;
 
-		if (opts.method == AM)
+		if (opts.method == MSGS)
 			ret =
 			    cci_send(connection, buffer, current_size, NULL,
 				     opts.flags);
@@ -300,7 +295,7 @@ void do_client()
 
 		gettimeofday(&end, NULL);
 
-		if (opts.method == AM)
+		if (opts.method == MSGS)
 			lat = usecs(start, end) / (double)iters / 2.0;
 		else
 			lat = usecs(start, end) / (double)iters;
@@ -332,7 +327,7 @@ void do_client()
 	while (!done)
 		poll_events();
 
-	if (opts.method != AM) {
+	if (opts.method != MSGS) {
 		ret = cci_rma_deregister(local_rma_handle);
 		check_return("cci_rma_deregister", ret, 1);
 	}
@@ -352,56 +347,63 @@ void do_server()
 
 		ret = cci_get_event(endpoint, &event);
 		if (ret == CCI_SUCCESS) {
-			int len;
+            switch (event->type) {
+            case CCI_EVENT_CONNECT_REQUEST:
+                if (accept) {
+                    opts = *((options_t *) event->request.data_ptr);
+                    ret = cci_accept(event, NULL);
+                    check_return("cci_accept", ret, 1);
+                } else {
+                    ret = cci_reject(event);
+                    check_return("cci_accept", ret, 1);
+                }
+                break;
+            case CCI_EVENT_ACCEPT:
+            {
+                int len;
 
-			if (accept) {
-				ready = 1;
-				opts = *((options_t *) event->request.data_ptr);
-				ret = cci_accept(event, NULL, &connection);
-				check_return("cci_accept", ret, 1);
-			} else {
-				ret = cci_reject(event);
-				check_return("cci_accept", ret, 1);
-			}
+			    ready = 1;
+                connection = event->accept.connection;
 
-			ret = cci_return_event(event);
-			check_return("cci_return_event", ret, 1);
+			    if (opts.method == MSGS)
+				    len = connection->max_send_size;
+			    else
+				    len = opts.max_rma_size;
 
-			if (!accept)
-				goto out;
+			    ret = posix_memalign((void **)&buffer, 4096, len);
+			    check_return("memalign buffer", ret, 1);
 
-			if (opts.method == AM)
-				len = connection->max_send_size;
-			else
-				len = opts.max_rma_size;
+			    memset(buffer, 'a', len);
 
-			ret = posix_memalign((void **)&buffer, 4096, len);
-			check_return("memalign buffer", ret, 1);
+			    if (opts.method != MSGS) {
+				    ret =
+				        cci_rma_register(endpoint, connection,
+						        buffer, opts.max_rma_size,
+						        &opts.server_rma_handle);
+				    check_return("cci_rma_register", ret, 1);
+                }
+			    ret =
+			        cci_send(connection, &opts, sizeof(opts), NULL, 0);
+			    check_return("cci_send", ret, 1);
+                break;
+            }
+            default:
+                fprintf(stderr, "%s: ignoring unexpected event %d\n",
+                        __func__, event->type);
+                break;
+            }
 
-			memset(buffer, 'a', len);
-
-			if (opts.method != AM) {
-				ret =
-				    cci_rma_register(endpoint, connection,
-						     buffer, opts.max_rma_size,
-						     &opts.server_rma_handle);
-				check_return("cci_rma_register", ret, 1);
-			}
-			ret =
-			    cci_send(connection, &opts, sizeof(opts), NULL, 0);
-			check_return("cci_send", ret, 1);
 		}
 	}
 
 	while (!done)
 		poll_events();
 
-	if (opts.method != AM) {
+	if (opts.method != MSGS) {
 		ret = cci_rma_deregister(opts.server_rma_handle);
 		check_return("cci_rma_deregister", ret, 1);
 	}
 
-out:
 	printf("server done\n");
 	sleep(1);
 
@@ -472,7 +474,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (attr == CCI_CONN_ATTR_UU) {
-		if (opts.method != AM) {
+		if (opts.method != MSGS) {
 			fprintf(stderr,
 				"RMA %s not allowed with UU connections\n",
 				opts.method == RMA_WRITE ? "WRITE" : "READ");
@@ -480,7 +482,7 @@ int main(int argc, char *argv[])
 		}
 		if (opts.max_rma_size) {
 			printf
-			    ("ignoring max_rma_size (-m) with active messages\n");
+			    ("ignoring max_rma_size (-m) with MSGs\n");
 			opts.max_rma_size = 0;
 		}
 	} else {

@@ -44,7 +44,7 @@ static int verbs_create_endpoint(cci_device_t * device,
 				 cci_os_handle_t * fd);
 static int verbs_destroy_endpoint(cci_endpoint_t * endpoint);
 static int verbs_accept(union cci_event *event,
-			void *context, cci_connection_t ** connection);
+			void *context);
 static int verbs_reject(union cci_event *event);
 static int verbs_connect(cci_endpoint_t * endpoint, char *server_uri,
 			 void *data_ptr, uint32_t data_len,
@@ -1348,7 +1348,7 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 }
 
 static int verbs_accept(union cci_event *event,
-			void *context, cci_connection_t ** connection)
+			void *context)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
@@ -1370,6 +1370,21 @@ static int verbs_accept(union cci_event *event,
 	conn = evt->conn;
 	vconn = conn->priv;
 
+	tx = verbs_get_tx(ep);
+	if (!tx) {
+		ret = CCI_ENOBUFS;
+		goto out;
+	}
+	tx->msg_type = VERBS_MSG_CONN_REPLY;
+	tx->flags = 0;
+	tx->rma_op = NULL;
+	tx->evt.event.type = CCI_EVENT_ACCEPT;
+	tx->evt.event.accept.status = CCI_SUCCESS; /* for now */
+	tx->evt.event.accept.context = context;
+	tx->evt.event.accept.connection = &conn->connection;
+	tx->evt.conn = conn;
+	tx->evt.ep = ep;
+
 	ret = verbs_vconn_set_mss(vconn);
 	if (ret) {
 		/* TODO */
@@ -1379,15 +1394,8 @@ static int verbs_accept(union cci_event *event,
 
 	if (vconn->num_slots) {
 		pthread_mutex_lock(&ep->lock);
-		if (vep->rdma_msg_used < vep->rdma_msg_total) {
-			tx = verbs_get_tx_locked(vep);
-			if (!tx)
-				vconn->num_slots = 0;
-			else
-				vep->rdma_msg_used++;
-		} else {
+		if (vep->rdma_msg_used >= vep->rdma_msg_total)
 			vconn->num_slots = 0;
-		}
 		pthread_mutex_unlock(&ep->lock);
 	}
 
@@ -1450,7 +1458,7 @@ static int verbs_accept(union cci_event *event,
 	}
 
 	header = VERBS_MSG_CONN_REPLY;
-	header |= (CCI_EVENT_CONNECT_ACCEPTED << 4);
+	header |= (CCI_SUCCESS << 4);
 	if (vconn->num_slots)
 		header |= (1 << 8);	/* magic number */
 
@@ -1460,7 +1468,7 @@ static int verbs_accept(union cci_event *event,
 	TAILQ_INSERT_TAIL(&vep->conns, vconn, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-	ret = verbs_post_send(conn, 0, ptr, len, header);
+	ret = verbs_post_send(conn, (uintptr_t) tx, ptr, len, header);
 	if (ret) {
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_REMOVE(&vep->conns, vconn, entry);
@@ -1468,7 +1476,6 @@ static int verbs_accept(union cci_event *event,
 		goto out;
 	}
 
-	*connection = &conn->connection;
       out:
 	/* do not repost rx here - it will be posted in return event */
 	CCI_EXIT;
@@ -1504,7 +1511,7 @@ static int verbs_reject(union cci_event *event)
 
 	/* send a reject rather than just disconnect so the client knows */
 	header = VERBS_MSG_CONN_REPLY;
-	header |= (CCI_EVENT_CONNECT_REJECTED << 4);
+	header |= (CCI_ECONNREFUSED << 4);
 
 	ret = verbs_post_send(conn, (uintptr_t) tx, NULL, 0, header);
 	/* FIXME handle error */
@@ -2413,14 +2420,17 @@ static int verbs_handle_conn_reply(cci__ep_t * ep, struct ibv_wc wc)
 	header = ntohl(wc.imm_data);
 
 	rx = (verbs_rx_t *) (uintptr_t) wc.wr_id;
-	rx->evt.event.type = (header >> 4) & 0xF;	/* magic number */
-	if (rx->evt.event.type == CCI_EVENT_CONNECT_ACCEPTED) {
+	rx->evt.event.type = CCI_EVENT_CONNECT;
+	rx->evt.event.connect.status = (header >> 4) & 0xF;	/* magic number */
+	rx->evt.event.connect.context = vconn->conn_req ? vconn->conn_req->context : NULL;
+	rx->evt.conn = conn;
+	if (rx->evt.event.connect.status == CCI_SUCCESS) {
 		int use_rdma = (header >> 8) & 0x1;
 		struct ibv_qp_attr attr;
 		struct ibv_qp_init_attr init;
 
 		vconn->state = VERBS_CONN_ESTABLISHED;
-		rx->evt.event.accepted.connection = &conn->connection;
+		rx->evt.event.connect.connection = &conn->connection;
 		if (vconn->num_slots) {
 			if (use_rdma) {
 				vconn->raddr =
@@ -2443,14 +2453,8 @@ static int verbs_handle_conn_reply(cci__ep_t * ep, struct ibv_wc wc)
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_INSERT_TAIL(&vep->conns, vconn, entry);
 		pthread_mutex_unlock(&ep->lock);
-	} else if (rx->evt.event.type == CCI_EVENT_CONNECT_REJECTED) {
-		rx->evt.event.rejected.context = vconn->conn_req ?
-		    vconn->conn_req->context : NULL;
-		rx->evt.conn = conn;
-		/* the rejected conn is cleaned up after return event */
 	} else {
-		debug(CCI_DB_WARN, "%s: invalid reply %u", __func__,
-		      rx->evt.event.type);
+		rx->evt.event.connect.connection = NULL;
 	}
 
 	pthread_mutex_lock(&ep->lock);
@@ -2825,7 +2829,7 @@ static int verbs_complete_send(cci__ep_t * ep, struct ibv_wc wc)
 		      type);
 		break;
 	}
-	if (ret) {
+	if (type != VERBS_MSG_INVALID && type != VERBS_MSG_SEND) {
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_INSERT_HEAD(&vep->idle_txs, tx, entry);
 		pthread_mutex_unlock(&ep->lock);
@@ -2905,6 +2909,10 @@ static int verbs_handle_send_completion(cci__ep_t * ep, struct ibv_wc wc)
 				rdma_destroy_ep(vconn->id);
 				free(vconn);
 				free(conn);
+			} else {
+				pthread_mutex_lock(&ep->lock);
+				TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
+				pthread_mutex_unlock(&ep->lock);
 			}
 		}
 		break;
@@ -3124,26 +3132,22 @@ static int verbs_return_event(cci_event_t * event)
 	case CCI_EVENT_CONNECT_REQUEST:
 		ret = verbs_return_conn_request(event);
 		break;
-	case CCI_EVENT_CONNECT_REJECTED:
+	case CCI_EVENT_CONNECT:
 		{
 			cci__evt_t *evt =
 			    container_of(event, cci__evt_t, event);
 			cci__conn_t *conn = evt->conn;
 			verbs_conn_t *vconn = conn->priv;
-
-			/* TODO if RDMA MSGs requested, clean up as well */
-			rdma_disconnect(vconn->id);
-			rdma_destroy_ep(vconn->id);
-			free(vconn);
-			free(conn);
-		}
-		/* fall through */
-	case CCI_EVENT_CONNECT_ACCEPTED:
-		{
-			cci__evt_t *evt =
-			    container_of(event, cci__evt_t, event);
 			cci__ep_t *ep = evt->ep;
 			verbs_rx_t *rx = container_of(evt, verbs_rx_t, evt);
+
+			if (event->connect.status != CCI_SUCCESS) {
+				/* TODO if RDMA MSGs requested, clean up as well */
+				rdma_disconnect(vconn->id);
+				rdma_destroy_ep(vconn->id);
+				free(vconn);
+				free(conn);
+			}
 
 			ret = verbs_post_rx(ep, rx);
 			if (ret) {
@@ -3151,6 +3155,20 @@ static int verbs_return_event(cci_event_t * event)
 				debug(CCI_DB_MSG, "%s: post_rx() returned %s",
 				      __func__, strerror(ret));
 			}
+		}
+		break;
+	case CCI_EVENT_ACCEPT:
+		{
+			cci__evt_t *evt =
+			    container_of(event, cci__evt_t, event);
+			cci__ep_t *ep = evt->ep;
+			verbs_ep_t *vep = ep->priv;
+			verbs_tx_t *tx = NULL;
+
+			tx = container_of(evt, verbs_tx_t, evt);
+			pthread_mutex_lock(&ep->lock);
+			TAILQ_INSERT_HEAD(&vep->idle_txs, tx, entry);
+			pthread_mutex_unlock(&ep->lock);
 		}
 		break;
 	case CCI_EVENT_RECV:

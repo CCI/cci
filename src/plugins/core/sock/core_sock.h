@@ -451,7 +451,7 @@ static inline void sock_pack_keepalive(sock_header_t * header, uint32_t id)
    type: SOCK_MSG_RNR
 
  */
-/* FIXME GV: i do not think we need "count" */
+/* FIXME: do we really need "count" */
 static inline void
 sock_pack_nack(sock_header_r_t * header_r, sock_msg_type_t type,
 	       uint32_t peer_id, uint32_t seq, uint32_t ts, int count)
@@ -642,7 +642,7 @@ sock_pack_rma_write(sock_rma_header_t * write, uint16_t data_len,
     <---------- 32 bits ---------->
     <- 8 -> <- 8 -> <---- 16 ----->
    +-------+-----------------------+
-   | type  |   a   |   data_len    |
+   | type  |   a   |       b       |
    +-------+-----------------------+
    |            peer id            |
    +-------------------------------+
@@ -681,10 +681,11 @@ sock_pack_rma_write(sock_rma_header_t * write, uint16_t data_len,
    local offset: offset into the local handle (changes for each packet)
    remote handle: passive peer's handle (stays same for each packet)
    remote offset: offset into the remote handle (changes for each packet)
+   context: context of the RMA operation
  */
 
 static inline void
-sock_pack_rma_read(sock_rma_header_t * read, uint16_t data_len,
+sock_pack_rma_read(sock_rma_header_t * read, uint64_t data_len,
 		   uint32_t peer_id, uint32_t seq, uint32_t ts,
 		   uint64_t local_handle, uint64_t local_offset,
 		   uint64_t remote_handle, uint64_t remote_offset)
@@ -697,8 +698,21 @@ sock_pack_rma_read(sock_rma_header_t * read, uint16_t data_len,
 				    remote_offset);
 }
 
-/***
- * FIXME Describe packet format
+/* RMA WRITE DONE message
+    <---------- 32 bits ---------->
+    <- 8 -> <- 8 -> <---- 16 ----->
+   +-------+-----------------------+
+   | type  |   a   |  context_id   |
+   +-------+-----------------------+
+   |            peer id            |
+   +-------------------------------+
+
+   +-------------------------------+
+   |              seq              |
+   +-------------------------------+
+   |           timestamp           |
+   +-------------------------------+
+
  */
 
 static inline void

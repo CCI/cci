@@ -243,8 +243,12 @@ typedef enum cci_status {
 	CCI_ENOMSG = ENOMSG,
 
 	/*! Address not available */
-	CCI_EADDRNOTAVAIL = EADDRNOTAVAIL
-	    /* ...more here, inspired from errno.h... */
+	CCI_EADDRNOTAVAIL = EADDRNOTAVAIL,
+
+	/*! Connection request rejected */
+	CCI_ECONNREFUSED = ECONNREFUSED
+
+	/* ...more here, inspired from errno.h... */
 } cci_status_t;
 
 /*!
@@ -659,29 +663,30 @@ typedef struct cci_connection {
 union cci_event;
 
 /*!
-  Accept a connection request and establish a connection with a specific
-  endpoint.
+  Accept a connection request.
 
   \param[in] conn_req		A connection request event previously returned by
 				cci_get_event().
   \param[in] context		Cookie to be used to identify the connection in
 				incoming events.
-  \param[in,out] connection	Connection pointer to a connection request structure.
 
-  \return CCI_SUCCESS   The connection has been established.
+  \return CCI_SUCCESS   CCI has started completing the connection handshake.
   \return CCI_EINVAL    The event is not a connection request or it has
                         already been accepted or rejected.
   \return Each driver may have additional error codes.
 
-  Upon success, the incoming connection request is bound to the
-  desired endpoint and a connection handle is filled in.  The
-  connection request event must still be returned to CCI via
+  Upon success, CCI will attempt to complete the connection handshake.
+  Once completed, CCI will return a CCI_EVENT_ACCEPT event. If successful,
+  the event will contain a pointer to the new connection. It will always
+  contain the context passed in here.
+
+  The connection request event must still be returned to CCI via
   cci_return_event().
 
   \ingroup connection
 */
 CCI_DECLSPEC int cci_accept(union cci_event *conn_req,
-			    void *context, cci_connection_t ** connection);
+			    void *context);
 
 /*!
   Reject a connection request.
@@ -817,20 +822,14 @@ typedef enum cci_event_type {
 	/*! A message has been received. */
 	CCI_EVENT_RECV,
 
-	/*! A new outgoing connection was successfully accepted at the
-	   peer; a connection is now available for data transfer. */
-	CCI_EVENT_CONNECT_ACCEPTED,
-
-	/*! A new outgoing connection could not complete the accept/connect
-	   handshake with the peer, either because the timeout expired, or
-	   for another driver specific reason. */
-	CCI_EVENT_CONNECT_FAILED,
-
-	/*! A new outgoing connection was rejected by the server. */
-	CCI_EVENT_CONNECT_REJECTED,
+	/*! An outgoing connection request has completed. */
+	CCI_EVENT_CONNECT,
 
 	/*! An incoming connection request from a client. */
 	CCI_EVENT_CONNECT_REQUEST,
+
+	/*! An incoming connection accept has completed. */
+	CCI_EVENT_ACCEPT,
 
 	/*! This event occurs when the keepalive timeout has expired (see
 	   CCI_OPT_ENDPT_KEEPALIVE_TIMEDOUT for more details). */
@@ -922,37 +921,28 @@ typedef struct cci_event_recv {
 } cci_event_recv_t;
 
 /*!
-  Connect success event.
+  Connect request completion event.
 
-  A connect has completed successfully and the new connection is
-  available for communication. The context is returned that was
-  passed to cci_connect().
+  The status field may contain the following values:
 
-  The number of fields in this struct is intentionally limited in
-  order to reduce costs associated with state storage, caching,
-  updating, copying.  For example, there is no field pointing to the
-  endpoint because it can be obtained from the cci_connection or
-  through the endpoint passed to the cci_get_event() call.
+  CCI_SUCCESS	The connection was accepted by the server and
+		successfully established. The corresponding
+		connection structure is available in the event
+		connection field.
 
-  The ordering of fields in this struct is intended to reduce memory
-  holes between fields.
+  CCI_ECONNREFUSED	The server rejected the connection request.
 
-  \ingroup events
-*/
-typedef struct cci_event_connect_accepted {
-	/*! Type of event - should equal CCI_EVENT_CONNECT_ACCEPTED. */
-	cci_event_type_t type;
+  CCI_ETIMEDOUT    The connection could not be established before
+                   the timeout expired.
 
-	/*! The new connection. Its context field contains the context
-	   that was given to cci_connect(). */
-	cci_connection_t *connection;
-} cci_event_connect_accepted_t;
+  Some drivers may also return specific return codes.
 
-/*!
-  Connect timeout event.
+  The connection field is only valid for use if status is
+  CCI_SUCCESS. It is set to NULL in any other case.
 
-  A connect has timed out. No new connection is available. The context
-  is returned that was passed to cci_connect().
+  The context field is always set to what was passed to
+  cci_connect(). On success, the connection structure context
+  field is also set accordingly.
 
   The number of fields in this struct is intentionally limited in
   order to reduce costs associated with state storage, caching,
@@ -965,44 +955,19 @@ typedef struct cci_event_connect_accepted {
 
   \ingroup events
 */
-typedef struct cci_event_connect_failed {
-	/*! Type of event - should equal CCI_EVENT_CONNECT_FAILED. */
+typedef struct cci_event_connect {
+	/*! Type of event - should equal CCI_EVENT_CONNECT. */
 	cci_event_type_t type;
 
-	/*! A status indicating why the connection failed.
-	   If the connection could not be setup before the timeout expired,
-	   status is CCI_ETIMEDOUT.
-	   Each driver may have additional error codes. */
+	/*! Result of the connect request. */
 	cci_status_t status;
 
 	/*! Context value that was passed to cci_connect() */
 	void *context;
-} cci_event_connect_failed_t;
 
-/*!
-  Connection rejected event.
-
-  The server rejected our connection request. No new connection is
-  available. The context is returned that was passed to cci_connect().
-
-  The number of fields in this struct is intentionally limited in
-  order to reduce costs associated with state storage, caching,
-  updating, copying.  For example, there is no field pointing to the
-  endpoint because it can be obtained from the cci_connection or
-  through the endpoint passed to the cci_get_event() call.
-
-  The ordering of fields in this struct is intended to reduce memory
-  holes between fields.
-
-  \ingroup events
-*/
-typedef struct cci_event_connect_rejected {
-	/*! Type of event - should equal CCI_EVENT_CONNECT_REJECTED. */
-	cci_event_type_t type;
-
-	/*! Context value that was passed to cci_connect() */
-	void *context;
-} cci_event_connect_rejected_t;
+	/*! The new connection, if the request successfully completed. */
+	cci_connection_t *connection;
+} cci_event_connect_t;
 
 /*!
   Connection request event.
@@ -1036,6 +1001,52 @@ typedef struct cci_event_connect_request {
 	/*! Attribute of requested connection */
 	cci_conn_attribute_t attribute;
 } cci_event_connect_request_t;
+
+/*!
+  Accept completion event.
+
+  The status field may contain the following values:
+
+  CCI_SUCCESS	The accepted connection was successfully established.
+		The corresponding connection structure is available
+		in the event connection field.
+
+  Some drivers may also return specific return codes.
+
+  The connection field is only valid for use if status is
+  CCI_SUCCESS. It is set to NULL in any other case.
+
+  The context field is always set to what was passed to
+  cci_accept(). On success, the connection structure context
+  field is also set accordingly.
+
+  The number of fields in this struct is intentionally limited in
+  order to reduce costs associated with state storage, caching,
+  updating, copying.  For example, there is no field pointing to the
+  endpoint because it can be obtained from the cci_connection or
+  through the endpoint passed to the cci_get_event() call.
+
+  The ordering of fields in this struct is intended to reduce memory
+  holes between fields.
+
+  This event should be passed to either cci_accept() or cci_reject()
+  before being returned with cci_return_event().
+
+  \ingroup events
+*/
+typedef struct cci_event_accept {
+	/*! Type of event - should equal CCI_EVENT_ACCEPT. */
+	cci_event_type_t type;
+
+	/*! Result of the accept. */
+	cci_status_t status;
+
+	/*! The context that was passed to cci_accept() */
+	void *context;
+
+	/*! The new connection, if the request successfully completed. */
+	cci_connection_t *connection;
+} cci_event_accept_t;
 
 /*!
   Keepalive timeout event.
@@ -1098,10 +1109,9 @@ typedef union cci_event {
 	cci_event_type_t type;
 	cci_event_send_t send;
 	cci_event_recv_t recv;
-	cci_event_connect_accepted_t accepted;
-	cci_event_connect_rejected_t rejected;
-	cci_event_connect_failed_t conn_failed;
+	cci_event_connect_t connect;
 	cci_event_connect_request_t request;
+	cci_event_accept_t accept;
 	cci_event_keepalive_timedout_t keepalive;
 	cci_event_endpoint_device_failed_t dev_failed;
 } cci_event_t;
