@@ -34,8 +34,7 @@ static int eth_create_endpoint(cci_device_t * device,
 			       cci_endpoint_t ** endpoint,
 			       cci_os_handle_t * fd);
 static int eth_destroy_endpoint(cci_endpoint_t * endpoint);
-static int eth_accept(union cci_event *event,
-		      void *context, cci_connection_t ** connection);
+static int eth_accept(union cci_event *event, void *context);
 static int eth_reject(union cci_event *event);
 static int eth_connect(cci_endpoint_t * endpoint, char *server_uri,
 		       void *data_ptr, uint32_t data_len,
@@ -595,8 +594,7 @@ static int eth_destroy_endpoint(cci_endpoint_t * endpoint)
 	return CCI_SUCCESS;
 }
 
-static int eth_accept(union cci_event *event,
-		      void *context, cci_connection_t ** connection)
+static int eth_accept(union cci_event *event, void *context)
 {
 	cci__evt_t *_ev = container_of(event, cci__evt_t, event);
 	eth__evt_t *eev = container_of(_ev, eth__evt_t, _ev);
@@ -636,7 +634,8 @@ static int eth_accept(union cci_event *event,
 	_conn->connection.attribute = ge->connect_request.attribute;
 	_conn->connection.context = context;
 
-	*connection = &_conn->connection;
+#warning FIXME generate a accept event
+
 	return CCI_SUCCESS;
 }
 
@@ -833,8 +832,10 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 			econn->_conn.connection.max_send_size =
 			    ge->connect_accepted.max_send_size;
 
-			event->type = CCI_EVENT_CONNECT_ACCEPTED;
-			event->accepted.connection = &econn->_conn.connection;
+			event->type = CCI_EVENT_CONNECT;
+			event->connect.status = CCI_SUCCESS;
+			event->connect.context = econn->_conn.connection.context;
+			event->connect.connection = &econn->_conn.connection;
 			break;
 		}
 	case CCIETH_IOCTL_EVENT_CONNECT_REJECTED:{
@@ -846,8 +847,10 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 			econn =
 			    (void *)(uintptr_t) ge->
 			    connect_rejected.user_conn_id;
-			event->type = CCI_EVENT_CONNECT_REJECTED;
-			event->rejected.context = econn->_conn.connection.context;
+			event->type = CCI_EVENT_CONNECT;
+			event->connect.status = CCI_ECONNREFUSED;
+			event->connect.context = econn->_conn.connection.context;
+			event->connect.connection = NULL;
 
 			free(econn);
 			break;
@@ -861,10 +864,11 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 			econn =
 			    (void *)(uintptr_t) ge->
 			    connect_timedout.user_conn_id;
-			event->type = CCI_EVENT_CONNECT_FAILED;
-			event->conn_failed.context =
-			    econn->_conn.connection.context;
-			event->conn_failed.status = ETIMEDOUT;
+
+			event->type = CCI_EVENT_CONNECT;
+			event->connect.status = ETIMEDOUT;
+			event->connect.context = econn->_conn.connection.context;
+			event->connect.connection = NULL;
 
 			free(econn);
 			break;
