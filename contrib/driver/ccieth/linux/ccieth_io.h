@@ -76,6 +76,11 @@ struct ccieth_ioctl_get_event {
 		struct {
 			__u64 user_conn_id;
 			/* 16 */
+			__u32 status;
+		} accept;
+		struct {
+			__u64 user_conn_id;
+			/* 16 */
 		} connection_closed;
 	};
 };
@@ -148,6 +153,7 @@ struct ccieth_ioctl_msg {
 #define CCIETH_IOCTL_EVENT_RECV 2
 #define CCIETH_IOCTL_EVENT_CONNECT 3
 #define CCIETH_IOCTL_EVENT_CONNECT_REQUEST 4
+#define CCIETH_IOCTL_EVENT_ACCEPT 5
 #define CCIETH_IOCTL_EVENT_DEVICE_FAILED 8
 
 #define CCIETH_IOCTL_EVENT_CONNECTION_CLOSED 20

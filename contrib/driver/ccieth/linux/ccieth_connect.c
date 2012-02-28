@@ -676,8 +676,18 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	struct sk_buff *skb;
 	struct net_device *ifp;
 	struct ccieth_pkt_header_connect_accept *hdr;
+	struct ccieth_endpoint_event *event;
 	struct ccieth_connection *conn;
 	int err;
+
+	/* get an event */
+	event = ccieth_get_free_event(ep);
+	if (!event) {
+		/* don't ack, we need a resend */
+		err = -ENOBUFS;
+		dprintk("ccieth: no event slot for connect accepted\n");
+		goto out;
+	}
 
 	rcu_read_lock();
 
@@ -716,6 +726,14 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 
 	rcu_read_unlock();	/* end of rcu read access to ep conn idr only */
 
+	/* FIXME: move this to when accept is acked */
+	/* setup and notify the event */
+	event->event.type = CCIETH_IOCTL_EVENT_ACCEPT;
+	event->event.data_length = 0;
+	event->event.accept.status = 0;
+	event->event.accept.user_conn_id = conn->user_conn_id;
+	ccieth_queue_busy_event(ep, event);
+
 	/* try to send a clone. if we can't, we'll resend later. */
 	skb = skb_clone(skb, GFP_KERNEL);
 	if (skb) {
@@ -737,6 +755,8 @@ out_with_skb:
 	kfree_skb(skb);
 out_with_rculock:
 	rcu_read_unlock();
+	ccieth_putback_free_event(ep, event);
+out:
 	return err;
 }
 

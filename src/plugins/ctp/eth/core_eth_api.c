@@ -634,8 +634,6 @@ static int eth_accept(union cci_event *event, void *context)
 	_conn->connection.attribute = ge->connect_request.attribute;
 	_conn->connection.context = context;
 
-#warning FIXME generate a accept event
-
 	return CCI_SUCCESS;
 }
 
@@ -845,6 +843,33 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 				econn->_conn.connection.max_send_size =
 					ge->connect.max_send_size;
 
+				event->connect.connection = &econn->_conn.connection;
+			}
+			break;
+		}
+	case CCIETH_IOCTL_EVENT_ACCEPT: {
+			eth__conn_t *econn;
+
+			CCIETH_VALGRIND_MEMORY_MAKE_READABLE
+				(&ge->accept.status,
+			     sizeof(ge->accept.status));
+			CCIETH_VALGRIND_MEMORY_MAKE_READABLE
+			    (&ge->accept.user_conn_id,
+			     sizeof(ge->accept.user_conn_id));
+			econn =
+			    (void *)(uintptr_t) ge->accept.user_conn_id;
+
+			event->type = CCI_EVENT_ACCEPT;
+			event->connect.status = ge->connect.status;
+			event->connect.context = econn->_conn.connection.context;
+
+			if (ge->connect.status != 0) {
+				/* failed */
+				event->connect.connection = NULL;
+				free(econn);
+			} else {
+				/* success */
+				/* max_send_size and conn_id initialized on connect_request event */
 				event->connect.connection = &econn->_conn.connection;
 			}
 			break;
