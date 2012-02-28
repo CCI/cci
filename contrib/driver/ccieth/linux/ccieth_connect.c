@@ -646,18 +646,8 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	struct sk_buff *skb;
 	struct net_device *ifp;
 	struct ccieth_pkt_header_connect_accept *hdr;
-	struct ccieth_endpoint_event *event;
 	struct ccieth_connection *conn;
 	int err;
-
-	/* get an event */
-	event = ccieth_get_free_event(ep);
-	if (!event) {
-		/* don't ack, we need a resend */
-		err = -ENOBUFS;
-		dprintk("ccieth: no event slot for connect accepted\n");
-		goto out;
-	}
 
 	rcu_read_lock();
 
@@ -696,14 +686,6 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 
 	rcu_read_unlock();	/* end of rcu read access to ep conn idr only */
 
-	/* FIXME: move this to when accept is acked */
-	/* setup and notify the event */
-	event->event.type = CCIETH_IOCTL_EVENT_ACCEPT;
-	event->event.data_length = 0;
-	event->event.accept.status = 0;
-	event->event.accept.user_conn_id = conn->user_conn_id;
-	ccieth_queue_busy_event(ep, event);
-
 	/* try to send a clone. if we can't, we'll resend later. */
 	skb = skb_clone(skb, GFP_KERNEL);
 	if (skb) {
@@ -725,8 +707,6 @@ out_with_skb:
 	kfree_skb(skb);
 out_with_rculock:
 	rcu_read_unlock();
-	ccieth_putback_free_event(ep, event);
-out:
 	return err;
 }
 
@@ -1112,6 +1092,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 			 struct ccieth_pkt_header_connect_ack *hdr)
 {
 	struct ccieth_connection *conn;
+	struct ccieth_endpoint_event *event = NULL;
 	__u32 dst_conn_id;
 	__u32 req_seqnum;
 	__u8 ack_status;
@@ -1126,6 +1107,15 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 
 	dprintk("got conn ack from eid %d conn id %d seqnum %d to %d %d\n",
 		ntohl(hdr->src_ep_id), ntohl(hdr->src_conn_id), req_seqnum, ntohl(hdr->dst_ep_id), dst_conn_id);
+
+	/* get an event */
+	event = ccieth_get_free_event(ep);
+	if (!event) {
+		/* don't ack, we need a resend */
+		err = -ENOBUFS;
+		dprintk("ccieth: no event slot for connect accepted\n");
+		goto out;
+	}
 
 	rcu_read_lock();
 
@@ -1144,7 +1134,14 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 		/* ACK */
 		if (cmpxchg(&conn->status, CCIETH_CONNECTION_ACCEPTING, CCIETH_CONNECTION_READY)
 		      == CCIETH_CONNECTION_ACCEPTING) {
-			/* FIXME: report ACCEPT event here */
+			/* setup and notify the ACCEPT success event */
+			event->event.type = CCIETH_IOCTL_EVENT_ACCEPT;
+			event->event.data_length = 0;
+			event->event.accept.status = 0;
+			event->event.accept.user_conn_id = conn->user_conn_id;
+			ccieth_queue_busy_event(ep, event);
+			/* don't let the remaining code putback this event */
+			event = NULL;
 
 		} else if (cmpxchg(&conn->status, CCIETH_CONNECTION_REJECTING, CCIETH_CONNECTION_CLOSING)
 		    == CCIETH_CONNECTION_REJECTING) {
@@ -1159,19 +1156,21 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 
 	} else {
 		/* NACK */
-		if (cmpxchg(&conn->status, CCIETH_CONNECTION_REJECTING, CCIETH_CONNECTION_CLOSING)
+		if (cmpxchg(&conn->status, CCIETH_CONNECTION_ACCEPTING, CCIETH_CONNECTION_CLOSING)
+		    == CCIETH_CONNECTION_ACCEPTING) {
+			/* setup and notify the ACCEPT failed event */
+			event->event.type = CCIETH_IOCTL_EVENT_ACCEPT;
+			event->event.data_length = 0;
+			event->event.accept.status = EINVAL; /* FIXME: which value? */
+			event->event.accept.user_conn_id = conn->user_conn_id;
+			ccieth_queue_busy_event(ep, event);
+			/* don't let the remaining code putback this event */
+			event = NULL;
+
+		} else if (cmpxchg(&conn->status, CCIETH_CONNECTION_REJECTING, CCIETH_CONNECTION_CLOSING)
 		    == CCIETH_CONNECTION_REJECTING) {
 			/* reject ack status doesn't matter, just destroy the connection */
 			destroy = 1;
-
-		} else if (cmpxchg(&conn->status, CCIETH_CONNECTION_ACCEPTING, CCIETH_CONNECTION_CLOSING)
-		    == CCIETH_CONNECTION_ACCEPTING) {
-			/* FIXME: report ACCEPT event with status error instead */
-			/* accept nack likely means that the remote side closed in the meantime, maybe because of the timeout.
-			 * tell user-space that the connection isn't ready anymore */
-			notify_close = 1;
-			conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECTION_CLOSED;
-			conn->embedded_event.event.connection_closed.user_conn_id = conn->user_conn_id;
 
 		} else if (cmpxchg(&conn->status, CCIETH_CONNECTION_READY, CCIETH_CONNECTION_CLOSING)
 		    == CCIETH_CONNECTION_READY) {
@@ -1211,11 +1210,16 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 		call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
 	}
 
+	if (event)
+		ccieth_putback_free_event(ep, event);
 	dev_kfree_skb(skb);
 	return 0;
 
 out_with_rculock:
 	rcu_read_unlock();
+	if (event)
+		ccieth_putback_free_event(ep, event);
+out:
 	dev_kfree_skb(skb);
 	return err;
 }
