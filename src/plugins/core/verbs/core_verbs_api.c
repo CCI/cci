@@ -2530,7 +2530,6 @@ static int verbs_poll_rdma_msgs(verbs_conn_t * vconn)
 static int verbs_handle_msg(cci__ep_t * ep, struct ibv_wc wc)
 {
 	int ret = CCI_SUCCESS;
-	cci__conn_t *conn = NULL;
 	verbs_conn_t *vconn = NULL;
 	verbs_rx_t *rx = NULL;
 	void *ptr = NULL;
@@ -2545,14 +2544,13 @@ static int verbs_handle_msg(cci__ep_t * ep, struct ibv_wc wc)
 		      wc.qp_num);
 		goto out;
 	}
-	conn = vconn->conn;
 
 	rx = (verbs_rx_t *) (uintptr_t) wc.wr_id;
 	ptr = rx->rx_pool->buf + rx->offset;
 
-	rx->evt.conn = conn;
+	rx->evt.conn = vconn->conn;
 	rx->evt.event.type = CCI_EVENT_RECV;
-	rx->evt.event.recv.connection = &conn->connection;
+	rx->evt.event.recv.connection = &vconn->conn->connection;
 	*((uint32_t *) & rx->evt.event.recv.len) = wc.byte_len;
 	if (rx->evt.event.recv.len)
 		*((void **)&rx->evt.event.request.data_ptr) = ptr;
