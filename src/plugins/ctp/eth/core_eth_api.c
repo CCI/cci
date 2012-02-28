@@ -619,7 +619,6 @@ static int eth_accept(union cci_event *event, void *context)
 
 	ac.conn_id = conn_id;
 	ac.user_conn_id = (uintptr_t) econn;
-	ac.max_send_size = ge->connect_request.max_send_size;
 	err = ioctl(eep->fd, CCIETH_IOCTL_CONNECT_ACCEPT, &ac);
 	if (err < 0) {
 		perror("ioctl connect accept");

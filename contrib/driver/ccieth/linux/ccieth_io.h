@@ -121,7 +121,7 @@ struct ccieth_ioctl_connect_request {
 
 struct ccieth_ioctl_connect_accept {
 	__u32 conn_id;
-	__u32 max_send_size;
+	__u32 pad1;
 	/* 8 */
 	__u64 user_conn_id;	/* give it back in incoming events on this connection */
 	/* 16 */

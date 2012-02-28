@@ -577,6 +577,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	conn->dest_id = src_conn_id;
 	conn->req_seqnum = req_seqnum;
 	conn->recv_last_full_seqnum = first_seqnum - 1;
+	conn->max_send_size = src_max_send_size < ep->max_send_size ? src_max_send_size : ep->max_send_size;
 
 	/* get a connection id (only reserve it for now) */
 retry:
@@ -603,7 +604,7 @@ retry:
 	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_REQUEST;
 	event->event.data_length = data_len;
 	event->event.connect_request.attribute = hdr->attribute;
-	event->event.connect_request.max_send_size = src_max_send_size < ep->max_send_size ? src_max_send_size : ep->max_send_size;
+	event->event.connect_request.max_send_size = conn->max_send_size;
 	err = skb_copy_bits(skb, sizeof(*hdr), event+1, data_len);
 	BUG_ON(err < 0);
 
@@ -661,7 +662,6 @@ ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_ac
 	    != CCIETH_CONNECTION_RECEIVED)
 		goto out_with_rculock;
 	atomic_dec(&ep->connection_received);
-	conn->max_send_size = arg->max_send_size;
 	conn->user_conn_id = arg->user_conn_id;
 
 	/* fill headers */
