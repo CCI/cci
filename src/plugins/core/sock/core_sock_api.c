@@ -1856,9 +1856,6 @@ static void sock_progress_queued(cci__dev_t * dev)
 		if (SOCK_U64_LT(tx->timeout_us, now)) {
 
 			/* set status and add to completed events */
-            fprintf (stderr, "TIMEOUT! (timeout: %ld, tx->timeout: %ld, now: %ld)\n", timeout, tx->timeout_us, now);
-            fprintf (stderr, "conn->tx_timeout: %ld, ep->tx_timeout: %ld\n", conn->tx_timeout, ep->tx_timeout);
-
 			switch (tx->msg_type) {
 			case SOCK_MSG_SEND:
 				if (tx->rnr != 0) {
@@ -2259,7 +2256,7 @@ static int sock_rma_register(cci_endpoint_t * endpoint,
 static int sock_rma_deregister(uint64_t rma_handle)
 {
 	int ret = CCI_EINVAL;
-	sock_rma_handle_t *handle = (sock_rma_handle_t *) rma_handle;
+	sock_rma_handle_t *handle = (sock_rma_handle_t *) ((uintptr_t) rma_handle);
 	cci__ep_t *ep = NULL;
 	sock_ep_t *sep = NULL;
 	sock_rma_handle_t *h = NULL;
@@ -2563,6 +2560,8 @@ static int sock_rma(cci_connection_t * connection,
 		sep = ep->priv;
 		memset(tx->buffer, 0, sizeof(sock_rma_header_t));
 		tx->seq = ++(sconn->seq);
+        tx->timeout_us = 0ULL;
+        tx->last_attempt_us = 0ULL;
 		sock_pack_rma_read(read, data_len, sconn->peer_id, tx->seq, 0,
 				   local_handle, local_offset,
 				   remote_handle, remote_offset);
@@ -3043,7 +3042,7 @@ sock_handle_ack(sock_conn_t * sconn,
 		rma_op = tx->rma_op;
 		if (rma_op && rma_op->status == CCI_SUCCESS) {
 			sock_rma_handle_t *local =
-			    (sock_rma_handle_t *) rma_op->local_handle;
+                (sock_rma_handle_t *)((uintptr_t)rma_op->local_handle);
 			rma_op->completed++;
 
 			/* progress RMA */
@@ -3672,7 +3671,6 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
     sdev = dev->priv;
 
     hdr_r = (sock_header_r_t *) rx->buffer;
-    fprintf (stderr, "[%s:%d] Check...\n", __func__, __LINE__);
 
     /* Parse the RMA read request message */
 	sock_parse_rma_handle_offset(&read->local,
@@ -3681,13 +3679,10 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 				     &msg_remote_handle, &msg_remote_offset);
     
     sock_parse_seq_ts (&hdr_r->seq_ts, &seq, &ts);
-    fprintf (stderr, "[%s:%d] Seq: %d\n", __func__, __LINE__, seq);
     sock_handle_seq (sconn, seq);
 	remote = (sock_rma_handle_t *) (uintptr_t) remote_handle;
     memcpy(&toto, read->data, sizeof(uint64_t));
 	memcpy(&context_id, (void*)((char*)read->data+sizeof(uint64_t)), sizeof(uint64_t));
-    fprintf (stderr, "TOTOTO: %llu\n", toto);
-    fprintf (stderr, "Received RMA READ REQUEST (data_len: %llu)\n", toto);
 
 	local_handle = msg_remote_handle;
 	local_offset = msg_remote_offset;
@@ -3849,16 +3844,10 @@ sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 	void *context;
     sock_header_r_t *hdr_r = rx->buffer;
 
-    fprintf (stderr, "[%s:%d] Check\n", __func__, __LINE__);
-
 	endpoint = (&conn->connection)->endpoint;
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 
-    fprintf (stderr, "[%s:%d] Check\n", __func__, __LINE__);
-    if (rma_hdr == NULL || rma_hdr->data == NULL)
-        fprintf (stderr, "[%s:%d] Check\n", __func__, __LINE__);
 	memcpy(&context_id, hdr_r->data, sizeof(uint64_t));
-    fprintf (stderr, "[%s:%d] Context ID: %llu\n", __func__, __LINE__, context_id);
 
 	/* get cci__evt_t to hang on ep->events */
 	evt = &rx->evt;
@@ -3866,11 +3855,8 @@ sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 	/* setup the generic event for the application */
 	event = (cci_event_t *) & evt->event;
 	event->type = CCI_EVENT_RECV;
-    fprintf (stderr, "LEN: %d\n", rx->len);
 	*((uint32_t *) & event->recv.len) = len;
-    fprintf (stderr, "[%s:%d] Check\n", __func__, __LINE__);
 	lookup_contextid(sconn, context_id, &context);
-    fprintf (stderr, "[%s:%d] RMA READ %llu just finished\n", __func__, __LINE__, context_id);
 	*((void **)&event->recv.ptr) = context;
 	event->recv.connection = &conn->connection;
 
@@ -4115,7 +4101,6 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		sock_handle_rma_write_done(sconn, rx, b);
 		break;
 	case SOCK_MSG_RMA_READ_REQUEST:
-        fprintf (stderr, "[%s:%d] Check (b: %d)...\n", __func__, __LINE__, b);
 		sock_handle_rma_read_request(sconn, rx, b);
 		break;
 	case SOCK_MSG_RMA_READ_REPLY:
