@@ -135,11 +135,7 @@ struct ccieth_connection {
 
 #define CCIETH_CONN_FLAG_RELIABLE (1<<0)
 #define CCIETH_CONN_FLAG_ORDERED (1<<1)
-#define CCIETH_CONN_FLAG_DEFER_EARLY_MSG (1<<2)
 	unsigned long flags;
-
-	/* only if CCIETH_CONN_FLAG_DEFERRED_EARLY_MSG */
-	struct sk_buff_head deferred_msg_recv_queue;
 
 	/* only if CCIETH_CONN_FLAG_RELIABLE */
 	/* send-side reliability */
@@ -242,9 +238,6 @@ extern int ccieth_msg_resend(struct ccieth_connection *conn);
 
 extern int ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg);
 extern int ccieth_msg_ack(struct ccieth_connection *conn);
-
-extern void ccieth_conn_uu_defer_recv_msg(struct ccieth_connection *conn, struct sk_buff *skb);
-extern int ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn, struct ccieth_pkt_header_msg *hdr, struct sk_buff *skb);
 
 extern int ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt, struct net_device *orig_dev);
 

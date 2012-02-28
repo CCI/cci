@@ -55,32 +55,6 @@ ccieth_recv_needack_timer_hdlr(unsigned long _data)
 }
 
 static void
-ccieth_conn_uu_recv_deferred_msgs(struct ccieth_connection *conn)
-{
-	struct sk_buff *skb;
-	BUG_ON(!(conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG));
-	while ((skb = skb_dequeue(&conn->deferred_msg_recv_queue)) != NULL) {
-		struct ccieth_pkt_header_msg _hdr, *hdr;
-		dprintk("processing deferred msg\n");
-		hdr = skb_header_pointer(skb, 0, sizeof(_hdr), &_hdr);
-		BUG_ON(!hdr);	/* would have failed in ccieth_recv_msg() */
-		ccieth__recv_msg(conn->ep, conn, hdr, skb);
-	}
-}
-
-void
-ccieth_conn_uu_defer_recv_msg(struct ccieth_connection *conn,
-			      struct sk_buff *skb)
-{
-	BUG_ON(!(conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG));
-	dprintk("deferring UU msg until accept\n");
-	skb_queue_tail(&conn->deferred_msg_recv_queue, skb);
-	if (conn->status == CCIETH_CONNECTION_READY)
-		/* accepted in the meantime, make sure it didn't miss our packet */
-		ccieth_conn_uu_recv_deferred_msgs(conn);
-}
-
-static void
 ccieth_conn_init(struct ccieth_connection *conn, struct ccieth_endpoint *ep, int attribute)
 {
 	unsigned long flags;
@@ -97,7 +71,7 @@ ccieth_conn_init(struct ccieth_connection *conn, struct ccieth_endpoint *ep, int
 		flags = CCIETH_CONN_FLAG_RELIABLE;
 		break;
 	case CCIETH_CONNECT_ATTR_UU:
-		flags = CCIETH_CONN_FLAG_DEFER_EARLY_MSG;
+		flags = 0;
 		break;
 	default:
 		BUG();
@@ -121,15 +95,11 @@ ccieth_conn_init(struct ccieth_connection *conn, struct ccieth_endpoint *ep, int
 		setup_timer(&conn->recv_needack_timer, ccieth_recv_needack_timer_hdlr, (unsigned long)conn);
 		INIT_WORK(&conn->recv_needack_work, ccieth_recv_needack_workfunc);
 	}
-	if (conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG)
-		skb_queue_head_init(&conn->deferred_msg_recv_queue);
 }
 
 static void
 ccieth_conn_free(struct ccieth_connection *conn)
 {
-	if (conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG)
-		skb_queue_purge(&conn->deferred_msg_recv_queue);
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
 		struct sk_buff *nskb, *skb = conn->send_queue_first_seqnum;
 		while (skb) {
@@ -834,10 +804,6 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 	event->event.connect.max_send_size = max_send_size;
 	event->event.connect.user_conn_id = conn->user_conn_id;
 	ccieth_queue_busy_event(ep, event);
-
-	/* handle deferred msgs */
-	if (conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG)
-		ccieth_conn_uu_recv_deferred_msgs(conn);
 
 	rcu_read_unlock();
 

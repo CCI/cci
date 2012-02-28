@@ -294,7 +294,7 @@ out:
 }
 
 /* called under rcu_read_lock() */
-int
+static int
 ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 		 struct ccieth_pkt_header_msg *hdr, struct sk_buff *skb)
 {
@@ -449,15 +449,10 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 	if (unlikely(!conn))
 		goto out_with_rculock;
 
-	if (likely(conn->status == CCIETH_CONNECTION_READY)) {
-		err = ccieth__recv_msg(ep, conn, hdr, skb);
-	} else if (conn->status == CCIETH_CONNECTION_REQUESTED
-		   && (conn->flags & CCIETH_CONN_FLAG_DEFER_EARLY_MSG)) {
-		ccieth_conn_uu_defer_recv_msg(conn, skb);
-		err = 0;
-		/* UU doesn't need ack */
-	} else
+	if (unlikely(conn->status != CCIETH_CONNECTION_READY))
 		goto out_with_rculock;
+
+	err = ccieth__recv_msg(ep, conn, hdr, skb);
 
 	rcu_read_unlock();
 	return err;
