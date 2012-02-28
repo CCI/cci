@@ -33,12 +33,7 @@ int main(int argc, char *argv[])
 			printf("\t%s\n", *keyval);
 	}
 
-	ret = cci_free_devices(devices);
-	if (ret != CCI_SUCCESS) {
-		fprintf(stderr, "cci_free_devices() returned %s\n",
-			cci_strerror(ret));
-		exit(EXIT_FAILURE);
-	}
+	/* Add cci_finalize() here */
 
 	return 0;
 }
