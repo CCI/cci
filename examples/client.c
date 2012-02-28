@@ -49,7 +49,7 @@ poll_events(cci_endpoint_t * endpoint, cci_connection_t ** connection,
 		case CCI_EVENT_CONNECT:
 			*done = 1;
 			if (event->connect.status == CCI_SUCCESS)
-				*connection = event->accepted.connection;
+				*connection = event->connect.connection;
 			else
 				*connection = NULL;
 			break;
