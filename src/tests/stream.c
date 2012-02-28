@@ -146,7 +146,7 @@ static void poll_events(void)
 	case CCI_EVENT_CONNECT:
 		if (!is_server) {
 			connect_done = 1;
-			connection = event->accept.connection;
+			connection = event->connect.connection;
 		}
 		break;
 	case CCI_EVENT_CONNECT_REQUEST:{
@@ -326,6 +326,11 @@ int main(int argc, char *argv[])
 		default:
 			print_usage();
 		}
+	}
+
+	if (!is_server && !server_uri) {
+		fprintf(stderr, "Must select -h or -s\n");
+		print_usage();
 	}
 
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
