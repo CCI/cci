@@ -1172,6 +1172,17 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 			/* reject ack status doesn't matter, just destroy the connection */
 			destroy = 1;
 
+		} else if (cmpxchg(&conn->status, CCIETH_CONNECTION_REQUESTED, CCIETH_CONNECTION_CLOSING)
+		    == CCIETH_CONNECTION_REQUESTED) {
+			/* setup and notify the CONNECT failed event */
+			event->event.type = CCIETH_IOCTL_EVENT_CONNECT;
+			event->event.data_length = 0;
+			event->event.connect.status = EINVAL; /* FIXME: which value? */
+			event->event.connect.user_conn_id = conn->user_conn_id;
+			ccieth_queue_busy_event(ep, event);
+			/* don't let the remaining code putback this event */
+			event = NULL;
+
 		} else if (cmpxchg(&conn->status, CCIETH_CONNECTION_READY, CCIETH_CONNECTION_CLOSING)
 		    == CCIETH_CONNECTION_READY) {
 			/* ready nack likely means that the remote side closed in the meantime, maybe because of the timeout.
@@ -1181,7 +1192,6 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 			conn->embedded_event.event.connection_closed.user_conn_id = conn->user_conn_id;
 
 		} else {
-			/* request nack does nothing, the application will get a timeout */
 			/* nack on CLOSING is ignored */
 		}
 	}
