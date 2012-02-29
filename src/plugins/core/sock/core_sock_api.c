@@ -3776,7 +3776,8 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 	return;
 }
 
-/* Based on a context ID, we get the corresponding context. */
+/* Based on a context ID, we get the corresponding context. This is mainly
+   used for RMA reads, not for RMA writes. */
 static inline void
 lookup_contextid(sock_conn_t * sconn, uint64_t context_id, void **context)
 {
@@ -3784,12 +3785,16 @@ lookup_contextid(sock_conn_t * sconn, uint64_t context_id, void **context)
 	   track the different contexts used in context of RMA read operations. */
 	void *c;
 
-	if (sconn->rma_contexts[context_id] != NULL) {
-		c = sconn->rma_contexts[context_id];
-		*context = c;
-		sconn->rma_contexts[context_id] = NULL;
-	} else {
+	if (sconn->rma_contexts == NULL) {
 		*context = NULL;
+	} else {
+		if (sconn->rma_contexts[context_id] != NULL) {
+			c = sconn->rma_contexts[context_id];
+			*context = c;
+			sconn->rma_contexts[context_id] = NULL;
+		} else {
+			*context = NULL;
+		}
 	}
 }
 
