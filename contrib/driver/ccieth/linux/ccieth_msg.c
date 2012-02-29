@@ -332,7 +332,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 		int force_immediate_ack = 0;
 
 		spin_lock_bh(&conn->recv_lock);
-		dprintk("got MSG seqnum %u while we have %u+%lx\n",
+		dprintk("got MSG seqnum %u while we have %u+%x\n",
 			msg_seqnum, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
 		relseqnum = msg_seqnum - conn->recv_last_full_seqnum - 1; /* 0 if the next expected seqnum */
 		if (unlikely(relseqnum >= CCIETH_CONN_RECV_BITMAP_BITS)) {
@@ -375,7 +375,7 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 			conn->recv_next_bitmap >>= relfull;
 		}
 		conn->recv_last_full_seqnum += relfull;
-		dprintk("found %u new fully received, now have %u+%lx\n",
+		dprintk("found %u new fully received, now have %u+%x\n",
 			relfull, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
 		conn->recv_needack_nr += relfull;
 
