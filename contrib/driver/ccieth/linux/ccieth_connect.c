@@ -1087,7 +1087,7 @@ out:
 }
 
 static int
-ccieth__recv_connect_ack(struct ccieth_endpoint *ep, 
+ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 			 struct sk_buff *skb,
 			 struct ccieth_pkt_header_connect_ack *hdr)
 {
@@ -1161,7 +1161,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 			/* setup and notify the ACCEPT failed event */
 			event->event.type = CCIETH_IOCTL_EVENT_ACCEPT;
 			event->event.data_length = 0;
-			event->event.accept.status = EINVAL; /* FIXME: which value? */
+			event->event.accept.status = ccieth_pkt_ack_status_to_errno(ack_status);
 			event->event.accept.user_conn_id = conn->user_conn_id;
 			ccieth_queue_busy_event(ep, event);
 			/* don't let the remaining code putback this event */
@@ -1177,7 +1177,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 			/* setup and notify the CONNECT failed event */
 			event->event.type = CCIETH_IOCTL_EVENT_CONNECT;
 			event->event.data_length = 0;
-			event->event.connect.status = EINVAL; /* FIXME: which value? */
+			event->event.connect.status = ccieth_pkt_ack_status_to_errno(ack_status);
 			event->event.connect.user_conn_id = conn->user_conn_id;
 			ccieth_queue_busy_event(ep, event);
 			/* don't let the remaining code putback this event */

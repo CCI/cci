@@ -20,6 +20,7 @@
 #endif
 
 #include "ccieth_io.h"
+#include "ccieth_wire.h"
 #include "ccieth_hal.h"
 
 #define CCIETH_EVENT_SLOT_NR 64
@@ -273,6 +274,18 @@ ccieth_queue_busy_event(struct ccieth_endpoint *ep,
 	spin_lock_bh(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
 	spin_unlock_bh(&ep->event_list_lock);
+}
+
+static inline unsigned
+ccieth_pkt_ack_status_to_errno(__u8 status)
+{
+	switch (status) {
+	case CCIETH_PKT_ACK_SUCCESS: return 0;
+	case CCIETH_PKT_ACK_INVALID: return EINVAL; /* FIXME: only occurs if connect data is too large for remote peer */
+	case CCIETH_PKT_ACK_NO_ENDPOINT: return EINVAL; /* FIXME: ECONNREFUSED actually looks better but already used for reject() */
+	case CCIETH_PKT_ACK_NO_CONNECTION: return EINVAL; /* FIXME: ECONNRESET? */
+	default: return EIO;
+	}
 }
 
 
