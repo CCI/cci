@@ -295,12 +295,11 @@ out:
 
 /* called under rcu_read_lock() */
 static int
-ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
-		 struct ccieth_pkt_header_msg *hdr, struct sk_buff *skb)
+ccieth__recv_msg_unreliable(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
+			    struct ccieth_pkt_header_msg *hdr, struct sk_buff *skb)
 {
 	struct ccieth_endpoint_event *event;
 	__u32 msg_len = ntohl(hdr->msg_len);
-	__u32 msg_seqnum = ntohl(hdr->msg_seqnum);
 	int err;
 
 	/* get an event */
@@ -315,89 +314,128 @@ ccieth__recv_msg(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 	/* setup the event */
 	event->event.type = CCIETH_IOCTL_EVENT_RECV;
 	event->event.data_length = msg_len;
+	event->event.recv.user_conn_id = conn->user_conn_id;
 
 	err = skb_copy_bits(skb, sizeof(*hdr), event+1, msg_len);
 	BUG_ON(err < 0);
 
-	/* finalize and notify the event */
+	CCIETH_STAT_INC(conn, recv);
+
+	/* notify the event */
+	ccieth_queue_busy_event(ep, event);
+
+	dev_kfree_skb(skb);
+	return 0;
+
+out:
+	dev_kfree_skb(skb);
+	return err;
+}
+
+/* called under rcu_read_lock() */
+static int
+ccieth__recv_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
+			  struct ccieth_pkt_header_msg *hdr, struct sk_buff *skb)
+{
+	struct ccieth_endpoint_event *event;
+	__u32 msg_len = ntohl(hdr->msg_len);
+	__u32 msg_seqnum = ntohl(hdr->msg_seqnum);
+	__u32 relseqnum;
+	unsigned relfull = 0;
+	int force_delayed_ack = 0;
+	int force_immediate_ack = 0;
+	int err;
+
+	/* get an event */
+	event = ccieth_get_free_event(ep);
+	if (unlikely(!event)) {
+		/* don't ack, we need a resend */
+		err = -ENOBUFS;
+		dprintk("ccieth: no event slot for msg\n");
+		goto out;
+	}
+
+	/* setup the event */
+	event->event.type = CCIETH_IOCTL_EVENT_RECV;
+	event->event.data_length = msg_len;
 	event->event.recv.user_conn_id = conn->user_conn_id;
+
+	err = skb_copy_bits(skb, sizeof(*hdr), event+1, msg_len);
+	BUG_ON(err < 0);
+
+	spin_lock_bh(&conn->recv_lock);
 
 	CCIETH_STAT_INC(conn, recv);
 
-	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
-		/* reliable, look for obsolete, duplicates, ... */
-		__u32 relseqnum;
-		unsigned relfull = 0;
-		int force_delayed_ack = 0;
-		int force_immediate_ack = 0;
+	/* reliable, look for obsolete, duplicates, ... */
 
-		spin_lock_bh(&conn->recv_lock);
-		dprintk("got MSG seqnum %u while we have %u+%x\n",
-			msg_seqnum, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
-		relseqnum = msg_seqnum - conn->recv_last_full_seqnum - 1; /* 0 if the next expected seqnum */
-		if (unlikely(relseqnum >= CCIETH_CONN_RECV_BITMAP_BITS)) {
-			/* not in the window of next expected seqnums */
-			if (ccieth_seqnum_positive(relseqnum))
-				/* way in advance, drop */
-				CCIETH_STAT_INC(conn, recv_tooearly);
-			else
-				/* old duplicate, ignore */
-				CCIETH_STAT_INC(conn, recv_duplicate);
-			ccieth_putback_free_event(ep, event);
-			force_delayed_ack = 1;
-			goto done;
-		}
-		if (unlikely(conn->recv_next_bitmap & (1U << relseqnum))) {
-			/* recent misordered duplicate, ignore */
+	dprintk("got MSG seqnum %u while we have %u+%x\n",
+		msg_seqnum, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
+
+	relseqnum = msg_seqnum - conn->recv_last_full_seqnum - 1; /* 0 if the next expected seqnum */
+	if (unlikely(relseqnum >= CCIETH_CONN_RECV_BITMAP_BITS)) {
+		/* not in the window of next expected seqnums */
+		if (ccieth_seqnum_positive(relseqnum))
+			/* way in advance, drop */
+			CCIETH_STAT_INC(conn, recv_tooearly);
+		else
+			/* old duplicate, ignore */
 			CCIETH_STAT_INC(conn, recv_duplicate);
-			ccieth_putback_free_event(ep, event);
-			force_delayed_ack = 1;
-			goto done;
-		}
-		if (unlikely(relseqnum > 0)) {
-			CCIETH_STAT_INC(conn, recv_misorder);
-			/* force an immediate ack every once in a while when packets are out-of-order */
-			if (!(relseqnum % 8))
-				force_immediate_ack = 1;
-		}
+		ccieth_putback_free_event(ep, event);
+		force_delayed_ack = 1;
+		goto done;
+	}
 
-		/* deliver the event now that we verified everything ... */
-		ccieth_queue_busy_event(ep, event);
-		/* ... and update connection then */
-		conn->recv_next_bitmap |= 1U << relseqnum;
-		/* how many new fully received packets? */
-		if (conn->recv_next_bitmap == ~0U) {
-			relfull = 32;
-			conn->recv_next_bitmap = 0;
-		} else {
-			unsigned long bitmap = conn->recv_next_bitmap;  /* ffz wants a ulong */
-			relfull = ffz(bitmap); /* we know we have at least one zero, find the first one */
-			conn->recv_next_bitmap >>= relfull;
-		}
-		conn->recv_last_full_seqnum += relfull;
-		dprintk("found %u new fully received, now have %u+%x\n",
-			relfull, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
-		conn->recv_needack_nr += relfull;
+	if (unlikely(conn->recv_next_bitmap & (1U << relseqnum))) {
+		/* recent misordered duplicate, ignore */
+		CCIETH_STAT_INC(conn, recv_duplicate);
+		ccieth_putback_free_event(ep, event);
+		force_delayed_ack = 1;
+		goto done;
+	}
+
+	if (unlikely(relseqnum > 0)) {
+		CCIETH_STAT_INC(conn, recv_misorder);
+		/* force an immediate ack every once in a while when packets are out-of-order */
+		if (!(relseqnum % 8))
+			force_immediate_ack = 1;
+	}
+
+	/* deliver the event now that we verified everything ... */
+	ccieth_queue_busy_event(ep, event);
+	/* ... and update connection then */
+	conn->recv_next_bitmap |= 1U << relseqnum;
+	/* how many new fully received packets? */
+	if (conn->recv_next_bitmap == ~0U) {
+		relfull = 32;
+		conn->recv_next_bitmap = 0;
+	} else {
+		unsigned long bitmap = conn->recv_next_bitmap;  /* ffz wants a ulong */
+		relfull = ffz(bitmap); /* we know we have at least one zero, find the first one */
+		conn->recv_next_bitmap >>= relfull;
+	}
+	conn->recv_last_full_seqnum += relfull;
+	dprintk("found %u new fully received, now have %u+%x\n",
+		relfull, conn->recv_last_full_seqnum, conn->recv_next_bitmap);
+	conn->recv_needack_nr += relfull;
 
 done:
-		if (force_immediate_ack || force_delayed_ack)
-			conn->recv_needack_force = 1;
-		if (unlikely(conn->recv_needack_nr >= CCIETH_IMMEDIATE_MSG_ACK_NR
-			     || force_immediate_ack)) {
-			/* many non acked packets, we need to ack now */
-			schedule_work(&conn->recv_needack_work);
-		} else if (relfull || force_delayed_ack) {
-			/* some new non acked packets, we need to ack at some point in the future */
-			mod_timer(&conn->recv_needack_timer,
-				  jiffies + CCIETH_DEFERRED_MSG_ACK_DELAY);
-		}
-		spin_unlock_bh(&conn->recv_lock);
-
-		/* piggyback acks */
-		ccieth_conn_handle_ack(conn, ntohl(hdr->acked_seqnum), 0);
-	} else {
-		ccieth_queue_busy_event(ep, event);
+	if (force_immediate_ack || force_delayed_ack)
+		conn->recv_needack_force = 1;
+	if (unlikely(conn->recv_needack_nr >= CCIETH_IMMEDIATE_MSG_ACK_NR
+		     || force_immediate_ack)) {
+		/* many non acked packets, we need to ack now */
+		schedule_work(&conn->recv_needack_work);
+	} else if (relfull || force_delayed_ack) {
+		/* some new non acked packets, we need to ack at some point in the future */
+		mod_timer(&conn->recv_needack_timer,
+			  jiffies + CCIETH_DEFERRED_MSG_ACK_DELAY);
 	}
+
+	spin_unlock_bh(&conn->recv_lock);
+
+	/* piggyback acks */
+	ccieth_conn_handle_ack(conn, ntohl(hdr->acked_seqnum), 0);
 
 	dev_kfree_skb(skb);
 	return 0;
@@ -452,7 +490,10 @@ ccieth_recv_msg(struct net_device *ifp, struct sk_buff *skb)
 	if (unlikely(conn->status != CCIETH_CONNECTION_READY))
 		goto out_with_rculock;
 
-	err = ccieth__recv_msg(ep, conn, hdr, skb);
+	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE)
+		err = ccieth__recv_msg_reliable(ep, conn, hdr, skb);
+	else
+		err = ccieth__recv_msg_unreliable(ep, conn, hdr, skb);
 
 	rcu_read_unlock();
 	return err;
