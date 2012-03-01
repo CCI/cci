@@ -264,6 +264,25 @@ ccieth_get_free_event(struct ccieth_endpoint *ep)
 	return event;
 }
 
+static inline struct ccieth_driver_event *
+ccieth_get_free_event_maydefer(struct ccieth_endpoint *ep, int willdefer)
+{
+	struct ccieth_driver_event *event;
+	spin_lock_bh(&ep->free_event_list_lock);
+	if (unlikely(!ep->free_event_list_length)
+	    /* if the event will be deferred instead of delivered now,
+	     * don't consume the last quarter of the list */
+	    || (willdefer && unlikely(ep->free_event_list_length <= CCIETH_EVENT_SLOT_NR/4))) {
+		spin_unlock_bh(&ep->free_event_list_lock);
+		return NULL;
+	}
+	event = list_first_entry(&ep->free_event_list, struct ccieth_driver_event, list);
+	list_del(&event->list);
+	ep->free_event_list_length--;
+	spin_unlock_bh(&ep->free_event_list_lock);
+	return event;
+}
+
 static inline void
 ccieth_putback_free_event(struct ccieth_endpoint *ep,
 			  struct ccieth_driver_event *event)

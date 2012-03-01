@@ -386,7 +386,9 @@ ccieth__recv_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_connection *
 	}
 
 	/* deliver the event now that we verified everything ... */
-	event = ccieth_get_free_event(ep);
+	event = ccieth_get_free_event_maydefer(ep,
+					       /* if misordered packets in ordered connection, event will be deferred */
+					       relseqnum && (conn->flags & CCIETH_CONN_FLAG_ORDERED));
 	if (unlikely(!event)) {
 		/* don't ack, we need a resend */
 		err = -ENOBUFS;
@@ -401,6 +403,7 @@ ccieth__recv_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_connection *
 		event->data_skb_offset = sizeof(*hdr);
 		skb = NULL;
 	}
+	/* FIXME: if misordered, defer */
 	ccieth_queue_busy_event(ep, event);
 
 	/* ... and update connection then */
