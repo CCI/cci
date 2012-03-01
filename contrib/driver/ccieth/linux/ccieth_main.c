@@ -96,7 +96,7 @@ ccieth_event_destructor_recycle(struct ccieth_endpoint *ep,
 				struct ccieth_driver_event *event)
 {
 	spin_lock_bh(&ep->free_event_list_lock);
-	CCIETH_STAT_INC(ep, event_free);
+	ep->free_event_list_length++;
 	list_add_tail(&event->list, &ep->free_event_list);
 	spin_unlock_bh(&ep->free_event_list_lock);
 }
@@ -142,6 +142,7 @@ ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *a
 		event->destructor = ccieth_event_destructor_recycle;
 		list_add_tail(&event->list, &ep->free_event_list);
 	}
+	ep->free_event_list_length = CCIETH_EVENT_SLOT_NR;
 
 	ep->embedded_event.destructor = NULL;
 
@@ -176,8 +177,6 @@ retry:
 	BUG_ON(idr_replace(&ccieth_ep_idr, ep, id) != NULL);
 
 #ifdef CONFIG_CCIETH_DEBUGFS
-	memset(&ep->stats, 0, sizeof(ep->stats));
-	ep->stats.event_free = CCIETH_EVENT_SLOT_NR;
 	ep->debugfs_dir = NULL;
 	if (ccieth_debugfs_root) {
 		char *name = kasprintf(GFP_KERNEL, "ep%08x", id);
@@ -185,7 +184,7 @@ retry:
 			struct dentry *d = debugfs_create_dir(name, ccieth_debugfs_root);
 			if (!IS_ERR(d)) {
 				ep->debugfs_dir = d;
-				debugfs_create_u32("event_free", 0444, d, &ep->stats.event_free);
+				debugfs_create_u32("event_free", 0444, d, &ep->free_event_list_length);
 			}
 			kfree(name);
 		}

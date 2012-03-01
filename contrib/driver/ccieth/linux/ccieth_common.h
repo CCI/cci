@@ -54,6 +54,7 @@ struct ccieth_endpoint {
 	struct list_head event_list;
 	spinlock_t event_list_lock;
 	struct list_head free_event_list;
+	__u32 free_event_list_length; /* used as debugfs u32 */
 	spinlock_t free_event_list_lock;
 
 	struct sk_buff_head deferred_connect_recv_queue;
@@ -73,9 +74,6 @@ struct ccieth_endpoint {
 
 #ifdef CONFIG_CCIETH_DEBUGFS
 	struct dentry *debugfs_dir;
-	struct {
-		__u32 event_free;
-	} stats;
 #endif
 };
 
@@ -255,13 +253,13 @@ ccieth_get_free_event(struct ccieth_endpoint *ep)
 {
 	struct ccieth_driver_event *event;
 	spin_lock_bh(&ep->free_event_list_lock);
-	if (unlikely(list_empty(&ep->free_event_list))) {
+	if (unlikely(!ep->free_event_list_length)) {
 		spin_unlock_bh(&ep->free_event_list_lock);
 		return NULL;
 	}
 	event = list_first_entry(&ep->free_event_list, struct ccieth_driver_event, list);
 	list_del(&event->list);
-	CCIETH_STAT_DEC(ep, event_free);
+	ep->free_event_list_length--;
 	spin_unlock_bh(&ep->free_event_list_lock);
 	return event;
 }
@@ -271,6 +269,7 @@ ccieth_putback_free_event(struct ccieth_endpoint *ep,
 			  struct ccieth_driver_event *event)
 {
 	spin_lock_bh(&ep->free_event_list_lock);
+	ep->free_event_list_length++;
 	list_add_tail(&event->list, &ep->free_event_list);
 	spin_unlock_bh(&ep->free_event_list_lock);
 }
