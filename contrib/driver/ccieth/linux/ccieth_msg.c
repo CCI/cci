@@ -349,25 +349,6 @@ ccieth__recv_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_connection *
 	int force_immediate_ack = 0;
 	int err;
 
-	/* get an event */
-	event = ccieth_get_free_event(ep);
-	if (unlikely(!event)) {
-		/* don't ack, we need a resend */
-		err = -ENOBUFS;
-		dprintk("ccieth: no event slot for msg\n");
-		goto out;
-	}
-
-	/* setup the event */
-	event->event.type = CCIETH_IOCTL_EVENT_RECV;
-	event->event.data_length = msg_len;
-	event->event.recv.user_conn_id = conn->user_conn_id;
-	if (msg_len) {
-		event->data_skb = skb;
-		event->data_skb_offset = sizeof(*hdr);
-		skb = NULL;
-	}
-
 	spin_lock_bh(&conn->recv_lock);
 
 	CCIETH_STAT_INC(conn, recv);
@@ -386,10 +367,6 @@ ccieth__recv_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_connection *
 		else
 			/* old duplicate, ignore */
 			CCIETH_STAT_INC(conn, recv_duplicate);
-		/* put the event and skb back */
-		if (msg_len)
-			skb = event->data_skb;
-		ccieth_putback_free_event(ep, event);
 		force_delayed_ack = 1;
 		goto done;
 	}
@@ -397,10 +374,6 @@ ccieth__recv_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_connection *
 	if (unlikely(conn->recv_next_bitmap & (1U << relseqnum))) {
 		/* recent misordered duplicate, ignore */
 		CCIETH_STAT_INC(conn, recv_duplicate);
-		/* put the event and skb back */
-		if (msg_len)
-			skb = event->data_skb;
-		ccieth_putback_free_event(ep, event);
 		force_delayed_ack = 1;
 		goto done;
 	}
@@ -413,7 +386,23 @@ ccieth__recv_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_connection *
 	}
 
 	/* deliver the event now that we verified everything ... */
+	event = ccieth_get_free_event(ep);
+	if (unlikely(!event)) {
+		/* don't ack, we need a resend */
+		err = -ENOBUFS;
+		dprintk("ccieth: no event slot for msg\n");
+		goto out_with_lock;
+	}
+	event->event.type = CCIETH_IOCTL_EVENT_RECV;
+	event->event.data_length = msg_len;
+	event->event.recv.user_conn_id = conn->user_conn_id;
+	if (msg_len) {
+		event->data_skb = skb;
+		event->data_skb_offset = sizeof(*hdr);
+		skb = NULL;
+	}
 	ccieth_queue_busy_event(ep, event);
+
 	/* ... and update connection then */
 	conn->recv_next_bitmap |= 1U << relseqnum;
 	/* how many new fully received packets? */
@@ -451,7 +440,8 @@ done:
 	dev_kfree_skb(skb);
 	return 0;
 
-out:
+out_with_lock:
+	spin_unlock_bh(&conn->recv_lock);
 	dev_kfree_skb(skb);
 	return err;
 }
