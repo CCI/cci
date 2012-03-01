@@ -30,10 +30,10 @@
 struct ccieth_endpoint;
 struct ccieth_pkt_header_msg;
 
-struct ccieth_endpoint_event {
+struct ccieth_driver_event {
 	struct list_head list;
 	struct ccieth_ioctl_get_event event;
-	void (*destructor) (struct ccieth_endpoint *, struct ccieth_endpoint_event *);
+	void (*destructor) (struct ccieth_endpoint *, struct ccieth_driver_event *);
 };
 
 struct ccieth_endpoint {
@@ -61,7 +61,7 @@ struct ccieth_endpoint {
 	struct rcu_head release_ifp_rcu_head;
 	struct net_device *release_ifp;
 
-	struct ccieth_endpoint_event embedded_event;
+	struct ccieth_driver_event embedded_event;
 
 #ifdef CONFIG_CCIETH_DEBUGFS
 	struct dentry *debugfs_dir;
@@ -180,7 +180,7 @@ struct ccieth_connection {
 	 * the user should set the status to CLOSING first,
 	 * and let the event destructor destroy the connection for real.
 	 */
-	struct ccieth_endpoint_event embedded_event;
+	struct ccieth_driver_event embedded_event;
 
 #ifdef CONFIG_CCIETH_DEBUGFS
 	struct dentry *debugfs_dir;
@@ -217,7 +217,7 @@ struct ccieth_skb_cb {
 		struct {
 			__u32 seqnum;
 			unsigned long resend_jiffies;
-			struct ccieth_endpoint_event *event;
+			struct ccieth_driver_event *event;
 		} reliable_send;
 	};
 };
@@ -242,16 +242,16 @@ extern int ccieth_msg_ack(struct ccieth_connection *conn);
 
 extern int ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt, struct net_device *orig_dev);
 
-static inline struct ccieth_endpoint_event *
+static inline struct ccieth_driver_event *
 ccieth_get_free_event(struct ccieth_endpoint *ep)
 {
-	struct ccieth_endpoint_event *event;
+	struct ccieth_driver_event *event;
 	spin_lock_bh(&ep->free_event_list_lock);
 	if (unlikely(list_empty(&ep->free_event_list))) {
 		spin_unlock_bh(&ep->free_event_list_lock);
 		return NULL;
 	}
-	event = list_first_entry(&ep->free_event_list, struct ccieth_endpoint_event, list);
+	event = list_first_entry(&ep->free_event_list, struct ccieth_driver_event, list);
 	list_del(&event->list);
 	CCIETH_STAT_DEC(ep, event_free);
 	spin_unlock_bh(&ep->free_event_list_lock);
@@ -260,7 +260,7 @@ ccieth_get_free_event(struct ccieth_endpoint *ep)
 
 static inline void
 ccieth_putback_free_event(struct ccieth_endpoint *ep,
-			  struct ccieth_endpoint_event *event)
+			  struct ccieth_driver_event *event)
 {
 	spin_lock_bh(&ep->free_event_list_lock);
 	list_add_tail(&event->list, &ep->free_event_list);
@@ -269,7 +269,7 @@ ccieth_putback_free_event(struct ccieth_endpoint *ep,
 
 static inline void
 ccieth_queue_busy_event(struct ccieth_endpoint *ep,
-			struct ccieth_endpoint_event *event)
+			struct ccieth_driver_event *event)
 {
 	spin_lock_bh(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);

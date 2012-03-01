@@ -14,7 +14,7 @@
 
 static void
 ccieth_connection_event_destructor(struct ccieth_endpoint *ep,
-				   struct ccieth_endpoint_event *event);
+				   struct ccieth_driver_event *event);
 static int
 ccieth_connect_ack_from_endpoint(struct ccieth_endpoint *ep, __u32 src_conn_id,
 				 __u8 dst_addr[6],  __u32 dst_ep_id, __u32 dst_conn_id,
@@ -186,7 +186,7 @@ ccieth_destroy_connection_rcu(struct rcu_head *rcu_head)
 
 static void
 ccieth_connection_event_destructor(struct ccieth_endpoint *ep,
-				   struct ccieth_endpoint_event *event)
+				   struct ccieth_driver_event *event)
 {
 	struct ccieth_connection *conn = container_of(event, struct ccieth_connection, embedded_event);
 	/* the event was enqueued from ccieth_connect_timer_hdlr, while rcu readers may exist */
@@ -483,7 +483,7 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 			     struct sk_buff *skb,
 			     struct ccieth_pkt_header_connect_request *hdr)
 {
-	struct ccieth_endpoint_event *event;
+	struct ccieth_driver_event *event;
 	struct ccieth_connection *conn;
 	__u32 src_ep_id;
 	__u32 src_conn_id;
@@ -715,7 +715,7 @@ ccieth__recv_connect_accept(struct ccieth_endpoint *ep,
 			    struct sk_buff *skb,
 			    struct ccieth_pkt_header_connect_accept *hdr)
 {
-	struct ccieth_endpoint_event *event;
+	struct ccieth_driver_event *event;
 	struct ccieth_connection *conn;
 	__u32 src_conn_id;
 	__u32 src_ep_id;
@@ -1092,7 +1092,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 			 struct ccieth_pkt_header_connect_ack *hdr)
 {
 	struct ccieth_connection *conn;
-	struct ccieth_endpoint_event *event = NULL;
+	struct ccieth_driver_event *event = NULL;
 	__u32 dst_conn_id;
 	__u32 req_seqnum;
 	__u8 ack_status;

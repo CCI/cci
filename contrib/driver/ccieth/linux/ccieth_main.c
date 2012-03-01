@@ -31,7 +31,7 @@ struct dentry *ccieth_debugfs_root;
 static void
 ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 {
-	struct ccieth_endpoint_event *event, *nevent;
+	struct ccieth_driver_event *event, *nevent;
 	struct net_device *ifp;
 	int destroyed_conn = 0;
 	int must_put_ifp = 0;
@@ -91,7 +91,7 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 
 static void
 ccieth_event_destructor_recycle(struct ccieth_endpoint *ep,
-				struct ccieth_endpoint_event *event)
+				struct ccieth_driver_event *event)
 {
 	spin_lock_bh(&ep->free_event_list_lock);
 	CCIETH_STAT_INC(ep, event_free);
@@ -102,7 +102,7 @@ ccieth_event_destructor_recycle(struct ccieth_endpoint *ep,
 static int
 ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *arg)
 {
-	struct ccieth_endpoint_event *event, *nevent;
+	struct ccieth_driver_event *event, *nevent;
 	struct ccieth_endpoint *ep, **epp;
 	struct net_device *ifp;
 	int id, i;
@@ -208,10 +208,10 @@ out:
 	return err;
 }
 
-static struct ccieth_endpoint_event *
+static struct ccieth_driver_event *
 ccieth_get_event(struct ccieth_endpoint *ep)
 {
-	struct ccieth_endpoint_event *event;
+	struct ccieth_driver_event *event;
 
 	spin_lock_bh(&ep->event_list_lock);
 	if (list_empty(&ep->event_list)) {
@@ -219,7 +219,7 @@ ccieth_get_event(struct ccieth_endpoint *ep)
 		return NULL;
 	}
 
-	event = list_first_entry(&ep->event_list, struct ccieth_endpoint_event, list);
+	event = list_first_entry(&ep->event_list, struct ccieth_driver_event, list);
 	list_del(&event->list);
 	spin_unlock_bh(&ep->event_list_lock);
 
@@ -332,7 +332,7 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 	}
 
 	case CCIETH_IOCTL_GET_EVENT: {
-		struct ccieth_endpoint_event *event;
+		struct ccieth_driver_event *event;
 		struct ccieth_endpoint *ep = file->private_data;
 
 		if (!ep)

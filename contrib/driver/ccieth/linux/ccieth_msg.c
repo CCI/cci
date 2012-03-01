@@ -43,7 +43,7 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32
 	skb = conn->send_queue_first_seqnum;
 	/* remove acked MSGs */
 	while (skb != NULL) {
-		struct ccieth_endpoint_event *event;
+		struct ccieth_driver_event *event;
 		struct ccieth_skb_cb *scb = CCIETH_SKB_CB(skb);
 
 		if (ccieth_seqnum_after_strict(last_acked, scb->reliable_send.seqnum))
@@ -156,7 +156,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	struct net_device *ifp;
 	struct ccieth_pkt_header_msg *hdr;
 	struct ccieth_connection *conn;
-	struct ccieth_endpoint_event *event;
+	struct ccieth_driver_event *event;
 	size_t skblen;
 	int err;
 
@@ -298,7 +298,7 @@ static int
 ccieth__recv_msg_unreliable(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 			    struct ccieth_pkt_header_msg *hdr, struct sk_buff *skb)
 {
-	struct ccieth_endpoint_event *event;
+	struct ccieth_driver_event *event;
 	__u32 msg_len = ntohl(hdr->msg_len);
 	int err;
 
@@ -337,7 +337,7 @@ static int
 ccieth__recv_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
 			  struct ccieth_pkt_header_msg *hdr, struct sk_buff *skb)
 {
-	struct ccieth_endpoint_event *event;
+	struct ccieth_driver_event *event;
 	__u32 msg_len = ntohl(hdr->msg_len);
 	__u32 msg_seqnum = ntohl(hdr->msg_seqnum);
 	__u32 relseqnum;
