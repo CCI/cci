@@ -315,9 +315,11 @@ ccieth__recv_msg_unreliable(struct ccieth_endpoint *ep, struct ccieth_connection
 	event->event.type = CCIETH_IOCTL_EVENT_RECV;
 	event->event.data_length = msg_len;
 	event->event.recv.user_conn_id = conn->user_conn_id;
-
-	err = skb_copy_bits(skb, sizeof(*hdr), event+1, msg_len);
-	BUG_ON(err < 0);
+	if (msg_len) {
+		event->data_skb = skb;
+		event->data_skb_offset = sizeof(*hdr);
+		skb = NULL;
+	}
 
 	CCIETH_STAT_INC(conn, recv);
 
@@ -360,9 +362,11 @@ ccieth__recv_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_connection *
 	event->event.type = CCIETH_IOCTL_EVENT_RECV;
 	event->event.data_length = msg_len;
 	event->event.recv.user_conn_id = conn->user_conn_id;
-
-	err = skb_copy_bits(skb, sizeof(*hdr), event+1, msg_len);
-	BUG_ON(err < 0);
+	if (msg_len) {
+		event->data_skb = skb;
+		event->data_skb_offset = sizeof(*hdr);
+		skb = NULL;
+	}
 
 	spin_lock_bh(&conn->recv_lock);
 
@@ -382,6 +386,9 @@ ccieth__recv_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_connection *
 		else
 			/* old duplicate, ignore */
 			CCIETH_STAT_INC(conn, recv_duplicate);
+		/* put the event and skb back */
+		if (msg_len)
+			skb = event->data_skb;
 		ccieth_putback_free_event(ep, event);
 		force_delayed_ack = 1;
 		goto done;
@@ -390,6 +397,9 @@ ccieth__recv_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_connection *
 	if (unlikely(conn->recv_next_bitmap & (1U << relseqnum))) {
 		/* recent misordered duplicate, ignore */
 		CCIETH_STAT_INC(conn, recv_duplicate);
+		/* put the event and skb back */
+		if (msg_len)
+			skb = event->data_skb;
 		ccieth_putback_free_event(ep, event);
 		force_delayed_ack = 1;
 		goto done;

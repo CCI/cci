@@ -32,6 +32,14 @@ struct ccieth_pkt_header_msg;
 
 struct ccieth_driver_event {
 	struct list_head list;
+
+	/* skb data is copied into the final event during get_event()
+	 * before releasing the skb.
+	 * only matters if event.data_length > 0 */
+	struct sk_buff *data_skb;
+	unsigned data_skb_offset;
+
+	/* the actual event */
 	struct ccieth_ioctl_get_event event;
 	void (*destructor) (struct ccieth_endpoint *, struct ccieth_driver_event *);
 };

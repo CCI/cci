@@ -605,8 +605,11 @@ retry:
 	event->event.data_length = data_len;
 	event->event.connect_request.attribute = hdr->attribute;
 	event->event.connect_request.max_send_size = conn->max_send_size;
-	err = skb_copy_bits(skb, sizeof(*hdr), event+1, data_len);
-	BUG_ON(err < 0);
+	if (data_len) {
+		event->data_skb = skb;
+		event->data_skb_offset = sizeof(*hdr);
+		skb = NULL;
+	}
 
 	/* things cannot fail anymore now, insert the connection for real */
 	conn->id = id;

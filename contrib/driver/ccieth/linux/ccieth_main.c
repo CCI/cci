@@ -73,6 +73,8 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 
 	list_for_each_entry_safe(event, nevent, &ep->event_list, list) {
 		list_del(&event->list);
+		if (event->event.data_length)
+			dev_kfree_skb(event->data_skb);
 		kfree(event);
 	}
 	list_for_each_entry_safe(event, nevent, &ep->free_event_list, list) {
@@ -134,7 +136,7 @@ ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *a
 	INIT_LIST_HEAD(&ep->free_event_list);
 	spin_lock_init(&ep->free_event_list_lock);
 	for (i = 0; i < CCIETH_EVENT_SLOT_NR; i++) {
-		event = kmalloc(sizeof(*event) + ep->max_send_size, GFP_KERNEL);
+		event = kmalloc(sizeof(*event), GFP_KERNEL);
 		if (!event)
 			break;
 		event->destructor = ccieth_event_destructor_recycle;
@@ -343,9 +345,15 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 			return -EAGAIN;
 
 		ret = copy_to_user((__user void *)arg, &event->event, sizeof(event->event));
-		if (!ret && event->event.data_length > 0)
-			ret = copy_to_user(((__user void *)arg)+sizeof(struct ccieth_ioctl_get_event),
-					   event+1, event->event.data_length);
+		if (!ret && event->event.data_length > 0) {
+			struct iovec iov;
+			iov.iov_base = ((__user void *)arg) + sizeof(struct ccieth_ioctl_get_event);
+			iov.iov_len = event->event.data_length;
+			ret = skb_copy_datagram_iovec(event->data_skb, event->data_skb_offset,
+						      &iov, event->event.data_length);
+			BUG_ON(ret);
+			dev_kfree_skb(event->data_skb);
+		}
 
 		if (event->destructor)
 			event->destructor(ep, event);
