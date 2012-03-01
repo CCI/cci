@@ -340,6 +340,7 @@ ccieth__recv_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_connection *
 	struct ccieth_driver_event *event;
 	__u32 msg_len = ntohl(hdr->msg_len);
 	__u32 msg_seqnum = ntohl(hdr->msg_seqnum);
+	__u32 acked_seqnum = ntohl(hdr->acked_seqnum);
 	__u32 relseqnum;
 	unsigned relfull = 0;
 	int force_delayed_ack = 0;
@@ -434,8 +435,8 @@ done:
 
 	spin_unlock_bh(&conn->recv_lock);
 
-	/* piggyback acks */
-	ccieth_conn_handle_ack(conn, ntohl(hdr->acked_seqnum), 0);
+	/* piggybacked acks */
+	ccieth_conn_handle_ack(conn, acked_seqnum, 0);
 
 	dev_kfree_skb(skb);
 	return 0;
