@@ -10,10 +10,10 @@
 #define REGSIZE		(1024*1024)
 #define TOTALSIZE	(512*1024*1024)
 
-void check_return(char *func, int ret)
+void check_return(cci_endpoint_t *endpoint, char *func, int ret)
 {
 	if (ret) {
-		fprintf(stderr, "%s() returned %s\n", func, cci_strerror(ret));
+		fprintf(stderr, "%s() returned %s\n", func, cci_strerror(endpoint, ret));
 		exit(EXIT_FAILURE);
 	}
 	return;
@@ -91,13 +91,13 @@ int main(int argc, char *argv[])
 	count = totalsize / regsize;
 
 	ret = posix_memalign(&base, pagesize, totalsize + offset);
-	check_return("posix_memalign", ret);
+	check_return(NULL, "posix_memalign", ret);
 
 	ptr = base + (uintptr_t) offset;
 	length = regsize;
 
 	handles = calloc(count, sizeof(*handles));
-	check_return("calloc", handles ? 0 : CCI_ENOMEM);
+	check_return(NULL, "calloc", handles ? 0 : CCI_ENOMEM);
 
 	if (prefault) {
 		for (i = 0; i < totalsize; i += pagesize) {
@@ -107,13 +107,13 @@ int main(int argc, char *argv[])
 	}
 
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
-	check_return("cci_init", ret);
+	check_return(NULL, "cci_init", ret);
 
 	ret = cci_get_devices((cci_device_t const ***const)&devices);
-	check_return("cci_get_devices", ret);
+	check_return(NULL, "cci_get_devices", ret);
 
 	ret = cci_create_endpoint(NULL, 0, &endpoint, &fd);
-	check_return("cci_create_endpoint", ret);
+	check_return(NULL, "cci_create_endpoint", ret);
 
 	/* register */
 	if (!dereg)
@@ -123,7 +123,7 @@ int main(int argc, char *argv[])
 		void *p = ptr + (uintptr_t) i;
 
 		ret = cci_rma_register(endpoint, NULL, p, length, &handles[i]);
-		check_return("cci_rma_register", ret);
+		check_return(endpoint, "cci_rma_register", ret);
 	}
 
 	if (!dereg)
@@ -135,7 +135,7 @@ int main(int argc, char *argv[])
 
 	for (i = 0; i < count; i++) {
 		ret = cci_rma_deregister(handles[i]);
-		check_return("cci_rma_register", ret);
+		check_return(endpoint, "cci_rma_register", ret);
 	}
 
 	if (dereg)
@@ -148,10 +148,10 @@ int main(int argc, char *argv[])
 	       regsize, count, usecs, (double)usecs / (double)count);
 
 	ret = cci_destroy_endpoint(endpoint);
-	check_return("cci_destroy_endpoint", ret);
+	check_return(endpoint, "cci_destroy_endpoint", ret);
 
 	ret = cci_free_devices((cci_device_t const **const)devices);
-	check_return("cci_free_devices", ret);
+	check_return(endpoint, "cci_free_devices", ret);
 
 	return 0;
 }

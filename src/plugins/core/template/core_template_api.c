@@ -15,7 +15,7 @@
  * Local functions
  */
 static int template_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static const char *template_strerror(enum cci_status status);
+static const char *template_strerror(cci_endpoint_t * endpoint, enum cci_status status);
 static int template_get_devices(cci_device_t const ***devices);
 static int template_free_devices(cci_device_t const **devices);
 static int template_create_endpoint(cci_device_t * device,
@@ -113,7 +113,7 @@ static int template_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	return CCI_SUCCESS;
 }
 
-static const char *template_strerror(enum cci_status status)
+static const char *template_strerror(cci_endpoint_t * endpoint, enum cci_status status)
 {
 	printf("In template_sterrror\n");
 	return NULL;

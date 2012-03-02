@@ -15,7 +15,7 @@
  * Local functions
  */
 static int mx_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static const char *mx_strerror(enum cci_status status);
+static const char *mx_strerror(cci_endpoint_t * endpoint, enum cci_status status);
 static int mx_get_devices(cci_device_t const ***devices);
 static int mx_free_devices(cci_device_t const **devices);
 static int mx_create_endpoint(cci_device_t * device,
@@ -121,7 +121,7 @@ static int mx_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	return CCI_SUCCESS;
 }
 
-static const char *mx_strerror(enum cci_status status)
+static const char *mx_strerror(cci_endpoint_t * endpoint, enum cci_status status)
 {
 	printf("In mx_sterrror\n");
 	return NULL;

@@ -16,7 +16,7 @@
 #include "cci.h"
 #include "plugins/core/core.h"
 
-const char *cci_strerror(enum cci_status status)
+const char *cci_strerror(cci_endpoint_t *endpoint, enum cci_status status)
 {
 	switch (status) {
 	case CCI_SUCCESS:
@@ -80,6 +80,6 @@ const char *cci_strerror(enum cci_status status)
 		return "CCI_EADDRNOTAVAIL";
 
 	default:
-		return cci_core->strerror(status);
+		return cci_core->strerror(endpoint, status);
 	}
 }

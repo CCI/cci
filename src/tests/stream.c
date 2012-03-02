@@ -87,7 +87,7 @@ static void poll_events(void)
 	if (ret != 0) {
 		if (ret != CCI_EAGAIN) {
 			fprintf(stderr, "cci_get_event() returned %s\n",
-				cci_strerror(ret));
+				cci_strerror(endpoint, ret));
 		}
 		return;
 	}
@@ -105,7 +105,7 @@ static void poll_events(void)
 				if (ret && 1) {
 					fprintf(stderr,
 						"%s: send returned %s\n",
-						__func__, cci_strerror(ret));
+						__func__, cci_strerror(endpoint, ret));
 				} else
 					send++;
 
@@ -205,7 +205,7 @@ void do_client()
 	ret = cci_connect(endpoint, server_uri, NULL, 0, attr, NULL, 0, NULL);
 	if (ret) {
 		fprintf(stderr, "cci_connect() returned %s\n",
-			cci_strerror(ret));
+			cci_strerror(endpoint, ret));
 		return;
 	}
 
@@ -336,14 +336,14 @@ int main(int argc, char *argv[])
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
 	if (ret) {
 		fprintf(stderr, "cci_init() failed with %s\n",
-			cci_strerror(ret));
+			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
 
 	ret = cci_get_devices((cci_device_t const ***const)&devices);
 	if (ret) {
 		fprintf(stderr, "cci_get_devices() failed with %s\n",
-			cci_strerror(ret));
+			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
 
@@ -351,7 +351,7 @@ int main(int argc, char *argv[])
 	ret = cci_create_endpoint(NULL, 0, &endpoint, &ep_fd);
 	if (ret) {
 		fprintf(stderr, "cci_create_endpoint() failed with %s\n",
-			cci_strerror(ret));
+			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
 	printf("opened %s\n", endpoint->name);
@@ -369,7 +369,7 @@ int main(int argc, char *argv[])
 	ret = cci_destroy_endpoint(endpoint);
 	if (ret) {
 		fprintf(stderr, "cci_destroy_endpoint() failed with %s\n",
-			cci_strerror(ret));
+			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
 	if (buffer)
@@ -377,7 +377,7 @@ int main(int argc, char *argv[])
 	ret = cci_free_devices((cci_device_t const **)devices);
 	if (ret) {
 		fprintf(stderr, "cci_free_devices() failed with %s\n",
-			cci_strerror(ret));
+			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
 

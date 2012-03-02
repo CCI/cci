@@ -120,7 +120,7 @@ do {                                                                  \
 
 // Local functions
 static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static const char *gni_strerror(enum cci_status gRv);
+static const char *gni_strerror(cci_endpoint_t * endpoint, enum cci_status gRv);
 static int gni_get_devices(const cci_device_t *** devices);
 static int gni_free_devices(const cci_device_t ** devices);
 static int gni_create_endpoint(cci_device_t * device,
@@ -1126,7 +1126,7 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	return (cRv);
 }
 
-static const char *gni_strerror(enum cci_status cRv)
+static const char *gni_strerror(cci_endpoint_t * endpoint, enum cci_status cRv)
 {
 
 	debug(CCI_DB_FUNC, "In gni_strerror()");
