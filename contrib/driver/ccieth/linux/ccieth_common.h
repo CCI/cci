@@ -33,6 +33,8 @@ struct ccieth_pkt_header_msg;
 struct ccieth_driver_event {
 	struct list_head list;
 
+	__u32 seqnum; /* for RO recv */
+
 	/* skb data is copied into the final event during get_event()
 	 * before releasing the skb.
 	 * only matters if event.data_length > 0 */
@@ -165,6 +167,9 @@ struct ccieth_connection {
 	int recv_needack_force;
 	struct timer_list recv_needack_timer;
 	struct work_struct recv_needack_work;
+	/* only if CCIETH_CONN_FLAG_ORDERED */
+	/* recv-side deferred misordered event */
+	struct list_head recv_misordered_event_list;
 
 	/* resending of connect request, accept or reject */
 	int connect_needack;

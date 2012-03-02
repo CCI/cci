@@ -334,6 +334,36 @@ out:
 	return err;
 }
 
+static void
+ccieth__recv_msg_ordered_enqueue(struct ccieth_connection *conn,
+				 struct ccieth_driver_event *event,
+				 __u32 msg_seqnum)
+{
+	struct ccieth_driver_event *prev = NULL, *_ev;
+	list_for_each_entry(_ev, &conn->recv_misordered_event_list, list) {
+		if (ccieth_seqnum_after(msg_seqnum, _ev->seqnum))
+			break;
+		prev = _ev;
+	}
+	list_add(&event->list, prev ? &prev->list : &conn->recv_misordered_event_list);
+}
+
+static void
+ccieth__recv_msg_ordered_dequeue_after(struct ccieth_connection *conn,
+				       __u32 msg_seqnum)
+{
+	__u32 next_event_seqnum = msg_seqnum + 1;
+	while (!list_empty(&conn->recv_misordered_event_list)) {
+		struct ccieth_driver_event * event = list_first_entry(&conn->recv_misordered_event_list,
+								      struct ccieth_driver_event, list);
+		if (event->seqnum != next_event_seqnum)
+			break;
+		list_del(&event->list);
+		ccieth_queue_busy_event(conn->ep, event);
+		next_event_seqnum++;
+	}
+}
+
 /* called under rcu_read_lock() */
 static int
 ccieth__recv_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_connection *conn,
@@ -396,6 +426,7 @@ ccieth__recv_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_connection *
 		goto out_with_lock;
 	}
 	event->event.type = CCIETH_IOCTL_EVENT_RECV;
+	event->seqnum = msg_seqnum;
 	event->event.data_length = msg_len;
 	event->event.recv.user_conn_id = conn->user_conn_id;
 	if (msg_len) {
@@ -403,8 +434,22 @@ ccieth__recv_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_connection *
 		event->data_skb_offset = sizeof(*hdr);
 		skb = NULL;
 	}
-	/* FIXME: if misordered, defer */
-	ccieth_queue_busy_event(ep, event);
+
+	if (!(conn->flags & CCIETH_CONN_FLAG_ORDERED)) {
+		/* unordered connection, just notify the event now */
+		ccieth_queue_busy_event(ep, event);
+	} else {
+		/* ordered connection */
+		if (relseqnum) {
+			/* misordered packet, queue it */
+			ccieth__recv_msg_ordered_enqueue(conn, event, msg_seqnum);
+		} else {
+			/* first expected packet, notify it now */
+			ccieth_queue_busy_event(ep, event);
+			/* look at the queued one in case they are expected now */
+			ccieth__recv_msg_ordered_dequeue_after(conn, msg_seqnum);
+		}
+	}
 
 	/* ... and update connection then */
 	conn->recv_next_bitmap |= 1U << relseqnum;

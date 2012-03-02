@@ -94,6 +94,11 @@ ccieth_conn_init(struct ccieth_connection *conn, struct ccieth_endpoint *ep, int
 		conn->recv_needack_force = 0;
 		setup_timer(&conn->recv_needack_timer, ccieth_recv_needack_timer_hdlr, (unsigned long)conn);
 		INIT_WORK(&conn->recv_needack_work, ccieth_recv_needack_workfunc);
+
+		if (conn->flags & CCIETH_CONN_FLAG_ORDERED) {
+		    /* ordered recv side */
+		    INIT_LIST_HEAD(&conn->recv_misordered_event_list);
+		}
 	}
 }
 
@@ -101,6 +106,7 @@ static void
 ccieth_conn_free(struct ccieth_connection *conn)
 {
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
+		/* drop pending sends */
 		struct sk_buff *nskb, *skb = conn->send_queue_first_seqnum;
 		while (skb) {
 			nskb = skb->next;
@@ -109,6 +115,18 @@ ccieth_conn_free(struct ccieth_connection *conn)
 			kfree_skb(skb);
 
 			skb = nskb;
+		}
+
+		if (conn->flags & CCIETH_CONN_FLAG_ORDERED) {
+			/* drop queued misordered events */
+			while (!list_empty(&conn->recv_misordered_event_list)) {
+				struct ccieth_driver_event *event = list_first_entry(&conn->recv_misordered_event_list,
+										     struct ccieth_driver_event, list);
+				list_del(&event->list);
+				if (event->event.data_length)
+					dev_kfree_skb(event->data_skb);
+				ccieth_putback_free_event(conn->ep, event);
+			}
 		}
 	}
 }
