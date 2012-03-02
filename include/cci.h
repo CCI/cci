@@ -97,8 +97,9 @@
    \return Each driver may have additional error codes.
 
    If cci_init() completes successfully, then CCI is loaded and
-   available to be used in this application.  There is no
-   corresponding "finalize" call.
+   available to be used in this application.  The application must
+   call cci_finalize() to free all CCI resources at the end of its
+   execution.
 
    If cci_init() fails, an appropriate error code is returned.
 
@@ -113,6 +114,17 @@
   \ingroup env
 */
 CCI_DECLSPEC int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+
+/*!
+  This is the last CCI function that must be called; no other
+  CCI functions can be invoked after this function.
+
+   \return CCI_SUCCESS  CCI has been properly finalized.
+
+  If cci_init was invoked multiple times, cci_finalize() should be
+  called as many times, and only the last one will not be a no-op.
+ */
+CCI_DECLSPEC int cci_finalize(void);
 
 /*! \example init.c
  *  This is an example of using init and strerror.
@@ -349,6 +361,9 @@ typedef struct cci_device {
 	/*! Name of the device from the config file, e.g., "bob0" */
 	const char *name;
 
+	/*! Is this device actually up and running? */
+	unsigned up;
+
 	/*! Human readable description string (to include newlines); should
 	   contain debugging info, probably the network address of the
 	   device at a bare minimum. */
@@ -376,8 +391,8 @@ typedef struct cci_device {
 /*!
   Get an array of devices.
 
-  Returns a NULL-terminated array of (struct cci_device *)'s that are
-  "up".  The pointers can be copied, but the actual cci_device
+  Returns a NULL-terminated array of (struct cci_device *)'s.
+  The pointers can be copied, but the actual cci_device
   instances may not.  The array of devices is allocated by the CCI
   library; there may be hidden state that the application does not
   see.
@@ -385,14 +400,20 @@ typedef struct cci_device {
   \param[out] devices	Array of pointers to be filled by the function.
 			Previous value in the pointer will be overwritten.
 
-  \return CCI_SUCCESS   The array of "up" devices is available.
+  \return CCI_SUCCESS   The array of devices is available.
   \return CCI_EINVAL    Devices is NULL.
   \return Each driver may have additional error codes.
 
   If cci_get_devices() succeeds, the entire returned set of data (to
   include the data pointed to by the individual cci_device
-  instances) should be treated as const, and must be freed with a
-  corresponding call to cci_free_devices().
+  instances) should be treated as const.
+
+  If cci_get_devices() is invoked again later, it may return a larger
+  array if some new devices appeared in the system.  All previously
+  returned devices are guaranteed to be in the new array, but their
+  status may have changed.  For instance, if the corresponding physical
+  devices is not available anymore, the CCI device will have its
+  "up" field unset.
 
   The order of devices returned corresponds to the priority fields in
   the devices.  If two devices share the same priority, their
@@ -405,29 +426,8 @@ typedef struct cci_device {
 */
 CCI_DECLSPEC int cci_get_devices(cci_device_t const ***const devices);
 
-/*!
-  Frees a NULL-terminated array of (cci_device_t*)'s that were
-  previously allocated via cci_get_devices().
-
-  \param[in] devices: array of pointers previously filled in via
-  cci_get_devices().
-
-  \return CCI_SUCCESS   All CCI resources have been released.
-  \return CCI_EINVAL    Devices is NULL.
-  \return Each driver may have additional error codes.
-
-  If cci_free_devices() succeeds, the data pointed to by the devices
-  pointer will be stale (and should not be accessed).
-
-  If cci_free_devices() fails, the state of the data pointed to by
-  the devices parameter is undefined.
-
-  \ingroup devices
-*/
-CCI_DECLSPEC int cci_free_devices(cci_device_t const **devices);
-
 /*! \example devices.c
- *  This is an example of using get_devices and free_devices.
+ *  This is an example of using get_devices.
  *  It also iterates over the conf_argv array.
  */
 

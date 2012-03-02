@@ -112,9 +112,9 @@ do {                                                        \
  * Local functions
  */
 static int portals_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int portals_finalize(void);
 static const char *portals_strerror(cci_endpoint_t * endpoint, enum cci_status status);
 static int portals_get_devices(cci_device_t const ***devices);
-static int portals_free_devices(cci_device_t const **devices);
 static int portals_create_endpoint(cci_device_t * device,
 				   int flags,
 				   cci_endpoint_t ** endpoint,
@@ -192,9 +192,9 @@ cci_plugin_core_t cci_core_portals_plugin = {
 
 	/* API function pointers */
 	portals_init,
+	portals_finalize,
 	portals_strerror,
 	portals_get_devices,
-	portals_free_devices,
 	portals_create_endpoint,
 	portals_destroy_endpoint,
 	portals_accept,
@@ -295,6 +295,8 @@ static int portals_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	}
 
       false_alarm:
+
+/* FIXME: if configfile == 0, create default devices */
 
 /*
  * Start searching global configuration for portals devices.
@@ -500,11 +502,14 @@ static int portals_get_devices(cci_device_t const ***devices)
 	debug(CCI_DB_INFO, "Got portals ID of: %u:%hu",
 	      pdev->idp.nid, pdev->idp.pid);
 
+/* FIXME: update the devices list (up field, ...).
+   add new devices if !configfile */
+
 	CCI_EXIT;
 	return CCI_SUCCESS;
 }
 
-static int portals_free_devices(cci_device_t const **devices)
+static int portals_finalize(void)
 {
 	cci__dev_t *dev;
 

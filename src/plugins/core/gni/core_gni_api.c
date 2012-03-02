@@ -120,9 +120,9 @@ do {                                                                  \
 
 // Local functions
 static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int gni_finalize(void);
 static const char *gni_strerror(cci_endpoint_t * endpoint, enum cci_status gRv);
 static int gni_get_devices(const cci_device_t *** devices);
-static int gni_free_devices(const cci_device_t ** devices);
 static int gni_create_endpoint(cci_device_t * device,
 			       int32_t flags,
 			       cci_endpoint_t ** endpoint,
@@ -836,9 +836,9 @@ cci_plugin_core_t cci_core_gni_plugin = {
 
 //  API function pointers
 	gni_init,
+	gni_finalize,
 	gni_strerror,
 	gni_get_devices,
-	gni_free_devices,
 	gni_create_endpoint,
 	gni_destroy_endpoint,
 	gni_accept,
@@ -909,6 +909,8 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	debug(CCI_DB_INFO,
 	      "%8s.%5d %s: DCACHE_LINESIZE=                       %3zdB",
 	      uBuf.nodename, pid, __func__, gni_line);
+
+/* FIXME: if configfile == 0, create default devices */
 
 //  Step 1.  Extract Gemini device(s) from global configuration.
 	srandom((unsigned int)gni_get_usecs());
@@ -1158,11 +1160,14 @@ static int gni_get_devices(const cci_device_t *** devices)
 	debug(CCI_DB_INFO, "%8s.%5d %s: devices=                   %8d",
 	      gdev->nodename, gdev->INST, __func__, gglobals->count);
 
+/* FIXME: update the devices list (up field, ...).
+   add new devices if !configfile */
+
 	CCI_EXIT;
 	return (CCI_SUCCESS);
 }
 
-static int gni_free_devices(const cci_device_t ** devices)
+static int gni_finalize(void)
 {
 
 	const cci_device_t *device;
@@ -1177,12 +1182,12 @@ static int gni_free_devices(const cci_device_t ** devices)
 		CCI_EXIT;
 		return (CCI_ENODEV);
 	}
-	device = *devices;
-	dev = container_of(device, cci__dev_t, device);
-	gdev = dev->priv;
+//	device = *devices;
+//	dev = container_of(device, cci__dev_t, device);
+//	gdev = dev->priv;
 
-	debug(CCI_DB_FUNC, "%8s.%5d In gni_free_devices()", gdev->nodename,
-	      gdev->INST);
+//	debug(CCI_DB_FUNC, "%8s.%5d In gni_free_devices()", gdev->nodename,
+//	      gdev->INST);
 
 	pthread_mutex_lock(&globals->lock);	// Set shutdown
 	gni_shut_down = 1;	// Signal other thread(s)

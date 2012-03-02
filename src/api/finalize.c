@@ -17,13 +17,13 @@
 #include "plugins/core/core.h"
 #include "cci-api.h"
 
-int cci_free_devices(cci_device_t const **devices)
+int cci_finalize(void)
 {
 	cci__dev_t *dev = NULL;
 
-	if (NULL == devices || NULL == *devices) {
-		return CCI_EINVAL;
-	}
+	initialized--;
+	if (initialized > 0)
+		return CCI_SUCCESS;
 
 	/* for each device
 	 *     for each endpoint
@@ -44,7 +44,7 @@ int cci_free_devices(cci_device_t const **devices)
 	pthread_mutex_unlock(&globals->lock);
 
 	/* let the driver clean up the private device */
-	cci_core->free_devices(devices);
+	cci_core->finalize();
 
 	pthread_mutex_lock(&globals->lock);
 	while (!TAILQ_EMPTY(&globals->devs)) {

@@ -539,5 +539,12 @@ int main(int argc, char *argv[])
 
 	free(server_uri);
 
+	ret = cci_finalize();
+	if (ret) {
+		fprintf(stderr, "cci_finalize() failed with %s\n",
+			cci_strerror(NULL, ret));
+		exit(EXIT_FAILURE);
+	}
+
 	return 0;
 }

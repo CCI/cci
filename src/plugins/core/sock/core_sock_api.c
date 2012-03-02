@@ -51,10 +51,10 @@ pthread_t progress_tid, recv_tid;
  * Local functions
  */
 static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int sock_finalize(void);
 static const char *sock_strerror(cci_endpoint_t * endpoint,
 				 enum cci_status status);
 static int sock_get_devices(cci_device_t const ***devices);
-static int sock_free_devices(cci_device_t const **devices);
 static int sock_create_endpoint(cci_device_t * device,
 				int flags,
 				cci_endpoint_t ** endpoint,
@@ -130,9 +130,9 @@ cci_plugin_core_t cci_core_sock_plugin = {
 
 	/* API function pointers */
 	sock_init,
+	sock_finalize,
 	sock_strerror,
 	sock_get_devices,
-	sock_free_devices,
 	sock_create_endpoint,
 	sock_destroy_endpoint,
 	sock_accept,
@@ -233,8 +233,50 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		goto out;
 	}
 
-	/* find devices that we own */
+	if (!configfile) {
+		/* create a loopback device for now */
+		cci_device_t *device;
+		sock_dev_t *sdev;
 
+		dev = calloc(1, sizeof(*dev));
+		if (!dev) {
+			ret = CCI_ENOMEM;
+			goto out;
+		}
+		dev->priv = calloc(1, sizeof(*sdev));
+		if (!dev->priv) {
+			free(dev);
+			ret = CCI_ENOMEM;
+			goto out;
+		}
+
+		cci__init_dev(dev);
+
+		device = &dev->device;
+		device->max_send_size = SOCK_DEFAULT_MSS;
+		device->name = strdup("loopback");
+
+		device->rate = 10000000000ULL;
+		device->pci.domain = -1;    /* per CCI spec */
+		device->pci.bus = -1;       /* per CCI spec */
+		device->pci.dev = -1;       /* per CCI spec */
+		device->pci.func = -1;      /* per CCI spec */
+
+		sdev = dev->priv;
+		TAILQ_INIT(&sdev->queued);
+		TAILQ_INIT(&sdev->pending);
+		sdev->is_progressing = 0;
+		sdev->ip = inet_addr("127.0.0.1"); /* network order */
+
+		dev->driver = strdup("sock");
+		dev->is_up = 1;
+		dev->is_default = 1;
+		TAILQ_INSERT_TAIL(&globals->devs, dev, entry);
+		devices[sglobals->count] = device;
+		sglobals->count++;
+
+	} else
+	/* find devices that we own */
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
 		if (0 == strcmp("sock", dev->driver)) {
 			const char **arg;
@@ -351,6 +393,9 @@ static int sock_get_devices(cci_device_t const ***devices)
 		return CCI_ENODEV;
 	}
 
+/* FIXME: update the devices list (up field, ...).
+   add new devices if !configfile */
+
 	*devices = sglobals->devices;
 
 	CCI_EXIT;
@@ -362,7 +407,7 @@ static int sock_get_devices(cci_device_t const ***devices)
  *      and destroyed all endpoints.
  *      All we need to do if free dev->priv
  */
-static int sock_free_devices(cci_device_t const **devices)
+static int sock_finalize(void)
 {
 	cci__dev_t *dev = NULL;
 

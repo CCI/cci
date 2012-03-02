@@ -23,6 +23,8 @@
 
 int cci__debug = CCI_DB_DFLT;
 cci__globals_t *globals = NULL;
+int initialized = 0;
+int configfile = 0;
 
 static inline void cci__get_debug_env(void)
 {
@@ -135,6 +137,17 @@ int cci__free_devs(void)
 	pthread_mutex_unlock(&globals->lock);
 
 	return CCI_ENOMEM;
+}
+
+void cci__init_dev(cci__dev_t *dev)
+{
+	cci_device_t *device = &dev->device;
+
+	dev->priority = 50; /* default */
+	dev->is_default = 0;
+	TAILQ_INIT(&dev->eps);
+	pthread_mutex_init(&dev->lock, NULL);
+	device->up = 1;
 }
 
 void cci__add_dev(cci__dev_t * dev)
@@ -259,10 +272,7 @@ int cci__parse_config(const char *path)
 				      "calloc failed for device %s", open);
 				return cci__free_devs();
 			}
-			dev->priority = 50;	/* default */
-			/* dev->is_default = 0; */
-			TAILQ_INIT(&dev->eps);
-			pthread_mutex_init(&dev->lock, NULL);
+			cci__init_dev(dev);
 
 			d = &dev->device;
 			d->conf_argv = calloc(CCI_MAX_ARGS + 1, sizeof(char *));
@@ -424,7 +434,6 @@ int cci__parse_config(const char *path)
 int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	int ret;
-	static int once = 0;
 
 	cci__get_debug_env();
 
@@ -437,10 +446,10 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	if (!caps)
 		return CCI_EINVAL;
 
-	if (0 == once) {
+	if (0 == initialized) {
 		char *str;
 
-		once++;
+		initialized++;
 
 		/* init globals */
 
@@ -467,17 +476,14 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		}
 
 		str = getenv("CCI_CONFIG");
-		if (!str || str[0] == '\0') {
-			debug(CCI_DB_WARN,
-			      "unable to find CCI_CONFIG environment variable.");
-			return CCI_ERR_NOT_FOUND;
-		}
-
-		ret = cci__parse_config(str);
-		if (ret) {
-			debug(CCI_DB_ERR, "unable to parse CCI_CONFIG file %s",
-			      str);
-			return CCI_ERROR;
+		if (str && str[0] != '\0') {
+			ret = cci__parse_config(str);
+			if (ret) {
+				debug(CCI_DB_ERR, "unable to parse CCI_CONFIG file %s",
+				      str);
+				return CCI_ERROR;
+			}
+			configfile = 1;
 		}
 
 		ret = cci_core->init(abi_ver, flags, caps);

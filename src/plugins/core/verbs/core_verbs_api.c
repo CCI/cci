@@ -35,9 +35,9 @@ pthread_t progress_tid;
  * Local functions
  */
 static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int verbs_finalize(void);
 static const char *verbs_strerror(cci_endpoint_t * endpoint, enum cci_status status);
 static int verbs_get_devices(cci_device_t const ***devices);
-static int verbs_free_devices(cci_device_t const **devices);
 static int verbs_create_endpoint(cci_device_t * device,
 				 int flags,
 				 cci_endpoint_t ** endpoint,
@@ -106,9 +106,9 @@ cci_plugin_core_t cci_core_verbs_plugin = {
 
 	/* API function pointers */
 	verbs_init,
+	verbs_finalize,
 	verbs_strerror,
 	verbs_get_devices,
-	verbs_free_devices,
 	verbs_create_endpoint,
 	verbs_destroy_endpoint,
 	verbs_accept,
@@ -369,6 +369,8 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	}
 	vglobals->ifaddrs = ifaddrs;
 
+/* FIXME: if configfile == 0, create default devices */
+
 	/* find devices we own */
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
 		if (0 == strcmp("verbs", dev->driver)) {
@@ -576,13 +578,16 @@ static int verbs_get_devices(cci_device_t const ***devices)
 		return CCI_ENODEV;
 	}
 
+/* FIXME: update the devices list (up field, ...).
+   add new devices if !configfile */
+
 	*devices = vglobals->devices;
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
 }
 
-static int verbs_free_devices(cci_device_t const **devices)
+static int verbs_finalize(void)
 {
 	int ret = CCI_SUCCESS;
 	int i = 0;

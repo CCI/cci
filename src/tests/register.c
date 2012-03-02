@@ -150,8 +150,8 @@ int main(int argc, char *argv[])
 	ret = cci_destroy_endpoint(endpoint);
 	check_return(endpoint, "cci_destroy_endpoint", ret);
 
-	ret = cci_free_devices((cci_device_t const **const)devices);
-	check_return(endpoint, "cci_free_devices", ret);
+        ret = cci_finalize();
+	check_return(NULL, "cci_finalize", ret);
 
 	return 0;
 }

@@ -101,6 +101,7 @@ int main(int argc, char *argv[])
 
 	/* clean up */
 	cci_destroy_endpoint(endpoint);
+	cci_finalize();
 
 	return 0;
 }
