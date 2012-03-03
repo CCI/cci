@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -13,10 +14,11 @@
 
 int cci_plugins_core_close(void)
 {
-	if (NULL != cci_core) {
-		lt_dlclose(cci_plugins_core_handle);
-		cci_core = NULL;
-	}
+	int i;
+
+	for(i = 0; cci_all_plugins[i].plugin != NULL; i++)
+		lt_dlclose(cci_all_plugins[i].handle);
+	free(cci_all_plugins);
 
 	return CCI_SUCCESS;
 }
