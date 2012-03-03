@@ -14,7 +14,6 @@
  * Public variables
  */
 struct cci_plugin_handle *cci_all_plugins = NULL;
-cci_plugin_core_t *cci_core = NULL;
 
 int cci_plugins_core_open(void)
 {
@@ -26,9 +25,6 @@ int cci_plugins_core_open(void)
 	if (CCI_SUCCESS != rc) {
 		return rc;
 	}
-
-	/* FIXME */
-	cci_core = (cci_plugin_core_t*) cci_all_plugins[0].plugin;
 
 	return CCI_SUCCESS;
 }
