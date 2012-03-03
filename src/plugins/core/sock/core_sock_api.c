@@ -53,11 +53,11 @@ pthread_t progress_tid, recv_tid;
 /*
  * Local functions
  */
-static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int sock_finalize(void);
+static int sock_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int sock_finalize(cci_plugin_core_t * plugin);
 static const char *sock_strerror(cci_endpoint_t * endpoint,
 				 enum cci_status status);
-static int sock_get_devices(cci_device_t * const **devices);
+static int sock_get_devices(cci_plugin_core_t * plugin, cci_device_t * const **devices);
 static int sock_create_endpoint(cci_device_t * device,
 				int flags,
 				cci_endpoint_t ** endpoint,
@@ -206,7 +206,8 @@ static inline const char *sock_msg_type(sock_msg_type_t type)
 	return NULL;
 }
 
-static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+static int sock_init(cci_plugin_core_t *plugin,
+		     uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	int ret;
 	cci__dev_t *dev;
@@ -253,6 +254,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		}
 
 		cci__init_dev(dev);
+		dev->plugin = plugin;
 
 		device = &dev->device;
 		device->max_send_size = SOCK_DEFAULT_MSS;
@@ -284,6 +286,8 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			const char * const *arg;
 			struct cci_device *device;
 			sock_dev_t *sdev;
+
+			dev->plugin = plugin;
 
 			device = &dev->device;
 			device->max_send_size = SOCK_DEFAULT_MSS;
@@ -386,7 +390,8 @@ static const char *sock_strerror(cci_endpoint_t * endpoint,
 	return NULL;
 }
 
-static int sock_get_devices(cci_device_t * const **devices)
+static int sock_get_devices(cci_plugin_core_t * plugin,
+			    cci_device_t * const **devices)
 {
 	CCI_ENTER;
 
@@ -409,7 +414,7 @@ static int sock_get_devices(cci_device_t * const **devices)
  *      and destroyed all endpoints.
  *      All we need to do if free dev->priv
  */
-static int sock_finalize(void)
+static int sock_finalize(cci_plugin_core_t * plugin)
 {
 	cci__dev_t *dev = NULL;
 
@@ -858,6 +863,7 @@ static int sock_accept(cci_event_t *event, const void *context)
 		CCI_EXIT;
 		return CCI_ENOMEM;
 	}
+	conn->plugin = ep->plugin;
 
 	conn->tx_timeout = ep->tx_timeout;
 	conn->priv = calloc(1, sizeof(*sconn));
@@ -1263,6 +1269,7 @@ static int sock_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	sdev = dev->priv;
 
 	connection->max_send_size = dev->device.max_send_size;
+	conn->plugin = ep->plugin;
 
 	/* Dealing with keepalive, if set, include the keepalive timeout value into
 	   the connection request */

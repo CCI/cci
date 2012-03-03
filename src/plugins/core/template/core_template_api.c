@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -14,10 +15,10 @@
 /*
  * Local functions
  */
-static int template_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int template_finalize(void);
+static int template_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int template_finalize(cci_plugin_core_t * plugin);
 static const char *template_strerror(cci_endpoint_t * endpoint, enum cci_status status);
-static int template_get_devices(cci_device_t * const **devices);
+static int template_get_devices(cci_plugin_core_t * plugin, cci_device_t * const **devices);
 static int template_create_endpoint(cci_device_t * device,
 				    int flags,
 				    cci_endpoint_t ** endpoint,
@@ -106,13 +107,13 @@ cci_plugin_core_t cci_core_template_plugin = {
 	template_rma
 };
 
-static int template_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+static int template_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	printf("In template_init\n");
 	return CCI_SUCCESS;
 }
 
-static int template_finalize(void)
+static int template_finalize(cci_plugin_core_t * plugin)
 {
 	printf("In template_free_devices\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
@@ -124,7 +125,7 @@ static const char *template_strerror(cci_endpoint_t * endpoint, enum cci_status 
 	return NULL;
 }
 
-static int template_get_devices(cci_device_t * const **devices)
+static int template_get_devices(cci_plugin_core_t * plugin, cci_device_t * const **devices)
 {
 	printf("In template_get_devices\n");
 	return CCI_ERR_NOT_IMPLEMENTED;

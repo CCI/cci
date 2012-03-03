@@ -19,6 +19,7 @@
 #include <pthread.h>
 #include <stddef.h>
 #include "bsd/queue.h"
+#include "plugins/core/core.h"
 
 BEGIN_C_DECLS
 #define CCI_MAX_DEVICES     32
@@ -40,6 +41,9 @@ BEGIN_C_DECLS
  */
 /*! CCI private device */
     typedef struct cci__dev {
+	/*! Pointer to the plugin structure */
+	struct cci_plugin_core *plugin;
+
 	/*! Public device (name, info, argv, max_send_size, rate, pci) */
 	struct cci_device device;
 
@@ -73,6 +77,9 @@ void cci__init_dev(cci__dev_t *dev);
 
 /*! CCI private endpoint */
 typedef struct cci__ep {
+	/*! Pointer to the plugin structure */
+	struct cci_plugin_core *plugin;
+
 	/*! Public endpoint (max_recv_buffer_count) */
 	struct cci_endpoint endpoint;
 
@@ -112,6 +119,9 @@ typedef struct cci__ep {
 
 /*! CCI private connection */
 typedef struct cci__conn {
+	/*! Pointer to the plugin structure */
+	struct cci_plugin_core *plugin;
+
 	/*! Public connection (max_send_size, endpoint, attribute) */
 	struct cci_connection connection;
 

@@ -19,5 +19,6 @@
 
 int cci_accept(cci_event_t *conn_req, const void *context)
 {
-	return cci_core->accept(conn_req, context);
+	cci__evt_t *ev = container_of(conn_req, cci__evt_t, event);
+	return ev->ep->plugin->accept(conn_req, context);
 }

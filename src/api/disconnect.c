@@ -2,6 +2,7 @@
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright © 2010-2011 UT-Battelle, LLC. All rights reserved.
  * Copyright © 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -18,10 +19,12 @@
 
 int cci_disconnect(cci_connection_t * connection)
 {
+	cci__conn_t *conn = container_of(connection, cci__conn_t, connection);
+
 	if (NULL == connection) {
 		return CCI_EINVAL;
 	}
 
 	/* NOTE the driver does all connection cleanup */
-	return cci_core->disconnect(connection);
+	return conn->plugin->disconnect(connection);
 }

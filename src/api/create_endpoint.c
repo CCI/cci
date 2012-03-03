@@ -2,6 +2,7 @@
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright © 2010-2011 UT-Battelle, LLC. All rights reserved.
  * Copyright © 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -56,8 +57,9 @@ int cci_create_endpoint(cci_device_t * device,
 	ep->dev = dev;
 	*endpoint = &ep->endpoint;
 
-	ret = cci_core->create_endpoint(device, flags, endpoint, fd);
+	ret = dev->plugin->create_endpoint(device, flags, endpoint, fd);
 
+	ep->plugin = dev->plugin;
 	pthread_mutex_lock(&dev->lock);
 	/* TODO check dev's state */
 	TAILQ_INSERT_TAIL(&dev->eps, ep, entry);

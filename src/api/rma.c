@@ -54,8 +54,8 @@ int cci_rma(cci_connection_t * connection,
 		return CCI_EINVAL;
 	}
 
-	return cci_core->rma(connection, header_ptr, header_len,
-			     local_handle, local_offset,
-			     remote_handle, remote_offset,
-			     data_len, context, flags);
+	return conn->plugin->rma(connection, header_ptr, header_len,
+				 local_handle, local_offset,
+				 remote_handle, remote_offset,
+				 data_len, context, flags);
 }

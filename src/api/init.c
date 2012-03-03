@@ -451,6 +451,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
 	if (0 == initialized) {
 		char *str;
+		int i, j;
 
 		/* init globals */
 
@@ -476,7 +477,8 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		if (CCI_SUCCESS != (ret = cci_plugins_core_open())) {
 			goto out_with_globals;
 		}
-		if (NULL == cci_core) {
+		if (NULL == cci_all_plugins
+		    || NULL == cci_all_plugins[0].plugin) {
 			ret = CCI_ERR_NOT_FOUND;
 			goto out_with_globals;
 		}
@@ -493,9 +495,17 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			globals->configfile = 1;
 		}
 
-		ret = cci_core->init(abi_ver, flags, caps);
-		if (ret) {
-			perror("cci_core->init failed:");
+		for (i = 0, j = 0;
+		     cci_all_plugins[i].plugin != NULL;
+		     i++) {
+			cci_plugin_core_t *plugin = (cci_plugin_core_t *) cci_all_plugins[i].plugin;
+			ret = plugin->init(plugin, abi_ver, flags, caps);
+			if (!ret)
+				j++;
+		}
+		/* return an error if all plugins init failed */
+		if (!j) {
+			perror("all plugins init failed:");
 			ret = errno;
 			goto out_with_globals;
 		}

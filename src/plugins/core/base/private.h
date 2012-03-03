@@ -11,7 +11,5 @@
 
 BEGIN_C_DECLS
 
-extern struct cci_plugin_handle *cci_all_plugins;
-
 END_C_DECLS
 #endif				/* PLUGINS_CORE_BASE_PRIVATE_H */
