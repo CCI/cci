@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -73,13 +74,23 @@ static int save_filename(const char *filename, lt_ptr data)
 }
 
 /*
+ * Compare plugins based on priority for qsort
+ */
+static
+int cci_plugin_priority_compare(const void *_p1, const void *_p2)
+{
+	const struct cci_plugin_handle *p1 = _p1, *p2 = _p2;
+	return p2->plugin->priority - p1->plugin->priority;
+}
+
+/*
  * Open plugins for a given framework
  */
-int cci_plugins_open_one(const char *framework,
+int cci_plugins_open_all(const char *framework,
 			 cci_plugins_framework_verify_fn_t verify,
-			 cci_plugin_t ** plugin_best, lt_dlhandle * handle_best)
+			 struct cci_plugin_handle ** plugins)
 {
-	int i;
+	int i, j;
 	size_t prefix_len;
 	char *ptr;
 	cci_plugin_t *plugin;
@@ -94,8 +105,14 @@ int cci_plugins_open_one(const char *framework,
 	prefix[BUFSIZ - 1] = '\0';
 	prefix_len = strlen(prefix);
 
-	*plugin_best = NULL;
 	for (i = 0; NULL != cci_plugins_filename_cache &&
+	     NULL != cci_plugins_filename_cache[i]; ++i);
+	*plugins = calloc(i + 1, sizeof(**plugins));
+	if (NULL == *plugins)
+		return CCI_ENOMEM;
+
+	for (i = 0, j = 0;
+	     NULL != cci_plugins_filename_cache &&
 	     NULL != cci_plugins_filename_cache[i]; ++i) {
 		/* Find the basename */
 		if ((ptr = strrchr(cci_plugins_filename_cache[i], '/')) == NULL) {
@@ -109,61 +126,29 @@ int cci_plugins_open_one(const char *framework,
 			if (open_plugin
 			    (cci_plugins_filename_cache[i], &handle, &plugin,
 			     verify) == CCI_SUCCESS) {
-				/* First possibillity of a plugin */
-				if (NULL == *plugin_best) {
-					if (NULL != plugin->post_load &&
-					    CCI_SUCCESS !=
-					    plugin->post_load(plugin)) {
-						fprintf(stderr,
-							"Post load hook for %s failed -- ignored\n",
-							ptr);
-						lt_dlclose(handle);
-						continue;
-					}
-
-					/* Post load was happy; this is a keeper */
-					*plugin_best = plugin;
-					*handle_best = handle;
-				}
-
-				/* This new plugin is better than the old one */
-				else if (plugin->priority >
-					 (*plugin_best)->priority) {
-					if (NULL != plugin->post_load
-					    && CCI_SUCCESS !=
-					    plugin->post_load(plugin)) {
-						fprintf(stderr,
-							"Post load hook for %s failed -- ignored\n",
-							ptr);
-						lt_dlclose(handle);
-						continue;
-					}
-
-					/* Close the previous plugin */
-					if (NULL != (*plugin_best)->pre_unload) {
-						(*plugin_best)->
-						    pre_unload(*plugin_best);
-					}
-					lt_dlclose(*handle_best);
-
-					/* Keep the new plugin */
-					*plugin_best = plugin;
-					*handle_best = handle;
-				}
-
-				/* This new plugin is worse than the old one */
-				else {
-					if (NULL != plugin->pre_unload) {
-						plugin->pre_unload(plugin);
-					}
+				if (NULL != plugin->post_load &&
+				    CCI_SUCCESS !=
+				    plugin->post_load(plugin)) {
+					fprintf(stderr,
+						"Post load hook for %s failed -- ignored\n",
+						ptr);
 					lt_dlclose(handle);
+					continue;
 				}
+
+				/* Post load was happy; this is a keeper */
+				(*plugins)[j].plugin = plugin;
+				(*plugins)[j].handle = handle;
+				j++;
 			}
 		}
 	}
 
-	if (NULL == *plugin_best) {
+	qsort(*plugins, j, sizeof(**plugins), cci_plugin_priority_compare);
+
+	if (NULL == (*plugins)[0].plugin) {
 		fprintf(stderr, "Unable to find suitable CCI plugin\n");
+		free(*plugins);
 		return CCI_ERROR;
 	}
 

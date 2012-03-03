@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  * $COPYRIGHT$
  *
  * Types for CCI.
@@ -15,6 +16,12 @@
 #include "plugins/plugins.h"
 
 BEGIN_C_DECLS
+
+struct cci_plugin_handle {
+	cci_plugin_t *plugin;
+	lt_dlhandle handle;
+};
+
 /* Startup the CCI plugins system */
 int cci_plugins_init(void);
 
@@ -22,13 +29,11 @@ int cci_plugins_init(void);
    selected */
 typedef int (*cci_plugins_framework_verify_fn_t) (cci_plugin_t * plugin);
 
-/* Open all modules of a given framework and only keep the one that
-   has the highest priority.  All others are closed.  Return an LT
-   handle to the "best" plugin and a pointer to its plugin struct. */
-int cci_plugins_open_one(const char *framework,
+/* Open all modules of a given framework and return arrays of LT
+   handles and pointers to its plugin struct. */
+int cci_plugins_open_all(const char *framework,
 			 cci_plugins_framework_verify_fn_t verify,
-			 cci_plugin_t ** plugin_best,
-			 lt_dlhandle * handle_best);
+			 struct cci_plugin_handle ** plugins);
 
 /* Normally we only read in the DSO filenames once.  But this function
    can be used to refresh that filename list cache. */
