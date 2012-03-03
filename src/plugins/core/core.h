@@ -114,11 +114,6 @@ typedef struct cci_plugin_core {
    terminated with NULL plugin field */
 extern struct cci_plugin_handle *cci_all_plugins;
 
-/* Global variable with the pointers to all the CCI plugin
-   functions */
-/* FIXME */
-extern cci_plugin_core_t *cci_core;
-
 /* Define for the version of this plugin type header file */
 #define CCI_CORE_API_VERSION_MAJOR 1
 #define CCI_CORE_API_VERSION_MINOR 0
