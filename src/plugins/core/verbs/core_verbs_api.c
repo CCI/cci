@@ -35,10 +35,10 @@ pthread_t progress_tid;
 /*
  * Local functions
  */
-static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int verbs_finalize(void);
+static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int verbs_finalize(cci_plugin_core_t * plugin);
 static const char *verbs_strerror(cci_endpoint_t * endpoint, enum cci_status status);
-static int verbs_get_devices(cci_device_t * const **devices);
+static int verbs_get_devices(cci_plugin_core_t * plugin, cci_device_t * const **devices);
 static int verbs_create_endpoint(cci_device_t * device,
 				 int flags,
 				 cci_endpoint_t ** endpoint,
@@ -324,7 +324,7 @@ static verbs_tx_t *verbs_get_tx(cci__ep_t * ep)
 	return tx;
 }
 
-static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	int count = 0;
 	int index = 0;
@@ -394,6 +394,7 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 				ret = CCI_ENOMEM;
 				goto out;
 			}
+			dev->plugin = plugin;
 
 			vdev = dev->priv;
 
@@ -546,7 +547,7 @@ static const char *verbs_strerror(cci_endpoint_t * endpoint, enum cci_status sta
 	return strerror(status);
 }
 
-static int verbs_get_devices(cci_device_t * const **devices)
+static int verbs_get_devices(cci_plugin_core_t * plugin, cci_device_t * const **devices)
 {
 	CCI_ENTER;
 
@@ -564,7 +565,7 @@ static int verbs_get_devices(cci_device_t * const **devices)
 	return CCI_SUCCESS;
 }
 
-static int verbs_finalize(void)
+static int verbs_finalize(cci_plugin_core_t * plugin)
 {
 	int ret = CCI_SUCCESS;
 	int i = 0;
@@ -1374,6 +1375,7 @@ static int verbs_accept(cci_event_t *event, const void *context)
 		goto out;
 	}
 	conn->connection.max_send_size = vconn->mss;
+	conn->plugin = ep->plugin;
 
 	if (vconn->num_slots) {
 		pthread_mutex_lock(&ep->lock);
@@ -2098,6 +2100,7 @@ verbs_handle_conn_request(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 		ret = CCI_ENOMEM;
 		goto out;
 	}
+	conn->plugin = ep->plugin;
 
 	conn->priv = calloc(1, sizeof(*vconn));
 	if (!conn->priv) {
