@@ -15,12 +15,30 @@
 #include <stdio.h>
 
 #include "cci.h"
+#include "plugins/base/public.h"
 #include "plugins/core/core.h"
 
 int cci_get_devices(cci_device_t * const ** devices)
 {
+	int ret;
+	int i, j;
+
 	if (NULL == devices)
 		return CCI_EINVAL;
 
-	return cci_core->get_devices(devices);
+	for (i = 0, j = 0;
+	     cci_all_plugins[i].plugin != NULL;
+	     i++) {
+		cci_plugin_core_t *plugin = (cci_plugin_core_t *) cci_all_plugins[i].plugin;
+		ret = plugin->get_devices(plugin, devices); /* FIMXE append? */
+		if (!ret)
+			j++;
+	}
+	/* return an error if all plugins init failed */
+	if (!j) {
+		perror("all plugins get_devices failed:");
+		return errno;
+	}
+
+	return CCI_SUCCESS;
 }

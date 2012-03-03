@@ -2,6 +2,7 @@
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright © 2010-2011 UT-Battelle, LLC. All rights reserved.
  * Copyright © 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -14,6 +15,7 @@
 #include <stdio.h>
 
 #include "cci.h"
+#include "plugins/base/public.h"
 #include "plugins/core/core.h"
 #include "cci-api.h"
 
@@ -21,6 +23,7 @@ int cci_finalize(void)
 {
 	int ret = CCI_SUCCESS;
 	cci__dev_t *dev = NULL;
+	int i;
 
 	pthread_mutex_lock(&init_lock);
 
@@ -55,7 +58,12 @@ int cci_finalize(void)
 	pthread_mutex_unlock(&globals->lock);
 
 	/* let the driver clean up the private device */
-	cci_core->finalize();
+	for (i = 0;
+	     cci_all_plugins[i].plugin != NULL;
+	     i++) {
+		cci_plugin_core_t *plugin = (cci_plugin_core_t *) cci_all_plugins[i].plugin;
+		plugin->finalize(plugin);
+	}
 
 	pthread_mutex_lock(&globals->lock);
 	while (!TAILQ_EMPTY(&globals->devs)) {

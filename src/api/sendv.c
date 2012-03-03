@@ -20,8 +20,10 @@
 int cci_sendv(cci_connection_t * connection,
 	      const struct iovec *data, uint32_t iovcnt, const void *context, int flags)
 {
+	cci__conn_t *conn = container_of(connection, cci__conn_t, connection);
+
 	if (NULL == connection)
 		return CCI_EINVAL;
 
-	return cci_core->sendv(connection, data, iovcnt, context, flags);
+	return conn->plugin->sendv(connection, data, iovcnt, context, flags);
 }
