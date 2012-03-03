@@ -26,9 +26,9 @@
  * Local functions
  */
 static int eth_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static const char *eth_strerror(enum cci_status status);
+static int eth_finalize(void);
+static const char *eth_strerror(cci_endpoint_t * endpoint, enum cci_status status);
 static int eth_get_devices(cci_device_t const ***devices);
-static int eth_free_devices(cci_device_t const **devices);
 static int eth_create_endpoint(cci_device_t * device,
 			       int flags,
 			       cci_endpoint_t ** endpoint,
@@ -95,9 +95,9 @@ cci_plugin_core_t cci_core_eth_plugin = {
 
 	/* API function pointers */
 	eth_init,
+	eth_finalize,
 	eth_strerror,
 	eth_get_devices,
-	eth_free_devices,
 	eth_create_endpoint,
 	eth_destroy_endpoint,
 	eth_accept,
@@ -271,7 +271,7 @@ static int eth__get_devices(void)
 		goto out;
 	}
 
-	if (TAILQ_EMPTY(&globals->devs)) {
+	if (!configfile) {
 		int loopback_ok = (getenv("CCIETH_ALLOW_LOOPBACK") != NULL);
 		/* get all ethernet devices from the system */
 		for (addr = addrs; addr != NULL; addr = addr->ifa_next) {
@@ -317,9 +317,7 @@ static int eth__get_devices(void)
 				continue;
 			}
 
-			/* FIXME: add a device structure initialization function in the core */
-			TAILQ_INIT(&_dev->eps);
-			pthread_mutex_init(&_dev->lock, NULL);
+			cci__init_dev(_dev);
 			_dev->driver = strdup("eth");
 			if (is_loopback)
 				_dev->is_default = 1;
@@ -444,7 +442,13 @@ static int eth_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	return CCI_SUCCESS;
 }
 
-static const char *eth_strerror(enum cci_status status)
+static int eth_finalize(void)
+{
+	printf("In eth_finalize\n");
+	return CCI_ERR_NOT_IMPLEMENTED;
+}
+
+static const char *eth_strerror(cci_endpoint_t * endpoint, enum cci_status status)
 {
 	printf("In eth_sterrror\n");
 	return NULL;
@@ -501,12 +505,6 @@ static int eth_get_devices(cci_device_t const ***devices_p)
 out:
 	CCI_EXIT;
 	return ret;
-}
-
-static int eth_free_devices(cci_device_t const **devices)
-{
-	printf("In eth_free_devices\n");
-	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 #define CCIETH_URI_LENGTH (6 /* prefix */ + 17 /* mac */ + 1 /* colon */ + 8 /* id */ + 1 /* \0 */)
