@@ -109,9 +109,21 @@ ccieth_conn_free(struct ccieth_connection *conn)
 		/* drop pending sends */
 		struct sk_buff *nskb, *skb = conn->send_queue_first_seqnum;
 		while (skb) {
+			struct ccieth_skb_cb *scb = CCIETH_SKB_CB(skb);
 			nskb = skb->next;
 
-			ccieth_putback_free_event(conn->ep, CCIETH_SKB_CB(skb)->reliable_send.event);
+			if (scb->reliable_send.blocking) {
+				struct ccieth_rcu_completion *completion;
+				rcu_read_lock();
+				completion = rcu_dereference(scb->reliable_send.completion);
+				if (completion) {
+					completion->status = EIO; /* FIXME */
+					complete(&completion->completion);
+				}
+				rcu_read_unlock();
+			} else {
+				ccieth_putback_free_event(conn->ep, scb->reliable_send.event);
+			}
 			kfree_skb(skb);
 
 			skb = nskb;

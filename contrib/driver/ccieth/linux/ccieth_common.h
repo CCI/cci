@@ -46,6 +46,12 @@ struct ccieth_driver_event {
 	void (*destructor) (struct ccieth_endpoint *, struct ccieth_driver_event *);
 };
 
+struct ccieth_rcu_completion {
+	struct rcu_head rcu; /* for kfree_rcu() */
+	struct completion completion;
+	int status;
+};
+
 struct ccieth_endpoint {
 	struct net_device __rcu *ifp;
 	__u8 addr[6];
@@ -228,7 +234,11 @@ struct ccieth_skb_cb {
 		struct {
 			__u32 seqnum;
 			unsigned long resend_jiffies;
-			struct ccieth_driver_event *event;
+			unsigned blocking;
+			union {
+				struct ccieth_driver_event *event;
+				struct ccieth_rcu_completion __rcu *completion;
+			};
 		} reliable_send;
 	};
 };

@@ -43,7 +43,6 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32
 	skb = conn->send_queue_first_seqnum;
 	/* remove acked MSGs */
 	while (skb != NULL) {
-		struct ccieth_driver_event *event;
 		struct ccieth_skb_cb *scb = CCIETH_SKB_CB(skb);
 
 		if (ccieth_seqnum_after_strict(last_acked, scb->reliable_send.seqnum))
@@ -75,9 +74,20 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32
 		if (skb == conn->send_queue_next_resend)
 			conn->send_queue_next_resend = nskb ? nskb : conn->send_queue_first_seqnum;
 
-		event = scb->reliable_send.event;
-		event->event.send.status = 0;
-		ccieth_queue_busy_event(conn->ep, event);
+		if (scb->reliable_send.blocking) {
+			struct ccieth_rcu_completion *completion;
+			rcu_read_lock();
+			completion = rcu_dereference(scb->reliable_send.completion);
+			if (completion) {
+				completion->status = 0;
+				complete(&completion->completion);
+			}
+			rcu_read_unlock();
+		} else {
+			struct ccieth_driver_event *event = scb->reliable_send.event;
+			event->event.send.status = 0;
+			ccieth_queue_busy_event(conn->ep, event);
+		}
 
 		dprintk("no need to resend MSG %u anymore\n", scb->reliable_send.seqnum);
 		kfree_skb(skb);
@@ -155,8 +165,10 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	struct sk_buff *skb, *skb2 = NULL;
 	struct net_device *ifp;
 	struct ccieth_pkt_header_msg *hdr;
+	struct ccieth_skb_cb *scb;
 	struct ccieth_connection *conn;
 	struct ccieth_driver_event *event = NULL;
+	struct ccieth_rcu_completion *completion = NULL;
 	size_t skblen;
 	int err;
 
@@ -174,6 +186,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		skb = alloc_skb(skblen, GFP_KERNEL);
 	if (unlikely(!skb))
 		goto out;
+	scb = CCIETH_SKB_CB(skb);
 	skb_reset_mac_header(skb);
 	skb_reset_network_header(skb);
 	skb->protocol = __constant_htons(ETH_P_CCI);
@@ -191,6 +204,19 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	if (unlikely(err)) {
 		err = -EFAULT;
 		goto out_with_skb2;
+	}
+
+	if (unlikely((arg->flags & (CCIETH_MSG_FLAG_RELIABLE|CCIETH_MSG_FLAG_BLOCKING))
+		     == (CCIETH_MSG_FLAG_RELIABLE|CCIETH_MSG_FLAG_BLOCKING))) {
+		/* reliable blocking, we need a completion */
+		completion = kmalloc(sizeof(*completion), GFP_KERNEL);
+		if (!completion)
+			goto out_with_skb2;
+		init_completion(&completion->completion);
+		rcu_assign_pointer(scb->reliable_send.completion, completion);
+		scb->reliable_send.blocking = 1;
+	} else {
+		scb->reliable_send.blocking = 0;
 	}
 
 	rcu_read_lock();
@@ -211,8 +237,9 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		     != !!(conn->flags & CCIETH_CONN_FLAG_RELIABLE)))
 		goto out_with_rculock;
 
-	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
-		/* get an event */
+	if (likely((arg->flags & (CCIETH_MSG_FLAG_RELIABLE|CCIETH_MSG_FLAG_BLOCKING))
+		   == CCIETH_MSG_FLAG_RELIABLE)) {
+		/* reliable non-blocking, we need an event */
 		event = ccieth_get_free_event(ep);
 		if (unlikely(!event)) {
 			err = -ENOBUFS;
@@ -224,6 +251,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		event->event.data_length = 0;
 		event->event.send.user_conn_id = conn->user_conn_id;
 		event->event.send.context = arg->context;
+		scb->reliable_send.event = event;
 	}
 
 	/* fill headers */
@@ -236,12 +264,11 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	hdr->conn_seqnum = htonl(conn->req_seqnum);
 	hdr->msg_len = htonl(arg->msg_len);
 
-	/* FIXME: implement flags */
+	/* FIXME: work on CCIETH_MSG_FLAG_SILENT once ordering clarified */
 
 	CCIETH_STAT_INC(conn, send);
 
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
-		struct ccieth_skb_cb *scb = CCIETH_SKB_CB(skb);
 		__u32 seqnum;
 
 		spin_lock_bh(&conn->send_lock);
@@ -249,7 +276,6 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		hdr->msg_seqnum = htonl(seqnum);
 		scb->reliable_send.seqnum = seqnum;
 		scb->reliable_send.resend_jiffies = jiffies + CCIETH_MSG_RESEND_DELAY;
-		scb->reliable_send.event = event;
 		if (conn->send_queue_last_seqnum) {
 			conn->send_queue_last_seqnum->next = skb;
 			skb->prev = conn->send_queue_last_seqnum;
@@ -278,10 +304,22 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	}
 
 	rcu_read_unlock();
-	return 0;
+
+	if (unlikely((arg->flags & (CCIETH_MSG_FLAG_RELIABLE|CCIETH_MSG_FLAG_BLOCKING))
+		     == (CCIETH_MSG_FLAG_RELIABLE|CCIETH_MSG_FLAG_BLOCKING))) {
+		wait_for_completion_interruptible(&completion->completion);
+		err = completion->status;
+		rcu_assign_pointer(scb->reliable_send.completion, NULL);
+		kfree_rcu(completion, rcu);
+	} else {
+		err = 0;
+	}
+
+	return err;
 
 out_with_rculock:
 	rcu_read_unlock();
+	kfree(completion);
 out_with_skb2:
 	kfree_skb(skb2);
 out_with_skb:

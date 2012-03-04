@@ -930,8 +930,6 @@ static int eth_send(cci_connection_t * connection,
 	flags &= ~CCI_FLAG_NO_COPY;
 
 	/* FIXME */
-	if (flags & CCI_FLAG_BLOCKING)
-		return ENOSYS;
 	if (flags & CCI_FLAG_SILENT)
 		return ENOSYS;
 
