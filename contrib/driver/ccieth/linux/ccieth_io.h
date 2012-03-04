@@ -141,14 +141,14 @@ struct ccieth_ioctl_msg {
 	/* 16 */
 	__u64 context;
 	/* 24 */
-	__u32 api_flags;
-#define CCIETH_MSG_FLAG_RELIABLE (1<<0)
-	__u32 internal_flags;
-	/* 32 */
+#define CCIETH_MSG_FLAG_BLOCKING	(1 << 0)
+#define CCIETH_MSG_FLAG_SILENT		(1 << 3)
+#define CCIETH_MSG_FLAG_RELIABLE	(1 << 31)
+	__u32 flags;
 };
 #define CCIETH_IOCTL_MSG _IOR(CCIETH_IOCTL_MAGIC, 0x8, struct ccieth_ioctl_msg)
 
-/* FIXME: enforce matching with enum cci_event_type */
+/* FIXME: enforce matching with enum cci_event_type and simplify user-space switch? */
 #define CCIETH_IOCTL_EVENT_SEND 1
 #define CCIETH_IOCTL_EVENT_RECV 2
 #define CCIETH_IOCTL_EVENT_CONNECT 3

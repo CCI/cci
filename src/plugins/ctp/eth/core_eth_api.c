@@ -22,6 +22,8 @@
 #include "plugins/core/core.h"
 #include "core_eth.h"
 
+#define ETH_BUILD_ASSERT(condition) ((void)sizeof(char[1 - 2*!(condition)]))
+
 /*
  * Local functions
  */
@@ -933,14 +935,21 @@ static int eth_send(cci_connection_t * connection,
 	if (flags & CCI_FLAG_SILENT)
 		return ENOSYS;
 
+	/* make sure API flag match */
+	ETH_BUILD_ASSERT(CCI_FLAG_BLOCKING == CCIETH_MSG_FLAG_BLOCKING);
+	ETH_BUILD_ASSERT(CCI_FLAG_SILENT == CCIETH_MSG_FLAG_SILENT);
+	/* make sure internal flags don't conflict with API flags */
+	assert(!(flags & CCIETH_MSG_FLAG_RELIABLE));
+
+	/* add internal flags */
+	if (connection->attribute != CCI_CONN_ATTR_UU)
+		flags |= CCIETH_MSG_FLAG_RELIABLE;
+
 	arg.conn_id = econn->id;
 	arg.msg_ptr = (uintptr_t) msg_ptr;
 	arg.msg_len = msg_len;
 	arg.context = (uintptr_t) context;
-	arg.api_flags = flags;
-	arg.internal_flags = 0;
-	if (connection->attribute != CCI_CONN_ATTR_UU)
-		arg.internal_flags |= CCIETH_MSG_FLAG_RELIABLE;
+	arg.flags = flags;
 
 	ret = ioctl(eep->fd, CCIETH_IOCTL_MSG, &arg);
 	if (ret < 0) {

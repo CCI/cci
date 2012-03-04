@@ -168,7 +168,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	skblen = sizeof(*hdr) + arg->msg_len;
 	if (skblen < ETH_ZLEN)
 		skblen = ETH_ZLEN;
-	if (arg->internal_flags & CCIETH_MSG_FLAG_RELIABLE)
+	if (arg->flags & CCIETH_MSG_FLAG_RELIABLE)
 		skb = alloc_skb_fclone(skblen, GFP_KERNEL);
 	else
 		skb = alloc_skb(skblen, GFP_KERNEL);
@@ -179,7 +179,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	skb->protocol = __constant_htons(ETH_P_CCI);
 	skb_put(skb, skblen);
 	/* reliable sends need a clone */
-	if (arg->internal_flags & CCIETH_MSG_FLAG_RELIABLE) {
+	if (arg->flags & CCIETH_MSG_FLAG_RELIABLE) {
 		skb2 = skb_clone(skb, GFP_KERNEL);
 		if (unlikely(!skb2))
 			goto out_with_skb;
@@ -207,7 +207,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	if (unlikely(!conn || conn->status != CCIETH_CONNECTION_READY))
 		goto out_with_rculock;
 	/* check that the user-space reliable hint was valid */
-	if (unlikely(!!(arg->internal_flags & CCIETH_MSG_FLAG_RELIABLE)
+	if (unlikely(!!(arg->flags & CCIETH_MSG_FLAG_RELIABLE)
 		     != !!(conn->flags & CCIETH_CONN_FLAG_RELIABLE)))
 		goto out_with_rculock;
 
