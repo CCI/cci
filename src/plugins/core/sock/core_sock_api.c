@@ -61,8 +61,8 @@ static int sock_create_endpoint(cci_device_t * device,
 				cci_endpoint_t ** endpoint,
 				cci_os_handle_t * fd);
 static int sock_destroy_endpoint(cci_endpoint_t * endpoint);
-static int sock_accept(union cci_event *event, void *context);
-static int sock_reject(union cci_event *conn_req);
+static int sock_accept(cci_event_t *event, void *context);
+static int sock_reject(cci_event_t *conn_req);
 static int sock_connect(cci_endpoint_t * endpoint, char *server_uri,
 			void *data_ptr, uint32_t data_len,
 			cci_conn_attribute_t attribute,
@@ -814,7 +814,7 @@ static uint8_t sock_ip_hash(in_addr_t ip, uint16_t port)
 	return (port & 0x00FF) ^ ((port & 0xFF00) >> 8);
 }
 
-static int sock_accept(union cci_event *event, void *context)
+static int sock_accept(cci_event_t *event, void *context)
 {
 	uint8_t a;
 	uint16_t b;
@@ -985,7 +985,7 @@ static int sock_accept(union cci_event *event, void *context)
  * We cannot use the event's buffer since the app will most likely return the
  * event before we get an ack from the client. We will get a tx for the reply.
  */
-static int sock_reject(union cci_event *event)
+static int sock_reject(cci_event_t *event)
 {
 	int ret = CCI_SUCCESS;
 	uint8_t a;
@@ -1656,7 +1656,7 @@ static void sock_progress_pending(cci__dev_t * dev)
 	uint64_t now;
 	sock_tx_t *tx, *tmp;
 	cci__evt_t *evt;
-	cci_event_t *event;	/* generic CCI event */
+	union cci_event *event;	/* generic CCI event */
 	cci_connection_t *connection;	/* generic CCI connection */
 	cci__conn_t *conn;
 	sock_conn_t *sconn;
@@ -1859,7 +1859,7 @@ static void sock_progress_queued(cci__dev_t * dev)
 	sock_ep_t *sep;
 	sock_conn_t *sconn;
 	sock_dev_t *sdev = dev->priv;
-	cci_event_t *event;	/* generic CCI event */
+	union cci_event *event;	/* generic CCI event */
 	cci_connection_t *connection;	/* generic CCI connection */
 	cci_endpoint_t *endpoint;	/* generic CCI endpoint */
 
@@ -2093,7 +2093,7 @@ static int sock_sendv(cci_connection_t * connection,
 	sock_header_t *hdr;
 	void *ptr;
 	cci__evt_t *evt;
-	cci_event_t *event;	/* generic CCI event */
+	union cci_event *event;	/* generic CCI event */
 
 	debug(CCI_DB_FUNC, "entering %s", func);
 
@@ -2746,7 +2746,7 @@ sock_handle_active_message(sock_conn_t * sconn,
 	cci__evt_t *evt;
 	cci__conn_t *conn = sconn->conn;
 	sock_header_t *hdr;	/* wire header */
-	cci_event_t *event;	/* generic CCI event */
+	union cci_event *event;	/* generic CCI event */
 	cci_endpoint_t *endpoint;	/* generic CCI endpoint */
 	cci__ep_t *ep;
 
@@ -2765,17 +2765,17 @@ sock_handle_active_message(sock_conn_t * sconn,
 
 	/* setup the generic event for the application */
 
-	event = (cci_event_t *) & evt->event;
+	event = & evt->event;
 	event->type = CCI_EVENT_RECV;
-	*((uint32_t *) & event->recv.len) = len;
-	*((void **)&event->recv.ptr) = (void *)&hdr->data;
+	event->recv.len = len;
+	event->recv.ptr = (void *)&hdr->data;
 	event->recv.connection = &conn->connection;
 
 	/* if a reliable connection, handle the ack */
 
 	if (cci_conn_is_reliable(conn)) {
 		sock_header_r_t *hdr_r = (sock_header_r_t *) rx->buffer;
-		*((void **)&event->recv.ptr) = (void *)&hdr_r->data;
+		event->recv.ptr = (void *)&hdr_r->data;
 
 	}
 
@@ -3323,7 +3323,7 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,	/* NULL if rejected */
 	sock_dev_t *sdev = NULL;
 	sock_tx_t *tx = NULL, *tmp = NULL, *t = NULL;
 	sock_header_r_t *hdr_r;	/* wire header */
-	cci_event_t *event;	/* generic CCI event */
+	union cci_event *event;	/* generic CCI event */
 	uint32_t seq;		/* peer's seq */
 	uint32_t ts;		/* FIXME our original seq */
 	sock_handshake_t *hs = NULL;
@@ -3441,7 +3441,7 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,	/* NULL if rejected */
 
 		/* setup the generic event for the application */
 
-		event = (cci_event_t *) & evt->event;
+		event = & evt->event;
 		event->type = CCI_EVENT_CONNECT;
 		event->connect.status = reply;
 		event->connect.connection =
@@ -3852,7 +3852,7 @@ sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 {
 	cci__evt_t *evt;
 	cci__conn_t *conn = sconn->conn;
-	cci_event_t *event;	/* generic CCI event */
+	union cci_event *event;	/* generic CCI event */
 	cci_endpoint_t *endpoint;	/* generic CCI endpoint */
 	cci__ep_t *ep;
 	uint64_t context_id = 0;
@@ -3869,11 +3869,11 @@ sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 	evt = &rx->evt;
 
 	/* setup the generic event for the application */
-	event = (cci_event_t *) & evt->event;
+	event = & evt->event;
 	event->type = CCI_EVENT_RECV;
-	*((uint32_t *) & event->recv.len) = len;
+	event->recv.len = len;
 	lookup_contextid(sconn, context_id, &context);
-	*((void **)&event->recv.ptr) = context;
+	event->recv.ptr = context;
 	event->recv.connection = &conn->connection;
 
 	/* queue event on endpoint's completed event queue */
