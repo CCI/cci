@@ -665,6 +665,7 @@ typedef struct cci_connection {
 } cci_connection_t;
 
 union cci_event;
+typedef union cci_event cci_event_t;
 
 /*!
   Accept a connection request.
@@ -689,7 +690,7 @@ union cci_event;
 
   \ingroup connection
 */
-CCI_DECLSPEC int cci_accept(union cci_event *conn_req, void *context);
+CCI_DECLSPEC int cci_accept(cci_event_t *conn_req, void *context);
 
 /*!
   Reject a connection request.
@@ -706,7 +707,7 @@ CCI_DECLSPEC int cci_accept(union cci_event *conn_req, void *context);
 
    \ingroup connection
  */
-CCI_DECLSPEC int cci_reject(union cci_event *conn_req);
+CCI_DECLSPEC int cci_reject(cci_event_t *conn_req);
 
 /*! \example server.c
  *  This application demonstrates opening an endpoint, getting connection
@@ -1108,7 +1109,7 @@ typedef struct cci_event_endpoint_device_failed {
 
   \ingroup events
 */
-typedef union cci_event {
+union cci_event {
 	cci_event_type_t type;
 	cci_event_send_t send;
 	cci_event_recv_t recv;
@@ -1117,7 +1118,7 @@ typedef union cci_event {
 	cci_event_accept_t accept;
 	cci_event_keepalive_timedout_t keepalive;
 	cci_event_endpoint_device_failed_t dev_failed;
-} cci_event_t;
+};
 
 /********************/
 /*                  */
