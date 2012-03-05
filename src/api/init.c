@@ -2,6 +2,7 @@
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright © 2010-2011 UT-Battelle, LLC. All rights reserved.
  * Copyright © 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -99,7 +100,7 @@ void cci__free_args(char **args)
 
 void cci__free_dev(cci__dev_t * dev)
 {
-	cci_device_t *device;
+	struct cci_device *device;
 
 	if (!dev)
 		return;
@@ -141,7 +142,7 @@ int cci__free_devs(void)
 
 void cci__init_dev(cci__dev_t *dev)
 {
-	cci_device_t *device = &dev->device;
+	struct cci_device *device = &dev->device;
 
 	dev->priority = 50; /* default */
 	dev->is_default = 0;
@@ -185,7 +186,7 @@ int cci__parse_config(const char *path)
 	int ret = 0, i = 0, arg_cnt = 0, driver = 0, is_default = 0;
 	char buffer[CCI_BUF_LEN], *str, *default_name = NULL;
 	FILE *file;
-	cci_device_t *d = NULL;
+	struct cci_device *d = NULL;
 	cci__dev_t *dev = NULL;
 
 	file = fopen(path, "r");

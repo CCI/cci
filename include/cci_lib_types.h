@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2010-2011 UT-Battelle, LLC.  All rights reserved.
  * Copyright (c) 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -40,7 +41,7 @@ BEGIN_C_DECLS
 /*! CCI private device */
     typedef struct cci__dev {
 	/*! Public device (name, info, argv, max_send_size, rate, pci) */
-	cci_device_t device;
+	struct cci_device device;
 
 	/*! Driver name */
 	char *driver;
@@ -154,7 +155,7 @@ typedef struct cci__globals {
 	TAILQ_HEAD(s_devs, cci__dev) devs;
 
 	/*! Array of user devices */
-	cci_device_t **devices;
+	struct cci_device **devices;
 
 	/*! Lock to protect svcs */
 	pthread_mutex_t lock;
