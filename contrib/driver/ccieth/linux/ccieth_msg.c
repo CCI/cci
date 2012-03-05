@@ -85,7 +85,6 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32
 			rcu_read_unlock();
 		} else if (scb->reliable_send.completion_type == CCIETH_MSG_COMPLETION_EVENT) {
 			struct ccieth_driver_event *event = scb->reliable_send.event;
-			event->event.send.status = 0;
 			ccieth_queue_busy_event(conn->ep, event);
 		}
 
@@ -255,6 +254,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		/* setup the event */
 		event->event.type = CCIETH_IOCTL_EVENT_SEND;
 		event->event.data_length = 0;
+		event->event.send.status = 0;
 		event->event.send.user_conn_id = conn->user_conn_id;
 		event->event.send.context = arg->context;
 		scb->reliable_send.event = event;
