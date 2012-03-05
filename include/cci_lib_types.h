@@ -134,7 +134,7 @@ static inline int cci_conn_is_reliable(cci__conn_t * conn)
 /*! CCI private event */
 typedef struct cci__evt {
 	/*! Public event (type, union of send/recv/other) */
-	cci_event_t event;
+	union cci_event event;
 
 	/*! Owning endpoint */
 	cci__ep_t *ep;

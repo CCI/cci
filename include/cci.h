@@ -665,7 +665,7 @@ typedef const struct cci_connection {
 } cci_connection_t;
 
 union cci_event;
-typedef union cci_event cci_event_t;
+typedef const union cci_event cci_event_t;
 
 /*!
   Accept a connection request.
@@ -915,11 +915,11 @@ typedef struct cci_event_recv {
 	cci_event_type_t type;
 
 	/*! The length of the data (in bytes).  This value may be 0. */
-	const uint32_t len;
+	uint32_t len;
 
 	/*! Pointer to the data.  The pointer always points to an address that is
 	   8-byte aligned, unless (len == 0), in which case the value is undefined. */
-	void *const ptr;
+	const void * ptr;
 
 	/*! Connection that this message was received on. */
 	cci_connection_t *connection;
@@ -1188,7 +1188,7 @@ CCI_DECLSPEC int cci_arm_os_handle(cci_endpoint_t * endpoint, int flags);
   \ingroup events
 */
 CCI_DECLSPEC int cci_get_event(cci_endpoint_t * endpoint,
-			       cci_event_t ** const event);
+			       cci_event_t ** event);
 
 /*!
   This function returns the buffer associated with an event that was
