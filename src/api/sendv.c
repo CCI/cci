@@ -18,7 +18,7 @@
 #include "plugins/core/core.h"
 
 int cci_sendv(cci_connection_t * connection,
-	      struct iovec *data, uint32_t iovcnt, const void *context, int flags)
+	      const struct iovec *data, uint32_t iovcnt, const void *context, int flags)
 {
 	if (NULL == connection)
 		return CCI_EINVAL;

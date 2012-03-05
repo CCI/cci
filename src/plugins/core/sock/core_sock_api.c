@@ -63,10 +63,10 @@ static int sock_create_endpoint(cci_device_t * device,
 static int sock_destroy_endpoint(cci_endpoint_t * endpoint);
 static int sock_accept(cci_event_t *event, const void *context);
 static int sock_reject(cci_event_t *conn_req);
-static int sock_connect(cci_endpoint_t * endpoint, char *server_uri,
-			void *data_ptr, uint32_t data_len,
+static int sock_connect(cci_endpoint_t * endpoint, const char *server_uri,
+			const void *data_ptr, uint32_t data_len,
 			cci_conn_attribute_t attribute,
-			const void *context, int flags, struct timeval *timeout);
+			const void *context, int flags, const struct timeval *timeout);
 static int sock_disconnect(cci_connection_t * connection);
 static int sock_set_opt(cci_opt_handle_t * handle,
 			cci_opt_level_t level,
@@ -79,9 +79,9 @@ static int sock_get_event(cci_endpoint_t * endpoint,
 			  cci_event_t ** const event);
 static int sock_return_event(cci_event_t * event);
 static int sock_send(cci_connection_t * connection,
-		     void *msg_ptr, uint32_t msg_len, const void *context, int flags);
+		     const void *msg_ptr, uint32_t msg_len, const void *context, int flags);
 static int sock_sendv(cci_connection_t * connection,
-		      struct iovec *data, uint32_t iovcnt,
+		      const struct iovec *data, uint32_t iovcnt,
 		      const void *context, int flags);
 static int sock_rma_register(cci_endpoint_t * endpoint,
 			     cci_connection_t * connection,
@@ -1181,10 +1181,10 @@ static sock_conn_t *sock_find_conn(sock_ep_t * sep, in_addr_t ip, uint16_t port,
 	}
 }
 
-static int sock_connect(cci_endpoint_t * endpoint, char *server_uri,
-			void *data_ptr, uint32_t data_len,
+static int sock_connect(cci_endpoint_t * endpoint, const char *server_uri,
+			const void *data_ptr, uint32_t data_len,
 			cci_conn_attribute_t attribute,
-			const void *context, int flags, struct timeval *timeout)
+			const void *context, int flags, const struct timeval *timeout)
 {
 	int ret;
 	int i;
@@ -2062,14 +2062,14 @@ static void sock_progress_sends(cci__dev_t * dev)
 }
 
 static int sock_send(cci_connection_t * connection,
-		     void *msg_ptr, uint32_t msg_len, const void *context, int flags)
+		     const void *msg_ptr, uint32_t msg_len, const void *context, int flags)
 {
 	uint32_t iovcnt = 0;
 	struct iovec iov = { NULL, 0 };
 
 	if (msg_ptr && msg_len) {
 		iovcnt = 1;
-		iov.iov_base = msg_ptr;
+		iov.iov_base = (void *) msg_ptr;
 		iov.iov_len = msg_len;
 	}
 
@@ -2077,7 +2077,7 @@ static int sock_send(cci_connection_t * connection,
 }
 
 static int sock_sendv(cci_connection_t * connection,
-		      struct iovec *data, uint32_t iovcnt,
+		      const struct iovec *data, uint32_t iovcnt,
 		      const void *context, int flags)
 {
 	int i, ret, is_reliable = 0, data_len = 0;

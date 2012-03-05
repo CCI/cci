@@ -18,7 +18,7 @@
 #include "plugins/core/core.h"
 
 int cci_send(cci_connection_t * connection,
-	     void *msg_ptr, uint32_t msg_len, const void *context, int flags)
+	     const void *msg_ptr, uint32_t msg_len, const void *context, int flags)
 {
 	if (NULL == connection)
 		return CCI_EINVAL;

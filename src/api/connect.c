@@ -17,10 +17,10 @@
 #include "cci.h"
 #include "plugins/core/core.h"
 
-int cci_connect(cci_endpoint_t * endpoint, char *server_uri,
-		void *data_ptr, uint32_t data_len,
+int cci_connect(cci_endpoint_t * endpoint, const char *server_uri,
+		const void *data_ptr, uint32_t data_len,
 		cci_conn_attribute_t attribute,
-		const void *context, int flags, struct timeval *timeout)
+		const void *context, int flags, const struct timeval *timeout)
 {
 	/* NOTE the driver does all of the connection management
 	 * It allocates whatever it needs in addition to the cci__conn_t
