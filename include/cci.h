@@ -371,7 +371,7 @@ typedef const struct cci_device {
 
 	/*! Array of "key=value" strings from the config file for this
 	   device; the last pointer in the array is NULL. */
-	const char **conf_argv;
+	const char * const *conf_argv;
 
 	/*! Maximum send size supported by the device */
 	uint32_t max_send_size;

@@ -232,7 +232,7 @@ int cci__parse_config(const char *path)
 				if (arg_cnt < CCI_MAX_ARGS) {
 					/* release the unused pointers */
 					d->conf_argv =
-					    realloc(d->conf_argv,
+					    realloc((char **) d->conf_argv,
 						    sizeof(char *) * (arg_cnt +
 								      1));
 				}
@@ -323,7 +323,7 @@ int cci__parse_config(const char *path)
 				char arg[CCI_BUF_LEN];
 
 				snprintf(arg, CCI_BUF_LEN, "%s=%s", key, value);
-				d->conf_argv[arg_cnt] = strdup(arg);
+				((char **) d->conf_argv)[arg_cnt] = strdup(arg);
 				if (!d->conf_argv[arg_cnt]) {
 					cci__free_dev(dev);
 					return cci__free_devs();
@@ -376,7 +376,7 @@ int cci__parse_config(const char *path)
 		if (arg_cnt < CCI_MAX_ARGS) {
 			/* release the unused pointers */
 			d->conf_argv =
-			    realloc(d->conf_argv,
+			    realloc((char **) d->conf_argv,
 				    sizeof(char *) * (arg_cnt + 1));
 		}
 		if (driver == 1) {

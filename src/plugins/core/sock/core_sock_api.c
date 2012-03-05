@@ -280,7 +280,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	/* find devices that we own */
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
 		if (0 == strcmp("sock", dev->driver)) {
-			const char **arg;
+			const char * const *arg;
 			struct cci_device *device;
 			sock_dev_t *sdev;
 
