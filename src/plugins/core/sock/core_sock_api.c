@@ -1199,7 +1199,7 @@ static int sock_connect(cci_endpoint_t * endpoint, char *server_uri,
 	sock_tx_t *tx = NULL;
 	sock_header_r_t *hdr_r = NULL;
 	cci__evt_t *evt = NULL;
-	cci_connection_t *connection = NULL;
+	struct cci_connection *connection = NULL;
 	struct sockaddr_in *sin = NULL;
 	void *ptr = NULL;
 	in_addr_t ip;

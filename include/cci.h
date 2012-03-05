@@ -653,7 +653,7 @@ typedef enum cci_conn_attribute {
 
   \ingroup connection
 */
-typedef struct cci_connection {
+typedef const struct cci_connection {
 	/*! Maximum send size for the connection */
 	uint32_t max_send_size;
 	/*! Local endpoint associated to the connection */

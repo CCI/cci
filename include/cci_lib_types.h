@@ -110,7 +110,7 @@ typedef struct cci__ep {
 /*! CCI private connection */
 typedef struct cci__conn {
 	/*! Public connection (max_send_size, endpoint, attribute) */
-	cci_connection_t connection;
+	struct cci_connection connection;
 
 	/*! URI we connected to if we called connect */
 	const char *uri;
