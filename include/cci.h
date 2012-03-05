@@ -474,7 +474,7 @@ typedef enum cci_endpoint_flags {
 
   \ingroup endpoints
 */
-typedef struct cci_endpoint {
+typedef const struct cci_endpoint {
 	/*! Maximum number of receive buffers on this endpoint that can be
 	   loaned to the application.  When this number of buffers have
 	   been loaned to the application, incoming messages may be
@@ -484,7 +484,7 @@ typedef struct cci_endpoint {
 	/*! Driver created name of the endpoint. May be passed to clients out-of-band
 	   to pass to cci_connect(). The application should never need to parse
 	   this URI. */
-	char const *const name;
+	char const * name;
 
 	/*! Application-provided, private context. */
 	void *context;

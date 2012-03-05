@@ -490,13 +490,14 @@ static inline void sock_close_socket(cci_os_handle_t sock)
 
 static int sock_create_endpoint(cci_device_t * device,
 				int flags,
-				cci_endpoint_t ** endpoint,
+				cci_endpoint_t ** endpointp,
 				cci_os_handle_t * fd)
 {
 	int i, ret;
 	cci__dev_t *dev = NULL;
 	cci__ep_t *ep = NULL;
 	sock_ep_t *sep = NULL;
+	struct cci_endpoint *endpoint = (struct cci_endpoint *) *endpointp;
 	sock_dev_t *sdev;
 	struct sockaddr_in sin;
 	socklen_t slen;
@@ -515,14 +516,14 @@ static int sock_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 
-	ep = container_of(*endpoint, cci__ep_t, endpoint);
+	ep = container_of(endpoint, cci__ep_t, endpoint);
 	ep->priv = calloc(1, sizeof(*sep));
 	if (!ep->priv) {
 		ret = CCI_ENOMEM;
 		goto out;
 	}
 
-	(*endpoint)->max_recv_buffer_count = SOCK_EP_RX_CNT;
+	endpoint->max_recv_buffer_count = SOCK_EP_RX_CNT;
 	ep->rx_buf_cnt = SOCK_EP_RX_CNT;
 	ep->tx_buf_cnt = SOCK_EP_TX_CNT;
 	ep->buffer_len = dev->device.max_send_size + SOCK_MAX_HDRS;
@@ -563,7 +564,7 @@ static int sock_create_endpoint(cci_device_t * device,
 	memset(name, 0, sizeof(name));
 	sprintf(name, "ip://");
 	sock_sin_to_name(sep->sin, name + (uintptr_t) 5, sizeof(name) - 5);
-	*((char **)&ep->endpoint.name) = strdup(name);
+	endpoint->name = strdup(name);
 
 	for (i = 0; i < SOCK_EP_HASH_SIZE; i++) {
 		TAILQ_INIT(&sep->conn_hash[i]);
@@ -659,7 +660,7 @@ static int sock_create_endpoint(cci_device_t * device,
 	}
 	if (ep)
 		free(ep);
-	*endpoint = NULL;
+	*endpointp = NULL;
 	CCI_EXIT;
 	return ret;
 }
