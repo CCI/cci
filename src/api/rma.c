@@ -2,6 +2,7 @@
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright © 2010-2011 UT-Battelle, LLC. All rights reserved.
  * Copyright © 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -20,7 +21,7 @@ int cci_rma(cci_connection_t * connection,
 	    void *header_ptr, uint32_t header_len,
 	    uint64_t local_handle, uint64_t local_offset,
 	    uint64_t remote_handle, uint64_t remote_offset,
-	    uint64_t data_len, void *context, int flags)
+	    uint64_t data_len, const void *context, int flags)
 {
 	cci__conn_t *conn = NULL;
 

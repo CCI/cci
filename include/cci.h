@@ -690,7 +690,7 @@ typedef const union cci_event cci_event_t;
 
   \ingroup connection
 */
-CCI_DECLSPEC int cci_accept(cci_event_t *conn_req, void *context);
+CCI_DECLSPEC int cci_accept(cci_event_t *conn_req, const void *context);
 
 /*!
   Reject a connection request.
@@ -766,7 +766,7 @@ CCI_DECLSPEC int cci_reject(cci_event_t *conn_req);
 CCI_DECLSPEC int cci_connect(cci_endpoint_t * endpoint, char *server_uri,
 			     void *data_ptr, uint32_t data_len,
 			     cci_conn_attribute_t attribute,
-			     void *context, int flags, struct timeval *timeout);
+			     const void *context, int flags, struct timeval *timeout);
 
 /*!
   This constant is the maximum value of data_len passed to cci_connect().
@@ -1438,7 +1438,7 @@ CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
 */
 CCI_DECLSPEC int cci_send(cci_connection_t * connection,
 			  void *msg_ptr, uint32_t msg_len,
-			  void *context, int flags);
+			  const void *context, int flags);
 
 #define CCI_FLAG_BLOCKING   (1 << 0)
 #define CCI_FLAG_NO_COPY    (1 << 1)
@@ -1474,7 +1474,7 @@ CCI_DECLSPEC int cci_send(cci_connection_t * connection,
  */
 CCI_DECLSPEC int cci_sendv(cci_connection_t * connection,
 			   struct iovec *data, uint32_t iovcnt,
-			   void *context, int flags);
+			   const void *context, int flags);
 
 /* RMA Area operations */
 
@@ -1591,6 +1591,6 @@ CCI_DECLSPEC int cci_rma(cci_connection_t * connection,
 			 void *msg_ptr, uint32_t msg_len,
 			 uint64_t local_handle, uint64_t local_offset,
 			 uint64_t remote_handle, uint64_t remote_offset,
-			 uint64_t data_len, void *context, int flags);
+			 uint64_t data_len, const void *context, int flags);
 
 #endif				/* CCI_H */
