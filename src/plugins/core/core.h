@@ -44,11 +44,11 @@ typedef int (*cci_create_endpoint_fn_t) (cci_device_t * device,
 typedef int (*cci_destroy_endpoint_fn_t) (cci_endpoint_t * endpoint);
 typedef int (*cci_accept_fn_t) (cci_event_t * conn_req, const void *context);
 typedef int (*cci_reject_fn_t) (cci_event_t * conn_req);
-typedef int (*cci_connect_fn_t) (cci_endpoint_t * endpoint, char *server_uri,
-				 void *data_ptr, uint32_t data_len,
+typedef int (*cci_connect_fn_t) (cci_endpoint_t * endpoint, const char *server_uri,
+				 const void *data_ptr, uint32_t data_len,
 				 cci_conn_attribute_t attribute,
 				 const void *context, int flags,
-				 struct timeval * timeout);
+				 const struct timeval * timeout);
 typedef int (*cci_disconnect_fn_t) (cci_connection_t * connection);
 typedef int (*cci_set_opt_fn_t) (cci_opt_handle_t * handle,
 				 cci_opt_level_t level,
@@ -61,10 +61,10 @@ typedef int (*cci_get_event_fn_t) (cci_endpoint_t * endpoint,
 				   cci_event_t ** const event);
 typedef int (*cci_return_event_fn_t) (cci_event_t * event);
 typedef int (*cci_send_fn_t) (cci_connection_t * connection,
-			      void *msg_ptr, uint32_t msg_len,
+			      const void *msg_ptr, uint32_t msg_len,
 			      const void *context, int flags);
 typedef int (*cci_sendv_fn_t) (cci_connection_t * connection,
-			       struct iovec * data, uint32_t iovcnt,
+			       const struct iovec * data, uint32_t iovcnt,
 			       const void *context, int flags);
 typedef int (*cci_rma_register_fn_t) (cci_endpoint_t * endpoint,
 				      cci_connection_t * connection,
