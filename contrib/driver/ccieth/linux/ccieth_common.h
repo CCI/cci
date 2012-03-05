@@ -45,7 +45,6 @@ struct ccieth_driver_event {
 	struct ccieth_ioctl_get_event event;
 	void (*destructor) (struct ccieth_endpoint *, struct ccieth_driver_event *);
 };
-
 struct ccieth_rcu_completion {
 	struct rcu_head rcu; /* for kfree_rcu() */
 	struct completion completion;
@@ -234,10 +233,14 @@ struct ccieth_skb_cb {
 		struct {
 			__u32 seqnum;
 			unsigned long resend_jiffies;
-			unsigned blocking;
+			enum ccieth_msg_completion_type {
+				CCIETH_MSG_COMPLETION_EVENT,
+				CCIETH_MSG_COMPLETION_BLOCKING,
+				CCIETH_MSG_COMPLETION_SILENT,
+			} completion_type;
 			union {
-				struct ccieth_driver_event *event;
-				struct ccieth_rcu_completion __rcu *completion;
+				struct ccieth_driver_event *event; /* CCIETH_MSG_COMPLETION_EVENT */
+				struct ccieth_rcu_completion __rcu *completion; /* CCIETH_MSG_COMPLETION_BLOCKING */
 			};
 		} reliable_send;
 	};

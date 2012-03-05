@@ -74,7 +74,7 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32
 		if (skb == conn->send_queue_next_resend)
 			conn->send_queue_next_resend = nskb ? nskb : conn->send_queue_first_seqnum;
 
-		if (scb->reliable_send.blocking) {
+		if (scb->reliable_send.completion_type == CCIETH_MSG_COMPLETION_BLOCKING) {
 			struct ccieth_rcu_completion *completion;
 			rcu_read_lock();
 			completion = rcu_dereference(scb->reliable_send.completion);
@@ -83,7 +83,7 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32
 				complete(&completion->completion);
 			}
 			rcu_read_unlock();
-		} else {
+		} else if (scb->reliable_send.completion_type == CCIETH_MSG_COMPLETION_EVENT) {
 			struct ccieth_driver_event *event = scb->reliable_send.event;
 			event->event.send.status = 0;
 			ccieth_queue_busy_event(conn->ep, event);
@@ -168,6 +168,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	struct ccieth_skb_cb *scb;
 	struct ccieth_connection *conn;
 	struct ccieth_driver_event *event = NULL;
+	enum ccieth_msg_completion_type completion_type;
 	struct ccieth_rcu_completion *completion = NULL;
 	size_t skblen;
 	int err;
@@ -206,17 +207,23 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		goto out_with_skb2;
 	}
 
-	if (unlikely((arg->flags & (CCIETH_MSG_FLAG_RELIABLE|CCIETH_MSG_FLAG_BLOCKING))
-		     == (CCIETH_MSG_FLAG_RELIABLE|CCIETH_MSG_FLAG_BLOCKING))) {
-		/* reliable blocking, we need a completion */
-		completion = kmalloc(sizeof(*completion), GFP_KERNEL);
-		if (!completion)
-			goto out_with_skb2;
-		init_completion(&completion->completion);
-		rcu_assign_pointer(scb->reliable_send.completion, completion);
-		scb->reliable_send.blocking = 1;
-	} else {
-		scb->reliable_send.blocking = 0;
+	/* SILENT by default, and for UU */
+	completion_type = CCIETH_MSG_COMPLETION_SILENT;
+	/* setup reliable send completion */
+	if (arg->flags & CCIETH_MSG_FLAG_RELIABLE) {
+		if (unlikely(arg->flags & CCIETH_MSG_FLAG_BLOCKING)) {
+			/* blocking (silent or not), we need a completion */
+			completion = kmalloc(sizeof(*completion), GFP_KERNEL);
+			if (!completion)
+				goto out_with_skb2;
+			init_completion(&completion->completion);
+			rcu_assign_pointer(scb->reliable_send.completion, completion);
+			completion_type = CCIETH_MSG_COMPLETION_BLOCKING;
+
+		} else if (likely(!(arg->flags & CCIETH_MSG_FLAG_SILENT))) {
+			/* non-blocking non-silent, report an event (default case) */
+			completion_type = CCIETH_MSG_COMPLETION_EVENT;
+		}
 	}
 
 	rcu_read_lock();
@@ -237,8 +244,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		     != !!(conn->flags & CCIETH_CONN_FLAG_RELIABLE)))
 		goto out_with_rculock;
 
-	if (likely((arg->flags & (CCIETH_MSG_FLAG_RELIABLE|CCIETH_MSG_FLAG_BLOCKING))
-		   == CCIETH_MSG_FLAG_RELIABLE)) {
+	if (likely(completion_type == CCIETH_MSG_COMPLETION_EVENT)) {
 		/* reliable non-blocking, we need an event */
 		event = ccieth_get_free_event(ep);
 		if (unlikely(!event)) {
@@ -264,8 +270,6 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	hdr->conn_seqnum = htonl(conn->req_seqnum);
 	hdr->msg_len = htonl(arg->msg_len);
 
-	/* FIXME: work on CCIETH_MSG_FLAG_SILENT once ordering clarified */
-
 	CCIETH_STAT_INC(conn, send);
 
 	if (conn->flags & CCIETH_CONN_FLAG_RELIABLE) {
@@ -276,6 +280,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		hdr->msg_seqnum = htonl(seqnum);
 		scb->reliable_send.seqnum = seqnum;
 		scb->reliable_send.resend_jiffies = jiffies + CCIETH_MSG_RESEND_DELAY;
+		scb->reliable_send.completion_type = completion_type;
 		if (conn->send_queue_last_seqnum) {
 			conn->send_queue_last_seqnum->next = skb;
 			skb->prev = conn->send_queue_last_seqnum;
@@ -305,8 +310,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 	rcu_read_unlock();
 
-	if (unlikely((arg->flags & (CCIETH_MSG_FLAG_RELIABLE|CCIETH_MSG_FLAG_BLOCKING))
-		     == (CCIETH_MSG_FLAG_RELIABLE|CCIETH_MSG_FLAG_BLOCKING))) {
+	if (unlikely(completion_type == CCIETH_MSG_COMPLETION_BLOCKING)) {
 		wait_for_completion_interruptible(&completion->completion);
 		err = completion->status;
 		rcu_assign_pointer(scb->reliable_send.completion, NULL);

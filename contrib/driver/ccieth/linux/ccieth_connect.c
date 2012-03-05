@@ -112,7 +112,7 @@ ccieth_conn_free(struct ccieth_connection *conn)
 			struct ccieth_skb_cb *scb = CCIETH_SKB_CB(skb);
 			nskb = skb->next;
 
-			if (scb->reliable_send.blocking) {
+			if (scb->reliable_send.completion_type == CCIETH_MSG_COMPLETION_BLOCKING) {
 				struct ccieth_rcu_completion *completion;
 				rcu_read_lock();
 				completion = rcu_dereference(scb->reliable_send.completion);
@@ -121,7 +121,7 @@ ccieth_conn_free(struct ccieth_connection *conn)
 					complete(&completion->completion);
 				}
 				rcu_read_unlock();
-			} else {
+			} else if (scb->reliable_send.completion_type == CCIETH_MSG_COMPLETION_EVENT) {
 				ccieth_putback_free_event(conn->ep, scb->reliable_send.event);
 			}
 			kfree_skb(skb);
