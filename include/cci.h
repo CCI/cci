@@ -357,7 +357,7 @@ The config file forms the basis for the device discussion, below.
 
   \ingroup devices
 */
-typedef struct cci_device {
+typedef const struct cci_device {
 	/*! Name of the device from the config file, e.g., "bob0" */
 	const char *name;
 
@@ -424,7 +424,7 @@ typedef struct cci_device {
 
   \ingroup devices
 */
-CCI_DECLSPEC int cci_get_devices(cci_device_t const ***const devices);
+CCI_DECLSPEC int cci_get_devices(cci_device_t * const ** devices);
 
 /*! \example devices.c
  *  This is an example of using get_devices.

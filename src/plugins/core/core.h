@@ -2,6 +2,7 @@
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2012 UT-Battelle, LLC.  All rights reserved.
  * Copyright (c) 2012 Oak Ridge National Laboratory.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  * $COPYRIGHT$
  *
  * Types for CCI.
@@ -35,7 +36,7 @@ typedef int (*cci_init_fn_t) (uint32_t abi_ver, uint32_t flags,
 typedef int (*cci_finalize_fn_t)(void);
 typedef const char *(*cci_strerror_fn_t) (cci_endpoint_t * endpoint,
 					  enum cci_status status);
-typedef int (*cci_get_devices_fn_t) (cci_device_t const ***devices);
+typedef int (*cci_get_devices_fn_t) (cci_device_t * const **devices);
 typedef int (*cci_create_endpoint_fn_t) (cci_device_t * device,
 					 int flags,
 					 cci_endpoint_t ** endpoint,

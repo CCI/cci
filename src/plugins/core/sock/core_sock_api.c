@@ -2,6 +2,7 @@
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright © 2010-2012 UT-Battelle, LLC. All rights reserved.
  * Copyright © 2010-2012 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -54,7 +55,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
 static int sock_finalize(void);
 static const char *sock_strerror(cci_endpoint_t * endpoint,
 				 enum cci_status status);
-static int sock_get_devices(cci_device_t const ***devices);
+static int sock_get_devices(cci_device_t * const **devices);
 static int sock_create_endpoint(cci_device_t * device,
 				int flags,
 				cci_endpoint_t ** endpoint,
@@ -235,7 +236,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
 	if (!configfile) {
 		/* create a loopback device for now */
-		cci_device_t *device;
+		struct cci_device *device;
 		sock_dev_t *sdev;
 
 		dev = calloc(1, sizeof(*dev));
@@ -280,7 +281,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
 		if (0 == strcmp("sock", dev->driver)) {
 			const char **arg;
-			cci_device_t *device;
+			struct cci_device *device;
 			sock_dev_t *sdev;
 
 			device = &dev->device;
@@ -384,7 +385,7 @@ static const char *sock_strerror(cci_endpoint_t * endpoint,
 	return NULL;
 }
 
-static int sock_get_devices(cci_device_t const ***devices)
+static int sock_get_devices(cci_device_t * const **devices)
 {
 	CCI_ENTER;
 
