@@ -61,12 +61,12 @@ static int sock_create_endpoint(cci_device_t * device,
 				cci_endpoint_t ** endpoint,
 				cci_os_handle_t * fd);
 static int sock_destroy_endpoint(cci_endpoint_t * endpoint);
-static int sock_accept(cci_event_t *event, void *context);
+static int sock_accept(cci_event_t *event, const void *context);
 static int sock_reject(cci_event_t *conn_req);
 static int sock_connect(cci_endpoint_t * endpoint, char *server_uri,
 			void *data_ptr, uint32_t data_len,
 			cci_conn_attribute_t attribute,
-			void *context, int flags, struct timeval *timeout);
+			const void *context, int flags, struct timeval *timeout);
 static int sock_disconnect(cci_connection_t * connection);
 static int sock_set_opt(cci_opt_handle_t * handle,
 			cci_opt_level_t level,
@@ -79,10 +79,10 @@ static int sock_get_event(cci_endpoint_t * endpoint,
 			  cci_event_t ** const event);
 static int sock_return_event(cci_event_t * event);
 static int sock_send(cci_connection_t * connection,
-		     void *msg_ptr, uint32_t msg_len, void *context, int flags);
+		     void *msg_ptr, uint32_t msg_len, const void *context, int flags);
 static int sock_sendv(cci_connection_t * connection,
 		      struct iovec *data, uint32_t iovcnt,
-		      void *context, int flags);
+		      const void *context, int flags);
 static int sock_rma_register(cci_endpoint_t * endpoint,
 			     cci_connection_t * connection,
 			     void *start, uint64_t length,
@@ -92,7 +92,7 @@ static int sock_rma(cci_connection_t * connection,
 		    void *header_ptr, uint32_t header_len,
 		    uint64_t local_handle, uint64_t local_offset,
 		    uint64_t remote_handle, uint64_t remote_offset,
-		    uint64_t data_len, void *context, int flags);
+		    uint64_t data_len, const void *context, int flags);
 
 static uint8_t sock_ip_hash(in_addr_t ip, uint16_t port);
 static void sock_progress_sends(cci__dev_t * dev);
@@ -814,7 +814,7 @@ static uint8_t sock_ip_hash(in_addr_t ip, uint16_t port)
 	return (port & 0x00FF) ^ ((port & 0xFF00) >> 8);
 }
 
-static int sock_accept(cci_event_t *event, void *context)
+static int sock_accept(cci_event_t *event, const void *context)
 {
 	uint8_t a;
 	uint16_t b;
@@ -887,7 +887,7 @@ static int sock_accept(cci_event_t *event, void *context)
 
 	conn->connection.attribute = (enum cci_conn_attribute)a;
 	conn->connection.endpoint = endpoint;
-	conn->connection.context = context;
+	conn->connection.context = (void *)context;
 	conn->connection.max_send_size = dev->device.max_send_size;
 
 	hs = (sock_handshake_t *) (rx->buffer +
@@ -944,7 +944,7 @@ static int sock_accept(cci_event_t *event, void *context)
 	evt->conn = conn;
 	evt->event.type = CCI_EVENT_ACCEPT;
 	evt->event.accept.status = CCI_SUCCESS;	/* for now */
-	evt->event.accept.context = context;
+	evt->event.accept.context = (void *)context;
 	evt->event.accept.connection = &conn->connection;
 
 	/* pack the msg */
@@ -1184,7 +1184,7 @@ static sock_conn_t *sock_find_conn(sock_ep_t * sep, in_addr_t ip, uint16_t port,
 static int sock_connect(cci_endpoint_t * endpoint, char *server_uri,
 			void *data_ptr, uint32_t data_len,
 			cci_conn_attribute_t attribute,
-			void *context, int flags, struct timeval *timeout)
+			const void *context, int flags, struct timeval *timeout)
 {
 	int ret;
 	int i;
@@ -1237,7 +1237,7 @@ static int sock_connect(cci_endpoint_t * endpoint, char *server_uri,
 	connection = &conn->connection;
 	connection->attribute = attribute;
 	connection->endpoint = endpoint;
-	connection->context = context;
+	connection->context = (void *)context;
 
 	/* set up sock specific info */
 
@@ -1299,7 +1299,7 @@ static int sock_connect(cci_endpoint_t * endpoint, char *server_uri,
 	evt->conn = conn;
 	evt->event.type = CCI_EVENT_CONNECT;	/* for now */
 	evt->event.connect.status = CCI_SUCCESS;
-	evt->event.connect.context = context;
+	evt->event.connect.context = (void *)context;
 	evt->event.connect.connection = connection;
 
 	/* pack the msg */
@@ -2062,7 +2062,7 @@ static void sock_progress_sends(cci__dev_t * dev)
 }
 
 static int sock_send(cci_connection_t * connection,
-		     void *msg_ptr, uint32_t msg_len, void *context, int flags)
+		     void *msg_ptr, uint32_t msg_len, const void *context, int flags)
 {
 	uint32_t iovcnt = 0;
 	struct iovec iov = { NULL, 0 };
@@ -2078,7 +2078,7 @@ static int sock_send(cci_connection_t * connection,
 
 static int sock_sendv(cci_connection_t * connection,
 		      struct iovec *data, uint32_t iovcnt,
-		      void *context, int flags)
+		      const void *context, int flags)
 {
 	int i, ret, is_reliable = 0, data_len = 0;
 	char *func = iovcnt < 2 ? "send" : "sendv";
@@ -2150,7 +2150,7 @@ static int sock_sendv(cci_connection_t * connection,
 	event = &evt->event;
 	event->type = CCI_EVENT_SEND;
 	event->send.connection = connection;
-	event->send.context = context;
+	event->send.context = (void *)context;
 	event->send.status = CCI_SUCCESS;	/* for now */
 
 	/* pack buffer */
@@ -2354,7 +2354,7 @@ static int sock_rma_deregister(uint64_t rma_handle)
  */
 #define CONTEXTS_BLOCK_SIZE 10
 static inline void
-generate_context_id(sock_conn_t * sconn, void *context, uint64_t * context_id)
+generate_context_id(sock_conn_t * sconn, const void *context, uint64_t * context_id)
 {
 	uint64_t index = 0;
 
@@ -2395,7 +2395,7 @@ static int sock_rma(cci_connection_t * connection,
 		    void *msg_ptr, uint32_t msg_len,
 		    uint64_t local_handle, uint64_t local_offset,
 		    uint64_t remote_handle, uint64_t remote_offset,
-		    uint64_t data_len, void *context, int flags)
+		    uint64_t data_len, const void *context, int flags)
 {
 	int ret = CCI_ERR_NOT_IMPLEMENTED;
 	cci__ep_t *ep = NULL;
@@ -2470,7 +2470,7 @@ static int sock_rma(cci_connection_t * connection,
 		rma_op->num_msgs++;
 	rma_op->completed = 0;
 	rma_op->status = CCI_SUCCESS;	/* for now */
-	rma_op->context = context;
+	rma_op->context = (void *)context;
 	rma_op->flags = flags;
 	rma_op->msg_len = (uint16_t) msg_len;
 	rma_op->tx = NULL;
@@ -3828,11 +3828,11 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 /* Based on a context ID, we get the corresponding context. This is mainly
    used for RMA reads, not for RMA writes. */
 static inline void
-lookup_contextid(sock_conn_t * sconn, uint64_t context_id, void **context)
+lookup_contextid(sock_conn_t * sconn, uint64_t context_id, const void **context)
 {
 	/* Remember, the unique ID is actually the index in the array we use to
 	   track the different contexts used in context of RMA read operations. */
-	void *c;
+	const void *c;
 
 	if (sconn->rma_contexts == NULL) {
 		*context = NULL;
@@ -3857,7 +3857,7 @@ sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 	cci__ep_t *ep;
 	uint64_t context_id = 0;
 	//sock_rma_header_t *rma_hdr = rx->buffer;
-	void *context;
+	const void *context;
 	sock_header_r_t *hdr_r = rx->buffer;
 
 	endpoint = (&conn->connection)->endpoint;
