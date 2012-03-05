@@ -71,7 +71,7 @@ BEGIN_C_DECLS
 /*! CCI private endpoint */
 typedef struct cci__ep {
 	/*! Public endpoint (max_recv_buffer_count) */
-	cci_endpoint_t endpoint;
+	struct cci_endpoint endpoint;
 
 	/*! Number of rx buffers */
 	uint32_t rx_buf_cnt;
