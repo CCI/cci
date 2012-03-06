@@ -58,9 +58,10 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 		must_put_ifp = 1;
 	rcu_read_unlock();
 
-	/* destroy remaining connections */
+	/* destroy remaining connections and rma handles */
 	ccieth_destroy_endpoint_connections(ep);
-
+	ccieth_destroy_endpoint_rma_handles(ep);
+	
 	/* connection-timers are gone.
 	 * some rcu callbacks may be in flight, either users of ep->ifp,
 	 * or because of deferred connection destruction (which may release endpoint events).
@@ -84,6 +85,7 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 	}
 
 	idr_destroy(&ep->connection_idr);
+	idr_destroy(&ep->rma_handle_idr);
 #ifdef CONFIG_CCIETH_DEBUGFS
 	if (ep->debugfs_dir)
 		debugfs_remove_recursive(ep->debugfs_dir);
@@ -154,6 +156,9 @@ ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *a
 
 	skb_queue_head_init(&ep->deferred_connect_recv_queue);
 	INIT_WORK(&ep->deferred_connect_recv_work, ccieth_deferred_connect_recv_workfunc);
+
+	idr_init(&ep->rma_handle_idr);
+	spin_lock_init(&ep->rma_handle_idr_lock);
 
 retry:
 	/* reserve an index without exposing the endpoint there yet
@@ -474,6 +479,46 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 			ret = ccieth_msg_reliable(ep, &ms_arg);
 		else
 			ret = ccieth_msg_unreliable(ep, &ms_arg);
+		if (ret < 0)
+			return ret;
+
+		return 0;
+	}
+
+	case CCIETH_IOCTL_RMA_REGISTER: {
+		struct ccieth_ioctl_rma_register rr_arg;
+		struct ccieth_endpoint *ep = file->private_data;
+
+		if (!ep)
+			return -EINVAL;
+
+		ret = copy_from_user(&rr_arg, (__user void *)arg, sizeof(rr_arg));
+		if (ret)
+			return -EFAULT;
+
+		ret = ccieth_rma_register(ep, &rr_arg);
+		if (ret < 0)
+			return ret;
+
+		ret = copy_to_user((__user void *)arg, &rr_arg, sizeof(rr_arg));
+		if (ret)
+			return -EFAULT;
+
+		return 0;
+	}
+
+	case CCIETH_IOCTL_RMA_DEREGISTER: {
+		struct ccieth_ioctl_rma_deregister dr_arg;
+		struct ccieth_endpoint *ep = file->private_data;
+
+		if (!ep)
+			return -EINVAL;
+
+		ret = copy_from_user(&dr_arg, (__user void *)arg, sizeof(dr_arg));
+		if (ret)
+			return -EFAULT;
+
+		ret = ccieth_rma_deregister(ep, &dr_arg);
 		if (ret < 0)
 			return ret;
 

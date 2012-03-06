@@ -18,4 +18,4 @@ ccflags-y += $(CFLAGS)
 endif
 
 obj-m += ccieth.o
-ccieth-y = ccieth_main.o ccieth_msg.o ccieth_connect.o
+ccieth-y = ccieth_main.o ccieth_msg.o ccieth_rma.o ccieth_connect.o

@@ -153,9 +153,29 @@ struct ccieth_ioctl_disconnect {
 };
 #define CCIETH_IOCTL_DISCONNECT _IOR(CCIETH_IOCTL_MAGIC, 0x9, struct ccieth_ioctl_disconnect)
 
+struct ccieth_ioctl_rma_register {
+	__u32 protection;
+	__u32 buffer_len;
+	/* 8 */
+	__u64 buffer_ptr;
+	/* 16 */
+	__u64 handle;
+	/* 24 */
+};
+#define CCIETH_IOCTL_RMA_REGISTER _IOWR(CCIETH_IOCTL_MAGIC, 0xa, struct ccieth_ioctl_rma_register)
+
+struct ccieth_ioctl_rma_deregister {
+	__u64 handle;
+	/* 8 */
+};
+#define CCIETH_IOCTL_RMA_DEREGISTER _IOR(CCIETH_IOCTL_MAGIC, 0xb, struct ccieth_ioctl_rma_deregister)
+
 #define CCIETH_FLAG_BLOCKING	(1 << 0)
 /* NO_COPY unused in ccieth, 1<<2 unused in cci */
 #define CCIETH_FLAG_SILENT	(1 << 3)
+#define CCIETH_FLAG_READ	(1 << 4)
+#define CCIETH_FLAG_WRITE	(1 << 5)
+#define CCIETH_FLAG_FENCE	(1 << 6)
 #define CCIETH_FLAG_RELIABLE	(1 << 31)
 
 /* FIXME: enforce matching with enum cci_event_type and simplify user-space switch? */

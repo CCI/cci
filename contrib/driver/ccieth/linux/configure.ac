@@ -10,6 +10,7 @@ AC_INIT(ccieth,
 AC_CONFIG_SRCDIR(ccieth_main.c)
 AC_CONFIG_LINKS(ccieth_main.c:ccieth_main.c)
 AC_CONFIG_LINKS(ccieth_msg.c:ccieth_msg.c)
+AC_CONFIG_LINKS(ccieth_rma.c:ccieth_rma.c)
 AC_CONFIG_LINKS(ccieth_connect.c:ccieth_connect.c)
 AC_CONFIG_LINKS(ccieth_common.h:ccieth_common.h)
 AC_CONFIG_LINKS(ccieth_hal.h:ccieth_hal.h)
