@@ -17,6 +17,7 @@
 #include <linux/rcupdate.h>
 #include <linux/timer.h>
 #include <linux/jiffies.h>
+#include <linux/poll.h>
 
 #include <ccieth_io.h>
 #include <ccieth_common.h>
@@ -143,6 +144,7 @@ ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *a
 		list_add_tail(&event->list, &ep->free_event_list);
 	}
 	ep->free_event_list_length = CCIETH_EVENT_SLOT_NR;
+	init_waitqueue_head(&ep->event_wq);
 
 	ep->embedded_event.destructor = NULL;
 
@@ -462,12 +464,32 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 	}
 }
 
+static unsigned int
+ccieth_miscdev_poll(struct file *file, struct poll_table_struct *wait)
+{
+	struct ccieth_endpoint *ep = file->private_data;
+	unsigned int mask = 0;
+
+	if (!ep) {
+		mask |= POLLERR;
+		goto out;
+	}
+
+	poll_wait(file, &ep->event_wq, wait);
+	if (!list_empty(&ep->event_list))
+		mask |= POLLIN;
+
+out:
+	return mask;
+}
+
 static struct file_operations
 ccieth_miscdev_fops = {
 	.owner = THIS_MODULE,
 	.open = ccieth_miscdev_open,
 	.release = ccieth_miscdev_release,
 	.unlocked_ioctl = ccieth_miscdev_ioctl,
+	.poll = ccieth_miscdev_poll,
 };
 
 static struct miscdevice

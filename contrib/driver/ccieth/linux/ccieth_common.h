@@ -15,6 +15,7 @@
 #include <linux/kref.h>
 #include <linux/workqueue.h>
 #include <linux/completion.h>
+#include <linux/sched.h>
 #ifdef CONFIG_CCIETH_DEBUGFS
 #include <linux/debugfs.h>
 #endif
@@ -63,6 +64,7 @@ struct ccieth_endpoint {
 	struct list_head free_event_list;
 	__u32 free_event_list_length; /* used as debugfs u32 */
 	spinlock_t free_event_list_lock;
+	wait_queue_head_t event_wq;
 
 	struct sk_buff_head deferred_connect_recv_queue;
 	struct work_struct deferred_connect_recv_work;
@@ -329,6 +331,7 @@ ccieth_queue_busy_event(struct ccieth_endpoint *ep,
 {
 	spin_lock_bh(&ep->event_list_lock);
 	list_add_tail(&event->list, &ep->event_list);
+	wake_up_interruptible(&ep->event_wq);
 	spin_unlock_bh(&ep->event_list_lock);
 }
 

@@ -728,8 +728,7 @@ static int eth_get_opt(cci_opt_handle_t * handle,
 
 static int eth_arm_os_handle(cci_endpoint_t * endpoint, int flags)
 {
-	printf("In eth_arm_os_handle\n");
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return CCI_SUCCESS;
 }
 
 static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
