@@ -433,7 +433,7 @@ retry:
 	memcpy(&conn->dest_addr, &arg->dest_addr, 6);
 	conn->dest_eid = arg->dest_eid;
 	conn->user_conn_id = arg->user_conn_id;
-	conn->id = id;
+	conn->id = id; /* cannot be CCIETH_CONNECTION_INVALID_ID */
 	idr_replace(&ep->connection_idr, conn, id);
 	hdr->src_conn_id = htonl(id);
 
@@ -639,7 +639,7 @@ retry:
 	}
 
 	/* things cannot fail anymore now, insert the connection for real */
-	conn->id = id;
+	conn->id = id; /* cannot be CCIETH_CONNECTION_INVALID_ID */
 	idr_replace(&ep->connection_idr, conn, id);
 	atomic_inc(&ep->connection_received);
 

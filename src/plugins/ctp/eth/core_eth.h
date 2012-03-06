@@ -11,6 +11,7 @@
 #include "ccieth_io.h"
 
 #include <netpacket/packet.h>
+#include <stdint.h>
 
 BEGIN_C_DECLS
 
@@ -24,7 +25,7 @@ typedef struct eth__ep {
 } eth__ep_t;
 
 typedef struct eth__conn {
-	int id;
+	uint32_t id;
 	cci__conn_t _conn;
 } eth__conn_t;
 

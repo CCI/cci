@@ -13,6 +13,9 @@
 
 #define CCIETH_IOCTL_MAGIC 'C'
 
+/* reserved by user-space, driver should never assign it to a connection */
+#define CCIETH_CONNECTION_INVALID_ID (~0U)
+
 struct ccieth_ioctl_get_info {
 	__u8 addr[6];
 	__u8 pad1[2];

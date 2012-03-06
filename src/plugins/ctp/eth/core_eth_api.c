@@ -615,7 +615,9 @@ static int eth_accept(union cci_event *event, void *context)
 	if (!econn)
 		return CCI_ENOMEM;
 	_conn = &econn->_conn;
+
 	econn->id = conn_id;
+	assert(econn->id != CCIETH_CONNECTION_INVALID_ID);
 
 	ac.conn_id = conn_id;
 	ac.user_conn_id = (uintptr_t) econn;
@@ -837,7 +839,9 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 				CCIETH_VALGRIND_MEMORY_MAKE_READABLE
 					(&ge->connect.conn_id,
 					 sizeof(ge->connect.conn_id));
+
 				econn->id = ge->connect.conn_id;
+				assert(econn->id != CCIETH_CONNECTION_INVALID_ID);
 				econn->_conn.connection.max_send_size =
 					ge->connect.max_send_size;
 
@@ -885,7 +889,7 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 			econn =
 			    (void *)(uintptr_t) ge->
 			    connection_closed.user_conn_id;
-			econn->id = -1;	/* keep the connection, but make it unusable */
+			econn->id = CCIETH_CONNECTION_INVALID_ID;	/* keep the connection, but make it unusable */
 			printf("marked connection as closed\n");
 			break;
 		}
