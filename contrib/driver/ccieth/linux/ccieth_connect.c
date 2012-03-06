@@ -109,10 +109,17 @@ ccieth_conn_free(struct ccieth_connection *conn)
 		/* drop pending sends */
 		struct sk_buff *nskb, *skb = conn->send_queue_first_seqnum;
 		while (skb) {
-			struct ccieth_skb_cb *scb = CCIETH_SKB_CB(skb);
+			struct ccieth_skb_cb *scb = CCIETH_SKB_CB(skb), *cscb, *nscb;
 			nskb = skb->next;
 
 			ccieth_abort_reliable_send_scb(conn, scb, EIO /* FIXME? */);
+			/* dequeue queued events */
+			list_for_each_entry_safe(cscb, nscb, &scb->reliable_send.next_ordered_list, reliable_send.next_ordered_list) {
+			struct sk_buff *cskb = container_of((void*)cscb, struct sk_buff, cb);
+				ccieth_abort_reliable_send_scb(conn, cscb, EIO /* FIXME */);
+				/* don't bother dequeueing, we're freeing everything */
+				kfree_skb(cskb);
+			}
 			kfree_skb(skb);
 
 			skb = nskb;

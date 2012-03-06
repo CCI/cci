@@ -67,7 +67,9 @@ static void
 ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32 acked_bitmap)
 {
 	struct sk_buff *skb, *nskb, *old_next_resend;
+	struct list_head *prev_queue = NULL;
 	__u32 last_acked = acked_seqnum;
+	int ordered = conn->flags & CCIETH_CONN_FLAG_ORDERED;
 
 	if (acked_bitmap) {
 		last_acked += fls(acked_bitmap);
@@ -91,6 +93,7 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32
 			__u32 offset = scb->reliable_send.seqnum - acked_seqnum -1;
 			if (!(acked_bitmap & (1 << offset))) {
 				skb = skb->next;
+				prev_queue = &scb->reliable_send.next_ordered_list;
 				continue;
 			}
 		}
@@ -111,9 +114,24 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32
 		if (skb == conn->send_queue_next_resend)
 			conn->send_queue_next_resend = nskb ? nskb : conn->send_queue_first_seqnum;
 
-		ccieth_complete_reliable_send_scb(conn, scb);
 		dprintk("no need to resend MSG %u anymore\n", scb->reliable_send.seqnum);
-		kfree_skb(skb);
+
+		if (unlikely(ordered && prev_queue)) {
+			/* cannot complete now, need to wait for previous to be done */
+			list_add_tail(&scb->reliable_send.next_ordered_list, prev_queue);
+		} else {
+			struct ccieth_skb_cb *cscb, *nscb;
+			/* complete now */
+			ccieth_complete_reliable_send_scb(conn, scb);
+			/* dequeue queued events */
+			list_for_each_entry_safe(cscb, nscb, &scb->reliable_send.next_ordered_list, reliable_send.next_ordered_list) {
+				struct sk_buff *cskb = container_of((void*)cscb, struct sk_buff, cb);
+				ccieth_complete_reliable_send_scb(conn, cscb);
+				/* don't bother dequeueing, we're freeing everything */
+				kfree_skb(cskb);
+			}
+			kfree_skb(skb);
+		}
 
 		skb = nskb;
 	}
@@ -305,6 +323,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		scb->reliable_send.seqnum = seqnum;
 		scb->reliable_send.resend_jiffies = jiffies + CCIETH_MSG_RESEND_DELAY;
 		scb->reliable_send.completion_type = completion_type;
+		INIT_LIST_HEAD(&scb->reliable_send.next_ordered_list);
 		if (conn->send_queue_last_seqnum) {
 			conn->send_queue_last_seqnum->next = skb;
 			skb->prev = conn->send_queue_last_seqnum;

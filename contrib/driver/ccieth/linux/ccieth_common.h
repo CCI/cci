@@ -242,6 +242,7 @@ struct ccieth_skb_cb {
 				struct ccieth_driver_event *event; /* CCIETH_MSG_COMPLETION_EVENT */
 				struct ccieth_rcu_completion __rcu *completion; /* CCIETH_MSG_COMPLETION_BLOCKING */
 			};
+			struct list_head next_ordered_list;
 		} reliable_send;
 	};
 };
