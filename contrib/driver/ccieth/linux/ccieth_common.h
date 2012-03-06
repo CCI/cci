@@ -264,6 +264,8 @@ extern int ccieth_msg_resend(struct ccieth_connection *conn);
 extern int ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg);
 extern int ccieth_msg_ack(struct ccieth_connection *conn);
 
+extern void ccieth_abort_reliable_send_scb(struct ccieth_connection *conn, struct ccieth_skb_cb *scb, int error);
+
 extern int ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packet_type *pt, struct net_device *orig_dev);
 
 static inline struct ccieth_driver_event *

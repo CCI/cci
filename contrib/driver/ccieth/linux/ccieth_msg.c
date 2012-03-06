@@ -27,6 +27,43 @@ ccieth_conn_send_ack(struct ccieth_connection *conn, __be32 *seqnum, __be32 *bit
 }
 
 static void
+ccieth_complete_reliable_send_scb(struct ccieth_connection *conn,
+				  struct ccieth_skb_cb *scb)
+{
+	if (scb->reliable_send.completion_type == CCIETH_MSG_COMPLETION_BLOCKING) {
+		struct ccieth_rcu_completion *completion;
+		rcu_read_lock();
+		completion = rcu_dereference(scb->reliable_send.completion);
+		if (completion) {
+			completion->status = 0;
+			complete(&completion->completion);
+		}
+		rcu_read_unlock();
+	} else if (scb->reliable_send.completion_type == CCIETH_MSG_COMPLETION_EVENT) {
+		ccieth_queue_busy_event(conn->ep, scb->reliable_send.event);
+	}
+}
+
+void
+ccieth_abort_reliable_send_scb(struct ccieth_connection *conn,
+			       struct ccieth_skb_cb *scb,
+			       int error)
+{
+	if (scb->reliable_send.completion_type == CCIETH_MSG_COMPLETION_BLOCKING) {
+		struct ccieth_rcu_completion *completion;
+		rcu_read_lock();
+		completion = rcu_dereference(scb->reliable_send.completion);
+		if (completion) {
+			completion->status = error;
+			complete(&completion->completion);
+		}
+		rcu_read_unlock();
+	} else if (scb->reliable_send.completion_type == CCIETH_MSG_COMPLETION_EVENT) {
+		ccieth_putback_free_event(conn->ep, scb->reliable_send.event);
+	}
+}
+
+static void
 ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32 acked_bitmap)
 {
 	struct sk_buff *skb, *nskb, *old_next_resend;
@@ -74,20 +111,7 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32
 		if (skb == conn->send_queue_next_resend)
 			conn->send_queue_next_resend = nskb ? nskb : conn->send_queue_first_seqnum;
 
-		if (scb->reliable_send.completion_type == CCIETH_MSG_COMPLETION_BLOCKING) {
-			struct ccieth_rcu_completion *completion;
-			rcu_read_lock();
-			completion = rcu_dereference(scb->reliable_send.completion);
-			if (completion) {
-				completion->status = 0;
-				complete(&completion->completion);
-			}
-			rcu_read_unlock();
-		} else if (scb->reliable_send.completion_type == CCIETH_MSG_COMPLETION_EVENT) {
-			struct ccieth_driver_event *event = scb->reliable_send.event;
-			ccieth_queue_busy_event(conn->ep, event);
-		}
-
+		ccieth_complete_reliable_send_scb(conn, scb);
 		dprintk("no need to resend MSG %u anymore\n", scb->reliable_send.seqnum);
 		kfree_skb(skb);
 
