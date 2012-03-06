@@ -175,6 +175,7 @@ ccieth_conn_stats_init(struct ccieth_connection *conn, const char *prefix)
 				conn->debugfs_dir = d;
 				debugfs_create_u32("send", 0444, d, &conn->stats.send);
 				debugfs_create_u32("send_resend", 0444, d, &conn->stats.send_resend);
+				debugfs_create_u32("send_reordered_event", 0444, d, &conn->stats.send_reordered_event);
 				debugfs_create_u32("recv", 0444, d, &conn->stats.recv);
 				debugfs_create_u32("recv_duplicate", 0444, d, &conn->stats.recv_duplicate);
 				debugfs_create_u32("recv_misorder", 0444, d, &conn->stats.recv_misorder);

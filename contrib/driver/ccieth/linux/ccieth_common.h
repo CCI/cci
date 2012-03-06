@@ -203,6 +203,7 @@ struct ccieth_connection {
 	struct {
 		__u32 send;
 		__u32 send_resend;
+		__u32 send_reordered_event;
 		__u32 recv;
 		__u32 recv_duplicate;
 		__u32 recv_misorder;

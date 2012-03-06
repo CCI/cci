@@ -119,6 +119,7 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32
 		if (unlikely(ordered && prev_queue)) {
 			/* cannot complete now, need to wait for previous to be done */
 			list_add_tail(&scb->reliable_send.next_ordered_list, prev_queue);
+			CCIETH_STAT_INC(conn, send_reordered_event);
 		} else {
 			struct ccieth_skb_cb *cscb, *nscb;
 			/* complete now */
