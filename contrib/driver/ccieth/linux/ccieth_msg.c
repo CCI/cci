@@ -93,7 +93,7 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32
 			__u32 offset = scb->reliable_send.seqnum - acked_seqnum -1;
 			if (!(acked_bitmap & (1 << offset))) {
 				skb = skb->next;
-				prev_queue = &scb->reliable_send.next_ordered_list;
+				prev_queue = &scb->reliable_send.reordered_completed_send_list;
 				continue;
 			}
 		}
@@ -118,17 +118,18 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32
 
 		if (unlikely(ordered && prev_queue
 			     && scb->reliable_send.completion_type != CCIETH_MSG_COMPLETION_SILENT)) {
-			/* cannot report completion now, need to wait for previous to be done.
-			 * we can safely let SILENT be destroyed because there's another one to wait for (prev_queue)
+			/* If a RO send completes before any previous one, queue it in the last previous until it completes as well.
+			 * If this RO send is silent, we can destroy it immediately because prev_queue!=NULL guarantee that next
+			 * sends will get queued properly instead of completing out-of-order.
 			 */
-			list_add_tail(&scb->reliable_send.next_ordered_list, prev_queue);
+			list_add_tail(&scb->reliable_send.reordered_completed_send_list, prev_queue);
 			CCIETH_STAT_INC(conn, send_reordered_event);
 		} else {
 			struct ccieth_skb_cb *cscb, *nscb;
 			/* report completion now */
 			ccieth_complete_reliable_send_scb(conn, scb);
 			/* dequeue queued events */
-			list_for_each_entry_safe(cscb, nscb, &scb->reliable_send.next_ordered_list, reliable_send.next_ordered_list) {
+			list_for_each_entry_safe(cscb, nscb, &scb->reliable_send.reordered_completed_send_list, reliable_send.reordered_completed_send_list) {
 				struct sk_buff *cskb = container_of((void*)cscb, struct sk_buff, cb);
 				ccieth_complete_reliable_send_scb(conn, cscb);
 				/* don't bother dequeueing, we're freeing everything */
@@ -327,7 +328,7 @@ ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		scb->reliable_send.seqnum = seqnum;
 		scb->reliable_send.resend_jiffies = jiffies + CCIETH_MSG_RESEND_DELAY;
 		scb->reliable_send.completion_type = completion_type;
-		INIT_LIST_HEAD(&scb->reliable_send.next_ordered_list);
+		INIT_LIST_HEAD(&scb->reliable_send.reordered_completed_send_list);
 		if (conn->send_queue_last_seqnum) {
 			conn->send_queue_last_seqnum->next = skb;
 			skb->prev = conn->send_queue_last_seqnum;

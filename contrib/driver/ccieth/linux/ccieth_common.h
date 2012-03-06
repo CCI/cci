@@ -243,7 +243,15 @@ struct ccieth_skb_cb {
 				struct ccieth_driver_event *event; /* CCIETH_MSG_COMPLETION_EVENT */
 				struct ccieth_rcu_completion __rcu *completion; /* CCIETH_MSG_COMPLETION_BLOCKING */
 			};
-			struct list_head next_ordered_list;
+
+			/* RO sends that complete out of order are removed from the resend list
+			 * and queued after the last-previous-seqnum non-completed send.
+			 * When a RO send completes in order, it is notified before all sends
+			 * queued after it are notified as well.
+			 * For non-completed sends, this field is the head of queue.
+			 * For misordered completed RO sends, this field is the list element.
+			 */
+			struct list_head reordered_completed_send_list;
 		} reliable_send;
 	};
 };
