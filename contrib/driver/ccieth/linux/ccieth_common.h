@@ -15,6 +15,7 @@
 #include <linux/kref.h>
 #include <linux/workqueue.h>
 #include <linux/completion.h>
+#include <linux/netdevice.h>
 #include <linux/sched.h>
 #ifdef CONFIG_CCIETH_DEBUGFS
 #include <linux/debugfs.h>

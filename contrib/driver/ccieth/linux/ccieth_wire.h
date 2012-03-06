@@ -8,6 +8,8 @@
 #ifndef CCIETH_WIRE_H
 #define CCIETH_WIRE_H 1
 
+#include <linux/if_ether.h>
+
 #define ETH_P_CCI 0x86df
 
 union ccieth_pkt_header {
