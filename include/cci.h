@@ -757,6 +757,7 @@ CCI_DECLSPEC int cci_reject(cci_event_t *conn_req);
 
   \return CCI_SUCCESS   The request is buffered and ready to be sent or
                         has been sent.
+  \return CCI_EINVAL    data_len is strictly larger than CCI_CONN_REQ_LEN.
   \return Each driver may have additional error codes.
 
   \ingroup connection

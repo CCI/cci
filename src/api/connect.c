@@ -21,6 +21,9 @@ int cci_connect(cci_endpoint_t * endpoint, char *server_uri,
 		cci_conn_attribute_t attribute,
 		void *context, int flags, struct timeval *timeout)
 {
+	if (data_len > CCI_CONN_REQ_LEN)
+		return CCI_EINVAL;
+
 	/* NOTE the driver does all of the connection management
 	 * It allocates whatever it needs in addition to the cci__conn_t
 	 */
