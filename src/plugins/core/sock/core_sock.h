@@ -1097,6 +1097,44 @@ typedef struct sock_globals {
 	 TAILQ_HEAD(ka_conns, sock_conn) ka_conns;
 } sock_globals_t;
 
+/* Macro to initialize the structure of a device */
+#define INIT_CCI_DEVICE_STRUCT(device) { \
+        device->max_send_size = SOCK_DEFAULT_MSS; \
+        device->rate = 10000000000ULL; \
+        device->pci.domain = -1;    /* per CCI spec */ \
+        device->pci.bus = -1;       /* per CCI spec */ \
+        device->pci.dev = -1;       /* per CCI spec */ \
+        device->pci.func = -1;      /* per CCI spec */ \
+        device->up = 0; \
+    } while (0)
+
+#define INIT_CCI__DEV_STRUCT(dev,ret) do { \
+        cci_device_t *device; \
+        sock_dev_t *sdev; \
+        ret = CCI_SUCCESS; \
+        dev = calloc(1, sizeof(*dev)); \
+        if (!dev) \
+            ret = CCI_ENOMEM; \
+        dev->priv = calloc(1, sizeof(*sdev)); \
+        if (!dev->priv) { \
+            free(dev); \
+            ret = CCI_ENOMEM; \
+        } \
+        cci__init_dev(dev); \
+        device = &dev->device; \
+        INIT_CCI_DEVICE_STRUCT(device); \
+        sdev = dev->priv; \
+        TAILQ_INIT(&sdev->queued); \
+        TAILQ_INIT(&sdev->pending); \
+        sdev->is_progressing = 0; \
+        dev->driver = strdup("sock"); \
+    } while(0)
+
+typedef enum device_state {
+	IFACE_IS_DOWN = 0,
+	IFACE_IS_UP
+} core_sock_device_state_t;
+
 #ifndef FD_COPY
 #define FD_COPY(a,b) memcpy(a,b,sizeof(fd_set))
 #endif
@@ -1107,4 +1145,4 @@ int cci_core_sock_post_load(cci_plugin_t * me);
 int cci_core_sock_pre_unload(cci_plugin_t * me);
 
 END_C_DECLS
-#endif				/* CCI_CORE_SOCK_H */
+#endif /* CCI_CORE_SOCK_H */

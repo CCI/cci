@@ -15,7 +15,7 @@
 #pragma warning(disable:981)
 #pragma warning(disable:1338)
 #pragma warning(disable:2259)
-#endif				//   __INTEL_COMPILER
+#endif //   __INTEL_COMPILER
 
 #include "cci/config.h"
 
@@ -31,6 +31,13 @@
 #include <netdb.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <ifaddrs.h>
+#if defined(__linux__)
+#include <linux/if.h>
+#else
+#include <net/if.h>
+#include <net/if_dl.h>
+#endif
 
 #include "cci.h"
 #include "plugins/core/core.h"
@@ -204,6 +211,246 @@ static inline const char *sock_msg_type(sock_msg_type_t type)
 	return NULL;
 }
 
+static const char *sock_strerror(cci_endpoint_t * endpoint,
+				 enum cci_status status)
+{
+	CCI_ENTER;
+
+	CCI_EXIT;
+	return NULL;
+}
+
+/**
+ * Display a NULL terminated array of devices
+ * @param[in]	devices	NULL terminated array of devices to display
+ */
+static inline void prettyprint_devices(cci_device_t ** devices)
+{
+	int i = 0;
+	cci_device_t *device;
+
+	if (devices == 0)
+		return;
+
+	while (devices[i] != NULL) {
+		device = devices[i];
+		printf("Index: %d\n", i);
+		printf("\t%s", device->name);
+		if (device->up == 1) {
+			/* All the device info is _not_ storing in the cci_device_t
+			   structure so we need to lookup the other structure in order to
+			   get all the data and display it */
+			sock_dev_t *sdev;
+			cci__dev_t *dev;
+			struct in_addr addr;
+			char *ip_str;
+
+			dev = container_of(device, cci__dev_t, device);
+			sdev = dev->priv;
+
+			addr.s_addr = sdev->ip;
+			ip_str = inet_ntoa(addr);
+			printf(" is up (%s)", ip_str);
+		} else {
+			printf(" is down");
+		}
+		printf("\n");
+		i++;
+	}
+}
+
+/**
+ * Lookup a device from an array of devices based on its name.
+ * @param[in]	ifa_name	Name of the device to add
+ * @param[in]	devices		NULL terminated array of devices
+ * @param[out]	dev			Pointer to the device structure when the device is
+ *							found in the array
+ * @return CCI_SUCCESS	Upon success
+ * @return CCI_ERROR	Upon error
+ */
+static inline int
+lookup_device(char *ifa_name, cci_device_t ** devices, cci_device_t ** dev)
+{
+	int i = 0;
+	cci_device_t *device;
+
+	if (ifa_name == NULL)
+		return CCI_ERROR;
+
+	if (devices == NULL) {
+		*dev = NULL;
+		return CCI_SUCCESS;
+	}
+
+	while (devices[i] != NULL && strcmp(ifa_name, devices[i]->name) != 0)
+		i++;
+
+	if (devices[i] == NULL)
+		*dev = NULL;
+	else
+		*dev = devices[i];
+
+	return CCI_SUCCESS;
+}
+
+/**
+ * Return the size of a NULL terminated array.
+ * @param[in]	array	NULL terminated array from which we want the size
+ * @return	-1	Fatal error
+ * @return	>=0	Size of the array
+ */
+static inline size_t get_array_size(cci_device_t ** array)
+{
+	size_t i = 0;
+
+	if (array == NULL)
+		return 0;
+
+	while (array[i] != NULL)
+		i++;
+
+	return i;
+}
+
+/**
+ * Store device data into the a of devices.
+ * @param[in]	ifa_name	Name of the device
+ * @param[in]	ip			IP address of the device (can be NULL)
+ * @param[in]	s			State of the device (i.e., up or down)
+ * @param[in,out]	list_devices	List of devices where to add the new device,
+ *									the list is NULL terminated.
+ * @return	CCI_SUCCESS Upon success
+ * @return	CCI_ERROR	Error occured
+ */
+static inline int
+store_device(char *ifa_name,
+	     char *ip,
+	     core_sock_device_state_t s, cci_device_t *** list_devices)
+{
+	int rc, count;
+	cci_device_t *device;
+	cci_device_t **devices;
+	size_t n;
+
+	devices = *list_devices;
+
+	rc = lookup_device(ifa_name, devices, &device);
+	if (rc != CCI_SUCCESS)
+		return CCI_ERROR;
+
+	if (device == NULL) {
+		cci__dev_t *dev;
+
+		/*
+		 * The device is not yet in the list, we add it and make sure the
+		 * list that is NULL terminated remain coherent
+		 */
+
+		INIT_CCI__DEV_STRUCT(dev, rc);
+		device = &dev->device;
+		device->name = strdup(ifa_name);
+		if (s == IFACE_IS_UP) {
+			/* We store in two different places the state (up or not) of the
+			   iface */
+			device->up = 1;
+			dev->is_up = 1;
+		}
+		TAILQ_INSERT_TAIL(&globals->devs, dev, entry);
+
+		/* The list is NULL terminated so we need to extend it in a coherent
+		   manner */
+		n = get_array_size(devices);
+		devices = realloc(devices, (n + 2) * sizeof(cci_device_t *));
+		devices[n + 1] = NULL;
+		devices[n] = device;
+	} else {
+		/* 
+		 * The device is already in the list, we simply update the data if we
+		 * have to 
+		 */
+		if (ip != NULL) {
+			sock_dev_t *sdev;
+			cci__dev_t *dev;
+
+			/*
+			 * If the IP is specified, we save it and specify the iface as up.
+			 */
+			dev = container_of(device, cci__dev_t, device);
+			sdev = dev->priv;
+			if (sdev == NULL)
+				return CCI_ERROR;
+			/* We store in two different places the state (up or not) of the
+			   iface */
+			dev->is_up = 1;
+			device->up = 1;
+			sdev->ip = inet_addr(ip);
+		}
+	}
+
+	*list_devices = devices;
+
+	return CCI_SUCCESS;
+}
+
+/*
+ * Generic function that loads the available network interfaces and store then
+ * in the appropriate data structure such as sglobals and globals
+ */
+static inline int load_devices(void)
+{
+	struct ifconf ifc;
+	struct ifreq *ifr;
+	struct ifaddrs *ifaddr;
+	struct ifaddrs *ifa;
+	int family;
+	int rc;
+	cci_device_t **list_devices = NULL;
+
+	if (getifaddrs(&ifaddr) == -1)
+		return CCI_ERROR;
+
+	list_devices = (cci_device_t **) sglobals->devices;
+
+	for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+		/* Do we already have data about this device? */
+		if (ifa->ifa_addr == NULL)
+			continue;
+
+		rc = store_device(ifa->ifa_name,
+				  NULL, IFACE_IS_DOWN, &list_devices);
+		if (rc != CCI_SUCCESS)
+			return CCI_ERROR;
+
+		family = ifa->ifa_addr->sa_family;
+
+        /* We only care about the IPv4 addresses at the moment */
+		if (family == AF_INET) {
+			struct sockaddr_in *s4;
+			void *in_addr;
+			char buf[INET_ADDRSTRLEN];
+			const char *s;
+
+			/* If we can get an IP, we update the data of that device */
+			s4 = (struct sockaddr_in *)ifa->ifa_addr;
+			s = inet_ntop(ifa->ifa_addr->sa_family,
+				      &s4->sin_addr, buf, sizeof(buf));
+			if (s != NULL) {
+				rc = store_device(ifa->ifa_name,
+						  (char *)buf,
+						  IFACE_IS_UP, &list_devices);
+				if (rc != CCI_SUCCESS)
+					return CCI_ERROR;
+			}
+		}
+	}
+
+	sglobals->count = get_array_size(list_devices);
+
+	freeifaddrs(ifaddr);
+
+	return CCI_SUCCESS;
+}
+
 static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	int ret;
@@ -234,50 +481,10 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	}
 
 	if (!configfile) {
-		/* create a loopback device for now */
-		cci_device_t *device;
-		sock_dev_t *sdev;
-
-		dev = calloc(1, sizeof(*dev));
-		if (!dev) {
-			ret = CCI_ENOMEM;
-			goto out;
-		}
-		dev->priv = calloc(1, sizeof(*sdev));
-		if (!dev->priv) {
-			free(dev);
-			ret = CCI_ENOMEM;
-			goto out;
-		}
-
-		cci__init_dev(dev);
-
-		device = &dev->device;
-		device->max_send_size = SOCK_DEFAULT_MSS;
-		device->name = strdup("loopback");
-
-		device->rate = 10000000000ULL;
-		device->pci.domain = -1;    /* per CCI spec */
-		device->pci.bus = -1;       /* per CCI spec */
-		device->pci.dev = -1;       /* per CCI spec */
-		device->pci.func = -1;      /* per CCI spec */
-
-		sdev = dev->priv;
-		TAILQ_INIT(&sdev->queued);
-		TAILQ_INIT(&sdev->pending);
-		sdev->is_progressing = 0;
-		sdev->ip = inet_addr("127.0.0.1"); /* network order */
-
-		dev->driver = strdup("sock");
-		dev->is_up = 1;
-		dev->is_default = 1;
-		TAILQ_INSERT_TAIL(&globals->devs, dev, entry);
-		devices[sglobals->count] = device;
-		sglobals->count++;
-
+		load_devices();
 	} else
-	/* find devices that we own */
-	TAILQ_FOREACH(dev, &globals->devs, entry) {
+		/* find devices that we own */
+		TAILQ_FOREACH(dev, &globals->devs, entry) {
 		if (0 == strcmp("sock", dev->driver)) {
 			const char **arg;
 			cci_device_t *device;
@@ -336,7 +543,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
 			/* TODO determine if IP is available and up */
 		}
-	}
+		}
 
 	devices =
 	    realloc(devices, (sglobals->count + 1) * sizeof(cci_device_t *));
@@ -355,12 +562,14 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	CCI_EXIT;
 	return CCI_SUCCESS;
 
-      out:
+out:
 	if (devices) {
+		int i = 0;
 		cci_device_t const *device;
 		cci__dev_t *my_dev;
 
-		for (device = devices[0]; device != NULL; device++) {
+		while (devices[i] != NULL) {
+			device = devices[i];
 			my_dev = container_of(device, cci__dev_t, device);
 			if (my_dev->priv)
 				free(my_dev->priv);
@@ -375,15 +584,6 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	return ret;
 }
 
-static const char *sock_strerror(cci_endpoint_t * endpoint,
-				 enum cci_status status)
-{
-	CCI_ENTER;
-
-	CCI_EXIT;
-	return NULL;
-}
-
 static int sock_get_devices(cci_device_t const ***devices)
 {
 	CCI_ENTER;
@@ -393,8 +593,9 @@ static int sock_get_devices(cci_device_t const ***devices)
 		return CCI_ENODEV;
 	}
 
-/* FIXME: update the devices list (up field, ...).
-   add new devices if !configfile */
+	if (!configfile) {
+		load_devices();
+	}
 
 	*devices = sglobals->devices;
 
@@ -623,7 +824,7 @@ static int sock_create_endpoint(cci_device_t * device,
 	CCI_EXIT;
 	return CCI_SUCCESS;
 
-      out:
+out:
 	pthread_mutex_lock(&dev->lock);
 	if (!TAILQ_EMPTY(&dev->eps)) {
 		TAILQ_REMOVE(&dev->eps, ep, entry);
@@ -1072,7 +1273,7 @@ static int sock_reject(union cci_event *event)
 	debug((CCI_DB_MSG | CCI_DB_CONN), "ep %d sending reject to %s",
 	      sep->sock, name);
 
-      out:
+out:
 	CCI_EXIT;
 	return ret;
 }
@@ -1359,7 +1560,7 @@ static int sock_connect(cci_endpoint_t * endpoint, char *server_uri,
 	CCI_EXIT;
 	return CCI_SUCCESS;
 
-      out:
+out:
 	if (conn) {
 		if (conn->uri)
 			free((char *)conn->uri);
@@ -1697,6 +1898,9 @@ static void sock_progress_pending(cci__dev_t * dev)
 		if (SOCK_U64_LT(tx->timeout_us, now)) {
 			/* dequeue */
 
+			debug(CCI_DB_WARN, "%s: timeout of %s msg",
+			      __func__, sock_msg_type(tx->msg_type));
+
 			TAILQ_REMOVE(&sdev->pending, tx, dentry);
 
 			/* set status and add to completed events */
@@ -1716,14 +1920,13 @@ static void sock_progress_pending(cci__dev_t * dev)
 					    CCI_CONN_ATTR_RO) {
 						sock_tx_t *my_temp_tx;
 						TAILQ_FOREACH_SAFE(my_temp_tx,
-								   &sdev->
-								   pending,
+								   &sdev->pending,
 								   dentry,
 								   tmp) {
 							if (my_temp_tx->seq >
 							    tx->seq)
-								my_temp_tx->
-								    rnr = 1;
+								my_temp_tx->rnr
+								    = 1;
 						}
 					}
 				}
@@ -1744,8 +1947,8 @@ static void sock_progress_pending(cci__dev_t * dev)
 					if (conn->uri)
 						free((char *)conn->uri);
 					sconn->status = SOCK_CONN_CLOSING;
-					i = sock_ip_hash(sconn->sin.
-							 sin_addr.s_addr, 0);
+					i = sock_ip_hash(sconn->sin.sin_addr.
+							 s_addr, 0);
 					active_list = &sep->active_hash[i];
 					pthread_mutex_lock(&ep->lock);
 					TAILQ_REMOVE(active_list, sconn, entry);
@@ -1813,7 +2016,8 @@ static void sock_progress_pending(cci__dev_t * dev)
 		if (ret != tx->len) {
 			debug((CCI_DB_MSG | CCI_DB_INFO),
 			      "sendto() failed with %s",
-			      cci_strerror(&ep->endpoint, (enum cci_status)errno));
+			      cci_strerror(&ep->endpoint,
+					   (enum cci_status)errno));
 			continue;
 		}
 	}
@@ -1891,8 +2095,8 @@ static void sock_progress_queued(cci__dev_t * dev)
 
 		if (tx->last_attempt_us == 0ULL) {
 			timeout =
-			    conn->tx_timeout ? conn->
-			    tx_timeout : ep->tx_timeout;
+			    conn->tx_timeout ? conn->tx_timeout : ep->
+			    tx_timeout;
 			tx->timeout_us = now + (uint64_t) timeout;
 		}
 
@@ -2908,16 +3112,16 @@ sock_handle_ack(sock_conn_t * sconn,
 						   if the receiver was always ready to receive, the 
 						   complete the send with a success status. Otherwise,
 						   we complete the send with a RNR status */
-						if (conn->
-						    connection.attribute ==
+						if (conn->connection.
+						    attribute ==
 						    CCI_CONN_ATTR_RO
 						    && tx->rnr != 0) {
-							tx->evt.event.
-							    send.status =
+							tx->evt.event.send.
+							    status =
 							    CCI_ERR_RNR;
 						} else {
-							tx->evt.event.
-							    send.status =
+							tx->evt.event.send.
+							    status =
 							    CCI_SUCCESS;
 						}
 						/* store locally until we can drop the locks */
@@ -2967,16 +3171,16 @@ sock_handle_ack(sock_conn_t * sconn,
 						   if the receiver was always ready to receive, the 
 						   complete the send with a success status. Otherwise,
 						   we complete the send with a RNR status */
-						if (conn->
-						    connection.attribute ==
+						if (conn->connection.
+						    attribute ==
 						    CCI_CONN_ATTR_RO
 						    && tx->rnr != 0) {
-							tx->evt.event.
-							    send.status =
+							tx->evt.event.send.
+							    status =
 							    CCI_ERR_RNR;
 						} else {
-							tx->evt.event.
-							    send.status =
+							tx->evt.event.send.
+							    status =
 							    CCI_SUCCESS;
 						}
 						/* store locally until we can drop the locks */
@@ -3018,8 +3222,7 @@ sock_handle_ack(sock_conn_t * sconn,
 								     __func__,
 								     sconn->cwnd
 								     - 1,
-								     sconn->
-								     cwnd);
+								     sconn->cwnd);
 							} else {
 								sconn->cwnd++;
 							}
@@ -3041,24 +3244,23 @@ sock_handle_ack(sock_conn_t * sconn,
 							   complete the send with a success status.
 							   Otherwise, we complete the send with a RNR status
 							 */
-							if (conn->
-							    connection.attribute
-							    == CCI_CONN_ATTR_RO
+							if (conn->connection.
+							    attribute ==
+							    CCI_CONN_ATTR_RO
 							    && tx->rnr != 0) {
-								tx->evt.
-								    event.send.
-								    status =
+								tx->evt.event.
+								    send.status
+								    =
 								    CCI_ERR_RNR;
 							} else {
-								tx->evt.
-								    event.send.
-								    status =
+								tx->evt.event.
+								    send.status
+								    =
 								    CCI_SUCCESS;
 							}
 							/* store locally until we can drop the dev->lock */
 							TAILQ_INSERT_TAIL(&evts,
-									  &tx->
-									  evt,
+									  &tx->evt,
 									  entry);
 						}
 					}
@@ -3083,8 +3285,8 @@ sock_handle_ack(sock_conn_t * sconn,
 		rma_op = tx->rma_op;
 		if (rma_op && rma_op->status == CCI_SUCCESS) {
 			sock_rma_handle_t *local =
-			    (sock_rma_handle_t *) ((uintptr_t) rma_op->
-						   local_handle);
+			    (sock_rma_handle_t *) ((uintptr_t)
+						   rma_op->local_handle);
 			rma_op->completed++;
 
 			/* progress RMA */
@@ -3358,7 +3560,8 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,	/* NULL if rejected */
 				debug((CCI_DB_CONN | CCI_DB_MSG),
 				      "ep %d failed to send conn_ack with %s",
 				      sep->sock,
-				      cci_strerror(&ep->endpoint, (enum cci_status)ret));
+				      cci_strerror(&ep->endpoint,
+						   (enum cci_status)ret));
 			}
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
@@ -3428,8 +3631,8 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,	/* NULL if rejected */
 		if (cci_conn_is_reliable(conn)) {
 			sconn->max_tx_cnt =
 			    max_recv_buffer_count <
-			    ep->
-			    tx_buf_cnt ? max_recv_buffer_count : ep->tx_buf_cnt;
+			    ep->tx_buf_cnt ? max_recv_buffer_count : ep->
+			    tx_buf_cnt;
 			sconn->ssthresh = sconn->max_tx_cnt;
 		}
 
@@ -3490,7 +3693,8 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,	/* NULL if rejected */
 				debug((CCI_DB_CONN | CCI_DB_MSG),
 				      "ep %d failed to send conn_ack with %s",
 				      sep->sock,
-				      cci_strerror(&ep->endpoint, (enum cci_status)ret));
+				      cci_strerror(&ep->endpoint,
+						   (enum cci_status)ret));
 			}
 		}
 		/* add rx->evt to ep->evts */
@@ -3815,7 +4019,7 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 	debug(CCI_DB_INFO, "%s: copying data into target buffer", __func__);
 	memcpy(remote->start + (uintptr_t) remote_offset, &write->data, len);
 
-      out:
+out:
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
 	pthread_mutex_unlock(&ep->lock);
@@ -4124,7 +4328,7 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		      (enum sock_msg_type)type);
 	}
 
-      out:
+out:
 	if (q_rx) {
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
@@ -4403,7 +4607,8 @@ static void *sock_progress_thread(void *arg)
 	pthread_mutex_lock(&globals->lock);
 	while (!sock_shut_down) {
 		cci__dev_t *dev;
-		cci_device_t const **device;
+		cci_device_t const *device;
+		int i = 0;
 
 		pthread_mutex_unlock(&globals->lock);
 
@@ -4413,9 +4618,13 @@ static void *sock_progress_thread(void *arg)
 		sock_keepalive();
 
 		/* for each device, try progressing */
-		for (device = sglobals->devices; *device != NULL; device++) {
-			dev = container_of(*device, cci__dev_t, device);
-			sock_progress_dev(dev);
+		while (sglobals->devices[i] != NULL) {
+			if (sglobals->devices[i]->up == 1) {
+				device = sglobals->devices[i];
+				dev = container_of(device, cci__dev_t, device);
+				sock_progress_dev(dev);
+			}
+			i++;
 		}
 		select(0, NULL, NULL, NULL, &tv);
 		pthread_mutex_lock(&globals->lock);
@@ -4476,7 +4685,7 @@ static void *sock_recv_thread(void *arg)
 			}
 			i = (i + 1) % nfds;
 		} while (i != start);
-	      relock:
+relock:
 		pthread_mutex_lock(&globals->lock);
 	}
 	pthread_mutex_unlock(&globals->lock);
