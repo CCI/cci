@@ -955,17 +955,34 @@ static int eth_send(cci_connection_t * connection,
 		return errno;
 	}
 
-	/* FIXME: implement flags */
-
 	return CCI_SUCCESS;
 }
 
 static int eth_sendv(cci_connection_t * connection,
-		     struct iovec *data, uint32_t iovcnt,
+		     struct iovec *iov_ptr, uint32_t iov_len,
 		     void *context, int flags)
 {
-	printf("In eth_sendv\n");
-	return CCI_ERR_NOT_IMPLEMENTED;
+	void *buffer;
+	size_t length, offset;
+	unsigned i;
+	int ret;
+
+	for(i = 0, length = 0;
+	    i < iov_len;
+	    length += iov_ptr[i].iov_len, i++);
+
+	buffer = malloc(length);
+	if (!buffer)
+		return CCI_ENOMEM;
+
+	for(i = 0, offset = 0; i < iov_len; offset += iov_ptr[i].iov_len, i++)
+		memcpy(buffer + offset, iov_ptr[i].iov_base, iov_ptr[i].iov_len);
+
+	ret = cci_send(connection, buffer, length, context, flags);
+
+	free(buffer);
+
+	return ret;
 }
 
 static int eth_rma_register(cci_endpoint_t * endpoint,
