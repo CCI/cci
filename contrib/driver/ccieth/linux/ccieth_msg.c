@@ -116,13 +116,16 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32
 
 		dprintk("no need to resend MSG %u anymore\n", scb->reliable_send.seqnum);
 
-		if (unlikely(ordered && prev_queue)) {
-			/* cannot complete now, need to wait for previous to be done */
+		if (unlikely(ordered && prev_queue
+			     && scb->reliable_send.completion_type != CCIETH_MSG_COMPLETION_SILENT)) {
+			/* cannot report completion now, need to wait for previous to be done.
+			 * we can safely let SILENT be destroyed because there's another one to wait for (prev_queue)
+			 */
 			list_add_tail(&scb->reliable_send.next_ordered_list, prev_queue);
 			CCIETH_STAT_INC(conn, send_reordered_event);
 		} else {
 			struct ccieth_skb_cb *cscb, *nscb;
-			/* complete now */
+			/* report completion now */
 			ccieth_complete_reliable_send_scb(conn, scb);
 			/* dequeue queued events */
 			list_for_each_entry_safe(cscb, nscb, &scb->reliable_send.next_ordered_list, reliable_send.next_ordered_list) {
