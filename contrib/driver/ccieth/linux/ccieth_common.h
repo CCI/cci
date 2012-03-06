@@ -231,8 +231,8 @@ struct ccieth_skb_cb {
 			__u8 type;
 		} connect;
 		struct {
-			__u32 seqnum;
 			unsigned long resend_jiffies;
+			__u32 seqnum;
 			enum ccieth_msg_completion_type {
 				CCIETH_MSG_COMPLETION_EVENT,
 				CCIETH_MSG_COMPLETION_BLOCKING,
