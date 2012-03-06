@@ -122,7 +122,12 @@ ccieth_conn_handle_ack(struct ccieth_connection *conn, __u32 acked_seqnum, __u32
 			 * If this RO send is silent, we can destroy it immediately because prev_queue!=NULL guarantee that next
 			 * sends will get queued properly instead of completing out-of-order.
 			 */
-			list_add_tail(&scb->reliable_send.reordered_completed_send_list, prev_queue);
+			/* we'd need a splice that doesn't remove the head scb->reliable_send.reordered_completed_send_list */
+			struct list_head *first = &scb->reliable_send.reordered_completed_send_list, *last = first->prev;
+			prev_queue->prev->next = first;
+			first->prev = prev_queue->prev;
+			prev_queue->prev = last;
+			last->next = prev_queue;
 			CCIETH_STAT_INC(conn, send_reordered_event);
 		} else {
 			struct ccieth_skb_cb *cscb, *nscb;
