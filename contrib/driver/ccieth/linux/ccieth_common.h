@@ -337,7 +337,7 @@ ccieth_pkt_ack_status_to_errno(__u8 status)
 {
 	switch (status) {
 	case CCIETH_PKT_ACK_SUCCESS: return 0;
-	case CCIETH_PKT_ACK_INVALID: return EINVAL; /* FIXME: only occurs if connect data is too large for remote peer */
+	case CCIETH_PKT_ACK_INVALID: return EINVAL; /* only occurs if connect data is too large for remote peer, user-space should return EINVAL earlier */
 	case CCIETH_PKT_ACK_NO_ENDPOINT: return EINVAL; /* FIXME: ECONNREFUSED actually looks better but already used for reject() */
 	case CCIETH_PKT_ACK_NO_CONNECTION: return EINVAL; /* FIXME: ECONNRESET? */
 	default: return EIO;
