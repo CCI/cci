@@ -375,6 +375,7 @@ ccieth_msg_unreliable(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	struct net_device *ifp;
 	struct ccieth_pkt_header_msg *hdr;
 	struct ccieth_connection *conn;
+	struct ccieth_driver_event *event = NULL;
 	size_t skblen;
 	int err;
 
@@ -419,6 +420,21 @@ ccieth_msg_unreliable(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	if (unlikely(arg->flags & CCIETH_MSG_FLAG_RELIABLE))
 		goto out_with_rculock;
 
+	if (likely(!(arg->flags & CCIETH_MSG_FLAG_SILENT))) {
+		event = ccieth_get_free_event(ep);
+		if (unlikely(!event)) {
+			err = -ENOBUFS;
+			dprintk("ccieth: no event slot for send\n");
+			goto out_with_rculock;
+		}
+		/* setup the event */
+		event->event.type = CCIETH_IOCTL_EVENT_SEND;
+		event->event.data_length = 0;
+		event->event.send.status = 0;
+		event->event.send.user_conn_id = conn->user_conn_id;
+		event->event.send.context = arg->context;
+	}
+
 	/* fill headers */
 	memcpy(&hdr->eth.h_dest, &conn->dest_addr, 6);
 	memcpy(&hdr->eth.h_source, ep->addr, 6);
@@ -438,6 +454,10 @@ ccieth_msg_unreliable(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	dev_queue_xmit(skb);
 
 	rcu_read_unlock();
+
+	if (event)
+		/* notify the event */
+		ccieth_queue_busy_event(ep, event);
 
 	return err;
 
