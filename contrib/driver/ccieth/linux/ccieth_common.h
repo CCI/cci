@@ -274,7 +274,8 @@ extern int ccieth_defer_connect_recv(struct net_device *ifp, __u8 type, struct s
 
 extern int ccieth_msg_resend(struct ccieth_connection *conn);
 
-extern int ccieth_msg(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg);
+extern int ccieth_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg);
+extern int ccieth_msg_unreliable(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg);
 extern int ccieth_msg_ack(struct ccieth_connection *conn);
 
 extern void ccieth_abort_reliable_send_scb(struct ccieth_connection *conn, struct ccieth_skb_cb *scb, int error);

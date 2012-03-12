@@ -452,7 +452,10 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		if (ret)
 			return -EFAULT;
 
-		ret = ccieth_msg(ep, &ms_arg);
+		if (ms_arg.flags & CCIETH_MSG_FLAG_RELIABLE)
+			ret = ccieth_msg_reliable(ep, &ms_arg);
+		else
+			ret = ccieth_msg_unreliable(ep, &ms_arg);
 		if (ret < 0)
 			return ret;
 
