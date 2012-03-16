@@ -2,6 +2,7 @@
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright © 2010-2012 UT-Battelle, LLC. All rights reserved.
  * Copyright © 2010-2012 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -54,18 +55,18 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
 static int sock_finalize(void);
 static const char *sock_strerror(cci_endpoint_t * endpoint,
 				 enum cci_status status);
-static int sock_get_devices(cci_device_t const ***devices);
+static int sock_get_devices(cci_device_t * const **devices);
 static int sock_create_endpoint(cci_device_t * device,
 				int flags,
 				cci_endpoint_t ** endpoint,
 				cci_os_handle_t * fd);
 static int sock_destroy_endpoint(cci_endpoint_t * endpoint);
-static int sock_accept(union cci_event *event, void *context);
-static int sock_reject(union cci_event *conn_req);
-static int sock_connect(cci_endpoint_t * endpoint, char *server_uri,
-			void *data_ptr, uint32_t data_len,
+static int sock_accept(cci_event_t *event, const void *context);
+static int sock_reject(cci_event_t *conn_req);
+static int sock_connect(cci_endpoint_t * endpoint, const char *server_uri,
+			const void *data_ptr, uint32_t data_len,
 			cci_conn_attribute_t attribute,
-			void *context, int flags, struct timeval *timeout);
+			const void *context, int flags, const struct timeval *timeout);
 static int sock_disconnect(cci_connection_t * connection);
 static int sock_set_opt(cci_opt_handle_t * handle,
 			cci_opt_level_t level,
@@ -78,10 +79,10 @@ static int sock_get_event(cci_endpoint_t * endpoint,
 			  cci_event_t ** const event);
 static int sock_return_event(cci_event_t * event);
 static int sock_send(cci_connection_t * connection,
-		     void *msg_ptr, uint32_t msg_len, void *context, int flags);
+		     const void *msg_ptr, uint32_t msg_len, const void *context, int flags);
 static int sock_sendv(cci_connection_t * connection,
-		      struct iovec *data, uint32_t iovcnt,
-		      void *context, int flags);
+		      const struct iovec *data, uint32_t iovcnt,
+		      const void *context, int flags);
 static int sock_rma_register(cci_endpoint_t * endpoint,
 			     cci_connection_t * connection,
 			     void *start, uint64_t length,
@@ -91,7 +92,7 @@ static int sock_rma(cci_connection_t * connection,
 		    void *header_ptr, uint32_t header_len,
 		    uint64_t local_handle, uint64_t local_offset,
 		    uint64_t remote_handle, uint64_t remote_offset,
-		    uint64_t data_len, void *context, int flags);
+		    uint64_t data_len, const void *context, int flags);
 
 static uint8_t sock_ip_hash(in_addr_t ip, uint16_t port);
 static void sock_progress_sends(cci__dev_t * dev);
@@ -235,7 +236,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
 	if (!configfile) {
 		/* create a loopback device for now */
-		cci_device_t *device;
+		struct cci_device *device;
 		sock_dev_t *sdev;
 
 		dev = calloc(1, sizeof(*dev));
@@ -279,8 +280,8 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	/* find devices that we own */
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
 		if (0 == strcmp("sock", dev->driver)) {
-			const char **arg;
-			cci_device_t *device;
+			const char * const *arg;
+			struct cci_device *device;
 			sock_dev_t *sdev;
 
 			device = &dev->device;
@@ -384,7 +385,7 @@ static const char *sock_strerror(cci_endpoint_t * endpoint,
 	return NULL;
 }
 
-static int sock_get_devices(cci_device_t const ***devices)
+static int sock_get_devices(cci_device_t * const **devices)
 {
 	CCI_ENTER;
 
@@ -487,13 +488,14 @@ static inline void sock_close_socket(cci_os_handle_t sock)
 
 static int sock_create_endpoint(cci_device_t * device,
 				int flags,
-				cci_endpoint_t ** endpoint,
+				cci_endpoint_t ** endpointp,
 				cci_os_handle_t * fd)
 {
 	int i, ret;
 	cci__dev_t *dev = NULL;
 	cci__ep_t *ep = NULL;
 	sock_ep_t *sep = NULL;
+	struct cci_endpoint *endpoint = (struct cci_endpoint *) *endpointp;
 	sock_dev_t *sdev;
 	struct sockaddr_in sin;
 	socklen_t slen;
@@ -512,14 +514,14 @@ static int sock_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 
-	ep = container_of(*endpoint, cci__ep_t, endpoint);
+	ep = container_of(endpoint, cci__ep_t, endpoint);
 	ep->priv = calloc(1, sizeof(*sep));
 	if (!ep->priv) {
 		ret = CCI_ENOMEM;
 		goto out;
 	}
 
-	(*endpoint)->max_recv_buffer_count = SOCK_EP_RX_CNT;
+	endpoint->max_recv_buffer_count = SOCK_EP_RX_CNT;
 	ep->rx_buf_cnt = SOCK_EP_RX_CNT;
 	ep->tx_buf_cnt = SOCK_EP_TX_CNT;
 	ep->buffer_len = dev->device.max_send_size + SOCK_MAX_HDRS;
@@ -560,7 +562,7 @@ static int sock_create_endpoint(cci_device_t * device,
 	memset(name, 0, sizeof(name));
 	sprintf(name, "ip://");
 	sock_sin_to_name(sep->sin, name + (uintptr_t) 5, sizeof(name) - 5);
-	*((char **)&ep->endpoint.name) = strdup(name);
+	endpoint->name = strdup(name);
 
 	for (i = 0; i < SOCK_EP_HASH_SIZE; i++) {
 		TAILQ_INIT(&sep->conn_hash[i]);
@@ -656,7 +658,7 @@ static int sock_create_endpoint(cci_device_t * device,
 	}
 	if (ep)
 		free(ep);
-	*endpoint = NULL;
+	*endpointp = NULL;
 	CCI_EXIT;
 	return ret;
 }
@@ -812,7 +814,7 @@ static uint8_t sock_ip_hash(in_addr_t ip, uint16_t port)
 	return (port & 0x00FF) ^ ((port & 0xFF00) >> 8);
 }
 
-static int sock_accept(union cci_event *event, void *context)
+static int sock_accept(cci_event_t *event, const void *context)
 {
 	uint8_t a;
 	uint16_t b;
@@ -885,7 +887,7 @@ static int sock_accept(union cci_event *event, void *context)
 
 	conn->connection.attribute = (enum cci_conn_attribute)a;
 	conn->connection.endpoint = endpoint;
-	conn->connection.context = context;
+	conn->connection.context = (void *)context;
 	conn->connection.max_send_size = dev->device.max_send_size;
 
 	hs = (sock_handshake_t *) (rx->buffer +
@@ -942,7 +944,7 @@ static int sock_accept(union cci_event *event, void *context)
 	evt->conn = conn;
 	evt->event.type = CCI_EVENT_ACCEPT;
 	evt->event.accept.status = CCI_SUCCESS;	/* for now */
-	evt->event.accept.context = context;
+	evt->event.accept.context = (void *)context;
 	evt->event.accept.connection = &conn->connection;
 
 	/* pack the msg */
@@ -983,7 +985,7 @@ static int sock_accept(union cci_event *event, void *context)
  * We cannot use the event's buffer since the app will most likely return the
  * event before we get an ack from the client. We will get a tx for the reply.
  */
-static int sock_reject(union cci_event *event)
+static int sock_reject(cci_event_t *event)
 {
 	int ret = CCI_SUCCESS;
 	uint8_t a;
@@ -1179,10 +1181,10 @@ static sock_conn_t *sock_find_conn(sock_ep_t * sep, in_addr_t ip, uint16_t port,
 	}
 }
 
-static int sock_connect(cci_endpoint_t * endpoint, char *server_uri,
-			void *data_ptr, uint32_t data_len,
+static int sock_connect(cci_endpoint_t * endpoint, const char *server_uri,
+			const void *data_ptr, uint32_t data_len,
 			cci_conn_attribute_t attribute,
-			void *context, int flags, struct timeval *timeout)
+			const void *context, int flags, const struct timeval *timeout)
 {
 	int ret;
 	int i;
@@ -1195,7 +1197,7 @@ static int sock_connect(cci_endpoint_t * endpoint, char *server_uri,
 	sock_tx_t *tx = NULL;
 	sock_header_r_t *hdr_r = NULL;
 	cci__evt_t *evt = NULL;
-	cci_connection_t *connection = NULL;
+	struct cci_connection *connection = NULL;
 	struct sockaddr_in *sin = NULL;
 	void *ptr = NULL;
 	in_addr_t ip;
@@ -1235,7 +1237,7 @@ static int sock_connect(cci_endpoint_t * endpoint, char *server_uri,
 	connection = &conn->connection;
 	connection->attribute = attribute;
 	connection->endpoint = endpoint;
-	connection->context = context;
+	connection->context = (void *)context;
 
 	/* set up sock specific info */
 
@@ -1297,7 +1299,7 @@ static int sock_connect(cci_endpoint_t * endpoint, char *server_uri,
 	evt->conn = conn;
 	evt->event.type = CCI_EVENT_CONNECT;	/* for now */
 	evt->event.connect.status = CCI_SUCCESS;
-	evt->event.connect.context = context;
+	evt->event.connect.context = (void *)context;
 	evt->event.connect.connection = connection;
 
 	/* pack the msg */
@@ -1654,7 +1656,7 @@ static void sock_progress_pending(cci__dev_t * dev)
 	uint64_t now;
 	sock_tx_t *tx, *tmp;
 	cci__evt_t *evt;
-	cci_event_t *event;	/* generic CCI event */
+	union cci_event *event;	/* generic CCI event */
 	cci_connection_t *connection;	/* generic CCI connection */
 	cci__conn_t *conn;
 	sock_conn_t *sconn;
@@ -1857,7 +1859,7 @@ static void sock_progress_queued(cci__dev_t * dev)
 	sock_ep_t *sep;
 	sock_conn_t *sconn;
 	sock_dev_t *sdev = dev->priv;
-	cci_event_t *event;	/* generic CCI event */
+	union cci_event *event;	/* generic CCI event */
 	cci_connection_t *connection;	/* generic CCI connection */
 	cci_endpoint_t *endpoint;	/* generic CCI endpoint */
 
@@ -2060,14 +2062,14 @@ static void sock_progress_sends(cci__dev_t * dev)
 }
 
 static int sock_send(cci_connection_t * connection,
-		     void *msg_ptr, uint32_t msg_len, void *context, int flags)
+		     const void *msg_ptr, uint32_t msg_len, const void *context, int flags)
 {
 	uint32_t iovcnt = 0;
 	struct iovec iov = { NULL, 0 };
 
 	if (msg_ptr && msg_len) {
 		iovcnt = 1;
-		iov.iov_base = msg_ptr;
+		iov.iov_base = (void *) msg_ptr;
 		iov.iov_len = msg_len;
 	}
 
@@ -2075,8 +2077,8 @@ static int sock_send(cci_connection_t * connection,
 }
 
 static int sock_sendv(cci_connection_t * connection,
-		      struct iovec *data, uint32_t iovcnt,
-		      void *context, int flags)
+		      const struct iovec *data, uint32_t iovcnt,
+		      const void *context, int flags)
 {
 	int i, ret, is_reliable = 0, data_len = 0;
 	char *func = iovcnt < 2 ? "send" : "sendv";
@@ -2091,7 +2093,7 @@ static int sock_sendv(cci_connection_t * connection,
 	sock_header_t *hdr;
 	void *ptr;
 	cci__evt_t *evt;
-	cci_event_t *event;	/* generic CCI event */
+	union cci_event *event;	/* generic CCI event */
 
 	debug(CCI_DB_FUNC, "entering %s", func);
 
@@ -2148,7 +2150,7 @@ static int sock_sendv(cci_connection_t * connection,
 	event = &evt->event;
 	event->type = CCI_EVENT_SEND;
 	event->send.connection = connection;
-	event->send.context = context;
+	event->send.context = (void *)context;
 	event->send.status = CCI_SUCCESS;	/* for now */
 
 	/* pack buffer */
@@ -2352,7 +2354,7 @@ static int sock_rma_deregister(uint64_t rma_handle)
  */
 #define CONTEXTS_BLOCK_SIZE 10
 static inline void
-generate_context_id(sock_conn_t * sconn, void *context, uint64_t * context_id)
+generate_context_id(sock_conn_t * sconn, const void *context, uint64_t * context_id)
 {
 	uint64_t index = 0;
 
@@ -2393,7 +2395,7 @@ static int sock_rma(cci_connection_t * connection,
 		    void *msg_ptr, uint32_t msg_len,
 		    uint64_t local_handle, uint64_t local_offset,
 		    uint64_t remote_handle, uint64_t remote_offset,
-		    uint64_t data_len, void *context, int flags)
+		    uint64_t data_len, const void *context, int flags)
 {
 	int ret = CCI_ERR_NOT_IMPLEMENTED;
 	cci__ep_t *ep = NULL;
@@ -2468,7 +2470,7 @@ static int sock_rma(cci_connection_t * connection,
 		rma_op->num_msgs++;
 	rma_op->completed = 0;
 	rma_op->status = CCI_SUCCESS;	/* for now */
-	rma_op->context = context;
+	rma_op->context = (void *)context;
 	rma_op->flags = flags;
 	rma_op->msg_len = (uint16_t) msg_len;
 	rma_op->tx = NULL;
@@ -2744,7 +2746,7 @@ sock_handle_active_message(sock_conn_t * sconn,
 	cci__evt_t *evt;
 	cci__conn_t *conn = sconn->conn;
 	sock_header_t *hdr;	/* wire header */
-	cci_event_t *event;	/* generic CCI event */
+	union cci_event *event;	/* generic CCI event */
 	cci_endpoint_t *endpoint;	/* generic CCI endpoint */
 	cci__ep_t *ep;
 
@@ -2763,17 +2765,17 @@ sock_handle_active_message(sock_conn_t * sconn,
 
 	/* setup the generic event for the application */
 
-	event = (cci_event_t *) & evt->event;
+	event = & evt->event;
 	event->type = CCI_EVENT_RECV;
-	*((uint32_t *) & event->recv.len) = len;
-	*((void **)&event->recv.ptr) = (void *)&hdr->data;
+	event->recv.len = len;
+	event->recv.ptr = (void *)&hdr->data;
 	event->recv.connection = &conn->connection;
 
 	/* if a reliable connection, handle the ack */
 
 	if (cci_conn_is_reliable(conn)) {
 		sock_header_r_t *hdr_r = (sock_header_r_t *) rx->buffer;
-		*((void **)&event->recv.ptr) = (void *)&hdr_r->data;
+		event->recv.ptr = (void *)&hdr_r->data;
 
 	}
 
@@ -3321,7 +3323,7 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,	/* NULL if rejected */
 	sock_dev_t *sdev = NULL;
 	sock_tx_t *tx = NULL, *tmp = NULL, *t = NULL;
 	sock_header_r_t *hdr_r;	/* wire header */
-	cci_event_t *event;	/* generic CCI event */
+	union cci_event *event;	/* generic CCI event */
 	uint32_t seq;		/* peer's seq */
 	uint32_t ts;		/* FIXME our original seq */
 	sock_handshake_t *hs = NULL;
@@ -3439,7 +3441,7 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,	/* NULL if rejected */
 
 		/* setup the generic event for the application */
 
-		event = (cci_event_t *) & evt->event;
+		event = & evt->event;
 		event->type = CCI_EVENT_CONNECT;
 		event->connect.status = reply;
 		event->connect.connection =
@@ -3826,11 +3828,11 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 /* Based on a context ID, we get the corresponding context. This is mainly
    used for RMA reads, not for RMA writes. */
 static inline void
-lookup_contextid(sock_conn_t * sconn, uint64_t context_id, void **context)
+lookup_contextid(sock_conn_t * sconn, uint64_t context_id, const void **context)
 {
 	/* Remember, the unique ID is actually the index in the array we use to
 	   track the different contexts used in context of RMA read operations. */
-	void *c;
+	const void *c;
 
 	if (sconn->rma_contexts == NULL) {
 		*context = NULL;
@@ -3850,12 +3852,12 @@ sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 {
 	cci__evt_t *evt;
 	cci__conn_t *conn = sconn->conn;
-	cci_event_t *event;	/* generic CCI event */
+	union cci_event *event;	/* generic CCI event */
 	cci_endpoint_t *endpoint;	/* generic CCI endpoint */
 	cci__ep_t *ep;
 	uint64_t context_id = 0;
 	//sock_rma_header_t *rma_hdr = rx->buffer;
-	void *context;
+	const void *context;
 	sock_header_r_t *hdr_r = rx->buffer;
 
 	endpoint = (&conn->connection)->endpoint;
@@ -3867,11 +3869,11 @@ sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 	evt = &rx->evt;
 
 	/* setup the generic event for the application */
-	event = (cci_event_t *) & evt->event;
+	event = & evt->event;
 	event->type = CCI_EVENT_RECV;
-	*((uint32_t *) & event->recv.len) = len;
+	event->recv.len = len;
 	lookup_contextid(sconn, context_id, &context);
-	*((void **)&event->recv.ptr) = context;
+	event->recv.ptr = context;
 	event->recv.connection = &conn->connection;
 
 	/* queue event on endpoint's completed event queue */

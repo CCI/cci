@@ -357,7 +357,7 @@ The config file forms the basis for the device discussion, below.
 
   \ingroup devices
 */
-typedef struct cci_device {
+typedef const struct cci_device {
 	/*! Name of the device from the config file, e.g., "bob0" */
 	const char *name;
 
@@ -371,7 +371,7 @@ typedef struct cci_device {
 
 	/*! Array of "key=value" strings from the config file for this
 	   device; the last pointer in the array is NULL. */
-	const char **conf_argv;
+	const char * const *conf_argv;
 
 	/*! Maximum send size supported by the device */
 	uint32_t max_send_size;
@@ -424,7 +424,7 @@ typedef struct cci_device {
 
   \ingroup devices
 */
-CCI_DECLSPEC int cci_get_devices(cci_device_t const ***const devices);
+CCI_DECLSPEC int cci_get_devices(cci_device_t * const ** devices);
 
 /*! \example devices.c
  *  This is an example of using get_devices.
@@ -474,7 +474,7 @@ typedef enum cci_endpoint_flags {
 
   \ingroup endpoints
 */
-typedef struct cci_endpoint {
+typedef const struct cci_endpoint {
 	/*! Maximum number of receive buffers on this endpoint that can be
 	   loaned to the application.  When this number of buffers have
 	   been loaned to the application, incoming messages may be
@@ -484,7 +484,7 @@ typedef struct cci_endpoint {
 	/*! Driver created name of the endpoint. May be passed to clients out-of-band
 	   to pass to cci_connect(). The application should never need to parse
 	   this URI. */
-	char const *const name;
+	char const * name;
 
 	/*! Application-provided, private context. */
 	void *context;
@@ -653,7 +653,7 @@ typedef enum cci_conn_attribute {
 
   \ingroup connection
 */
-typedef struct cci_connection {
+typedef const struct cci_connection {
 	/*! Maximum send size for the connection */
 	uint32_t max_send_size;
 	/*! Local endpoint associated to the connection */
@@ -665,7 +665,7 @@ typedef struct cci_connection {
 } cci_connection_t;
 
 union cci_event;
-typedef union cci_event cci_event_t;
+typedef const union cci_event cci_event_t;
 
 /*!
   Accept a connection request.
@@ -690,7 +690,7 @@ typedef union cci_event cci_event_t;
 
   \ingroup connection
 */
-CCI_DECLSPEC int cci_accept(cci_event_t *conn_req, void *context);
+CCI_DECLSPEC int cci_accept(cci_event_t *conn_req, const void *context);
 
 /*!
   Reject a connection request.
@@ -763,10 +763,10 @@ CCI_DECLSPEC int cci_reject(cci_event_t *conn_req);
   \ingroup connection
 */
 /* QUESTION: data is cached or not ? */
-CCI_DECLSPEC int cci_connect(cci_endpoint_t * endpoint, char *server_uri,
-			     void *data_ptr, uint32_t data_len,
+CCI_DECLSPEC int cci_connect(cci_endpoint_t * endpoint, const char *server_uri,
+			     const void *data_ptr, uint32_t data_len,
 			     cci_conn_attribute_t attribute,
-			     void *context, int flags, struct timeval *timeout);
+			     const void *context, int flags, const struct timeval *timeout);
 
 /*!
   This constant is the maximum value of data_len passed to cci_connect().
@@ -915,11 +915,11 @@ typedef struct cci_event_recv {
 	cci_event_type_t type;
 
 	/*! The length of the data (in bytes).  This value may be 0. */
-	const uint32_t len;
+	uint32_t len;
 
 	/*! Pointer to the data.  The pointer always points to an address that is
 	   8-byte aligned, unless (len == 0), in which case the value is undefined. */
-	void *const ptr;
+	const void * ptr;
 
 	/*! Connection that this message was received on. */
 	cci_connection_t *connection;
@@ -1188,7 +1188,7 @@ CCI_DECLSPEC int cci_arm_os_handle(cci_endpoint_t * endpoint, int flags);
   \ingroup events
 */
 CCI_DECLSPEC int cci_get_event(cci_endpoint_t * endpoint,
-			       cci_event_t ** const event);
+			       cci_event_t ** event);
 
 /*!
   This function returns the buffer associated with an event that was
@@ -1437,8 +1437,8 @@ CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
   previous SILENT sends.
 */
 CCI_DECLSPEC int cci_send(cci_connection_t * connection,
-			  void *msg_ptr, uint32_t msg_len,
-			  void *context, int flags);
+			  const void *msg_ptr, uint32_t msg_len,
+			  const void *context, int flags);
 
 #define CCI_FLAG_BLOCKING   (1 << 0)
 #define CCI_FLAG_NO_COPY    (1 << 1)
@@ -1473,8 +1473,8 @@ CCI_DECLSPEC int cci_send(cci_connection_t * connection,
 
  */
 CCI_DECLSPEC int cci_sendv(cci_connection_t * connection,
-			   struct iovec *data, uint32_t iovcnt,
-			   void *context, int flags);
+			   const struct iovec *data, uint32_t iovcnt,
+			   const void *context, int flags);
 
 /* RMA Area operations */
 
@@ -1591,6 +1591,6 @@ CCI_DECLSPEC int cci_rma(cci_connection_t * connection,
 			 void *msg_ptr, uint32_t msg_len,
 			 uint64_t local_handle, uint64_t local_offset,
 			 uint64_t remote_handle, uint64_t remote_offset,
-			 uint64_t data_len, void *context, int flags);
+			 uint64_t data_len, const void *context, int flags);
 
 #endif				/* CCI_H */

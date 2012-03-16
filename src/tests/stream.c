@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2011 UT-Battelle, LLC.  All rights reserved.
  * Copyright (c) 2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -43,7 +44,7 @@ int timeout = TIMEOUT;
 int running = 1;
 pthread_mutex_t lock;
 uint32_t current_size = 32;
-cci_device_t **devices = NULL;
+cci_device_t * const *devices = NULL;
 cci_endpoint_t *endpoint = NULL;
 cci_connection_t *connection = NULL;
 cci_conn_attribute_t attr = CCI_CONN_ATTR_UU;
@@ -340,7 +341,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	ret = cci_get_devices((cci_device_t const ***const)&devices);
+	ret = cci_get_devices(&devices);
 	if (ret) {
 		fprintf(stderr, "cci_get_devices() failed with %s\n",
 			cci_strerror(NULL, ret));

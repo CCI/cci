@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2010-2011 UT-Battelle, LLC.  All rights reserved.
  * Copyright (c) 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -40,7 +41,7 @@ BEGIN_C_DECLS
 /*! CCI private device */
     typedef struct cci__dev {
 	/*! Public device (name, info, argv, max_send_size, rate, pci) */
-	cci_device_t device;
+	struct cci_device device;
 
 	/*! Driver name */
 	char *driver;
@@ -70,7 +71,7 @@ BEGIN_C_DECLS
 /*! CCI private endpoint */
 typedef struct cci__ep {
 	/*! Public endpoint (max_recv_buffer_count) */
-	cci_endpoint_t endpoint;
+	struct cci_endpoint endpoint;
 
 	/*! Number of rx buffers */
 	uint32_t rx_buf_cnt;
@@ -109,7 +110,7 @@ typedef struct cci__ep {
 /*! CCI private connection */
 typedef struct cci__conn {
 	/*! Public connection (max_send_size, endpoint, attribute) */
-	cci_connection_t connection;
+	struct cci_connection connection;
 
 	/*! URI we connected to if we called connect */
 	const char *uri;
@@ -133,7 +134,7 @@ static inline int cci_conn_is_reliable(cci__conn_t * conn)
 /*! CCI private event */
 typedef struct cci__evt {
 	/*! Public event (type, union of send/recv/other) */
-	cci_event_t event;
+	union cci_event event;
 
 	/*! Owning endpoint */
 	cci__ep_t *ep;
@@ -154,7 +155,7 @@ typedef struct cci__globals {
 	TAILQ_HEAD(s_devs, cci__dev) devs;
 
 	/*! Array of user devices */
-	cci_device_t **devices;
+	struct cci_device **devices;
 
 	/*! Lock to protect svcs */
 	pthread_mutex_t lock;

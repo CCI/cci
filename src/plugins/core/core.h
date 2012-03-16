@@ -2,6 +2,7 @@
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2012 UT-Battelle, LLC.  All rights reserved.
  * Copyright (c) 2012 Oak Ridge National Laboratory.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  * $COPYRIGHT$
  *
  * Types for CCI.
@@ -35,19 +36,19 @@ typedef int (*cci_init_fn_t) (uint32_t abi_ver, uint32_t flags,
 typedef int (*cci_finalize_fn_t)(void);
 typedef const char *(*cci_strerror_fn_t) (cci_endpoint_t * endpoint,
 					  enum cci_status status);
-typedef int (*cci_get_devices_fn_t) (cci_device_t const ***devices);
+typedef int (*cci_get_devices_fn_t) (cci_device_t * const **devices);
 typedef int (*cci_create_endpoint_fn_t) (cci_device_t * device,
 					 int flags,
 					 cci_endpoint_t ** endpoint,
 					 cci_os_handle_t * fd);
 typedef int (*cci_destroy_endpoint_fn_t) (cci_endpoint_t * endpoint);
-typedef int (*cci_accept_fn_t) (union cci_event * conn_req, void *context);
-typedef int (*cci_reject_fn_t) (union cci_event * conn_req);
-typedef int (*cci_connect_fn_t) (cci_endpoint_t * endpoint, char *server_uri,
-				 void *data_ptr, uint32_t data_len,
+typedef int (*cci_accept_fn_t) (cci_event_t * conn_req, const void *context);
+typedef int (*cci_reject_fn_t) (cci_event_t * conn_req);
+typedef int (*cci_connect_fn_t) (cci_endpoint_t * endpoint, const char *server_uri,
+				 const void *data_ptr, uint32_t data_len,
 				 cci_conn_attribute_t attribute,
-				 void *context, int flags,
-				 struct timeval * timeout);
+				 const void *context, int flags,
+				 const struct timeval * timeout);
 typedef int (*cci_disconnect_fn_t) (cci_connection_t * connection);
 typedef int (*cci_set_opt_fn_t) (cci_opt_handle_t * handle,
 				 cci_opt_level_t level,
@@ -60,11 +61,11 @@ typedef int (*cci_get_event_fn_t) (cci_endpoint_t * endpoint,
 				   cci_event_t ** const event);
 typedef int (*cci_return_event_fn_t) (cci_event_t * event);
 typedef int (*cci_send_fn_t) (cci_connection_t * connection,
-			      void *msg_ptr, uint32_t msg_len,
-			      void *context, int flags);
+			      const void *msg_ptr, uint32_t msg_len,
+			      const void *context, int flags);
 typedef int (*cci_sendv_fn_t) (cci_connection_t * connection,
-			       struct iovec * data, uint32_t iovcnt,
-			       void *context, int flags);
+			       const struct iovec * data, uint32_t iovcnt,
+			       const void *context, int flags);
 typedef int (*cci_rma_register_fn_t) (cci_endpoint_t * endpoint,
 				      cci_connection_t * connection,
 				      void *start, uint64_t length,
@@ -74,7 +75,7 @@ typedef int (*cci_rma_fn_t) (cci_connection_t * connection,
 			     void *msg_ptr, uint32_t msg_len,
 			     uint64_t local_handle, uint64_t local_offset,
 			     uint64_t remote_handle, uint64_t remote_offset,
-			     uint64_t data_len, void *context, int flags);
+			     uint64_t data_len, const void *context, int flags);
 
 /* Plugin struct */
 

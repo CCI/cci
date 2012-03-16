@@ -43,7 +43,7 @@ int main(int argc, char *argv[])
 	uint32_t pagesize = 0, offset = 0;
 	uint64_t regsize = REGSIZE, totalsize = TOTALSIZE, count, i;
 	uint32_t caps;
-	cci_device_t **devices;
+	cci_device_t * const *devices;
 	cci_endpoint_t *endpoint;
 	void *base, *ptr;
 	uint64_t length;
@@ -109,7 +109,7 @@ int main(int argc, char *argv[])
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
 	check_return(NULL, "cci_init", ret);
 
-	ret = cci_get_devices((cci_device_t const ***const)&devices);
+	ret = cci_get_devices(&devices);
 	check_return(NULL, "cci_get_devices", ret);
 
 	ret = cci_create_endpoint(NULL, 0, &endpoint, &fd);
