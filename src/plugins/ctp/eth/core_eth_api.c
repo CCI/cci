@@ -30,18 +30,18 @@
 static int eth_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
 static int eth_finalize(void);
 static const char *eth_strerror(cci_endpoint_t * endpoint, enum cci_status status);
-static int eth_get_devices(cci_device_t const ***devices);
+static int eth_get_devices(cci_device_t * const **devices);
 static int eth_create_endpoint(cci_device_t * device,
 			       int flags,
 			       cci_endpoint_t ** endpoint,
 			       cci_os_handle_t * fd);
 static int eth_destroy_endpoint(cci_endpoint_t * endpoint);
-static int eth_accept(union cci_event *event, void *context);
-static int eth_reject(union cci_event *event);
-static int eth_connect(cci_endpoint_t * endpoint, char *server_uri,
-		       void *data_ptr, uint32_t data_len,
+static int eth_accept(cci_event_t *event, const void *context);
+static int eth_reject(cci_event_t *event);
+static int eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
+		       const void *data_ptr, uint32_t data_len,
 		       cci_conn_attribute_t attribute,
-		       void *context, int flags, struct timeval *timeout);
+		       const void *context, int flags, const struct timeval *timeout);
 static int eth_disconnect(cci_connection_t * connection);
 static int eth_set_opt(cci_opt_handle_t * handle,
 		       cci_opt_level_t level,
@@ -50,13 +50,13 @@ static int eth_get_opt(cci_opt_handle_t * handle,
 		       cci_opt_level_t level,
 		       cci_opt_name_t name, void **val, int *len);
 static int eth_arm_os_handle(cci_endpoint_t * endpoint, int flags);
-static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event);
+static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** event);
 static int eth_return_event(cci_event_t * event);
 static int eth_send(cci_connection_t * connection,
-		    void *msg_ptr, uint32_t msg_len, void *context, int flags);
+		    const void *msg_ptr, uint32_t msg_len, const void *context, int flags);
 static int eth_sendv(cci_connection_t * connection,
-		     struct iovec *data, uint32_t iovcnt,
-		     void *context, int flags);
+		     const struct iovec *data, uint32_t iovcnt,
+		     const void *context, int flags);
 static int eth_rma_register(cci_endpoint_t * endpoint,
 			    cci_connection_t * connection,
 			    void *start, uint64_t length,
@@ -66,7 +66,7 @@ static int eth_rma(cci_connection_t * connection,
 		   void *msg_ptr, uint32_t msg_len,
 		   uint64_t local_handle, uint64_t local_offset,
 		   uint64_t remote_handle, uint64_t remote_offset,
-		   uint64_t data_len, void *context, int flags);
+		   uint64_t data_len, const void *context, int flags);
 
 /*
  * Public plugin structure.
@@ -120,7 +120,7 @@ cci_plugin_core_t cci_core_eth_plugin = {
 
 static int eth__get_device_info(cci__dev_t * _dev, struct ifaddrs *addr)
 {
-	cci_device_t *device = &_dev->device;
+	struct cci_device *device = &_dev->device;
 	struct sockaddr_ll *lladdr = (struct sockaddr_ll *)addr->ifa_addr;
 	struct ccieth_ioctl_get_info ioctl_arg;
 	struct ethtool_drvinfo edi;
@@ -259,7 +259,7 @@ static int eth__get_devices(void)
 	int ret;
 	cci__dev_t *_dev, *maxrate_dev;
 	unsigned count = 0;
-	cci_device_t *device;
+	struct cci_device *device;
 	eth__dev_t *edev;
 	struct ifaddrs *addrs = NULL, *addr;
 	struct sockaddr_ll *lladdr;
@@ -330,7 +330,7 @@ static int eth__get_devices(void)
 		/* find devices that we own in the config file */
 		TAILQ_FOREACH(_dev, &globals->devs, entry) {
 			if (0 == strcmp("eth", _dev->driver)) {
-				const char **arg;
+				const char * const *arg;
 				int gotmac = 0;
 
 				device = &_dev->device;
@@ -456,7 +456,7 @@ static const char *eth_strerror(cci_endpoint_t * endpoint, enum cci_status statu
 	return NULL;
 }
 
-static int eth_get_devices(cci_device_t const ***devices_p)
+static int eth_get_devices(cci_device_t * const **devices_p)
 {
 	cci_device_t **devices;
 	cci__dev_t *_dev;
@@ -594,7 +594,7 @@ static int eth_destroy_endpoint(cci_endpoint_t * endpoint)
 	return CCI_SUCCESS;
 }
 
-static int eth_accept(union cci_event *event, void *context)
+static int eth_accept(cci_event_t *event, const void *context)
 {
 	cci__evt_t *_ev = container_of(event, cci__evt_t, event);
 	eth__evt_t *eev = container_of(_ev, eth__evt_t, _ev);
@@ -633,12 +633,12 @@ static int eth_accept(union cci_event *event, void *context)
 	_conn->connection.max_send_size = ge->connect_request.max_send_size;
 	_conn->connection.endpoint = &_ep->endpoint;
 	_conn->connection.attribute = ge->connect_request.attribute;
-	_conn->connection.context = context;
+	_conn->connection.context = (void *)context;
 
 	return CCI_SUCCESS;
 }
 
-static int eth_reject(union cci_event *event)
+static int eth_reject(cci_event_t *event)
 {
 	cci__evt_t *_ev = container_of(event, cci__evt_t, event);
 	eth__evt_t *eev = container_of(_ev, eth__evt_t, _ev);
@@ -665,10 +665,10 @@ static int eth_reject(union cci_event *event)
 	return CCI_SUCCESS;
 }
 
-static int eth_connect(cci_endpoint_t * endpoint, char *server_uri,
-		       void *data_ptr, uint32_t data_len,
+static int eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
+		       const void *data_ptr, uint32_t data_len,
 		       cci_conn_attribute_t attribute,
-		       void *context, int flags, struct timeval *timeout)
+		       const void *context, int flags, const struct timeval *timeout)
 {
 	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
 	eth__ep_t *eep = ep->priv;
@@ -687,7 +687,7 @@ static int eth_connect(cci_endpoint_t * endpoint, char *server_uri,
 	_conn = &econn->_conn;
 	_conn->connection.endpoint = endpoint;
 	_conn->connection.attribute = attribute;
-	_conn->connection.context = context;
+	_conn->connection.context = (void *)context;
 
 	arg.data_len = data_len;
 	arg.data_ptr = (uintptr_t) data_ptr;
@@ -739,7 +739,7 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 	eth__ep_t *eep = _ep->priv;
 	cci__evt_t *_ev;
 	eth__evt_t *eev;
-	cci_event_t *event;
+	union cci_event *event;
 	struct ccieth_ioctl_get_event *ge;
 	char *data;
 	int ret;
@@ -919,7 +919,7 @@ static int eth_return_event(cci_event_t * event)
 }
 
 static int eth_send(cci_connection_t * connection,
-		    void *msg_ptr, uint32_t msg_len, void *context, int flags)
+		    const void *msg_ptr, uint32_t msg_len, const void *context, int flags)
 {
 	cci__conn_t *_conn = container_of(connection, cci__conn_t, connection);
 	eth__conn_t *econn = container_of(_conn, eth__conn_t, _conn);
@@ -962,8 +962,8 @@ static int eth_send(cci_connection_t * connection,
 }
 
 static int eth_sendv(cci_connection_t * connection,
-		     struct iovec *iov_ptr, uint32_t iov_len,
-		     void *context, int flags)
+		     const struct iovec *iov_ptr, uint32_t iov_len,
+		     const void *context, int flags)
 {
 	void *buffer;
 	size_t length, offset;
@@ -1006,7 +1006,7 @@ static int eth_rma(cci_connection_t * connection,
 		   void *msg_ptr, uint32_t msg_len,
 		   uint64_t local_handle, uint64_t local_offset,
 		   uint64_t remote_handle, uint64_t remote_offset,
-		   uint64_t data_len, void *context, int flags)
+		   uint64_t data_len, const void *context, int flags)
 {
 	printf("In eth_rma\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
