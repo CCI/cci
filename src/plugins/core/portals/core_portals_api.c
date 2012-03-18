@@ -149,7 +149,7 @@ static int portals_rma_register(cci_endpoint_t * endpoint,
 				cci_connection_t * connection,
 				void *start,
 				uint64_t length, uint64_t * rma_handle);
-static int portals_rma_deregister(uint64_t rma_handle);
+static int portals_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
 static int portals_rma(cci_connection_t * connection,
 		       void *msg_ptr,
 		       uint32_t msg_len,
@@ -2437,7 +2437,7 @@ static void portals_rma_handle_decref(portals_rma_handle_t * handle)
 	return;
 }
 
-static int portals_rma_deregister(uint64_t rma_handle)
+static int portals_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
 {
 	int ret = CCI_EINVAL;
 	portals_rma_handle_t *handle = (portals_rma_handle_t *) rma_handle;

@@ -156,7 +156,8 @@ static int gni_rma_register(cci_endpoint_t * endpoint,
 			    cci_connection_t * connection,
 			    void *start,
 			    uint64_t length, uint64_t * rma_handle);
-static int gni_rma_deregister(uint64_t rma_handle);
+static int gni_rma_deregister(cci_endpoint_t * endpoint,
+			      uint64_t rma_handle);
 static int gni_rma(cci_connection_t * connection,
 		   void *msg_ptr,
 		   uint32_t msg_len,
@@ -2479,7 +2480,8 @@ static int gni_rma_register(cci_endpoint_t * endpoint,
 	return (CCI_ERROR);
 }
 
-static int gni_rma_deregister(uint64_t rma_handle)
+static int gni_rma_deregister(cci_endpoint_t * endpoint,
+			      uint64_t rma_handle)
 {
 
 	const cci_device_t *device;
