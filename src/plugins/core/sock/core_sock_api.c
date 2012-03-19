@@ -208,7 +208,7 @@ static int sock_init(cci_plugin_core_t *plugin,
 		     uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	int ret;
-	cci__dev_t *dev;
+	cci__dev_t *dev, *ndev;
 	cci_device_t **devices;
 
 	CCI_ENTER;
@@ -273,13 +273,13 @@ static int sock_init(cci_plugin_core_t *plugin,
 		dev->driver = strdup("sock");
 		dev->is_up = 1;
 		dev->is_default = 1;
-		TAILQ_INSERT_TAIL(&globals->devs, dev, entry);
+		cci__add_dev(dev);
 		devices[sglobals->count] = device;
 		sglobals->count++;
 
 	} else
 	/* find devices that we own */
-	TAILQ_FOREACH(dev, &globals->devs, entry) {
+		TAILQ_FOREACH_SAFE(dev, &globals->configfile_devs, entry, ndev) {
 		if (0 == strcmp("sock", dev->driver)) {
 			const char * const *arg;
 			struct cci_device *device;
@@ -330,9 +330,13 @@ static int sock_init(cci_plugin_core_t *plugin,
 
 					assert(mss >= SOCK_MIN_MSS);
 					device->max_send_size = mss;
-				}
+				 }
 			}
 			if (sdev->ip != 0) {
+				pthread_mutex_lock(&globals->lock);
+				TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
+				pthread_mutex_unlock(&globals->lock);
+				cci__add_dev(dev);
 				devices[sglobals->count] = device;
 				sglobals->count++;
 				dev->is_up = 1;

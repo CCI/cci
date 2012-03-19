@@ -167,6 +167,9 @@ typedef struct cci__globals {
 	/*! List of all known devices */
 	TAILQ_HEAD(s_devs, cci__dev) devs;
 
+	/*! Temporary list of devices read from the config file */
+	struct s_devs configfile_devs;
+
 	/*! Array of user devices */
 	struct cci_device **devices;
 
