@@ -154,34 +154,27 @@ void cci__init_dev(cci__dev_t *dev)
 /* only used by backends when adding ready devices to the main list */
 void cci__add_dev(cci__dev_t * dev)
 {
+	int done = 0;
+	cci__dev_t *dd;
+
 	debug(CCI_DB_DRVR,
 	      "adding device [%s] (driver %s)",
 	      dev->device.name, dev->driver);
 
-	if (TAILQ_EMPTY(&globals->devs)) {
-		/* insert at front */
-		pthread_mutex_lock(&globals->lock);
-		TAILQ_INSERT_HEAD(&globals->devs, dev, entry);
-		pthread_mutex_unlock(&globals->lock);
-	} else {
-		int done = 0;
-		cci__dev_t *dd;
-
-		/* walk list and insert in order by priority */
-		TAILQ_FOREACH(dd, &globals->devs, entry) {
-			if (dev->priority > dd->priority) {
-				pthread_mutex_lock(&globals->lock);
-				TAILQ_INSERT_BEFORE(dd, dev, entry);
-				pthread_mutex_unlock(&globals->lock);
-				done = 1;
-				break;
-			}
-		}
-		if (!done) {
+	/* walk list and insert in order by priority */
+	TAILQ_FOREACH(dd, &globals->devs, entry) {
+		if (dev->priority > dd->priority) {
 			pthread_mutex_lock(&globals->lock);
-			TAILQ_INSERT_TAIL(&globals->devs, dev, entry);
+			TAILQ_INSERT_BEFORE(dd, dev, entry);
 			pthread_mutex_unlock(&globals->lock);
+			done = 1;
+			break;
 		}
+	}
+	if (!done) {
+		pthread_mutex_lock(&globals->lock);
+		TAILQ_INSERT_TAIL(&globals->devs, dev, entry);
+		pthread_mutex_unlock(&globals->lock);
 	}
 	return;
 }
