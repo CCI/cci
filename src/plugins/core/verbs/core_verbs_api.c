@@ -330,7 +330,7 @@ static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t fla
 	int index = 0;
 	int used[CCI_MAX_DEVICES];
 	int ret = 0;
-	cci__dev_t *dev = NULL;
+	cci__dev_t *dev = NULL, *ndev;
 	struct cci_device **devices = NULL;
 	struct ifaddrs *ifaddrs = NULL;
 
@@ -370,7 +370,7 @@ static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t fla
 /* FIXME: if globals->configfile == 0, create default devices */
 
 	/* find devices we own */
-	TAILQ_FOREACH(dev, &globals->devs, entry) {
+	TAILQ_FOREACH_SAFE(dev, &globals->configfile_devs, entry, ndev) {
 		if (0 == strcmp("verbs", dev->driver)) {
 			int i = 0;
 			const char * const *arg;
@@ -500,6 +500,10 @@ static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t fla
 			    verbs_mtu_val(port_attr.max_mtu);
 			device->rate = verbs_device_rate(port_attr);
 
+			pthread_mutex_lock(&globals->lock);
+			TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
+			pthread_mutex_unlock(&globals->lock);
+			cci__add_dev(dev);
 			devices[index] = device;
 			index++;
 			dev->is_up = vdev->ifa->ifa_flags & IFF_UP;

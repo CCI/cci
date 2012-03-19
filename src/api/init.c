@@ -151,8 +151,13 @@ void cci__init_dev(cci__dev_t *dev)
 	device->up = 1;
 }
 
+/* only used by backends when adding ready devices to the main list */
 void cci__add_dev(cci__dev_t * dev)
 {
+	debug(CCI_DB_DRVR,
+	      "adding device [%s] (driver %s)",
+	      dev->device.name, dev->driver);
+
 	if (TAILQ_EMPTY(&globals->devs)) {
 		/* insert at front */
 		pthread_mutex_lock(&globals->lock);
@@ -237,10 +242,12 @@ int cci__parse_config(const char *path)
 								      1));
 				}
 				if (driver == 1) {
-					cci__add_dev(dev);
+					pthread_mutex_lock(&globals->lock);
+					TAILQ_INSERT_TAIL(&globals->configfile_devs, dev, entry);
+					pthread_mutex_unlock(&globals->lock);
 					debug(CCI_DB_DRVR,
-					      "adding device [%s] (%d)",
-					      d->name, i);
+					      "read device [%s] (driver %s) from config file",
+					      d->name, dev->driver);
 					i++;
 				} else {
 					/* device does not have a driver, free it */
@@ -380,9 +387,12 @@ int cci__parse_config(const char *path)
 				    sizeof(char *) * (arg_cnt + 1));
 		}
 		if (driver == 1) {
-			cci__add_dev(dev);
-			debug(CCI_DB_DRVR, "adding device [%s] (%d)", d->name,
-			      i);
+			pthread_mutex_lock(&globals->lock);
+			TAILQ_INSERT_TAIL(&globals->configfile_devs, dev, entry);
+			pthread_mutex_unlock(&globals->lock);
+			debug(CCI_DB_DRVR,
+			      "read device [%s] (driver %s) from config file",
+			      d->name, dev->driver);
 			i++;
 		} else {
 			/* device does not have a driver, free it */
@@ -450,6 +460,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	pthread_mutex_lock(&init_lock);
 
 	if (0 == initialized) {
+		cci__dev_t *dev;
 		char *str;
 		int i, j;
 
@@ -463,6 +474,8 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
 		globals->flags = flags;
 		TAILQ_INIT(&globals->devs);
+		globals->configfile = 0;
+		TAILQ_INIT(&globals->configfile_devs);
 
 		ret = pthread_mutex_init(&globals->lock, NULL);
 		if (ret) {
@@ -508,6 +521,17 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			perror("all plugins init failed:");
 			ret = errno;
 			goto out_with_globals;
+		}
+
+		/* drop devices that weren't claimed by any driver,
+		 * they didn't move from configfile_devs to devs */
+		while (!TAILQ_EMPTY(&globals->configfile_devs)) {
+			dev = TAILQ_FIRST(&globals->configfile_devs);
+			TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
+			debug(CCI_DB_DRVR,
+			      "destroying device [%s] (driver %s), not claimed by any driver",
+			      dev->device.name, dev->driver);
+			cci__free_dev(dev);
 		}
 
 		/* success */
