@@ -161,15 +161,23 @@ void cci__add_dev(cci__dev_t * dev)
 	      "adding device [%s] (driver %s)",
 	      dev->device.name, dev->driver);
 
-	/* walk list and insert in order by priority */
+	/* walk list and insert in order by up/default/priority */
 	TAILQ_FOREACH(dd, &globals->devs, entry) {
-		if (dev->priority > dd->priority) {
-			pthread_mutex_lock(&globals->lock);
-			TAILQ_INSERT_BEFORE(dd, dev, entry);
-			pthread_mutex_unlock(&globals->lock);
-			done = 1;
-			break;
-		}
+		if (dev->device.up < dd->device.up)
+			continue;
+		if (dev->device.up == dd->device.up
+		    && dev->is_default < dd->is_default)
+			continue;
+		if (dev->device.up == dd->device.up
+		    && dev->is_default == dd->is_default
+		    && dev->priority < dd->priority)
+			continue;
+
+		pthread_mutex_lock(&globals->lock);
+		TAILQ_INSERT_BEFORE(dd, dev, entry);
+		pthread_mutex_unlock(&globals->lock);
+		done = 1;
+		break;
 	}
 	if (!done) {
 		pthread_mutex_lock(&globals->lock);
@@ -525,6 +533,14 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			      "destroying device [%s] (driver %s), not claimed by any driver",
 			      dev->device.name, dev->driver);
 			cci__free_dev(dev);
+		}
+
+		/* list ready devices */
+		TAILQ_FOREACH(dev, &globals->devs, entry) {
+			debug(CCI_DB_DRVR,
+			      "device [%s] (driver %s, default %d, priority %d, up %d) is ready",
+			      dev->device.name, dev->driver,
+			      dev->is_default, dev->priority, dev->device.up);
 		}
 
 		/* success */
