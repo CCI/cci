@@ -37,18 +37,18 @@ pthread_t progress_tid;
 static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
 static int verbs_finalize(void);
 static const char *verbs_strerror(cci_endpoint_t * endpoint, enum cci_status status);
-static int verbs_get_devices(cci_device_t const ***devices);
+static int verbs_get_devices(cci_device_t * const **devices);
 static int verbs_create_endpoint(cci_device_t * device,
 				 int flags,
 				 cci_endpoint_t ** endpoint,
 				 cci_os_handle_t * fd);
 static int verbs_destroy_endpoint(cci_endpoint_t * endpoint);
-static int verbs_accept(union cci_event *event, void *context);
-static int verbs_reject(union cci_event *event);
-static int verbs_connect(cci_endpoint_t * endpoint, char *server_uri,
-			 void *data_ptr, uint32_t data_len,
+static int verbs_accept(cci_event_t *event, const void *context);
+static int verbs_reject(cci_event_t *event);
+static int verbs_connect(cci_endpoint_t * endpoint, const char *server_uri,
+			 const void *data_ptr, uint32_t data_len,
 			 cci_conn_attribute_t attribute,
-			 void *context, int flags, struct timeval *timeout);
+			 const void *context, int flags, const struct timeval *timeout);
 static int verbs_disconnect(cci_connection_t * connection);
 static int verbs_set_opt(cci_opt_handle_t * handle,
 			 cci_opt_level_t level,
@@ -61,11 +61,11 @@ static int verbs_get_event(cci_endpoint_t * endpoint,
 			   cci_event_t ** const event);
 static int verbs_return_event(cci_event_t * event);
 static int verbs_send(cci_connection_t * connection,
-		      void *msg_ptr, uint32_t msg_len,
-		      void *context, int flags);
+		      const void *msg_ptr, uint32_t msg_len,
+		      const void *context, int flags);
 static int verbs_sendv(cci_connection_t * connection,
-		       struct iovec *data, uint32_t iovcnt,
-		       void *context, int flags);
+		       const struct iovec *data, uint32_t iovcnt,
+		       const void *context, int flags);
 static int verbs_rma_register(cci_endpoint_t * endpoint,
 			      cci_connection_t * connection,
 			      void *start, uint64_t length,
@@ -75,7 +75,7 @@ static int verbs_rma(cci_connection_t * connection,
 		     void *msg_ptr, uint32_t msg_len,
 		     uint64_t local_handle, uint64_t local_offset,
 		     uint64_t remote_handle, uint64_t remote_offset,
-		     uint64_t data_len, void *context, int flags);
+		     uint64_t data_len, const void *context, int flags);
 
 /*
  * Public plugin structure.
@@ -333,7 +333,7 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	int used[CCI_MAX_DEVICES];
 	int ret = 0;
 	cci__dev_t *dev = NULL;
-	cci_device_t **devices = NULL;
+	struct cci_device **devices = NULL;
 	struct ifaddrs *ifaddrs = NULL;
 
 	CCI_ENTER;
@@ -375,12 +375,12 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
 		if (0 == strcmp("verbs", dev->driver)) {
 			int i = 0;
-			const char **arg;
+			const char * const *arg;
 			const char *hca_id = NULL;
 			const char *interface = NULL;
 			struct in_addr in;
 			uint16_t port = 0;
-			cci_device_t *device = NULL;
+			struct cci_device *device = NULL;
 			verbs_dev_t *vdev = NULL;
 			struct ibv_port_attr port_attr;
 
@@ -532,7 +532,7 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	    realloc(devices, (vglobals->count + 1) * sizeof(cci_device_t *));
 	devices[vglobals->count] = NULL;
 
-	*((cci_device_t ***) & vglobals->devices) = devices;
+	vglobals->devices = devices;
 
 	/* TODO  start progress thread */
 
@@ -569,7 +569,7 @@ static const char *verbs_strerror(cci_endpoint_t * endpoint, enum cci_status sta
 	return strerror(status);
 }
 
-static int verbs_get_devices(cci_device_t const ***devices)
+static int verbs_get_devices(cci_device_t * const **devices)
 {
 	CCI_ENTER;
 
@@ -581,7 +581,7 @@ static int verbs_get_devices(cci_device_t const ***devices)
 /* FIXME: update the devices list (up field, ...).
    add new devices if !configfile */
 
-	*devices = vglobals->devices;
+	*devices = (cci_device_t * const *) vglobals->devices;
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -802,7 +802,7 @@ void rdma_destroy_ep(struct rdma_cm_id *id)
 static int
 verbs_create_endpoint(cci_device_t * device,
 		      int flags,
-		      cci_endpoint_t ** endpoint, cci_os_handle_t * fd)
+		      cci_endpoint_t ** endpointp, cci_os_handle_t * fd)
 {
 	int i = 0;
 	int ret = CCI_SUCCESS;
@@ -815,6 +815,7 @@ verbs_create_endpoint(cci_device_t * device,
 	verbs_ep_t *vep = NULL;
 	verbs_dev_t *vdev = NULL;
 	struct ibv_srq_init_attr srq_attr;
+	struct cci_endpoint *endpoint = * (struct cci_endpoint **) endpointp;
 
 	CCI_ENTER;
 
@@ -826,7 +827,7 @@ verbs_create_endpoint(cci_device_t * device,
 	dev = container_of(device, cci__dev_t, device);
 	vdev = dev->priv;
 
-	ep = container_of(*endpoint, cci__ep_t, endpoint);
+	ep = container_of(endpoint, cci__ep_t, endpoint);
 	ep->priv = calloc(1, sizeof(*vep));
 	if (!ep->priv) {
 		ret = CCI_ENOMEM;
@@ -844,7 +845,7 @@ verbs_create_endpoint(cci_device_t * device,
 	TAILQ_INIT(&vep->handles);
 	TAILQ_INIT(&vep->rma_ops);
 
-	(*endpoint)->max_recv_buffer_count = VERBS_EP_RX_CNT;
+	endpoint->max_recv_buffer_count = VERBS_EP_RX_CNT;
 	ep->rx_buf_cnt = VERBS_EP_RX_CNT;
 	ep->tx_buf_cnt = VERBS_EP_TX_CNT;
 	ep->buffer_len = dev->device.max_send_size;
@@ -904,7 +905,7 @@ verbs_create_endpoint(cci_device_t * device,
 	memset(name, 0, sizeof(name));
 	sprintf(name, "%s%s:%hu", VERBS_URI,
 		inet_ntoa(vep->sin.sin_addr), ntohs(vep->sin.sin_port));
-	*((char **)&ep->endpoint.name) = strdup(name);
+	endpoint->name = strdup(name);
 
 	vep->pd = ibv_alloc_pd(vdev->context);
 	if (!vep->pd) {
@@ -1351,7 +1352,7 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 	return ret;
 }
 
-static int verbs_accept(union cci_event *event, void *context)
+static int verbs_accept(cci_event_t *event, const void *context)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
@@ -1383,7 +1384,7 @@ static int verbs_accept(union cci_event *event, void *context)
 	tx->rma_op = NULL;
 	tx->evt.event.type = CCI_EVENT_ACCEPT;
 	tx->evt.event.accept.status = CCI_SUCCESS;	/* for now */
-	tx->evt.event.accept.context = context;
+	tx->evt.event.accept.context = (void *) context;
 	tx->evt.event.accept.connection = &conn->connection;
 	tx->evt.conn = conn;
 	tx->evt.ep = ep;
@@ -1485,7 +1486,7 @@ static int verbs_accept(union cci_event *event, void *context)
 	return ret;
 }
 
-static int verbs_reject(union cci_event *event)
+static int verbs_reject(cci_event_t *event)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
@@ -1568,10 +1569,10 @@ static int verbs_parse_uri(const char *uri, char **node, char **service)
 }
 
 static int
-verbs_connect(cci_endpoint_t * endpoint, char *server_uri,
-	      void *data_ptr, uint32_t data_len,
+verbs_connect(cci_endpoint_t * endpoint, const char *server_uri,
+	      const void *data_ptr, uint32_t data_len,
 	      cci_conn_attribute_t attribute,
-	      void *context, int flags, struct timeval *timeout)
+	      const void *context, int flags, const struct timeval *timeout)
 {
 	int ret = CCI_SUCCESS;
 	char *node = NULL;
@@ -1617,7 +1618,7 @@ verbs_connect(cci_endpoint_t * endpoint, char *server_uri,
 		}
 		vconn->conn_req = cr;
 
-		cr->context = context;
+		cr->context = (void *) context;
 		cr->attr = attribute;
 		if (data_len) {
 			cr->len = data_len;
@@ -1634,7 +1635,7 @@ verbs_connect(cci_endpoint_t * endpoint, char *server_uri,
 
 	conn->connection.attribute = attribute;
 	conn->connection.endpoint = endpoint;
-	conn->connection.context = context;
+	conn->connection.context = (void *) context;
 
 	ret = verbs_parse_uri(server_uri, &node, &service);
 	if (ret)
@@ -2844,8 +2845,8 @@ static int verbs_complete_send(cci__ep_t * ep, struct ibv_wc wc)
 }
 
 static int
-verbs_send_common(cci_connection_t * connection, struct iovec *iov,
-		  uint32_t iovcnt, void *context, int flags,
+verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
+		  uint32_t iovcnt, const void *context, int flags,
 		  verbs_rma_op_t * rma_op);
 
 static int verbs_handle_rma_completion(cci__ep_t * ep, struct ibv_wc wc)
@@ -3232,8 +3233,8 @@ static int verbs_return_event(cci_event_t * event)
 }
 
 static int
-verbs_send_common(cci_connection_t * connection, struct iovec *iov,
-		  uint32_t iovcnt, void *context, int flags,
+verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
+		  uint32_t iovcnt, const void *context, int flags,
 		  verbs_rma_op_t * rma_op)
 {
 	int ret = CCI_SUCCESS;
@@ -3291,7 +3292,7 @@ verbs_send_common(cci_connection_t * connection, struct iovec *iov,
 	tx->evt.ep = ep;
 	tx->evt.event.type = CCI_EVENT_SEND;
 	tx->evt.event.send.connection = connection;
-	tx->evt.event.send.context = context;
+	tx->evt.event.send.context = (void *) context;
 	tx->evt.event.send.status = CCI_SUCCESS;	/* for now */
 
 	if (vconn->raddr && iovcnt < 2) {
@@ -3362,7 +3363,7 @@ verbs_send_common(cci_connection_t * connection, struct iovec *iov,
 }
 
 static int verbs_send(cci_connection_t * connection,	/* magic number */
-		      void *msg_ptr, uint32_t msg_len, void *context, int flags)
+		      const void *msg_ptr, uint32_t msg_len, const void *context, int flags)
 {
 	int ret = CCI_SUCCESS;
 	uint32_t iovcnt = 0;
@@ -3372,7 +3373,7 @@ static int verbs_send(cci_connection_t * connection,	/* magic number */
 
 	if (msg_ptr && msg_len > 0) {
 		iovcnt = 1;
-		iov.iov_base = msg_ptr;
+		iov.iov_base = (void *) msg_ptr;
 		iov.iov_len = msg_len;
 	}
 
@@ -3384,7 +3385,7 @@ static int verbs_send(cci_connection_t * connection,	/* magic number */
 
 static int
 verbs_sendv(cci_connection_t * connection,
-	    struct iovec *data, uint32_t iovcnt, void *context, int flags)
+	    const struct iovec *data, uint32_t iovcnt, const void *context, int flags)
 {
 	int ret = CCI_SUCCESS;
 
@@ -3596,7 +3597,7 @@ verbs_rma(cci_connection_t * connection,
 	  void *msg_ptr, uint32_t msg_len,
 	  uint64_t local_handle, uint64_t local_offset,
 	  uint64_t remote_handle, uint64_t remote_offset,
-	  uint64_t data_len, void *context, int flags)
+	  uint64_t data_len, const void *context, int flags)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
@@ -3634,14 +3635,14 @@ verbs_rma(cci_connection_t * connection,
 	rma_op->remote_handle = remote_handle;
 	rma_op->remote_offset = remote_offset;
 	rma_op->len = data_len;
-	rma_op->context = context;
+	rma_op->context = (void *) context;
 	rma_op->flags = flags;
 	rma_op->msg_len = msg_len;
 	rma_op->msg_ptr = msg_ptr;
 
 	rma_op->evt.event.type = CCI_EVENT_SEND;
 	rma_op->evt.event.send.connection = connection;
-	rma_op->evt.event.send.context = context;
+	rma_op->evt.event.send.context = (void *) context;
 	rma_op->evt.event.send.status = CCI_SUCCESS;	/* for now */
 	rma_op->evt.ep = ep;
 	rma_op->evt.conn = conn;
