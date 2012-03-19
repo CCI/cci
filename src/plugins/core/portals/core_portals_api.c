@@ -146,9 +146,8 @@ static int portals_sendv(cci_connection_t * connection,
 			 struct iovec *data,
 			 uint32_t iovcnt, void *context, int flags);
 static int portals_rma_register(cci_endpoint_t * endpoint,
-				cci_connection_t * connection,
-				void *start,
-				uint64_t length, uint64_t * rma_handle);
+				void *start, uint64_t length,
+				int flags, uint64_t * rma_handle);
 static int portals_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
 static int portals_rma(cci_connection_t * connection,
 		       void *msg_ptr,
@@ -2299,6 +2298,8 @@ static int portals_send(cci_connection_t * connection,
 	return ret;
 }
 
+#warning FIXME: no connection anymore in rma_register
+
 /* We do not know if this buffer will be the source or sink,
  * so we must post a ME in case it will be a sink.
  * If the connection is not specified, we will return the
@@ -2308,14 +2309,13 @@ static int portals_send(cci_connection_t * connection,
  * to that connection since we cannot check the connection
  * before Portals matches the ME. */
 static int portals_rma_register(cci_endpoint_t * endpoint,
-				cci_connection_t * connection,
-				void *start,
-				uint64_t length, uint64_t * rma_handle)
+				void *start, uint64_t length,
+				int flags, uint64_t * rma_handle)
 {
-
+	/* FIXME use read/write flags? */
 	int iRC = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
-	cci__conn_t *conn = NULL;
+//	cci__conn_t *conn = NULL;
 	portals_ep_t *pep = NULL;
 	portals_dev_t *pdev = NULL;
 	portals_rma_handle_t *handle = NULL;
@@ -2332,7 +2332,7 @@ static int portals_rma_register(cci_endpoint_t * endpoint,
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 	pep = ep->priv;
 	pdev = ep->dev->priv;
-	conn = container_of(connection, cci__conn_t, connection);
+//	conn = container_of(connection, cci__conn_t, connection);
 
 	handle = calloc(1, sizeof(*handle));
 	if (!handle) {
@@ -2342,7 +2342,7 @@ static int portals_rma_register(cci_endpoint_t * endpoint,
 	}
 
 	handle->ep = ep;
-	handle->conn = conn;
+//	handle->conn = conn;
 	handle->length = length;
 	handle->start = start;
 	handle->refcnt = 1;

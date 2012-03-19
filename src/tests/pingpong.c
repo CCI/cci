@@ -247,8 +247,9 @@ void do_client()
 	memset(buffer, 'b', max);
 
 	if (opts.method != MSGS) {
-		ret = cci_rma_register(endpoint, connection, buffer,
-				       max, &local_rma_handle);
+		ret = cci_rma_register(endpoint, buffer, max,
+				       opts.method == RMA_WRITE ? CCI_FLAG_WRITE : CCI_FLAG_READ,
+				       &local_rma_handle);
 		check_return(endpoint, "cci_rma_register", ret, 1);
 		fprintf(stderr, "local_rma_handle is 0x%" PRIx64 "\n",
 			local_rma_handle);
@@ -382,10 +383,10 @@ void do_server()
 					if (opts.method != MSGS) {
 						ret =
 						    cci_rma_register(endpoint,
-								     connection,
 								     buffer,
 								     opts.
 								     max_rma_size,
+								     opts.method == RMA_WRITE ? CCI_FLAG_WRITE : CCI_FLAG_READ,
 								     &opts.
 								     server_rma_handle);
 						check_return(endpoint, "cci_rma_register",

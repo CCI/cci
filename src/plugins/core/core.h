@@ -67,9 +67,8 @@ typedef int (*cci_sendv_fn_t) (cci_connection_t * connection,
 			       const struct iovec * data, uint32_t iovcnt,
 			       const void *context, int flags);
 typedef int (*cci_rma_register_fn_t) (cci_endpoint_t * endpoint,
-				      cci_connection_t * connection,
 				      void *start, uint64_t length,
-				      uint64_t * rma_handle);
+				      int flags, uint64_t * rma_handle);
 typedef int (*cci_rma_deregister_fn_t) (cci_endpoint_t * endpoint,
 					uint64_t rma_handle);
 typedef int (*cci_rma_fn_t) (cci_connection_t * connection,

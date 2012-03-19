@@ -830,9 +830,6 @@ typedef struct sock_rma_handle {
 	/*! Owning endpoint */
 	cci__ep_t *ep;
 
-	/*! Owning connection, if any */
-	cci__conn_t *conn;
-
 	/*! Registered length */
 	uint64_t length;
 

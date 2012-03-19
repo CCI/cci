@@ -84,9 +84,8 @@ static int sock_sendv(cci_connection_t * connection,
 		      const struct iovec *data, uint32_t iovcnt,
 		      const void *context, int flags);
 static int sock_rma_register(cci_endpoint_t * endpoint,
-			     cci_connection_t * connection,
 			     void *start, uint64_t length,
-			     uint64_t * rma_handle);
+			     int flags, uint64_t * rma_handle);
 static int sock_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
 static int sock_rma(cci_connection_t * connection,
 		    void *header_ptr, uint32_t header_len,
@@ -2254,12 +2253,11 @@ static int sock_sendv(cci_connection_t * connection,
 }
 
 static int sock_rma_register(cci_endpoint_t * endpoint,
-			     cci_connection_t * connection,
 			     void *start, uint64_t length,
-			     uint64_t * rma_handle)
+			     int flags, uint64_t * rma_handle)
 {
+	/* FIXME use read/write flags? */
 	cci__ep_t *ep = NULL;
-	cci__conn_t *conn = NULL;
 	sock_ep_t *sep = NULL;
 	sock_rma_handle_t *handle = NULL;
 
@@ -2272,7 +2270,6 @@ static int sock_rma_register(cci_endpoint_t * endpoint,
 
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 	sep = ep->priv;
-	conn = container_of(connection, cci__conn_t, connection);
 
 	handle = calloc(1, sizeof(*handle));
 	if (!handle) {
@@ -2281,7 +2278,6 @@ static int sock_rma_register(cci_endpoint_t * endpoint,
 	}
 
 	handle->ep = ep;
-	handle->conn = conn;
 	handle->length = length;
 	handle->start = start;
 	handle->refcnt = 1;
@@ -2425,11 +2421,6 @@ static int sock_rma(cci_connection_t * connection,
 
 	if (!local) {
 		debug(CCI_DB_INFO, "%s: invalid local RMA handle", __func__);
-		CCI_EXIT;
-		return CCI_EINVAL;
-	} else if (local->conn && local->conn != conn) {
-		debug(CCI_DB_INFO, "%s: invalid connection for this RMA handle",
-		      __func__);
 		CCI_EXIT;
 		return CCI_EINVAL;
 	}

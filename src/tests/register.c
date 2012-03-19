@@ -122,7 +122,7 @@ int main(int argc, char *argv[])
 	for (i = 0; i < count; i++) {
 		void *p = ptr + (uintptr_t) i;
 
-		ret = cci_rma_register(endpoint, NULL, p, length, &handles[i]);
+		ret = cci_rma_register(endpoint, p, length, CCI_FLAG_READ|CCI_FLAG_WRITE, &handles[i]);
 		check_return(endpoint, "cci_rma_register", ret);
 	}
 
