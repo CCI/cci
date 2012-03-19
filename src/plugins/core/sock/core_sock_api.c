@@ -46,6 +46,7 @@ bool conn_established = false;
 
 volatile int sock_shut_down = 0;
 sock_globals_t *sglobals = NULL;
+static int threads_running = 0;
 pthread_t progress_tid, recv_tid;
 
 /*
@@ -276,6 +277,7 @@ static int sock_init(cci_plugin_core_t *plugin,
 		cci__add_dev(dev);
 		devices[sglobals->count] = device;
 		sglobals->count++;
+		threads_running = 1;
 
 	} else
 	/* find devices that we own */
@@ -340,6 +342,7 @@ static int sock_init(cci_plugin_core_t *plugin,
 				devices[sglobals->count] = device;
 				sglobals->count++;
 				dev->is_up = 1;
+				threads_running = 1;
 			}
 
 			/* TODO determine if IP is available and up */
@@ -352,13 +355,15 @@ static int sock_init(cci_plugin_core_t *plugin,
 
 	*((cci_device_t ***) & sglobals->devices) = devices;
 
-	ret = pthread_create(&recv_tid, NULL, sock_recv_thread, NULL);
-	if (ret)
-		goto out;
+	if (threads_running) {
+		ret = pthread_create(&recv_tid, NULL, sock_recv_thread, NULL);
+		if (ret)
+			goto out;
 
-	ret = pthread_create(&progress_tid, NULL, sock_progress_thread, NULL);
-	if (ret)
-		goto out;
+		ret = pthread_create(&progress_tid, NULL, sock_progress_thread, NULL);
+		if (ret)
+			goto out;
+	}
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -431,8 +436,10 @@ static int sock_finalize(cci_plugin_core_t * plugin)
 	pthread_mutex_lock(&globals->lock);
 	sock_shut_down = 1;
 	pthread_mutex_unlock(&globals->lock);
-	pthread_join(progress_tid, NULL);
-	pthread_join(recv_tid, NULL);
+	if (threads_running) {
+		pthread_join(progress_tid, NULL);
+		pthread_join(recv_tid, NULL);
+	}
 
 	pthread_mutex_lock(&globals->lock);
 	TAILQ_FOREACH(dev, &globals->devs, entry)
