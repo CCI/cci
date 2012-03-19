@@ -237,7 +237,7 @@ typedef struct verbs_dev {
 
 typedef struct verbs_globals {
 	int count;		/* number of devices */
-	cci_device_t const **const devices;	/* array of devices */
+	struct cci_device ** devices;	/* array of devices */
 	struct ibv_context **contexts;	/* open devices */
 	struct ifaddrs *ifaddrs;	/* array indexed to contexts */
 } verbs_globals_t;
