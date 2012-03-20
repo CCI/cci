@@ -17,7 +17,6 @@
 static int mx_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
 static int mx_finalize(void);
 static const char *mx_strerror(cci_endpoint_t * endpoint, enum cci_status status);
-static int mx_get_devices(cci_device_t const ***devices);
 static int mx_create_endpoint(cci_device_t * device,
 			      int flags,
 			      cci_endpoint_t ** endpoint, cci_os_handle_t * fd);
@@ -93,7 +92,6 @@ cci_plugin_core_t cci_core_mx_plugin = {
 	mx_init,
 	mx_finalize,
 	mx_strerror,
-	mx_get_devices,
 	mx_create_endpoint,
 	mx_destroy_endpoint,
 	mx_bind,
@@ -131,12 +129,6 @@ static const char *mx_strerror(cci_endpoint_t * endpoint, enum cci_status status
 {
 	printf("In mx_sterrror\n");
 	return NULL;
-}
-
-static int mx_get_devices(cci_device_t const ***devices)
-{
-	printf("In mx_get_devices\n");
-	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 static int mx_create_endpoint(cci_device_t * device,
