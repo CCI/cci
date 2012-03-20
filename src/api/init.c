@@ -408,38 +408,6 @@ int cci__parse_config(const char *path)
 
 	fclose(file);
 
-	/* free unused devices */
-	if (i < CCI_MAX_DEVICES) {
-		globals->devices = calloc(i + 1, sizeof(*globals->devices));
-		if (!globals->devices) {
-			cci__free_devs();
-			free(globals);
-		}
-		globals->devices[i] = NULL;
-	}
-
-	i = 0;
-	TAILQ_FOREACH(dev, &globals->devs, entry) {
-		debug(CCI_DB_DRVR, "%d: %s", i, dev->device.name);
-		globals->devices[i++] = &dev->device;
-	}
-
-	{
-		/* dump config info */
-		const char *conf;
-
-		for (i = 0, d = globals->devices[0]; d != NULL;
-		     i++, d = globals->devices[i]) {
-			int j;
-
-			debug(CCI_DB_DRVR, "[%s]", d->name);
-			for (j = 0, conf = d->conf_argv[j];
-			     conf != NULL; j++, conf = d->conf_argv[j]) {
-				debug(CCI_DB_DRVR, "\t%s", conf);
-			}
-		}
-	}
-
 	return 0;
 }
 
@@ -535,12 +503,25 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			cci__free_dev(dev);
 		}
 
+		/* build devices array and list it */
+		i=0;
+		TAILQ_FOREACH(dev, &globals->devs, entry)
+			i++;
+		globals->devices = calloc(i + 1, sizeof(*globals->devices));
+		if (!globals->devices) {
+			/* FIXME: free everything */
+			return CCI_ENOMEM;
+		}
+		globals->devices[i] = NULL;
+		i=0;
+
 		/* list ready devices */
 		TAILQ_FOREACH(dev, &globals->devs, entry) {
 			debug(CCI_DB_DRVR,
 			      "device [%s] (driver %s, default %d, priority %d, up %d) is ready",
 			      dev->device.name, dev->driver,
 			      dev->is_default, dev->priority, dev->device.up);
+			globals->devices[i++] = &dev->device;
 		}
 
 		/* success */

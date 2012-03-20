@@ -18,27 +18,18 @@
 #include "plugins/base/public.h"
 #include "plugins/core/core.h"
 
-int cci_get_devices(cci_device_t * const ** devices)
+int cci_get_devices(cci_device_t * const ** devicesp)
 {
+	cci_device_t **devices;
+	cci__dev_t *dev;
 	int ret;
-	int i, j;
+	int i, nb;
 
-	if (NULL == devices)
-		return CCI_EINVAL;
+	/* FIXME: if we have to update the device array at runtime,
+	 * add a update_devices plugin callback and call of them here,
+	 * to update the TAILQ. then update the devices array.
+	 */
 
-	for (i = 0, j = 0;
-	     cci_all_plugins[i].plugin != NULL;
-	     i++) {
-		cci_plugin_core_t *plugin = (cci_plugin_core_t *) cci_all_plugins[i].plugin;
-		ret = plugin->get_devices(plugin, devices); /* FIMXE append? */
-		if (!ret)
-			j++;
-	}
-	/* return an error if all plugins init failed */
-	if (!j) {
-		perror("all plugins get_devices failed:");
-		return errno;
-	}
-
+	*devicesp = (cci_device_t * const *) globals->devices;
 	return CCI_SUCCESS;
 }
