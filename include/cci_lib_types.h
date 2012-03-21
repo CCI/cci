@@ -42,7 +42,7 @@ BEGIN_C_DECLS
 /*! CCI private device */
     typedef struct cci__dev {
 	/*! Pointer to the plugin structure */
-	struct cci_plugin_core *plugin;
+	struct cci_plugin_core *plugin; /* set by the plugin init() */
 
 	/*! Public device (name, info, argv, max_send_size, rate, pci) */
 	struct cci_device device;
@@ -78,7 +78,7 @@ void cci__init_dev(cci__dev_t *dev);
 /*! CCI private endpoint */
 typedef struct cci__ep {
 	/*! Pointer to the plugin structure */
-	struct cci_plugin_core *plugin;
+	struct cci_plugin_core *plugin; /* set by the core before passing the newly allocated endpoint to the plugin create_endpoint() */
 
 	/*! Public endpoint (max_recv_buffer_count) */
 	struct cci_endpoint endpoint;
@@ -120,7 +120,7 @@ typedef struct cci__ep {
 /*! CCI private connection */
 typedef struct cci__conn {
 	/*! Pointer to the plugin structure */
-	struct cci_plugin_core *plugin;
+	struct cci_plugin_core *plugin; /* set by the plugin before returning the connection in connect/accept events */
 
 	/*! Public connection (max_send_size, endpoint, attribute) */
 	struct cci_connection connection;
