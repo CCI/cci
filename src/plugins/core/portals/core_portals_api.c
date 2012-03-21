@@ -111,8 +111,8 @@ do {                                                        \
 /*
  * Local functions
  */
-static int portals_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int portals_finalize(void);
+static int portals_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int portals_finalize(cci_plugin_core_t *plugin);
 static const char *portals_strerror(cci_endpoint_t * endpoint, enum cci_status status);
 static int portals_create_endpoint(cci_device_t * device,
 				   int flags,
@@ -210,7 +210,7 @@ cci_plugin_core_t cci_core_portals_plugin = {
 	portals_rma
 };
 
-static int portals_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+static int portals_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 
 	int iRC;
@@ -474,7 +474,7 @@ static const char *portals_strerror(cci_endpoint_t * endpoint, enum cci_status s
 	return cp;
 }
 
-static int portals_finalize(void)
+static int portals_finalize(cci_plugin_core_t *plugin)
 {
 	cci__dev_t *dev;
 

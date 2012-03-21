@@ -119,8 +119,8 @@ do {                                                                  \
 // Cycle count sampling code -- FINISH
 
 // Local functions
-static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int gni_finalize(void);
+static int gni_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int gni_finalize(cci_plugin_core_t *plugin);
 static const char *gni_strerror(cci_endpoint_t * endpoint, enum cci_status gRv);
 static int gni_create_endpoint(cci_device_t * device,
 			       int32_t flags,
@@ -855,7 +855,7 @@ cci_plugin_core_t cci_core_gni_plugin = {
 	gni_rma
 };
 
-static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+static int gni_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 
 	int32_t iTmp;		// integer temporary
@@ -1133,7 +1133,7 @@ static const char *gni_strerror(cci_endpoint_t * endpoint, enum cci_status cRv)
 	return (gni_err_str[(enum cci_status)cRv]);
 }
 
-static int gni_finalize(void)
+static int gni_finalize(cci_plugin_core_t *plugin<)
 {
 
 	const cci_device_t *device;

@@ -14,8 +14,8 @@
 /*
  * Local functions
  */
-static int mx_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int mx_finalize(void);
+static int mx_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int mx_finalize(cci_plugin_core_t *plugin);
 static const char *mx_strerror(cci_endpoint_t * endpoint, enum cci_status status);
 static int mx_create_endpoint(cci_device_t * device,
 			      int flags,
@@ -113,13 +113,13 @@ cci_plugin_core_t cci_core_mx_plugin = {
 	mx_rma
 };
 
-static int mx_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+static int mx_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	printf("In mx_init\n");
 	return CCI_SUCCESS;
 }
 
-static int mx_finalize(void)
+static int mx_finalize(cci_plugin_core_t *plugin)
 {
 	printf("In mx_finalize\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
