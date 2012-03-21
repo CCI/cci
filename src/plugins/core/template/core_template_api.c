@@ -76,7 +76,7 @@ cci_plugin_core_t cci_core_template_plugin = {
 	 CCI_CORE_API_VERSION,
 	 "template",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
-	 5,
+	 0, /* priority set to 0 because people shouldn't ever use it */
 
 	 /* Bootstrap function pointers */
 	 cci_core_template_post_load,
