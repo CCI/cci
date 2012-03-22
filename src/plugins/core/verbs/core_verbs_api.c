@@ -247,7 +247,7 @@ verbs_find_rdma_devices(struct ibv_context **contexts, int count,
 			struct ifaddrs **ifaddrs)
 {
 	int ret = CCI_SUCCESS;
-	int i, j;
+	int i;
 	struct ifaddrs *addrs = NULL;
 	struct ifaddrs *ifa = NULL;
 	struct ifaddrs *tmp = NULL;
@@ -266,9 +266,8 @@ verbs_find_rdma_devices(struct ibv_context **contexts, int count,
 		goto out;
 	}
 
-	for (i = j = 0; i < count; i++) {
+	for (i = 0; i < count; i++) {
 		struct ibv_context *c = contexts[i];
-		//char ip[256];
 
 		for (tmp = ifa; tmp != NULL; tmp = tmp->ifa_next) {
 			if (tmp->ifa_addr->sa_family == AF_INET &&
@@ -276,19 +275,18 @@ verbs_find_rdma_devices(struct ibv_context **contexts, int count,
 				ret = verbs_ifa_to_context(c, tmp->ifa_addr);
 				if (!ret) {
 					int len = sizeof(struct sockaddr);
-					addrs[j].ifa_name =
+					addrs[i].ifa_name =
 					    strdup(tmp->ifa_name);
-					addrs[j].ifa_flags = tmp->ifa_flags;
-					addrs[j].ifa_addr = calloc(1, len);
-					memcpy(addrs[j].ifa_addr, tmp->ifa_addr,
+					addrs[i].ifa_flags = tmp->ifa_flags;
+					addrs[i].ifa_addr = calloc(1, len);
+					memcpy(addrs[i].ifa_addr, tmp->ifa_addr,
 					       len);
-					addrs[j].ifa_netmask = calloc(1, len);
-					memcpy(addrs[j].ifa_netmask,
+					addrs[i].ifa_netmask = calloc(1, len);
+					memcpy(addrs[i].ifa_netmask,
 					       tmp->ifa_netmask, len);
-					addrs[j].ifa_broadaddr = calloc(1, len);
-					memcpy(addrs[j].ifa_broadaddr,
+					addrs[i].ifa_broadaddr = calloc(1, len);
+					memcpy(addrs[i].ifa_broadaddr,
 					       tmp->ifa_broadaddr, len);
-					j++;
 					break;
 				}
 			}
@@ -337,7 +335,7 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
 	CCI_ENTER;
 
-	memset(used, 0, CCI_MAX_DEVICES);
+	memset(used, 0, sizeof(int) * CCI_MAX_DEVICES);
 
 	/* init driver globals */
 	vglobals = calloc(1, sizeof(*vglobals));
@@ -375,7 +373,6 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		if (0 == strcmp("verbs", dev->driver)) {
 			int i = 0;
 			const char * const *arg;
-			const char *hca_id = NULL;
 			const char *interface = NULL;
 			struct in_addr in;
 			uint16_t port = 0;
@@ -414,8 +411,6 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 					port =
 					    (uint16_t) strtoul(port_str, NULL,
 							       0);
-				} else if (0 == strncmp("hca_id=", *arg, 7)) {
-					hca_id = *arg + 7;
 				} else if (0 == strncmp("interface=", *arg, 10)) {
 					interface = *arg + 10;
 				} else if (0 == strncmp("driver=", *arg, 7)) {
@@ -452,24 +447,6 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 				} else if (interface) {
 					if (0 ==
 					    strcmp(interface, ifa->ifa_name)) {
-						if (used[i]) {
-							debug(CCI_DB_WARN,
-							      "device already assigned "
-							      "%s %s %s",
-							      ctx->device->name,
-							      ifa->ifa_name,
-							      inet_ntoa(sin->
-									sin_addr));
-							goto out;
-						}
-						vdev->context = ctx;
-						vdev->ifa = ifa;
-						used[i]++;
-						break;
-					}
-				} else if (hca_id) {
-					if (0 ==
-					    strcmp(hca_id, ctx->device->name)) {
 						if (used[i]) {
 							debug(CCI_DB_WARN,
 							      "device already assigned "
@@ -1672,8 +1649,6 @@ verbs_connect(cci_endpoint_t * endpoint, const char *server_uri,
 #else
 	{
 		struct sockaddr_in dst;
-		debug(CCI_DB_ALL,
-		      "not using rdma_create_ep() or rdma_getaddrinfo()");
 
 		{
 			struct addrinfo *res, hints;
@@ -2364,7 +2339,6 @@ static int verbs_handle_conn_payload(cci__ep_t * ep, struct ibv_wc wc)
 	rx->evt.event.request.attribute = conn->connection.attribute;
 	ptr = rx->rx_pool->buf + rx->offset;
 	if (need_rdma) {
-		len -= 12;	/* magic number => uint64_t + uint32_t */
 		ptr = ptr + (uintptr_t) 12;
 		vconn->num_slots = VERBS_CONN_RMSG_DEPTH;	/* indicate peer wants RDMA */
 
@@ -3009,7 +2983,7 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 				ret = verbs_handle_rma_completion(ep, wc[i]);
 				break;
 			default:
-				debug(CCI_DB_ALL,
+				debug(CCI_DB_WARN,
 				      "%s: missed opcode %u status %s wr_id 0x%"
 				      PRIx64, __func__, wc[i].opcode,
 				      ibv_wc_status_str(wc[i].status),
