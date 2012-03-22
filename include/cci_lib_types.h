@@ -68,6 +68,9 @@ BEGIN_C_DECLS
 	void *priv;
 } cci__dev_t;
 
+/* export for transports as needed */
+void cci__init_dev(cci__dev_t *dev);
+
 /*! CCI private endpoint */
 typedef struct cci__ep {
 	/*! Public endpoint (max_recv_buffer_count) */
