@@ -2399,8 +2399,7 @@ static int verbs_handle_conn_reply(cci__ep_t * ep, struct ibv_wc wc)
 	rx = (verbs_rx_t *) (uintptr_t) wc.wr_id;
 	rx->evt.event.type = CCI_EVENT_CONNECT;
 	rx->evt.event.connect.status = (header >> 4) & 0xF;	/* magic number */
-	rx->evt.event.connect.context =
-	    vconn->conn_req ? vconn->conn_req->context : NULL;
+	rx->evt.event.connect.context = conn->connection.context;
 	rx->evt.conn = conn;
 	if (rx->evt.event.connect.status == CCI_SUCCESS) {
 		int use_rdma = (header >> 8) & 0x1;
