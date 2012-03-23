@@ -34,9 +34,10 @@ BEGIN_C_DECLS
 /* Wire Header Specification */
     typedef enum gni_msg_type {
 	GNI_MSG_INVALID = 0,
-	GNI_MSG_CONN_REQUEST,
+	GNI_MSG_CONN_REQUEST,		/* client -> server */
 	GNI_MSG_CONN_PAYLOAD,
-	GNI_MSG_CONN_REPLY,
+	GNI_MSG_CONN_REPLY,		/* client <- server */
+	GNI_MSG_CONN_ACK,		/* client -> server */
 	GNI_MSG_DISCONNECT,
 	GNI_MSG_SEND,
 	GNI_MSG_RMA_REMOTE_REQUEST,
@@ -60,9 +61,9 @@ BEGIN_C_DECLS
 
  */
 
-#define GNI_TYPE_BITS		(4)
-#define GNI_TYPE_MASK		((1 << GNI_TYPE_BITS) - 1)
-#define GNI_TYPE(x)		((x) & GNI_TYPE_MASK)
+#define GNI_MSG_TYPE_BITS	(4)
+#define GNI_MSG_TYPE_MASK	((1 << GNI_MSG_TYPE_BITS) - 1)
+#define GNI_MSG_TYPE(x)		((x) & GNI_MSG_TYPE_MASK)
 
 /* Send
 
@@ -323,10 +324,9 @@ typedef enum gni_conn_state {
 typedef struct gni_conn_request {
 	int sock;			/* socket for connection handshake */
 	uint32_t nic_id;		/* peer's physical nic id */
-	void *context;			/* application context */
 	void *ptr;			/* application payload */
 	uint32_t len;			/* payload length */
-	cci_conn_attribute_t attr;	/* connection type */
+	gni_smsg_info_t info;		/* sender's smsg info */
 } gni_conn_request_t;
 
 typedef struct gni_conn {
