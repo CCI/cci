@@ -2222,8 +2222,6 @@ verbs_handle_conn_established(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 	assert(conn);
 	vconn = conn->priv;
 	assert(vconn);
-	assert(vconn->state == VERBS_CONN_ACTIVE
-	       || vconn->state == VERBS_CONN_PASSIVE);
 
 	switch (vconn->state) {
 	case VERBS_CONN_ACTIVE:
