@@ -2122,6 +2122,7 @@ static int verbs_conn_est_active(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 		goto out;
 	}
 
+	tx->msg_type = VERBS_MSG_INVALID;
 	tx->evt.event.type = CCI_EVENT_NONE;	/* never hand to application */
 	tx->evt.conn = conn;
 
@@ -2229,6 +2230,8 @@ verbs_handle_conn_established(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 		break;
 	case VERBS_CONN_PASSIVE:
 		ret = verbs_conn_est_passive(ep, cm_evt);
+		break;
+	case VERBS_CONN_ESTABLISHED:
 		break;
 	default:
 		debug(CCI_DB_INFO, "%s: incorrect conn state %s", __func__,
@@ -2906,7 +2909,7 @@ static int verbs_handle_send_completion(cci__ep_t * ep, struct ibv_wc wc)
 		}
 		break;
 	default:
-		debug(CCI_DB_INFO, "%s: ignoring %s msg",
+		debug(CCI_DB_MSG, "%s: ignoring %s msg",
 		      __func__, verbs_msg_type_str(tx->msg_type));
 		break;
 	}
