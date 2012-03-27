@@ -2379,7 +2379,7 @@ static int verbs_handle_conn_reply(cci__ep_t * ep, struct ibv_wc wc)
 			vconn = vc;
 			conn = vconn->conn;
 			assert(conn == vc->id->context);
-			TAILQ_REMOVE(&vep->passive, vconn, temp);
+			TAILQ_REMOVE(&vep->active, vconn, temp);
 			break;
 		}
 	}
