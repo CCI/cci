@@ -148,7 +148,7 @@ typedef struct gni_smsg_info {
 typedef struct gni_rma_addr_rkey {
 	uint64_t remote_handle;		/* the CCI remote handle */
 	uint64_t remote_addr;		/* the gni remote address */
-	gni_mem_handle_t mem_hndl;	/* two uint64_t */
+	gni_mem_handle_t remote_mem_hndl;	/* two uint64_t */
 } gni_rma_addr_rkey_t;
 
 /* RMA Remote Handle Reply
@@ -218,7 +218,7 @@ typedef struct gni_tx {
 
 typedef struct gni_rx {
 	cci__evt_t evt;			/* associated event */
-	//uint32_t offset;		/* offset in gep->buffer */
+	uint32_t offset;		/* offset in gep->buffer */
 	TAILQ_ENTRY(gni_rx) entry;	/* hangs on rx_pool->rxs */
 	struct gni_rx_pool *rx_pool;	/* owning rx pool */
 } gni_rx_t;
@@ -262,6 +262,9 @@ typedef struct gni_rma_op {
 	uint64_t local_offset;
 	uint64_t remote_handle;
 	uint64_t remote_offset;
+
+	uint64_t remote_addr;
+	gni_mem_handle_t remote_mem_hndl; /* memory handle */
 
 	uint64_t len;
 	cci_status_t status;
