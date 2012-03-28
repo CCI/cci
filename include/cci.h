@@ -778,9 +778,8 @@ CCI_DECLSPEC int cci_connect(cci_endpoint_t * endpoint, const char *server_uri,
 /*!
   Tear down an existing connection.
 
-  Operation is local, remote side is not notified. From that point,
-  both local and remote side will get a DISCONNECTED communication error
-  if sends are initiated on  this connection.
+  Operation is local, remote side is not notified. Any future attempt
+  to use the connection will result in undefined behavior.
 
   \param[in] connection	Connection to server.
 
@@ -1375,11 +1374,11 @@ CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
   When cci_send() returns, the application buffer is reusable. By
   default, CCI will buffer the data internally.
 
-  \param[in] connection	Connection (destination/reliability).
+  \param[in] connection	Connection (destination/reliability/ordering).
   \param[in] msg_ptr    Pointer to local segment.
   \param[in] msg_len    Length of local segment (limited to max send size).
   \param[in] context	Cookie to identify the completion through a Send event
-				    when non-blocking.
+			when non-blocking.
   \param[in] flags      Optional flags: CCI_FLAG_BLOCKING,
                         CCI_FLAG_NO_COPY, CCI_FLAG_SILENT.  These flags
                         are explained below.
@@ -1410,7 +1409,7 @@ CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
   When cci_send() returns, the buffer is re-usable by the application.
 
   \anchor CCI_FLAG_BLOCKING
-  If the CCI_FLAG_BLOCKING flag is specified, cci_send() will \a also
+  If the CCI_FLAG_BLOCKING flag is specified, cci_send() will also
   block until the send completion has occurred.  In this case, there
   is no event returned for this send via cci_get_event(); the send
   completion status is returned via cci_send().
@@ -1419,7 +1418,7 @@ CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
   If the CCI_FLAG_NO_COPY is specified, the application is
   indicating that it does not need the buffer back until the send
   completion occurs (which is most useful when CCI_FLAG_BLOCKING is
-  \a not specified).  The CCI implementation is therefore free to use
+  not specified).  The CCI implementation is therefore free to use
   "zero copy" types of transmission with the buffer -- if it wants to.
 
   \anchor CCI_FLAG_SILENT
@@ -1432,9 +1431,10 @@ CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
   semantics imply specific unordered SILENT send completions.  The
   only ways to know when unordered SILENT sends have completed (and
   that the local send buffer is "owned" by the application again) is
-  either to close the connection or issue a non-SILENT send.  The
-  completion of a non-SILENT send guarantees the completion of all
-  previous SILENT sends.
+  to close the connection.
+
+  Note, using both CCI_FLAG_NO_COPY and CCI_FLAG_SILENT is only allowed
+  on RO connections.
 */
 CCI_DECLSPEC int cci_send(cci_connection_t * connection,
 			  const void *msg_ptr, uint32_t msg_len,
