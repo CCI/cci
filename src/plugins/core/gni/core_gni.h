@@ -57,8 +57,9 @@ BEGIN_C_DECLS
    |             B              |  A |
    +----------------------------+----+
 
-   where A is the msg type and each message type decides how to use B
-
+   where:
+      A is the msg type
+      B is set by each message type
  */
 
 #define GNI_MSG_TYPE_BITS	(4)
@@ -89,6 +90,8 @@ typedef struct gni_smsg_info {
 	uint32_t mbox_offset;
 	uint32_t mbox_maxcredit;
 	uint32_t msg_maxsize;
+	uint32_t id;			/* conn id */
+	uint32_t pad;
 } gni_smsg_info_t;
 
 /* Conn Request (sent over the socket)
@@ -235,6 +238,7 @@ typedef struct gni_globals {
 	uint32_t phys_addr;		/* physical Gemini address */
 	int count;			/* number of devices */
 	int *device_ids;		/* local device ids */
+	struct ifaddrs *ifaddrs;
 	cci_device_t const **const devices;	/* array of devices */
 } gni_globals_t;
 
@@ -305,6 +309,8 @@ typedef struct gni_ep {
 
 	TAILQ_HEAD(g_rx_pools, gni_rx_pool) rx_pools;	/* list of rx pools - usually one */
 
+	void *conn_tree;		/* tree of peer conn ids */
+	pthread_rwlock_t conn_tree_lock;	/* rw lock */
 	TAILQ_HEAD(g_conns, gni_conn) conns;	/* all conns */
 	TAILQ_HEAD(g_active, gni_conn) active;	/* active conns waiting on connect */
 	TAILQ_HEAD(g_active2, gni_conn) active2;	/* active conns waiting on reply */
@@ -334,9 +340,10 @@ typedef struct gni_conn_request {
 
 typedef struct gni_conn {
 	cci__conn_t *conn;		/* owning conn */
-	struct sockaddr_in sin;		/* peer address and port */
 	gni_ep_handle_t peer;		/* peer ep handle */
+	uint32_t id;			/* peer sets remote_event to this */
 	gni_conn_state_t state;		/* current state */
+	struct sockaddr_in sin;		/* peer address and port */
 	uint32_t mss;			/* max send size */
 	uint32_t max_tx_cnt;		/* max sends in flight */
 

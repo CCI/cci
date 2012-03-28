@@ -18,11 +18,13 @@
 #include <sys/socket.h>
 #include <sys/param.h>
 #include <sys/select.h>
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <netdb.h>
+#include <search.h>
 
 #include "cci.h"
 #include "plugins/core/core.h"
@@ -189,21 +191,6 @@ static cci_status_t gni_to_cci_status(gni_return_t rc)
 	return ret;
 }
 
-#if 0
-static int
-gni_ifa_to_device_id(int *device_id, struct ifaddrs *ifa)
-{
-	int ret = CCI_SUCCESS;
-
-	CCI_ENTER;
-
-
-	CCI_EXIT;
-	return ret;
-}
-#endif
-
-#if 0
 static int
 gni_find_gni_device_ids(int **device_ids, int count,
 			struct ifaddrs **ifaddrs)
@@ -228,16 +215,11 @@ gni_find_gni_device_ids(int **device_ids, int count,
 		goto out;
 	}
 
-	/* FIXME if device_id => ipogif<device_id>,
-	 * then match and return */
 	for (i = 0; i < count; i++) {
-		int *d = device_ids[i];
-
 		for (tmp = ifa; tmp != NULL; tmp = tmp->ifa_next) {
 			if (tmp->ifa_addr->sa_family == AF_INET &&
 			    !(tmp->ifa_flags & IFF_LOOPBACK)) {
-				ret = gni_ifa_to_device_id(d, tmp);
-				if (!ret) {
+				if (0 == strcmp("ipogif0", tmp->ifa_name)) {
 					int len = sizeof(struct sockaddr);
 					addrs[i].ifa_name =
 					    strdup(tmp->ifa_name);
@@ -263,7 +245,6 @@ gni_find_gni_device_ids(int **device_ids, int count,
 	CCI_EXIT;
 	return ret;
 }
-#endif
 
 static gni_tx_t *gni_get_tx_locked(gni_ep_t * gep)
 {
@@ -342,7 +323,7 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		goto out;
 	}
 
-#if 0
+#if 1
 	/* for each ifaddr, check if it is a GNI device */
 	ret = gni_find_gni_device_ids(&gglobals->device_ids, count, &ifaddrs);
 	if (ret) {
@@ -488,6 +469,18 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	devices[gglobals->count] = NULL;
 
 	*((cci_device_t ***) & gglobals->devices) = devices;
+
+	{
+		struct timeval tv;
+		int seed = 0;
+
+		seed = getpid();
+		seed = (seed & 0xFFFF) << 16;
+
+		gettimeofday(&tv, NULL);
+		seed |= (int) tv.tv_usec;
+		srandom(seed);
+	}
 
 	/* TODO  start progress thread */
 
@@ -745,6 +738,12 @@ gni_create_endpoint(cci_device_t * device,
 	TAILQ_INIT(&gep->passive);
 	TAILQ_INIT(&gep->handles);
 	TAILQ_INIT(&gep->rma_ops);
+
+	ret = pthread_rwlock_init(&gep->conn_tree_lock, NULL);
+	if (ret) {
+		/* TODO */
+		goto out;
+	}
 
 	(*endpoint)->max_recv_buffer_count = GNI_EP_RX_CNT;
 	ep->rx_buf_cnt = GNI_EP_RX_CNT;
@@ -1134,6 +1133,12 @@ static int gni_accept(union cci_event *event, void *context)
 		goto out;
 	}
 
+	grc = GNI_EpSetEventData(gconn->peer, gconn->id, cr->info.id);
+	if (grc) {
+		ret = gni_to_cci_status(grc);
+		goto out;
+	}
+
 	memset(&local, 0, sizeof(local));
 	local.mbox_maxcredit = GNI_CONN_CREDIT;
 	local.msg_maxsize = GNI_EP_MSS;
@@ -1173,6 +1178,7 @@ static int gni_accept(union cci_event *event, void *context)
 	reply.info.mbox_offset = 0;
 	reply.info.mbox_maxcredit = local.mbox_maxcredit;
 	reply.info.msg_maxsize = local.msg_maxsize;
+	reply.info.id = gconn->id;
 
 	grc = GNI_SmsgInit(gconn->peer, &local, &remote);
 	if (grc == -1) {
@@ -1283,7 +1289,7 @@ gni_connect(cci_endpoint_t * endpoint, char *server_uri,
 	gni_ep_t *gep = NULL;
 	gni_conn_t *gconn = NULL;
 	gni_conn_request_t *cr = NULL;
-	uint32_t header = (data_len << 8) | (attribute << 4) | GNI_MSG_CONN_REQUEST;
+	uint32_t header = 0;
 	gni_smsg_attr_t attr;
 	gni_smsg_info_t info;
 	uint16_t len = sizeof(header) + sizeof(info);
@@ -1315,6 +1321,9 @@ gni_connect(cci_endpoint_t * endpoint, char *server_uri,
 	TAILQ_INIT(&gconn->remotes);
 	TAILQ_INIT(&gconn->rma_ops);
 	*((char **)&conn->uri) = strdup(server_uri);
+	gconn->id = (uint32_t) random();
+
+	header = (data_len << 8) | (attribute << 4) | GNI_MSG_CONN_REQUEST;
 
 	cr = calloc(1, sizeof(*cr));
 	if (!cr) {
@@ -1377,6 +1386,7 @@ gni_connect(cci_endpoint_t * endpoint, char *server_uri,
 	info.mbox_offset = 0;
 	info.mbox_maxcredit = attr.mbox_maxcredit;
 	info.msg_maxsize = attr.msg_maxsize;
+	info.id = gconn->id;
 
 	cr->ptr = calloc(1, data_len + len);
 	if (!cr->ptr) {
@@ -1613,7 +1623,7 @@ static int gni_conn_est_passive(cci__ep_t * ep, cci__conn_t *conn)
 	gni_conn_t *gconn = conn->priv;
 	gni_conn_request_t *cr = gconn->conn_req;
 	cci__evt_t *evt = NULL;
-	uint32_t header = 0;
+	uint32_t header;
 
 	CCI_ENTER;
 
@@ -1727,6 +1737,12 @@ static int gni_handle_conn_reply(cci__ep_t * ep, cci__conn_t *conn)
 		remote.msg_maxsize = reply.info.msg_maxsize;
 
 		grc = GNI_EpBind(gconn->peer, reply.nic_id, ntohs(gconn->sin.sin_port));
+		if (grc) {
+			ret = gni_to_cci_status(grc);
+			goto out;
+		}
+
+		grc = GNI_EpSetEventData(gconn->peer, gconn->id, cr->info.id);
 		if (grc) {
 			ret = gni_to_cci_status(grc);
 			goto out;
@@ -1933,6 +1949,7 @@ gni_check_for_conn_requests(cci__ep_t *ep)
 	gconn->state = GNI_CONN_PASSIVE;
 	memcpy(&gconn->sin, &sin, sizeof(sin));
 	gconn->mss = GNI_EP_MSS;
+	gconn->id = (uint32_t) random();
 
 	cr = calloc(1, sizeof(*cr));
 	if (!cr) {
@@ -2024,7 +2041,7 @@ static int gni_conn_finish(cci__ep_t * ep, cci__conn_t *conn)
 	gni_ep_t *gep = ep->priv;
 	gni_conn_t *gconn = conn->priv;
 	gni_conn_request_t *cr = gconn->conn_req;
-	uint32_t header = 0;
+	uint32_t header;
 	cci__evt_t *evt = NULL;
 
 	CCI_ENTER;
@@ -2044,7 +2061,7 @@ static int gni_conn_finish(cci__ep_t * ep, cci__conn_t *conn)
 		ret = CCI_ERROR;
 		goto out;
 	}
-	assert(header == GNI_MSG_CONN_ACK);
+	assert(GNI_MSG_TYPE(header) == GNI_MSG_CONN_ACK);
 	evt->event.accept.status = CCI_SUCCESS;
 	evt->event.accept.context = conn->connection.context;
 	evt->event.accept.connection = &conn->connection;
@@ -2645,6 +2662,38 @@ gni_handle_recv(gni_rx_t *rx, void *msg)
 	return ret;
 }
 
+static int
+gni_compare_u32(const void *pa, const void *pb)
+{
+	if (*(uint32_t*) pa < *(uint32_t*) pb)
+		return -1;
+	if (*(uint32_t*) pa > *(uint32_t*) pb)
+		return 1;
+	return 0;
+}
+
+static int
+gni_find_conn(cci__ep_t *ep, uint32_t id, cci__conn_t ** conn)
+{
+	int ret = CCI_ERROR;
+	gni_ep_t *gep = ep->priv;
+	void *node = NULL;
+
+	CCI_ENTER;
+
+	pthread_rwlock_rdlock(&gep->conn_tree_lock);
+	node = tfind(&id, &gep->conn_tree, gni_compare_u32);
+	pthread_rwlock_unlock(&gep->conn_tree_lock);
+	if (node) {
+		*conn = *(cci__conn_t**)node;
+		assert(((gni_conn_t*)((*conn)->priv))->id == id);
+		ret = CCI_SUCCESS;
+	}
+
+	CCI_EXIT;
+	return ret;
+}
+
 static int gni_get_recv_event(cci__ep_t * ep)
 {
 	int ret = CCI_SUCCESS;
@@ -2674,10 +2723,13 @@ static int gni_get_recv_event(cci__ep_t * ep)
 		uint32_t header = 0;
 		gni_msg_type_t msg_type;
 
-		/* TODO lookup conn from id */
-		if (id) {  /* FIXME silence gcc for now */
-		gconn = conn->priv;
+		/* lookup conn from id */
+		ret = gni_find_conn(ep, id, &conn);
+		if (ret != CCI_SUCCESS) {
+			/* TODO */
+			goto out;
 		}
+		gconn = conn->priv;
 
 		grc = GNI_SmsgGetNext(gconn->peer, &msg);
 		if (grc != GNI_RC_SUCCESS) {
