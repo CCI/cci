@@ -1274,6 +1274,71 @@ static int gni_parse_uri(const char *uri, char **node, char **service)
 }
 
 static int
+gni_compare_u32(const void *pa, const void *pb)
+{
+	if (*(uint32_t*) pa < *(uint32_t*) pb)
+		return -1;
+	if (*(uint32_t*) pa > *(uint32_t*) pb)
+		return 1;
+	return 0;
+}
+
+static int
+gni_find_conn(cci__ep_t *ep, uint32_t id, cci__conn_t ** conn)
+{
+	int ret = CCI_ERROR;
+	gni_ep_t *gep = ep->priv;
+	void *node = NULL;
+	uint32_t *i = NULL;
+
+	CCI_ENTER;
+
+	pthread_rwlock_rdlock(&gep->conn_tree_lock);
+	node = tfind(&id, &gep->conn_tree, gni_compare_u32);
+	pthread_rwlock_unlock(&gep->conn_tree_lock);
+	if (node) {
+		gni_conn_t *gconn = NULL;
+
+		i = *((uint32_t **)node);
+		gconn = container_of(i, gni_conn_t, id);
+		assert(gconn->id == id);
+		*conn = gconn->conn;
+		ret = CCI_SUCCESS;
+	}
+
+	CCI_EXIT;
+	return ret;
+}
+
+static void
+gni_insert_conn(cci__conn_t *conn)
+{
+	int ret = CCI_SUCCESS;
+	uint32_t id = 0;
+	cci__ep_t *ep = container_of(conn->connection.endpoint, cci__ep_t, endpoint);;
+	cci__conn_t *c = NULL;
+	gni_ep_t *gep = ep->priv;
+	gni_conn_t *gconn = conn->priv;
+	void *node = NULL;
+
+	CCI_ENTER;
+
+	pthread_rwlock_wrlock(&gep->conn_tree_lock);
+	do {
+		id = random();
+		ret = gni_find_conn(ep, id, &c);
+	} while(ret == CCI_SUCCESS);
+	gconn->id = id;
+	do {
+		node = tsearch(&gconn->id, &gep->conn_tree, gni_compare_u32);
+	} while (!node);
+	pthread_rwlock_unlock(&gep->conn_tree_lock);
+
+	CCI_EXIT;
+	return;
+}
+
+static int
 gni_connect(cci_endpoint_t * endpoint, char *server_uri,
 	      void *data_ptr, uint32_t data_len,
 	      cci_conn_attribute_t attribute,
@@ -1321,7 +1386,7 @@ gni_connect(cci_endpoint_t * endpoint, char *server_uri,
 	TAILQ_INIT(&gconn->remotes);
 	TAILQ_INIT(&gconn->rma_ops);
 	*((char **)&conn->uri) = strdup(server_uri);
-	gconn->id = (uint32_t) random();
+	gni_insert_conn(conn);
 
 	header = (data_len << 8) | (attribute << 4) | GNI_MSG_CONN_REQUEST;
 
@@ -1949,7 +2014,7 @@ gni_check_for_conn_requests(cci__ep_t *ep)
 	gconn->state = GNI_CONN_PASSIVE;
 	memcpy(&gconn->sin, &sin, sizeof(sin));
 	gconn->mss = GNI_EP_MSS;
-	gconn->id = (uint32_t) random();
+	gni_insert_conn(conn);
 
 	cr = calloc(1, sizeof(*cr));
 	if (!cr) {
@@ -2657,38 +2722,6 @@ gni_handle_recv(gni_rx_t *rx, void *msg)
 	int ret = CCI_SUCCESS;
 
 	CCI_ENTER;
-
-	CCI_EXIT;
-	return ret;
-}
-
-static int
-gni_compare_u32(const void *pa, const void *pb)
-{
-	if (*(uint32_t*) pa < *(uint32_t*) pb)
-		return -1;
-	if (*(uint32_t*) pa > *(uint32_t*) pb)
-		return 1;
-	return 0;
-}
-
-static int
-gni_find_conn(cci__ep_t *ep, uint32_t id, cci__conn_t ** conn)
-{
-	int ret = CCI_ERROR;
-	gni_ep_t *gep = ep->priv;
-	void *node = NULL;
-
-	CCI_ENTER;
-
-	pthread_rwlock_rdlock(&gep->conn_tree_lock);
-	node = tfind(&id, &gep->conn_tree, gni_compare_u32);
-	pthread_rwlock_unlock(&gep->conn_tree_lock);
-	if (node) {
-		*conn = *(cci__conn_t**)node;
-		assert(((gni_conn_t*)((*conn)->priv))->id == id);
-		ret = CCI_SUCCESS;
-	}
 
 	CCI_EXIT;
 	return ret;
