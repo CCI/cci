@@ -298,6 +298,9 @@ typedef struct verbs_ep {
 	uint32_t cq_size;	/* number of cqe */
 	struct sockaddr_in sin;	/* host address and port */
 
+	void *conn_tree;	/* rbtree of conns sorted by qp_num */
+	pthread_rwlock_t conn_tree_lock;
+
 	void *tx_buf;		/* send buffer */
 	struct ibv_mr *tx_mr;	/* send memory registration */
 	 TAILQ_HEAD(v_txs, verbs_tx) txs;	/* all txs */
@@ -335,6 +338,7 @@ typedef struct verbs_conn_request {
 
 typedef struct verbs_conn {
 	cci__conn_t *conn;	/* owning conn */
+	uint32_t qp_num;	/* id->qp->qp_num for vep->conn_tree */
 	struct rdma_cm_id *id;	/* peer info */
 	verbs_conn_state_t state;	/* current state */
 	uint32_t mss;		/* max send size */
