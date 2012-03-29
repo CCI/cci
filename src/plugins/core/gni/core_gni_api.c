@@ -203,6 +203,8 @@ gni_find_gni_device_ids(int **device_ids, int count,
 
 	CCI_ENTER;
 
+	debug(CCI_DB_DRVR, "%s: count %d", __func__, count);
+
 	addrs = calloc(count + 1, sizeof(*addrs));
 	if (!addrs) {
 		ret = CCI_ENOMEM;
@@ -233,6 +235,8 @@ gni_find_gni_device_ids(int **device_ids, int count,
 					addrs[i].ifa_broadaddr = calloc(1, len);
 					memcpy(addrs[i].ifa_broadaddr,
 					       tmp->ifa_broadaddr, len);
+					debug(CCI_DB_DRVR, "%s: device[%d] is %s",
+						__func__, i, tmp->ifa_name);
 					break;
 				}
 			}
@@ -267,6 +271,18 @@ static gni_tx_t *gni_get_tx(cci__ep_t * ep)
 	pthread_mutex_unlock(&ep->lock);
 
 	return tx;
+}
+
+void
+gni_cci__init_dev(cci__dev_t *dev)
+{
+	struct cci_device *device = &dev->device;
+
+	dev->priority = 50; /* default */
+	dev->is_default = 0;
+	TAILQ_INIT(&dev->eps);
+	pthread_mutex_init(&dev->lock, NULL);
+	device->up = 1;
 }
 
 static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
@@ -336,6 +352,48 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
 /* FIXME: if configfile == 0, create default devices */
 
+	if (!configfile) {
+		struct cci_device *device;
+		gni_dev_t *gdev = NULL;
+
+		dev = calloc(1, sizeof(*dev));
+		if (!dev) {
+			ret = CCI_ENOMEM;
+			goto out;
+		}
+		dev->priv = calloc(1, sizeof(*gdev));
+		if (!dev->priv) {
+			free(dev);
+			ret = CCI_ENOMEM;
+			goto out;
+		}
+
+		gni_cci__init_dev(dev);
+
+		device = &dev->device;
+		device->max_send_size = GNI_EP_MSS;
+		device->name = strdup("ipogif0");
+
+		device->rate = gni_device_rate();
+		device->pci.domain = -1;	/* per CCI spec */
+		device->pci.bus = -1;		/* per CCI spec */
+		device->pci.dev = -1;		/* per CCI spec */
+		device->pci.func = -1;		/* per CCI spec */
+
+		gdev = dev->priv;
+		gdev->device_id = 0;
+		gdev->ptag = GNI_DEFAULT_PTAG;
+		gdev->cookie = GNI_DEFAULT_COOKIE;
+		gdev->ifa = &gglobals->ifaddrs[0];
+
+		dev->driver = strdup("gni");
+		dev->is_up = 1;
+		dev->is_default = 1;
+		TAILQ_INSERT_TAIL(&globals->devs, dev, entry);
+		devices[gglobals->count] = device;
+		gglobals->count++;
+
+	} else
 	/* find devices we own */
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
 		if (0 == strcmp("gni", dev->driver)) {
@@ -362,6 +420,9 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			}
 
 			gdev = dev->priv;
+			gdev->device_id = -1;
+			gdev->ptag = GNI_DEFAULT_PTAG;
+			gdev->cookie = GNI_DEFAULT_COOKIE;
 
 			/* parse conf_argv */
 			for (arg = device->conf_argv; *arg != NULL; arg++) {
@@ -414,6 +475,8 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 				} else if (interface) {
 					if (0 ==
 					    strcmp(interface, ifa->ifa_name)) {
+						debug(CCI_DB_INFO, "%s: found %s",
+							__func__, interface);
 						if (used[i]) {
 							debug(CCI_DB_WARN,
 							      "device already assigned "
@@ -446,8 +509,10 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 				}
 			}
 
-			if (!gdev->device_id)
+			if (gdev->device_id == -1) {
+				debug(CCI_DB_INFO, "%s: no device id for %d", __func__, i);
 				goto out;
+			}
 
 			if (port) {
 				struct sockaddr_in *sin =
@@ -461,6 +526,9 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			devices[index] = device;
 			index++;
 			dev->is_up = gdev->ifa->ifa_flags & IFF_UP;
+			debug(CCI_DB_INFO, "%s: device[%d] is up (%s %s)", __func__,
+				i, gdev->ifa->ifa_name,
+				inet_ntoa(((struct sockaddr_in*)gdev->ifa->ifa_addr)->sin_addr));
 		}
 	}
 
@@ -511,6 +579,7 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
 static const char *gni_strerror(cci_endpoint_t * endpoint, enum cci_status status)
 {
+	debug(CCI_DB_INFO, "%s: status %d", __func__, status);
 	return strerror(status);
 }
 
@@ -709,10 +778,13 @@ gni_create_endpoint(cci_device_t * device,
 	gni_return_t grc = GNI_RC_SUCCESS;
 	uint32_t port = 0;
 	uint32_t unused = 0;
+	struct sockaddr_in sin;
+	socklen_t slen = sizeof(sin);
 
 	CCI_ENTER;
 
 	if (!gglobals) {
+		debug(CCI_DB_DRVR, "%s: no globals?", __func__);
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
@@ -735,7 +807,9 @@ gni_create_endpoint(cci_device_t * device,
 	TAILQ_INIT(&gep->rx_pools);
 	TAILQ_INIT(&gep->conns);
 	TAILQ_INIT(&gep->active);
+	TAILQ_INIT(&gep->active2);
 	TAILQ_INIT(&gep->passive);
+	TAILQ_INIT(&gep->passive2);
 	TAILQ_INIT(&gep->handles);
 	TAILQ_INIT(&gep->rma_ops);
 
@@ -763,10 +837,14 @@ gni_create_endpoint(cci_device_t * device,
 	ret = bind(gep->sock, (struct sockaddr*)&gep->sin, sizeof(gep->sin));
 	if (ret == -1) {
 		ret = errno;
+		debug(CCI_DB_DRVR, "%s: bind() returned %s", __func__,
+			strerror(ret));
 		goto out;
 	}
+	ret = getsockname(gep->sock, (struct sockaddr*)&sin, &slen);
+	port = (uint32_t) ntohs(sin.sin_port);
 
-	port = (uint32_t) ntohs(gep->sin.sin_port);
+	memcpy(&gep->sin, &sin, slen);
 
 	memset(name, 0, sizeof(name));
 	sprintf(name, "%s%s:%u", GNI_URI,
@@ -789,6 +867,9 @@ gni_create_endpoint(cci_device_t * device,
 		ret = errno;
 		goto out;
 	}
+
+	debug(CCI_DB_DRVR, "%s: creating CDM port=%u ptag=%u cookie=0x%x",
+		__func__, port, gdev->ptag, gdev->cookie);
 
 	grc = GNI_CdmCreate(port, gdev->ptag, gdev->cookie,
 			0, &gep->cdm);
@@ -986,7 +1067,6 @@ static int gni_destroy_endpoint(cci_endpoint_t * endpoint)
 	return CCI_SUCCESS;
 }
 
-#if 0
 static const char *gni_msg_type_str(gni_msg_type_t msg_type)
 {
 	char *str;
@@ -1025,7 +1105,6 @@ static const char *gni_msg_type_str(gni_msg_type_t msg_type)
 	}
 	return str;
 }
-#endif
 
 typedef union gni_u64 {
 	uint64_t ull;
@@ -1187,8 +1266,10 @@ static int gni_accept(union cci_event *event, void *context)
 	}
 
 	ret = send(cr->sock, &reply, sizeof(reply), 0);
-	if (ret) {
+	if (ret != sizeof(reply)) {
 		goto out;
+	} else {
+		ret = CCI_SUCCESS;
 	}
 
 	/* wait for client ack */
@@ -1222,6 +1303,12 @@ static int gni_reject(union cci_event *event)
 	gconn->state = GNI_CONN_CLOSING;
 
 	ret = send(cr->sock, &header, sizeof(header), 0);
+	if (ret != sizeof(header)) {
+		ret = CCI_ENOBUFS;
+		/* TODO try again */
+	} else {
+		ret = CCI_SUCCESS;
+	}
 
 	/* TODO handle error
 	 *      queue to wait for ack?
@@ -1315,7 +1402,7 @@ gni_insert_conn(cci__conn_t *conn)
 {
 	int ret = CCI_SUCCESS;
 	uint32_t id = 0;
-	cci__ep_t *ep = container_of(conn->connection.endpoint, cci__ep_t, endpoint);;
+	cci__ep_t *ep = container_of(conn->connection.endpoint, cci__ep_t, endpoint);
 	cci__conn_t *c = NULL;
 	gni_ep_t *gep = ep->priv;
 	gni_conn_t *gconn = conn->priv;
@@ -1327,7 +1414,7 @@ gni_insert_conn(cci__conn_t *conn)
 	do {
 		id = random();
 		ret = gni_find_conn(ep, id, &c);
-	} while(ret == CCI_SUCCESS);
+	} while (ret == CCI_SUCCESS);
 	gconn->id = id;
 	do {
 		node = tsearch(&gconn->id, &gep->conn_tree, gni_compare_u32);
@@ -2238,71 +2325,6 @@ static int gni_progress_connections(cci__ep_t * ep)
 }
 
 #if 0
-static gni_conn_t *gni_qp_num_to_conn(cci__ep_t * ep, uint32_t qp_num)
-{
-	gni_ep_t *gep = ep->priv;
-	gni_conn_t *gconn = NULL;
-	gni_conn_t *gc = NULL;
-
-	CCI_ENTER;
-
-	/* find the conn for this QP */
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_FOREACH(gc, &gep->conns, temp) {
-		if (gc->id->qp->qp_num == qp_num) {
-			gconn = gc;
-			assert(gconn->conn == gc->id->context);
-			break;
-		}
-	}
-	pthread_mutex_unlock(&ep->lock);
-
-	CCI_EXIT;
-	return gconn;
-}
-
-static int gni_poll_rdma_msgs(gni_conn_t * gconn)
-{
-	int ret = CCI_EAGAIN;
-	int i = 0;
-	cci__conn_t *conn = gconn->conn;
-	cci_endpoint_t *endpoint = conn->connection.endpoint;
-	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
-	void *ptr = NULL;
-
-	for (i = 0; i < gconn->num_slots; i++) {
-		if (*(gconn->slots[i])) {
-			uint32_t header = ntohl(*gconn->slots[i]);
-			gni_rx_t *rx = &gconn->rxs[i];
-			uint32_t len = (header >> 5) & 0xFFFF;
-			uint32_t pad = len % 8 == 0 ? 0 : 8 - (len % 8);
-
-			debug(CCI_DB_MSG, "%s: recv'd 0x%x len %u slot %d",
-			      __func__, header, len, i);
-
-			//ptr = gconn->rbuf + (uintptr_t)(((i + 1) * (gconn->mss + 4)) - 4);
-			ptr = (void *)gconn->slots[i];
-			ptr -= (len + pad);
-			*gconn->slots[i] = 0;
-
-			*((uint32_t *) & rx->evt.event.recv.len) = len;
-			if (rx->evt.event.recv.len)
-				*((void **)&rx->evt.event.request.data_ptr) =
-				    ptr;
-			else
-				*((void **)&rx->evt.event.request.data_ptr) =
-				    NULL;
-
-			pthread_mutex_lock(&ep->lock);
-			TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
-			pthread_mutex_unlock(&ep->lock);
-			return CCI_SUCCESS;
-		}
-	}
-
-	return ret;
-}
-
 static int gni_handle_msg(cci__ep_t * ep, struct ibv_wc wc)
 {
 	int ret = CCI_SUCCESS;
@@ -2720,8 +2742,27 @@ static int
 gni_handle_recv(gni_rx_t *rx, void *msg)
 {
 	int ret = CCI_SUCCESS;
+	uint32_t *header = (uint32_t*)msg;
+	cci__ep_t *ep = rx->evt.ep;
 
 	CCI_ENTER;
+
+	rx->evt.event.type = CCI_EVENT_RECV; //FIXME redundant
+	*((uint32_t *) & rx->evt.event.recv.len) = (*header >> 4) & 0xFFF;
+	if (rx->evt.event.recv.len) {
+		void *p = rx->rx_pool->buf + rx->offset;
+		void *m = msg + (uintptr_t) sizeof(*header);
+
+		memcpy(p, m, rx->evt.event.recv.len);
+		*((void **)&rx->evt.event.recv.ptr) = p;
+	} else {
+		*((void **)&rx->evt.event.recv.ptr) = NULL;
+	}
+	rx->evt.event.recv.connection = &((cci__conn_t*)(rx->evt.conn))->connection;
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
+	pthread_mutex_unlock(&ep->lock);
 
 	CCI_EXIT;
 	return ret;
@@ -2777,6 +2818,8 @@ static int gni_get_recv_event(cci__ep_t * ep)
 			rx->evt.conn = conn;
 			ret = gni_handle_recv(rx, msg);
 		default:
+			debug(CCI_DB_MSG, "%s: ignoring incoming %s",
+				__func__, gni_msg_type_str(msg_type));
 			break;
 		}
 #if 0

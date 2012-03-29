@@ -36,6 +36,8 @@
 #include "plugins/core/core.h"
 #include "core_sock.h"
 
+extern void cci__init_dev(cci__dev_t *dev);
+
 #define DEBUG_RNR 0
 
 #if DEBUG_RNR
@@ -2582,7 +2584,7 @@ static int sock_rma(cci_connection_t * connection,
 		sock_rma_header_t *read = NULL;
 		//uint32_t seq;
 		uint64_t context_id;
-		void *msg_ptr = NULL;
+		//void *msg_ptr = NULL;
 
 		/* RMA_READ is implemented using RMA_WRITE: we send a request to the
 		   remote peer which will perform a RMA_WRITE */
@@ -2608,7 +2610,7 @@ static int sock_rma(cci_connection_t * connection,
 		tx->len = sizeof(sock_rma_header_t);
 		generate_context_id(sconn, context, &context_id);
 		memcpy(read->data, &data_len, sizeof(uint64_t));
-		msg_ptr = (void *)(read->data + sizeof(uint64_t));
+		//msg_ptr = (void *)(read->data + sizeof(uint64_t));
 		memcpy((void *)(((char *)read->data) + sizeof(uint64_t)),
 		       &context_id, sizeof(uint64_t));
 		tx->len += 2 * sizeof(uint64_t);
@@ -3683,7 +3685,7 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	//uint32_t msg_len = 1;
 	//void *msg_ptr = (void *)"RMAREAD";
 	int flags = 0;
-	sock_rma_handle_t *remote;
+	//sock_rma_handle_t *remote;
 	uint64_t msg_local_handle;
 	uint64_t msg_local_offset;
 	uint64_t msg_remote_handle;
@@ -3694,8 +3696,8 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	uint64_t remote_offset;
 	uint32_t seq, ts;
 	int rc;
-	cci__dev_t *dev = NULL;
-	sock_dev_t *sdev = NULL;
+	//cci__dev_t *dev = NULL;
+	//sock_dev_t *sdev = NULL;
 	uint64_t context_id;
 	uint64_t toto;
 	//cci__evt_t *evt;
@@ -3707,8 +3709,8 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	connection = &conn->connection;
 	ep = container_of(connection->endpoint, cci__ep_t, endpoint);
 	sep = ep->priv;
-	dev = ep->dev;
-	sdev = dev->priv;
+	//dev = ep->dev;
+	//sdev = dev->priv;
 
 	hdr_r = (sock_header_r_t *) rx->buffer;
 
@@ -3720,7 +3722,7 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 
 	sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
 	sock_handle_seq(sconn, seq);
-	remote = (sock_rma_handle_t *) (uintptr_t) remote_handle;
+	//remote = (sock_rma_handle_t *) (uintptr_t) remote_handle;
 	memcpy(&toto, read->data, sizeof(uint64_t));
 	memcpy(&context_id, (void *)((char *)read->data + sizeof(uint64_t)),
 	       sizeof(uint64_t));

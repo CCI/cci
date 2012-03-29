@@ -31,6 +31,10 @@ BEGIN_C_DECLS
 				  the default is a random, ephemeral port
  */
 #define GNI_URI		"gni://"
+
+#define GNI_DEFAULT_PTAG	(208)
+#define GNI_DEFAULT_COOKIE	(0x73e70000)
+
 /* Wire Header Specification */
     typedef enum gni_msg_type {
 	GNI_MSG_INVALID = 0,
