@@ -217,6 +217,7 @@ typedef struct gni_tx {
 	int flags;			/* (CCI_FLAG_[BLOCKING|SILENT|NO_COPY]) */
 	void *buffer;			/* registered send buffer */
 	uint16_t len;			/* length of buffer */
+	uint32_t id;			/* use for SMSG msg_id */
 	TAILQ_ENTRY(gni_tx) entry;	/* hang on gep->idle_txs, gdev->queued,
 					   gdev->pending */
 	TAILQ_ENTRY(gni_tx) gentry;	/* hangs on gep->txs */
@@ -225,8 +226,10 @@ typedef struct gni_tx {
 
 typedef struct gni_rx {
 	cci__evt_t evt;			/* associated event */
+	void *ptr;			/* start of buffer */
 	uint32_t offset;		/* offset in gep->buffer */
 	TAILQ_ENTRY(gni_rx) entry;	/* hangs on rx_pool->rxs */
+	TAILQ_ENTRY(gni_rx) idle;	/* hangs on rx_pool->idle_rxs */
 	struct gni_rx_pool *rx_pool;	/* owning rx pool */
 } gni_rx_t;
 
@@ -293,6 +296,7 @@ typedef struct gni_rx_pool {
 	TAILQ_ENTRY(gni_rx_pool) entry;	/* hang on ep->rx_pools */
 	void *buf;			/* recv buffer */
 	TAILQ_HEAD(g_rxs, gni_rx) rxs;	/* all rxs */
+	TAILQ_HEAD(g_irxs, gni_rx) idle_rxs;	/* available rxs */
 	uint32_t size;			/* current size */
 } gni_rx_pool_t;
 
