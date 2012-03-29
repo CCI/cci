@@ -165,6 +165,9 @@ typedef struct cci__globals {
 
 	/*! Set if a configfile was specified and read */
 	int configfile;
+
+	/*! Flags given to cci_init() */
+	uint32_t flags;
 } cci__globals_t;
 
 extern pthread_mutex_t init_lock; /*! Protects initialized and globals during cci_init() and cci_finalize() */
