@@ -25,6 +25,7 @@
 int cci__debug = CCI_DB_DFLT;
 cci__globals_t *globals = NULL;
 int initialized = 0;
+pthread_mutex_t init_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static inline void cci__get_debug_env(void)
 {
@@ -446,6 +447,8 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	if (!caps)
 		return CCI_EINVAL;
 
+	pthread_mutex_lock(&init_lock);
+
 	if (0 == initialized) {
 		char *str;
 
@@ -454,25 +457,29 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		/* init globals */
 
 		globals = calloc(1, sizeof(*globals));
-		if (!globals)
-			return CCI_ENOMEM;
+		if (!globals) {
+			ret = CCI_ENOMEM;
+			goto out;
+		}
 
 		TAILQ_INIT(&globals->devs);
 
 		ret = pthread_mutex_init(&globals->lock, NULL);
 		if (ret) {
 			perror("pthread_mutex_init failed:");
-			return errno;
+			ret = errno;
+			goto out;
 		}
 
 		if (CCI_SUCCESS != (ret = cci_plugins_init())) {
-			return ret;
+			goto out;
 		}
 		if (CCI_SUCCESS != (ret = cci_plugins_core_open())) {
-			return ret;
+			goto out;
 		}
 		if (NULL == cci_core) {
-			return CCI_ERR_NOT_FOUND;
+			ret = CCI_ERR_NOT_FOUND;
+			goto out;
 		}
 
 		str = getenv("CCI_CONFIG");
@@ -481,7 +488,8 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			if (ret) {
 				debug(CCI_DB_ERR, "unable to parse CCI_CONFIG file %s",
 				      str);
-				return CCI_ERROR;
+				ret = CCI_ERROR;
+				goto out;
 			}
 			globals->configfile = 1;
 		}
@@ -489,8 +497,10 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		ret = cci_core->init(abi_ver, flags, caps);
 		if (ret) {
 			perror("cci_core->init failed:");
-			return errno;
+			ret = errno;
+			goto out;
 		}
+
 	} else {
 		/* TODO */
 		/* check parameters */
@@ -499,8 +509,13 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		 *    if yes, do so and return SUCCESS
 		 *    if not, ignore and return CCI_ERROR
 		 */
-		return CCI_ERR_NOT_IMPLEMENTED;
+		ret = CCI_ERR_NOT_IMPLEMENTED;
+		goto out;
 	}
 
-	return CCI_SUCCESS;
+	ret = CCI_SUCCESS;
+
+out:
+	pthread_mutex_unlock(&init_lock);
+	return ret;
 }
