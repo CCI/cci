@@ -19,11 +19,22 @@
 
 int cci_finalize(void)
 {
+	int ret = CCI_SUCCESS;
 	cci__dev_t *dev = NULL;
 
+	pthread_mutex_lock(&init_lock);
+
+	if (!initialized) {
+		/* not initialized */
+		ret = CCI_EINVAL;
+		goto out;
+	}
+
 	initialized--;
-	if (initialized > 0)
-		return CCI_SUCCESS;
+	if (initialized > 0) {
+		/* no-op, return SUCCESS */
+		goto out;
+	}
 
 	/* for each device
 	 *     for each endpoint
@@ -58,5 +69,7 @@ int cci_finalize(void)
 	free(globals->devices);
 	free(globals);
 
-	return CCI_SUCCESS;
+out:
+	pthread_mutex_unlock(&init_lock);
+	return ret;
 }
