@@ -462,6 +462,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			goto out;
 		}
 
+		globals->flags = flags;
 		TAILQ_INIT(&globals->devs);
 
 		ret = pthread_mutex_init(&globals->lock, NULL);
@@ -502,15 +503,18 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		}
 
 	} else {
-		/* TODO */
-		/* check parameters */
-		/* if same, this is a no-op and return SUCCESS */
-		/* if different, can we accomodate new params?
-		 *    if yes, do so and return SUCCESS
-		 *    if not, ignore and return CCI_ERROR
-		 */
-		ret = CCI_ERR_NOT_IMPLEMENTED;
-		goto out;
+		if (flags == globals->flags) {
+			/* same parameters, no-op */
+			initialized++;
+		} else {
+			/* TODO */
+			/* if different, can we accomodate new params?
+			 *    if yes, do so and return SUCCESS
+			 *    if not, ignore and return CCI_ERROR
+			 */
+			ret = CCI_ERR_NOT_IMPLEMENTED;
+			goto out;
+		}
 	}
 
 	ret = CCI_SUCCESS;
