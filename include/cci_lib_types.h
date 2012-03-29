@@ -162,10 +162,12 @@ typedef struct cci__globals {
 
 	/*! Lock to protect svcs */
 	pthread_mutex_t lock;
+
+	/*! Set if a configfile was specified and read */
+	int configfile;
 } cci__globals_t;
 
 extern int initialized;
-extern int configfile;
 extern cci__globals_t *globals;
 
 /*! Obtain the private struct from the public struct

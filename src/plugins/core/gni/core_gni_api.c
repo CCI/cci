@@ -910,7 +910,7 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	      "%8s.%5d %s: DCACHE_LINESIZE=                       %3zdB",
 	      uBuf.nodename, pid, __func__, gni_line);
 
-/* FIXME: if configfile == 0, create default devices */
+/* FIXME: if globals->configfile == 0, create default devices */
 
 //  Step 1.  Extract Gemini device(s) from global configuration.
 	srandom((unsigned int)gni_get_usecs());
@@ -1161,7 +1161,7 @@ static int gni_get_devices(const cci_device_t *** devices)
 	      gdev->nodename, gdev->INST, __func__, gglobals->count);
 
 /* FIXME: update the devices list (up field, ...).
-   add new devices if !configfile */
+   add new devices if !globals->configfile */
 
 	CCI_EXIT;
 	return (CCI_SUCCESS);

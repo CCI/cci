@@ -25,7 +25,6 @@
 int cci__debug = CCI_DB_DFLT;
 cci__globals_t *globals = NULL;
 int initialized = 0;
-int configfile = 0;
 
 static inline void cci__get_debug_env(void)
 {
@@ -484,7 +483,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 				      str);
 				return CCI_ERROR;
 			}
-			configfile = 1;
+			globals->configfile = 1;
 		}
 
 		ret = cci_core->init(abi_ver, flags, caps);

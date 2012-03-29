@@ -233,7 +233,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		goto out;
 	}
 
-	if (!configfile) {
+	if (!globals->configfile) {
 		/* create a loopback device for now */
 		struct cci_device *device;
 		sock_dev_t *sdev;
@@ -394,7 +394,7 @@ static int sock_get_devices(cci_device_t * const **devices)
 	}
 
 /* FIXME: update the devices list (up field, ...).
-   add new devices if !configfile */
+   add new devices if !globals->configfile */
 
 	*devices = sglobals->devices;
 

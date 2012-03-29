@@ -367,7 +367,7 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	}
 	vglobals->ifaddrs = ifaddrs;
 
-/* FIXME: if configfile == 0, create default devices */
+/* FIXME: if globals->configfile == 0, create default devices */
 
 	/* find devices we own */
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
@@ -556,7 +556,7 @@ static int verbs_get_devices(cci_device_t * const **devices)
 	}
 
 /* FIXME: update the devices list (up field, ...).
-   add new devices if !configfile */
+   add new devices if !globals->configfile */
 
 	*devices = (cci_device_t * const *) vglobals->devices;
 
