@@ -452,8 +452,6 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	if (0 == initialized) {
 		char *str;
 
-		initialized++;
-
 		/* init globals */
 
 		globals = calloc(1, sizeof(*globals));
@@ -469,18 +467,18 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		if (ret) {
 			perror("pthread_mutex_init failed:");
 			ret = errno;
-			goto out;
+			goto out_with_globals;
 		}
 
 		if (CCI_SUCCESS != (ret = cci_plugins_init())) {
-			goto out;
+			goto out_with_globals;
 		}
 		if (CCI_SUCCESS != (ret = cci_plugins_core_open())) {
-			goto out;
+			goto out_with_globals;
 		}
 		if (NULL == cci_core) {
 			ret = CCI_ERR_NOT_FOUND;
-			goto out;
+			goto out_with_globals;
 		}
 
 		str = getenv("CCI_CONFIG");
@@ -490,7 +488,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 				debug(CCI_DB_ERR, "unable to parse CCI_CONFIG file %s",
 				      str);
 				ret = CCI_ERROR;
-				goto out;
+				goto out_with_globals;
 			}
 			globals->configfile = 1;
 		}
@@ -499,10 +497,14 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		if (ret) {
 			perror("cci_core->init failed:");
 			ret = errno;
-			goto out;
+			goto out_with_globals;
 		}
 
+		/* success */
+		initialized++;
+
 	} else {
+		/* already initialized */
 		if (flags == globals->flags) {
 			/* same parameters, no-op */
 			initialized++;
@@ -517,8 +519,11 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		}
 	}
 
-	ret = CCI_SUCCESS;
+	pthread_mutex_unlock(&init_lock);
+	return CCI_SUCCESS;
 
+out_with_globals:
+	free(globals);
 out:
 	pthread_mutex_unlock(&init_lock);
 	return ret;
