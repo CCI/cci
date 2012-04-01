@@ -273,7 +273,7 @@ static int eth__get_devices(void)
 		goto out;
 	}
 
-	if (!configfile) {
+	if (!globals->configfile) {
 		int loopback_ok = (getenv("CCIETH_ALLOW_LOOPBACK") != NULL);
 		/* get all ethernet devices from the system */
 		for (addr = addrs; addr != NULL; addr = addr->ifa_next) {
