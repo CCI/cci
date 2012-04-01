@@ -346,7 +346,7 @@ ccieth_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 	rcu_read_unlock();
 
-	if (unlikely(completion_type == CCIETH_MSG_COMPLETION_BLOCKING)) {
+	if (unlikely(completion)) {
 		wait_for_completion_interruptible(&completion->completion);
 		err = completion->status;
 		rcu_assign_pointer(scb->reliable_send.completion, NULL);
