@@ -72,7 +72,7 @@ typedef int (*cci_rma_register_fn_t) (cci_endpoint_t * endpoint,
 typedef int (*cci_rma_deregister_fn_t) (cci_endpoint_t * endpoint,
 					uint64_t rma_handle);
 typedef int (*cci_rma_fn_t) (cci_connection_t * connection,
-			     void *msg_ptr, uint32_t msg_len,
+			     const void *msg_ptr, uint32_t msg_len,
 			     uint64_t local_handle, uint64_t local_offset,
 			     uint64_t remote_handle, uint64_t remote_offset,
 			     uint64_t data_len, const void *context, int flags);

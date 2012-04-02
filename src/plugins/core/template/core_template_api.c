@@ -51,7 +51,7 @@ static int template_rma_register(cci_endpoint_t * endpoint,
 				 int flags, uint64_t * rma_handle);
 static int template_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
 static int template_rma(cci_connection_t * connection,
-			void *msg_ptr, uint32_t msg_len,
+			const void *msg_ptr, uint32_t msg_len,
 			uint64_t local_handle, uint64_t local_offset,
 			uint64_t remote_handle, uint64_t remote_offset,
 			uint64_t data_len, const void *context, int flags);
@@ -238,7 +238,7 @@ static int template_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handl
 }
 
 static int template_rma(cci_connection_t * connection,
-			void *msg_ptr, uint32_t msg_len,
+			const void *msg_ptr, uint32_t msg_len,
 			uint64_t local_handle, uint64_t local_offset,
 			uint64_t remote_handle, uint64_t remote_offset,
 			uint64_t data_len, const void *context, int flags)

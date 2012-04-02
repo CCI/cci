@@ -1586,7 +1586,7 @@ CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
   \note READ may not be performance efficient.
 */
 CCI_DECLSPEC int cci_rma(cci_connection_t * connection,
-			 void *msg_ptr, uint32_t msg_len,
+			 const void *msg_ptr, uint32_t msg_len,
 			 uint64_t local_handle, uint64_t local_offset,
 			 uint64_t remote_handle, uint64_t remote_offset,
 			 uint64_t data_len, const void *context, int flags);
