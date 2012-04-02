@@ -417,7 +417,7 @@ ccieth_msg_unreliable(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	if (unlikely(!conn || conn->status != CCIETH_CONNECTION_READY))
 		goto out_with_rculock;
 	/* check that the user-space reliable hint was valid */
-	if (unlikely(arg->flags & CCIETH_MSG_FLAG_RELIABLE))
+	if (unlikely(conn->flags & CCIETH_CONN_FLAG_RELIABLE))
 		goto out_with_rculock;
 
 	if (likely(!(arg->flags & CCIETH_MSG_FLAG_SILENT))) {
