@@ -183,3 +183,24 @@ int ccieth_rma_deregister(struct ccieth_endpoint *ep,
 
 	return err;
 }
+
+int ccieth_rma(struct ccieth_endpoint *ep,
+	       struct ccieth_ioctl_rma *rm)
+{
+	struct ccieth_connection *conn;
+	struct ccieth_driver_event *event = NULL;
+	enum ccieth_msg_completion_type completion_type;
+	struct ccieth_rcu_completion *completion = NULL;
+	int err;
+
+	err = -EINVAL;
+	if (unlikely(rm->msg_len > ep->max_send_size))
+		goto out;
+
+	/* TODO */
+
+	return -ENOSYS;
+
+out:
+	return err;
+}

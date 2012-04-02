@@ -1082,6 +1082,45 @@ static int ctp_eth_rma(cci_connection_t * connection,
 		       cci_rma_handle_t * remote_handle, uint64_t remote_offset,
 		       uint64_t data_len, const void *context, int flags)
 {
-	printf("In eth_rma\n");
-	return CCI_ERR_NOT_IMPLEMENTED;
+	cci__conn_t *_conn = container_of(connection, cci__conn_t, connection);
+	eth__conn_t *econn = container_of(_conn, eth__conn_t, _conn);
+	cci_endpoint_t *endpoint = connection->endpoint;
+	cci__ep_t *_ep = container_of(endpoint, cci__ep_t, endpoint);
+	eth__ep_t *eep = _ep->priv;
+	struct ccieth_ioctl_rma arg;
+	int ret;
+
+	/* ccieth always copies to kernel sk_buffs */
+	flags &= ~CCI_FLAG_NO_COPY;
+
+	/* make sure API flag match */
+	ETH_BUILD_ASSERT(CCI_FLAG_BLOCKING == CCIETH_FLAG_BLOCKING);
+	ETH_BUILD_ASSERT(CCI_FLAG_READ == CCIETH_FLAG_READ);
+	ETH_BUILD_ASSERT(CCI_FLAG_WRITE == CCIETH_FLAG_WRITE);
+	ETH_BUILD_ASSERT(CCI_FLAG_FENCE == CCIETH_FLAG_FENCE);
+	/* make sure internal flags don't conflict with API flags */
+	assert(!(flags & CCIETH_FLAG_RELIABLE));
+
+	/* add internal flags */
+	if (connection->attribute != CCI_CONN_ATTR_UU)
+		flags |= CCIETH_FLAG_RELIABLE;
+
+	arg.conn_id = econn->id;
+	arg.msg_ptr = (uintptr_t) msg_ptr;
+	arg.msg_len = msg_len;
+	arg.context = (uintptr_t) context;
+	arg.local_handle = local_handle;
+	arg.local_offset = local_offset;
+	arg.remote_handle = remote_handle;
+	arg.remote_offset = remote_offset;
+	arg.data_len = data_len;
+	arg.flags = flags;
+
+	ret = ioctl(eep->fd, CCIETH_IOCTL_RMA, &arg);
+	if (ret < 0) {
+		perror("ioctl rma");
+		return errno;
+	}
+
+	return CCI_SUCCESS;
 }

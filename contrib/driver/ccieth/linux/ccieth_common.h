@@ -295,6 +295,7 @@ extern int ccieth_recv(struct sk_buff *skb, struct net_device *ifp, struct packe
 extern int ccieth_rma_register(struct ccieth_endpoint *endpoint, struct ccieth_ioctl_rma_register *rr);
 extern int ccieth_rma_deregister(struct ccieth_endpoint *endpoint, struct ccieth_ioctl_rma_deregister *dr);
 extern void ccieth_destroy_endpoint_rma_handles(struct ccieth_endpoint *ep);
+extern int ccieth_rma(struct ccieth_endpoint *endpoint, struct ccieth_ioctl_rma *rm);
 
 static inline struct ccieth_driver_event *
 ccieth_get_free_event(struct ccieth_endpoint *ep)

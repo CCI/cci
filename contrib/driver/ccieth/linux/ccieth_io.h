@@ -170,6 +170,28 @@ struct ccieth_ioctl_rma_deregister {
 };
 #define CCIETH_IOCTL_RMA_DEREGISTER _IOR(CCIETH_IOCTL_MAGIC, 0xb, struct ccieth_ioctl_rma_deregister)
 
+struct ccieth_ioctl_rma {
+	__u32 conn_id;
+	__u32 msg_len;
+	/* 8 */
+	__u64 msg_ptr;
+	/* 16 */
+	__u64 context;
+	/* 24 */
+	__u64 local_handle;
+	/* 32 */
+	__u64 local_offset;
+	/* 40 */
+	__u64 remote_handle;
+	/* 48 */
+	__u64 remote_offset;
+	/* 56 */
+	__u64 data_len;
+	/* 64 */
+	__u32 flags; /* OR'ed CCIETH_FLAG_{BLOCKING,READ,WRITE,FENCE} */
+};
+#define CCIETH_IOCTL_RMA _IOR(CCIETH_IOCTL_MAGIC, 0xc, struct ccieth_ioctl_rma)
+
 #define CCIETH_FLAG_BLOCKING	(1 << 0)
 /* NO_COPY unused in ccieth, 1<<2 unused in cci */
 #define CCIETH_FLAG_SILENT	(1 << 3)
