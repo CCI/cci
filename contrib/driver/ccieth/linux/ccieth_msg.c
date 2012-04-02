@@ -254,7 +254,7 @@ ccieth_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		goto out_with_skb2;
 	}
 
-	/* SILENT by default, and for UU */
+	/* SILENT by default */
 	completion_type = CCIETH_MSG_COMPLETION_SILENT;
 	/* setup reliable send completion */
 	if (unlikely(arg->flags & CCIETH_MSG_FLAG_BLOCKING)) {
@@ -420,7 +420,8 @@ ccieth_msg_unreliable(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	if (unlikely(conn->flags & CCIETH_CONN_FLAG_RELIABLE))
 		goto out_with_rculock;
 
-	if (likely(!(arg->flags & CCIETH_MSG_FLAG_SILENT))) {
+	/* no event unless neither SILENT nor BLOCKING is given */
+	if (likely(!(arg->flags & (CCIETH_MSG_FLAG_SILENT|CCIETH_MSG_FLAG_BLOCKING)))) {
 		event = ccieth_get_free_event(ep);
 		if (unlikely(!event)) {
 			err = -ENOBUFS;
@@ -455,9 +456,13 @@ ccieth_msg_unreliable(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 	rcu_read_unlock();
 
-	if (event)
+	if (event) {
 		/* notify the event */
 		ccieth_queue_busy_event(ep, event);
+	} else {
+		/* if SILENT, nothing to do */
+		/* if BLOCKING, nothing to wait on */
+	}
 
 	return err;
 
