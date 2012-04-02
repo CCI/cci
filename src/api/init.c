@@ -14,6 +14,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <assert.h>
 
 #include "cci.h"
 #include "cci_lib_types.h"
@@ -161,6 +162,8 @@ void cci__add_dev(cci__dev_t * dev)
 {
 	int done = 0;
 	cci__dev_t *dd;
+
+	assert(NULL != dev->plugin);
 
 	debug(CCI_DB_DRVR,
 	      "adding device [%s] (driver %s)",
