@@ -275,7 +275,9 @@ static int sock_init(cci_plugin_core_t *plugin,
 		dev->driver = strdup("sock");
 		dev->is_up = 1;
 		dev->is_default = 1;
+		pthread_mutex_lock(&globals->lock);
 		cci__add_dev(dev);
+		pthread_mutex_unlock(&globals->lock);
 		devices[sglobals->count] = device;
 		sglobals->count++;
 		threads_running = 1;
@@ -340,8 +342,8 @@ static int sock_init(cci_plugin_core_t *plugin,
 			if (sdev->ip != 0) {
 				pthread_mutex_lock(&globals->lock);
 				TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
-				pthread_mutex_unlock(&globals->lock);
 				cci__add_dev(dev);
+				pthread_mutex_unlock(&globals->lock);
 				devices[sglobals->count] = device;
 				sglobals->count++;
 				dev->is_up = 1;
