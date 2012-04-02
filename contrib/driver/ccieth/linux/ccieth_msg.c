@@ -257,7 +257,7 @@ ccieth_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	/* SILENT by default */
 	completion_type = CCIETH_MSG_COMPLETION_SILENT;
 	/* setup reliable send completion */
-	if (unlikely(arg->flags & CCIETH_MSG_FLAG_BLOCKING)) {
+	if (unlikely(arg->flags & CCIETH_FLAG_BLOCKING)) {
 		/* blocking (silent or not), we need a completion */
 		completion = kmalloc(sizeof(*completion), GFP_KERNEL);
 		if (!completion)
@@ -266,7 +266,7 @@ ccieth_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		rcu_assign_pointer(scb->reliable_send.completion, completion);
 		completion_type = CCIETH_MSG_COMPLETION_BLOCKING;
 
-	} else if (likely(!(arg->flags & CCIETH_MSG_FLAG_SILENT))) {
+	} else if (likely(!(arg->flags & CCIETH_FLAG_SILENT))) {
 		/* non-blocking non-silent, report an event (default case) */
 		completion_type = CCIETH_MSG_COMPLETION_EVENT;
 	}
@@ -421,7 +421,7 @@ ccieth_msg_unreliable(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 		goto out_with_rculock;
 
 	/* no event unless neither SILENT nor BLOCKING is given */
-	if (likely(!(arg->flags & (CCIETH_MSG_FLAG_SILENT|CCIETH_MSG_FLAG_BLOCKING)))) {
+	if (likely(!(arg->flags & (CCIETH_FLAG_SILENT|CCIETH_FLAG_BLOCKING)))) {
 		event = ccieth_get_free_event(ep);
 		if (unlikely(!event)) {
 			err = -ENOBUFS;

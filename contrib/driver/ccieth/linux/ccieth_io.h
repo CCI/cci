@@ -144,12 +144,14 @@ struct ccieth_ioctl_msg {
 	/* 16 */
 	__u64 context;
 	/* 24 */
-#define CCIETH_MSG_FLAG_BLOCKING	(1 << 0)
-#define CCIETH_MSG_FLAG_SILENT		(1 << 3)
-#define CCIETH_MSG_FLAG_RELIABLE	(1 << 31)
-	__u32 flags;
+	__u32 flags; /* OR'ed CCIETH_FLAG_{BLOCKING,SILENT,RELIABLE} */
 };
 #define CCIETH_IOCTL_MSG _IOR(CCIETH_IOCTL_MAGIC, 0x8, struct ccieth_ioctl_msg)
+
+#define CCIETH_FLAG_BLOCKING	(1 << 0)
+/* NO_COPY unused in ccieth, 1<<2 unused in cci */
+#define CCIETH_FLAG_SILENT	(1 << 3)
+#define CCIETH_FLAG_RELIABLE	(1 << 31)
 
 /* FIXME: enforce matching with enum cci_event_type and simplify user-space switch? */
 #define CCIETH_IOCTL_EVENT_SEND 1

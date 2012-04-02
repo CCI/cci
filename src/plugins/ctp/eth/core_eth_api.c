@@ -898,14 +898,14 @@ static int eth_send(cci_connection_t * connection,
 		return ENOSYS;
 
 	/* make sure API flag match */
-	ETH_BUILD_ASSERT(CCI_FLAG_BLOCKING == CCIETH_MSG_FLAG_BLOCKING);
-	ETH_BUILD_ASSERT(CCI_FLAG_SILENT == CCIETH_MSG_FLAG_SILENT);
+	ETH_BUILD_ASSERT(CCI_FLAG_BLOCKING == CCIETH_FLAG_BLOCKING);
+	ETH_BUILD_ASSERT(CCI_FLAG_SILENT == CCIETH_FLAG_SILENT);
 	/* make sure internal flags don't conflict with API flags */
-	assert(!(flags & CCIETH_MSG_FLAG_RELIABLE));
+	assert(!(flags & CCIETH_FLAG_RELIABLE));
 
 	/* add internal flags */
 	if (connection->attribute != CCI_CONN_ATTR_UU)
-		flags |= CCIETH_MSG_FLAG_RELIABLE;
+		flags |= CCIETH_FLAG_RELIABLE;
 
 	arg.conn_id = econn->id;
 	arg.msg_ptr = (uintptr_t) msg_ptr;
