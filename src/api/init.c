@@ -155,7 +155,8 @@ void cci__init_dev(cci__dev_t *dev)
 	device->up = 1;
 }
 
-/* only used by backends when adding ready devices to the main list */
+/* only used by backends when adding ready devices to the main list
+ * must be called with globals->lock held */
 void cci__add_dev(cci__dev_t * dev)
 {
 	int done = 0;
@@ -177,16 +178,12 @@ void cci__add_dev(cci__dev_t * dev)
 		    && dev->priority < dd->priority)
 			continue;
 
-		pthread_mutex_lock(&globals->lock);
 		TAILQ_INSERT_BEFORE(dd, dev, entry);
-		pthread_mutex_unlock(&globals->lock);
 		done = 1;
 		break;
 	}
 	if (!done) {
-		pthread_mutex_lock(&globals->lock);
 		TAILQ_INSERT_TAIL(&globals->devs, dev, entry);
-		pthread_mutex_unlock(&globals->lock);
 	}
 	return;
 }

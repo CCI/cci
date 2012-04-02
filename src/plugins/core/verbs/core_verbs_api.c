@@ -502,8 +502,8 @@ static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t fla
 
 			pthread_mutex_lock(&globals->lock);
 			TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
-			pthread_mutex_unlock(&globals->lock);
 			cci__add_dev(dev);
+			pthread_mutex_unlock(&globals->lock);
 			devices[index] = device;
 			index++;
 			dev->is_up = vdev->ifa->ifa_flags & IFF_UP;
