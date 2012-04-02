@@ -1040,12 +1040,7 @@ static int ctp_eth_rma_register(cci_endpoint_t * endpoint,
 	cci__ep_t *_ep = container_of(endpoint, cci__ep_t, endpoint);
 	eth__ep_t *eep = _ep->priv;
 	struct ccieth_ioctl_rma_register arg;
-	eth__rma_handle_t *handle;
 	int ret;
-
-	handle = malloc(sizeof(*handle));
-	if (!handle)
-		return CCI_ENOMEM;
 
 	arg.protection =  ((flags & CCI_FLAG_READ ) ? PROT_READ  : 0)
 			| ((flags & CCI_FLAG_WRITE) ? PROT_WRITE : 0);
@@ -1055,11 +1050,9 @@ static int ctp_eth_rma_register(cci_endpoint_t * endpoint,
 	ret = ioctl(eep->fd, CCIETH_IOCTL_RMA_REGISTER, &arg);
 	if (ret < 0) {
 		perror("ioctl rma register");
-		free(handle);
 		return errno;
 	} else {
-		handle->handle = arg.handle;
-		*rma_handle = (uintptr_t) handle;
+		*rma_handle = arg.handle;
 	}
 
 	return CCI_SUCCESS;
@@ -1068,20 +1061,17 @@ static int ctp_eth_rma_register(cci_endpoint_t * endpoint,
 static int ctp_eth_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * rma_handle)
 {
 	struct ccieth_ioctl_rma_deregister arg;
-	eth__rma_handle_t *handle = (void *)(uintptr_t) rma_handle;
 	cci__ep_t *_ep = container_of(endpoint, cci__ep_t, endpoint);
 	eth__ep_t *eep = _ep->priv;
 	int ret;
 
-	arg.handle = handle->handle;
+	arg.handle = rma_handle;
 
 	ret = ioctl(eep->fd, CCIETH_IOCTL_RMA_DEREGISTER, &arg);
 	if (ret < 0) {
 		perror("ioctl rma deregister");
 		return errno;
 	}
-
-	free(handle);
 
 	return CCI_SUCCESS;
 }

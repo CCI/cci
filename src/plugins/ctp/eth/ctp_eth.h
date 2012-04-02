@@ -52,11 +52,6 @@ extern struct eth__globals {
 	int fd;
 } * eglobals;
 
-typedef struct eth__rma_handle {
-	/* FIXME: useless if only a uint64_t */
-	uint64_t handle;
-} eth__rma_handle_t;
-
 int cci_ctp_eth_post_load(cci_plugin_t * me);
 int cci_ctp_eth_pre_unload(cci_plugin_t * me);
 
