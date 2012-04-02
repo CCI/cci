@@ -125,14 +125,18 @@ void cci__free_dev(cci__dev_t * dev)
 	return;
 }
 
-int cci__free_devs(void)
+static int cci__free_configfile_devs(const char *reason)
 {
 	cci__dev_t *dev;
 
 	pthread_mutex_lock(&globals->lock);
-	while (!TAILQ_EMPTY(&globals->devs)) {
-		dev = TAILQ_FIRST(&globals->devs);
-		TAILQ_REMOVE(&globals->devs, dev, entry);
+	while (!TAILQ_EMPTY(&globals->configfile_devs)) {
+		dev = TAILQ_FIRST(&globals->configfile_devs);
+		TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
+		if (reason)
+			debug(CCI_DB_DRVR,
+			      "destroying device [%s] (driver %s), %s",
+			      dev->device.name, dev->driver, reason);
 		cci__free_dev(dev);
 	}
 	pthread_mutex_unlock(&globals->lock);
@@ -197,7 +201,7 @@ int cci__parse_config(const char *path)
 
 	file = fopen(path, "r");
 	if (!file) {
-		cci__free_devs();
+		cci__free_configfile_devs(NULL);
 		return errno;
 	}
 
@@ -279,7 +283,7 @@ int cci__parse_config(const char *path)
 			if (!dev) {
 				debug(CCI_DB_WARN,
 				      "calloc failed for device %s", open);
-				return cci__free_devs();
+				return cci__free_configfile_devs(NULL);
 			}
 			cci__init_dev(dev);
 
@@ -290,7 +294,7 @@ int cci__parse_config(const char *path)
 				      "calloc failed for device %s conf_argv",
 				      open);
 				cci__free_dev(dev);
-				return cci__free_devs();
+				return cci__free_configfile_devs(NULL);
 			}
 
 			arg_cnt = 0;
@@ -300,7 +304,7 @@ int cci__parse_config(const char *path)
 			d->name = strdup(open);
 			if (!d->name) {
 				cci__free_dev(dev);
-				return cci__free_devs();
+				return cci__free_configfile_devs(NULL);
 			}
 			continue;
 		}
@@ -334,7 +338,7 @@ int cci__parse_config(const char *path)
 				((char **) d->conf_argv)[arg_cnt] = strdup(arg);
 				if (!d->conf_argv[arg_cnt]) {
 					cci__free_dev(dev);
-					return cci__free_devs();
+					return cci__free_configfile_devs(NULL);
 				}
 				arg_cnt++;
 				if (0 == strcmp(key, "driver")) {
@@ -342,7 +346,7 @@ int cci__parse_config(const char *path)
 						dev->driver = strdup(value);
 						if (!dev->driver) {
 							cci__free_dev(dev);
-							return cci__free_devs();
+							return cci__free_configfile_devs(NULL);
 						}
 						driver++;
 					} else {
@@ -494,14 +498,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
 		/* drop devices that weren't claimed by any driver,
 		 * they didn't move from configfile_devs to devs */
-		while (!TAILQ_EMPTY(&globals->configfile_devs)) {
-			dev = TAILQ_FIRST(&globals->configfile_devs);
-			TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
-			debug(CCI_DB_DRVR,
-			      "destroying device [%s] (driver %s), not claimed by any driver",
-			      dev->device.name, dev->driver);
-			cci__free_dev(dev);
-		}
+		cci__free_configfile_devs("not claimed by any driver");
 
 		/* build devices array and list it */
 		i=0;
