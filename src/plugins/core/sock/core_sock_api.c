@@ -236,6 +236,7 @@ static int sock_init(cci_plugin_core_t *plugin,
 	}
 
 	if (!globals->configfile) {
+#if 0
 		/* create a loopback device for now */
 		struct cci_device *device;
 		sock_dev_t *sdev;
@@ -281,6 +282,7 @@ static int sock_init(cci_plugin_core_t *plugin,
 		devices[sglobals->count] = device;
 		sglobals->count++;
 		threads_running = 1;
+#endif
 
 	} else
 	/* find devices that we own */
