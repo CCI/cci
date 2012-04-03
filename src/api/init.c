@@ -461,12 +461,12 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			goto out_with_globals;
 		}
 		if (CCI_SUCCESS != (ret = cci_plugins_core_open())) {
-			goto out_with_globals;
+			goto out_with_plugins_init;
 		}
 		if (NULL == cci_all_plugins
 		    || NULL == cci_all_plugins[0].plugin) {
 			ret = CCI_ERR_NOT_FOUND;
-			goto out_with_globals;
+			goto out_with_plugins_core_open;
 		}
 
 		str = getenv("CCI_CONFIG");
@@ -476,7 +476,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 				debug(CCI_DB_ERR, "unable to parse CCI_CONFIG file %s",
 				      str);
 				ret = CCI_ERROR;
-				goto out_with_globals;
+				goto out_with_plugins_core_open;
 			}
 			globals->configfile = 1;
 		}
@@ -493,7 +493,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		if (!j) {
 			perror("all plugins init failed:");
 			ret = errno;
-			goto out_with_globals;
+			goto out_with_config_file;
 		}
 
 		/* drop devices that weren't claimed by any driver,
@@ -506,8 +506,8 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			i++;
 		globals->devices = calloc(i + 1, sizeof(*globals->devices));
 		if (!globals->devices) {
-			/* FIXME: free everything */
-			return CCI_ENOMEM;
+			ret = CCI_ENOMEM;
+			goto out_with_plugins;
 		}
 		globals->devices[i] = NULL;
 		i=0;
@@ -543,6 +543,14 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	pthread_mutex_unlock(&init_lock);
 	return CCI_SUCCESS;
 
+out_with_plugins:
+	/* FIXME */
+out_with_config_file:
+	/* FIXME? */
+out_with_plugins_core_open:
+	cci_plugins_core_close();
+out_with_plugins_init:
+	cci_plugins_finalize();
 out_with_globals:
 	free(globals);
 out:
