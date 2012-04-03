@@ -519,12 +519,13 @@ static int ccieth_uri_sscanf(const char *name, uint8_t * addr, uint32_t * id)
 
 static int eth_create_endpoint(cci_device_t * device,
 			       int flags,
-			       cci_endpoint_t ** endpoint,
+			       cci_endpoint_t ** endpointp,
 			       cci_os_handle_t * fdp)
 {
 	struct ccieth_ioctl_create_endpoint arg;
 	cci__dev_t *_dev = container_of(device, cci__dev_t, device);
 	eth__dev_t *edev = _dev->priv;
+	struct cci_endpoint *endpoint = (struct cci_endpoint *) *endpointp;
 	cci__ep_t *_ep;
 	eth__ep_t *eep;
 	int eid;
@@ -532,7 +533,7 @@ static int eth_create_endpoint(cci_device_t * device,
 	int fd;
 	int ret;
 
-	_ep = container_of(*endpoint, cci__ep_t, endpoint);
+	_ep = container_of(endpoint, cci__ep_t, endpoint);
 	eep = calloc(1, sizeof(eth__ep_t));
 	if (!eep) {
 		ret = CCI_ENOMEM;
@@ -563,7 +564,7 @@ static int eth_create_endpoint(cci_device_t * device,
 	eid = arg.id;
 
 	ccieth_uri_sprintf(name, (const uint8_t *)&edev->addr.sll_addr, arg.id);
-	*((char **)&(*endpoint)->name) = name;
+	endpoint->name = name;
 
 	*fdp = eep->fd = fd;
 	return CCI_SUCCESS;
@@ -781,8 +782,8 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 						     sizeof(ge->
 							    recv.user_conn_id));
 		event->type = CCI_EVENT_RECV;
-		*((uint32_t *) & event->recv.len) = ge->data_length;
-		*((void **)&event->recv.ptr) = ge->data_length ? data : NULL;
+		event->recv.len = ge->data_length;
+		event->recv.ptr = ge->data_length ? data : NULL;
 		event->recv.connection =
 		    &((eth__conn_t *) (uintptr_t) ge->recv.
 		      user_conn_id)->_conn.connection;
