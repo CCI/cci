@@ -27,10 +27,9 @@
 /*
  * Local functions
  */
-static int eth_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int eth_finalize(void);
+static int eth_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int eth_finalize(cci_plugin_core_t *plugin);
 static const char *eth_strerror(cci_endpoint_t * endpoint, enum cci_status status);
-static int eth_get_devices(cci_device_t * const **devices);
 static int eth_create_endpoint(cci_device_t * device,
 			       int flags,
 			       cci_endpoint_t ** endpoint,
@@ -63,7 +62,7 @@ static int eth_rma_register(cci_endpoint_t * endpoint,
 			    uint64_t * rma_handle);
 static int eth_rma_deregister(uint64_t rma_handle);
 static int eth_rma(cci_connection_t * connection,
-		   void *msg_ptr, uint32_t msg_len,
+		   const void *msg_ptr, uint32_t msg_len,
 		   uint64_t local_handle, uint64_t local_offset,
 		   uint64_t remote_handle, uint64_t remote_offset,
 		   uint64_t data_len, const void *context, int flags);
@@ -88,7 +87,7 @@ cci_plugin_core_t cci_core_eth_plugin = {
 	 CCI_CORE_API_VERSION,
 	 "eth",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
-	 8, /* higher than sock, lower than verbs */
+	 40, /* higher than sock, lower than verbs */
 
 	 /* Bootstrap function pointers */
 	 cci_core_eth_post_load,
@@ -99,7 +98,6 @@ cci_plugin_core_t cci_core_eth_plugin = {
 	eth_init,
 	eth_finalize,
 	eth_strerror,
-	eth_get_devices,
 	eth_create_endpoint,
 	eth_destroy_endpoint,
 	eth_accept,
@@ -254,10 +252,10 @@ out:
 	return -1;
 }
 
-static int eth__get_devices(void)
+static int eth__get_devices(cci_plugin_core_t *plugin)
 {
 	int ret;
-	cci__dev_t *_dev, *maxrate_dev;
+	cci__dev_t *_dev, *_ndev, *maxrate_dev;
 	unsigned count = 0;
 	struct cci_device *device;
 	eth__dev_t *edev;
@@ -320,15 +318,20 @@ static int eth__get_devices(void)
 			}
 
 			cci__init_dev(_dev);
+			_dev->plugin = plugin;
+			_dev->priority = plugin->base.priority;
 			_dev->driver = strdup("eth");
 			if (is_loopback)
 				_dev->is_default = 1;
-			TAILQ_INSERT_TAIL(&globals->devs, _dev, entry);
+
+			pthread_mutex_lock(&globals->lock);
+			cci__add_dev(_dev);
+			pthread_mutex_unlock(&globals->lock);
 		}
 
 	} else {
 		/* find devices that we own in the config file */
-		TAILQ_FOREACH(_dev, &globals->devs, entry) {
+		TAILQ_FOREACH_SAFE(_dev, &globals->configfile_devs, entry, _ndev) {
 			if (0 == strcmp("eth", _dev->driver)) {
 				const char * const *arg;
 				int gotmac = 0;
@@ -396,6 +399,15 @@ static int eth__get_devices(void)
 					free(edev);
 					continue;
 				}
+
+				_dev->plugin = plugin;
+				if (_dev->priority == -1)
+					_dev->priority = plugin->base.priority;
+
+				pthread_mutex_lock(&globals->lock);
+				TAILQ_REMOVE(&globals->configfile_devs, _dev, entry);
+				cci__add_dev(_dev);
+				pthread_mutex_unlock(&globals->lock);
 			}
 		}
 	}
@@ -436,15 +448,15 @@ out:
 	return ret;
 }
 
-static int eth_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+static int eth_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	CCI_ENTER;
-	eth__get_devices();
+	eth__get_devices(plugin);
 	CCI_EXIT;
 	return CCI_SUCCESS;
 }
 
-static int eth_finalize(void)
+static int eth_finalize(cci_plugin_core_t *plugin)
 {
 	printf("In eth_finalize\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
@@ -454,59 +466,6 @@ static const char *eth_strerror(cci_endpoint_t * endpoint, enum cci_status statu
 {
 	printf("In eth_sterrror\n");
 	return NULL;
-}
-
-static int eth_get_devices(cci_device_t * const **devices_p)
-{
-	cci_device_t **devices;
-	cci__dev_t *_dev;
-	unsigned count, i;
-	int ret;
-
-	CCI_ENTER;
-
-	count = 0;
-	TAILQ_FOREACH(_dev, &globals->devs, entry)
-		count++;
-
-	devices = calloc(count+1, sizeof(*devices));
-	if (!devices) {
-		ret = CCI_ENOMEM;
-		goto out;
-	}
-
-	i = 0;
-	TAILQ_FOREACH(_dev, &globals->devs, entry) {
-		devices[i] = &_dev->device;
-		i++;
-	}
-
-	debug(CCI_DB_INFO, "listing devices:");
-	for (i = 0; i < count; i++) {
-		cci_device_t *device;
-		eth__dev_t *edev;
-
-		device = devices[i];
-		_dev = container_of(device, cci__dev_t, device);
-		edev = _dev->priv;
-		struct sockaddr_ll *addr = &edev->addr;
-		debug(CCI_DB_INFO,
-		      "  device `%s' has address %02x:%02x:%02x:%02x:%02x:%02x%s",
-		      device->name, addr->sll_addr[0],
-		      addr->sll_addr[1], addr->sll_addr[2],
-		      addr->sll_addr[3], addr->sll_addr[4],
-		      addr->sll_addr[5],
-		      _dev->is_default ? " (default)" : "");
-	}
-	debug(CCI_DB_INFO, "end of device list.");
-
-	*devices_p = (cci_device_t const **)devices;
-	CCI_EXIT;
-	return CCI_SUCCESS;
-
-out:
-	CCI_EXIT;
-	return ret;
 }
 
 #define CCIETH_URI_LENGTH (6 /* prefix */ + 17 /* mac */ + 1 /* colon */ + 8 /* id */ + 1 /* \0 */)
@@ -615,6 +574,7 @@ static int eth_accept(cci_event_t *event, const void *context)
 	if (!econn)
 		return CCI_ENOMEM;
 	_conn = &econn->_conn;
+	_conn->plugin = _ep->plugin;
 
 	econn->id = conn_id;
 	assert(econn->id != CCIETH_CONNECTION_INVALID_ID);
@@ -685,6 +645,7 @@ static int eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	if (!econn)
 		return CCI_ENOMEM;
 	_conn = &econn->_conn;
+	_conn->plugin = ep->plugin;
 	_conn->connection.endpoint = endpoint;
 	_conn->connection.attribute = attribute;
 	_conn->connection.context = (void *)context;
@@ -1003,7 +964,7 @@ static int eth_rma_deregister(uint64_t rma_handle)
 }
 
 static int eth_rma(cci_connection_t * connection,
-		   void *msg_ptr, uint32_t msg_len,
+		   const void *msg_ptr, uint32_t msg_len,
 		   uint64_t local_handle, uint64_t local_offset,
 		   uint64_t remote_handle, uint64_t remote_offset,
 		   uint64_t data_len, const void *context, int flags)
