@@ -418,6 +418,7 @@ int cci__parse_config(const char *path)
 int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	int ret;
+	int i, j;
 
 	cci__get_debug_env();
 
@@ -435,7 +436,6 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	if (0 == initialized) {
 		cci__dev_t *dev;
 		char *str;
-		int i, j;
 
 		/* init globals */
 
@@ -485,7 +485,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		     cci_all_plugins[i].plugin != NULL;
 		     i++) {
 			cci_plugin_core_t *plugin = (cci_plugin_core_t *) cci_all_plugins[i].plugin;
-			ret = plugin->init(plugin, abi_ver, flags, caps);
+			ret = cci_all_plugins[i].init_status = plugin->init(plugin, abi_ver, flags, caps);
 			if (!ret)
 				j++;
 		}
@@ -544,7 +544,13 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	return CCI_SUCCESS;
 
 out_with_plugins:
-	/* FIXME */
+	for (i = 0;
+             cci_all_plugins[i].plugin != NULL;
+             i++) {
+		cci_plugin_core_t *plugin = (cci_plugin_core_t *) cci_all_plugins[i].plugin;
+		if (CCI_SUCCESS == cci_all_plugins[i].init_status)
+			plugin->finalize(plugin);
+	}
 out_with_config_file:
 	/* FIXME? */
 out_with_plugins_core_open:

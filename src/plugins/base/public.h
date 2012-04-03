@@ -20,6 +20,7 @@ BEGIN_C_DECLS
 struct cci_plugin_handle {
 	cci_plugin_t *plugin;
 	lt_dlhandle handle;
+	int init_status;
 };
 
 /* Startup the CCI plugins system */
