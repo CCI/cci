@@ -428,7 +428,8 @@ static int sock_finalize(cci_plugin_core_t * plugin)
 
 	pthread_mutex_lock(&globals->lock);
 	TAILQ_FOREACH(dev, &globals->devs, entry)
-	    free(dev->priv);
+		if (!strcmp(dev->driver, "sock"))
+			free(dev->priv);
 	pthread_mutex_unlock(&globals->lock);
 
 	free(sglobals->devices);

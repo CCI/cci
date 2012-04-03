@@ -1162,6 +1162,9 @@ static int gni_finalize(cci_plugin_core_t *plugin<)
 
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
 
+		if (strcmp(dev->driver, "gni"))
+			continue;
+
 		gdev = dev->priv;
 		if (gdev) {
 

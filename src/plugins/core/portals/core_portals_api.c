@@ -493,7 +493,12 @@ static int portals_finalize(cci_plugin_core_t *plugin)
 
 	pthread_mutex_lock(&globals->lock);
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
-		portals_dev_t *pdev = dev->priv;
+		portals_dev_t *pdev;
+
+		if (strcmp(dev->driver, "portals"))
+			continue;
+
+		pdev = dev->priv;
 		if (pdev) {	// Only for portals device
 			PtlNIFini(pdev->niHandle);
 			if (pdev->ep_idxs)
