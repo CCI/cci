@@ -15,17 +15,13 @@
 BEGIN_C_DECLS
 /* Valid URI include:
  *
- * gni://hostname:port	# Hostname or IPv4 address and port
+ * gni://gemini_addr:port	# The Gemini addr is the NIC's physical address
  */
 /* A gni device needs the following items in the config file:
 
    driver = gni		# must be lowercase
 
    A gni device may have these items:
-
-   ip = 1.2.3.4			# IPv4 address of device
-
-   interface = ipogif0		# Ethernet interface name
 
    port = 12345			# base listening port
 				  the default is a random, ephemeral port
@@ -88,14 +84,13 @@ BEGIN_C_DECLS
 typedef struct gni_smsg_info {
 	gni_mem_handle_t mem_hndl;	/* two uint64_t */
 	uint64_t msg_buffer;		/* (uint64_t)(uintptr_t)void * */
-	uint32_t nic_id;		/* physical NIC address */
 	uint32_t msg_type;		/* typedef enum gni_smsg_type */
 	uint32_t buff_size;
 	uint32_t mbox_offset;
 	uint32_t mbox_maxcredit;
 	uint32_t msg_maxsize;
 	uint32_t id;			/* conn id */
-	uint32_t pad;
+	uint32_t len_attr;		/* (payload len << 4) | conn attr */
 } gni_smsg_info_t;
 
 /* Conn Request (sent over the socket)
@@ -194,6 +189,7 @@ typedef struct gni_rma_addr_rkey {
 #define GNI_EP_RX_CNT		(32 * 1024)	/* default recv buffer count */
 #define GNI_EP_TX_CNT		(16 * 1024)	/* default send buffer count */
 #define GNI_EP_CQ_CNT		(GNI_EP_RX_CNT + GNI_EP_TX_CNT)	/* default CQ count */
+#define GNI_EP_CONN_REQ_CNT	(1)		/* number of incoming conn requests */
 #define GNI_PROG_TIME_US	(100000)	/* try to progress every N microseconds */
 #define GNI_CONN_CREDIT		(8)		/* mbox max msgs */
 
@@ -235,17 +231,17 @@ typedef struct gni_rx {
 
 typedef struct gni_dev {
 	int device_id;			/* GNI device id */
+	uint32_t phys_addr;		/* physical Gemini address */
 	uint32_t ptag;
 	uint32_t cookie;
-	struct ifaddrs *ifa;		/* device's interface addr */
+	uint32_t base_port;		/* start here when opening endpoints */
 	int is_progressing;		/* being progressed? */
+	struct sockaddr_in sin;		/* address of ipogif for binding ports */
 } gni_dev_t;
 
 typedef struct gni_globals {
-	uint32_t phys_addr;		/* physical Gemini address */
 	int count;			/* number of devices */
 	int *device_ids;		/* local device ids */
-	struct ifaddrs *ifaddrs;
 	cci_device_t const **const devices;	/* array of devices */
 } gni_globals_t;
 
@@ -301,15 +297,11 @@ typedef struct gni_rx_pool {
 } gni_rx_pool_t;
 
 typedef struct gni_ep {
-	gni_cdm_handle_t cdm;		/* communication domain handle */
-	gni_nic_handle_t nic;		/* NIC handle */
 	gni_cq_handle_t tx_cq;		/* source CQ for SMSG sends and RDMAs */
 	gni_cq_handle_t rx_cq;		/* destination CQ for SMSG recvs */
 
-	int sock;			/* listening socket for connection setup */
-	struct sockaddr_in sin;		/* host address and port */
-	TAILQ_HEAD(g_crs, gni_rx) crs;	/* all conn requests */
-	TAILQ_HEAD(g_crsi, gni_rx) idle_crs;	/* idle conn requests */
+	void *conn_tree;		/* tree of peer conn ids */
+	pthread_rwlock_t conn_tree_lock;	/* rw lock */
 
 	void *tx_buf;			/* send buffer */
 	TAILQ_HEAD(g_txs, gni_tx) txs;	/* all txs */
@@ -317,8 +309,14 @@ typedef struct gni_ep {
 
 	TAILQ_HEAD(g_rx_pools, gni_rx_pool) rx_pools;	/* list of rx pools - usually one */
 
-	void *conn_tree;		/* tree of peer conn ids */
-	pthread_rwlock_t conn_tree_lock;	/* rw lock */
+	gni_ep_handle_t lep;		/* listening endpoint for conn reqs */
+	gni_cdm_handle_t cdm;		/* communication domain handle */
+	gni_nic_handle_t nic;		/* NIC handle */
+
+	gni_smsg_info_t *infos;		/* for incoming conn requests */
+	TAILQ_HEAD(g_crs, gni_rx) crs;	/* all conn requests */
+	TAILQ_HEAD(g_crsi, gni_rx) idle_crs;	/* idle conn requests */
+
 	TAILQ_HEAD(g_conns, gni_conn) conns;	/* all conns */
 	TAILQ_HEAD(g_active, gni_conn) active;	/* active conns waiting on connect */
 	TAILQ_HEAD(g_active2, gni_conn) active2;	/* active conns waiting on reply */
@@ -326,6 +324,9 @@ typedef struct gni_ep {
 	TAILQ_HEAD(g_passive2, gni_conn) passive2;	/* passive conns waitin on ack */
 	TAILQ_HEAD(g_hdls, gni_rma_handle) handles;	/* all rma registrations */
 	TAILQ_HEAD(g_ops, gni_rma_op) rma_ops;	/* all rma ops */
+
+	int sock;			/* listening socket for connection setup */
+	struct sockaddr_in sin;		/* host address and port */
 } gni_ep_t;
 
 typedef enum gni_conn_state {
@@ -339,11 +340,12 @@ typedef enum gni_conn_state {
 } gni_conn_state_t;
 
 typedef struct gni_conn_request {
-	int sock;			/* socket for connection handshake */
-	uint32_t nic_id;		/* peer's physical nic id */
+	uint32_t addr;			/* peer's physical addr */
+	uint32_t port;			/* peer's inst_id */
 	void *ptr;			/* application payload */
 	uint32_t len;			/* payload length */
 	gni_smsg_info_t info;		/* sender's smsg info */
+	gni_smsg_info_t reply;		/* server's reply */
 } gni_conn_request_t;
 
 typedef struct gni_conn {
