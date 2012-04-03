@@ -15,12 +15,21 @@
 #include <stdio.h>
 
 #include "cci.h"
+#include "plugins/base/public.h"
 #include "plugins/core/core.h"
 
-int cci_get_devices(cci_device_t * const ** devices)
+int cci_get_devices(cci_device_t * const ** devicesp)
 {
-	if (NULL == devices)
-		return CCI_EINVAL;
+	cci_device_t **devices;
+	cci__dev_t *dev;
+	int ret;
+	int i, nb;
 
-	return cci_core->get_devices(devices);
+	/* FIXME: if we have to update the device array at runtime,
+	 * add a update_devices plugin callback and call of them here,
+	 * to update the TAILQ. then update the devices array.
+	 */
+
+	*devicesp = (cci_device_t * const *) globals->devices;
+	return CCI_SUCCESS;
 }

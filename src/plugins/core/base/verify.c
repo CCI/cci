@@ -18,7 +18,6 @@ int cci_plugins_core_verify(cci_plugin_t * plugin)
 	if (NULL == p->init ||
 	    NULL == p->finalize ||
 	    NULL == p->strerror ||
-	    NULL == p->get_devices ||
 	    NULL == p->create_endpoint ||
 	    NULL == p->destroy_endpoint ||
 	    NULL == p->accept ||

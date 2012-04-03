@@ -20,8 +20,10 @@
 int cci_send(cci_connection_t * connection,
 	     const void *msg_ptr, uint32_t msg_len, const void *context, int flags)
 {
+	cci__conn_t *conn = container_of(connection, cci__conn_t, connection);
+
 	if (NULL == connection)
 		return CCI_EINVAL;
 
-	return cci_core->send(connection, msg_ptr, msg_len, context, flags);
+	return conn->plugin->send(connection, msg_ptr, msg_len, context, flags);
 }

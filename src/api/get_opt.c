@@ -2,6 +2,7 @@
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright © 2010-2011 UT-Battelle, LLC. All rights reserved.
  * Copyright © 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -19,6 +20,7 @@
 int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
 		cci_opt_name_t name, void **val, int *len)
 {
+	cci_plugin_core_t * plugin;
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
 	cci__conn_t *conn = NULL;
@@ -34,12 +36,14 @@ int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
 		    || name == CCI_OPT_CONN_SEND_TIMEOUT)
 			return CCI_EINVAL;
 		ep = container_of(handle->endpoint, cci__ep_t, endpoint);
+		plugin = ep->plugin;
 	} else {
 		if (handle->connection == NULL
 		    || name != CCI_OPT_CONN_SEND_TIMEOUT)
 			return CCI_EINVAL;
 		conn =
 		    container_of(handle->connection, cci__conn_t, connection);
+		plugin = conn->plugin;
 	}
 
 	switch (name) {
@@ -99,7 +103,7 @@ int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
 			break;
 		}
 	default:
-		ret = cci_core->get_opt(handle, level, name, val, len);
+		ret = plugin->get_opt(handle, level, name, val, len);
 	}
 
 	CCI_EXIT;

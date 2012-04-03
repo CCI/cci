@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -12,17 +13,15 @@
 /*
  * Public variables
  */
-cci_plugin_core_t *cci_core = NULL;
-lt_dlhandle cci_plugins_core_handle;
+struct cci_plugin_handle *cci_all_plugins = NULL;
 
 int cci_plugins_core_open(void)
 {
 	int rc;
 
 	/* This framework only needs 1 plugin */
-	rc = cci_plugins_open_one("core", cci_plugins_core_verify,
-				  (cci_plugin_t **) & cci_core,
-				  &cci_plugins_core_handle);
+	rc = cci_plugins_open_all("core", cci_plugins_core_verify,
+				  &cci_all_plugins);
 	if (CCI_SUCCESS != rc) {
 		return rc;
 	}

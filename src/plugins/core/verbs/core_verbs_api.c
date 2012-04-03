@@ -35,10 +35,9 @@ pthread_t progress_tid;
 /*
  * Local functions
  */
-static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int verbs_finalize(void);
+static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int verbs_finalize(cci_plugin_core_t * plugin);
 static const char *verbs_strerror(cci_endpoint_t * endpoint, enum cci_status status);
-static int verbs_get_devices(cci_device_t * const **devices);
 static int verbs_create_endpoint(cci_device_t * device,
 				 int flags,
 				 cci_endpoint_t ** endpoint,
@@ -97,7 +96,7 @@ cci_plugin_core_t cci_core_verbs_plugin = {
 	 CCI_CORE_API_VERSION,
 	 "verbs",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
-	 10,
+	 50,
 
 	 /* Bootstrap function pointers */
 	 cci_core_verbs_post_load,
@@ -108,7 +107,6 @@ cci_plugin_core_t cci_core_verbs_plugin = {
 	verbs_init,
 	verbs_finalize,
 	verbs_strerror,
-	verbs_get_devices,
 	verbs_create_endpoint,
 	verbs_destroy_endpoint,
 	verbs_accept,
@@ -324,13 +322,13 @@ static verbs_tx_t *verbs_get_tx(cci__ep_t * ep)
 	return tx;
 }
 
-static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	int count = 0;
 	int index = 0;
 	int used[CCI_MAX_DEVICES];
 	int ret = 0;
-	cci__dev_t *dev = NULL;
+	cci__dev_t *dev = NULL, *ndev;
 	struct cci_device **devices = NULL;
 	struct ifaddrs *ifaddrs = NULL;
 
@@ -370,7 +368,7 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 /* FIXME: if globals->configfile == 0, create default devices */
 
 	/* find devices we own */
-	TAILQ_FOREACH(dev, &globals->devs, entry) {
+	TAILQ_FOREACH_SAFE(dev, &globals->configfile_devs, entry, ndev) {
 		if (0 == strcmp("verbs", dev->driver)) {
 			int i = 0;
 			const char * const *arg;
@@ -394,6 +392,9 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 				ret = CCI_ENOMEM;
 				goto out;
 			}
+			dev->plugin = plugin;
+			if (dev->priority == -1)
+				dev->priority = plugin->base.priority;
 
 			vdev = dev->priv;
 
@@ -499,6 +500,10 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			    verbs_mtu_val(port_attr.max_mtu);
 			device->rate = verbs_device_rate(port_attr);
 
+			pthread_mutex_lock(&globals->lock);
+			TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
+			cci__add_dev(dev);
+			pthread_mutex_unlock(&globals->lock);
 			devices[index] = device;
 			index++;
 			dev->is_up = vdev->ifa->ifa_flags & IFF_UP;
@@ -546,25 +551,7 @@ static const char *verbs_strerror(cci_endpoint_t * endpoint, enum cci_status sta
 	return strerror(status);
 }
 
-static int verbs_get_devices(cci_device_t * const **devices)
-{
-	CCI_ENTER;
-
-	if (!vglobals) {
-		CCI_EXIT;
-		return CCI_ENODEV;
-	}
-
-/* FIXME: update the devices list (up field, ...).
-   add new devices if !globals->configfile */
-
-	*devices = (cci_device_t * const *) vglobals->devices;
-
-	CCI_EXIT;
-	return CCI_SUCCESS;
-}
-
-static int verbs_finalize(void)
+static int verbs_finalize(cci_plugin_core_t * plugin)
 {
 	int ret = CCI_SUCCESS;
 	int i = 0;
@@ -1374,6 +1361,7 @@ static int verbs_accept(cci_event_t *event, const void *context)
 		goto out;
 	}
 	conn->connection.max_send_size = vconn->mss;
+	conn->plugin = ep->plugin;
 
 	if (vconn->num_slots) {
 		pthread_mutex_lock(&ep->lock);
@@ -2098,6 +2086,7 @@ verbs_handle_conn_request(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 		ret = CCI_ENOMEM;
 		goto out;
 	}
+	conn->plugin = ep->plugin;
 
 	conn->priv = calloc(1, sizeof(*vconn));
 	if (!conn->priv) {

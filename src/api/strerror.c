@@ -2,6 +2,7 @@
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright © 2010-2011 UT-Battelle, LLC. All rights reserved.
  * Copyright © 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -18,6 +19,8 @@
 
 const char *cci_strerror(cci_endpoint_t *endpoint, enum cci_status status)
 {
+	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
+
 	switch (status) {
 	case CCI_SUCCESS:
 		return "CCI_SUCCESS";
@@ -80,6 +83,6 @@ const char *cci_strerror(cci_endpoint_t *endpoint, enum cci_status status)
 		return "CCI_EADDRNOTAVAIL";
 
 	default:
-		return cci_core->strerror(endpoint, status);
+		return ep->plugin->strerror(endpoint, status);
 	}
 }

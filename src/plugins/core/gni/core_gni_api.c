@@ -119,10 +119,9 @@ do {                                                                  \
 // Cycle count sampling code -- FINISH
 
 // Local functions
-static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int gni_finalize(void);
+static int gni_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int gni_finalize(cci_plugin_core_t *plugin);
 static const char *gni_strerror(cci_endpoint_t * endpoint, enum cci_status gRv);
-static int gni_get_devices(const cci_device_t *** devices);
 static int gni_create_endpoint(cci_device_t * device,
 			       int32_t flags,
 			       cci_endpoint_t ** endpoint,
@@ -826,7 +825,7 @@ cci_plugin_core_t cci_core_gni_plugin = {
 	 CCI_CORE_API_VERSION,
 	 "gni",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
-	 5,
+	 50,
 
 //      Bootstrap function pointers
 	 cci_core_gni_post_load,
@@ -838,7 +837,6 @@ cci_plugin_core_t cci_core_gni_plugin = {
 	gni_init,
 	gni_finalize,
 	gni_strerror,
-	gni_get_devices,
 	gni_create_endpoint,
 	gni_destroy_endpoint,
 	gni_accept,
@@ -857,7 +855,7 @@ cci_plugin_core_t cci_core_gni_plugin = {
 	gni_rma
 };
 
-static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+static int gni_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 
 	int32_t iTmp;		// integer temporary
@@ -1135,39 +1133,7 @@ static const char *gni_strerror(cci_endpoint_t * endpoint, enum cci_status cRv)
 	return (gni_err_str[(enum cci_status)cRv]);
 }
 
-static int gni_get_devices(const cci_device_t *** devices)
-{
-
-	const cci_device_t *device;
-	cci__dev_t *dev;
-	gni__dev_t *gdev;
-
-	CCI_ENTER;
-
-	if (!gglobals) {
-
-		CCI_EXIT;
-		return (CCI_ENODEV);
-	}
-
-	*devices = gglobals->devices;
-	device = **devices;
-	dev = container_of(device, cci__dev_t, device);
-	gdev = dev->priv;
-
-	debug(CCI_DB_FUNC, "%8s.%5d In gni_get_devices()",
-	      gdev->nodename, gdev->INST);
-	debug(CCI_DB_INFO, "%8s.%5d %s: devices=                   %8d",
-	      gdev->nodename, gdev->INST, __func__, gglobals->count);
-
-/* FIXME: update the devices list (up field, ...).
-   add new devices if !globals->configfile */
-
-	CCI_EXIT;
-	return (CCI_SUCCESS);
-}
-
-static int gni_finalize(void)
+static int gni_finalize(cci_plugin_core_t *plugin<)
 {
 
 	const cci_device_t *device;

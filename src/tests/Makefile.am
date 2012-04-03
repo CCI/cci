@@ -5,6 +5,9 @@
 
 AM_LDFLAGS = $(top_builddir)/src/libcci.la
 
+bin_PROGRAMS = \
+	cci_info
+
 check_PROGRAMS = \
         init	\
 	server	\

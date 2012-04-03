@@ -27,16 +27,19 @@
 #endif
 
 BEGIN_C_DECLS
+
+struct cci_plugin_core;
+
 /*
  * Typedefs for the CCI code plugin framework, used in the
  * cci_plugin_core_t struct, below.
  */
-typedef int (*cci_init_fn_t) (uint32_t abi_ver, uint32_t flags,
+typedef int (*cci_init_fn_t) (struct cci_plugin_core *plugin,
+			      uint32_t abi_ver, uint32_t flags,
 			      uint32_t * caps);
-typedef int (*cci_finalize_fn_t)(void);
+typedef int (*cci_finalize_fn_t)(struct cci_plugin_core *plugin);
 typedef const char *(*cci_strerror_fn_t) (cci_endpoint_t * endpoint,
 					  enum cci_status status);
-typedef int (*cci_get_devices_fn_t) (cci_device_t * const **devices);
 typedef int (*cci_create_endpoint_fn_t) (cci_device_t * device,
 					 int flags,
 					 cci_endpoint_t ** endpoint,
@@ -79,14 +82,13 @@ typedef int (*cci_rma_fn_t) (cci_connection_t * connection,
 
 /* Plugin struct */
 
-typedef struct {
+typedef struct cci_plugin_core {
 	cci_plugin_t base;
 
 	/* CCI API function pointers */
 	cci_init_fn_t init;
 	cci_finalize_fn_t finalize;
 	cci_strerror_fn_t strerror;
-	cci_get_devices_fn_t get_devices;
 	cci_create_endpoint_fn_t create_endpoint;
 	cci_destroy_endpoint_fn_t destroy_endpoint;
 	cci_accept_fn_t accept;
@@ -105,9 +107,9 @@ typedef struct {
 	cci_rma_fn_t rma;
 } cci_plugin_core_t;
 
-/* Global variable with the pointers to all the CCI plugin
-   functions */
-extern cci_plugin_core_t *cci_core;
+/* Global variable containing all plugins handles,
+   terminated with NULL plugin field */
+extern struct cci_plugin_handle *cci_all_plugins;
 
 /* Define for the version of this plugin type header file */
 #define CCI_CORE_API_VERSION_MAJOR 1

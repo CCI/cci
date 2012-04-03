@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -14,10 +15,9 @@
 /*
  * Local functions
  */
-static int template_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int template_finalize(void);
+static int template_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int template_finalize(cci_plugin_core_t * plugin);
 static const char *template_strerror(cci_endpoint_t * endpoint, enum cci_status status);
-static int template_get_devices(cci_device_t * const **devices);
 static int template_create_endpoint(cci_device_t * device,
 				    int flags,
 				    cci_endpoint_t ** endpoint,
@@ -76,7 +76,7 @@ cci_plugin_core_t cci_core_template_plugin = {
 	 CCI_CORE_API_VERSION,
 	 "template",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
-	 5,
+	 0, /* priority set to 0 because people shouldn't ever use it */
 
 	 /* Bootstrap function pointers */
 	 cci_core_template_post_load,
@@ -87,7 +87,6 @@ cci_plugin_core_t cci_core_template_plugin = {
 	template_init,
 	template_finalize,
 	template_strerror,
-	template_get_devices,
 	template_create_endpoint,
 	template_destroy_endpoint,
 	template_accept,
@@ -106,13 +105,13 @@ cci_plugin_core_t cci_core_template_plugin = {
 	template_rma
 };
 
-static int template_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+static int template_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	printf("In template_init\n");
 	return CCI_SUCCESS;
 }
 
-static int template_finalize(void)
+static int template_finalize(cci_plugin_core_t * plugin)
 {
 	printf("In template_free_devices\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
@@ -122,12 +121,6 @@ static const char *template_strerror(cci_endpoint_t * endpoint, enum cci_status 
 {
 	printf("In template_sterrror\n");
 	return NULL;
-}
-
-static int template_get_devices(cci_device_t * const **devices)
-{
-	printf("In template_get_devices\n");
-	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 static int template_create_endpoint(cci_device_t * device,

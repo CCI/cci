@@ -46,16 +46,16 @@ bool conn_established = false;
 
 volatile int sock_shut_down = 0;
 sock_globals_t *sglobals = NULL;
+static int threads_running = 0;
 pthread_t progress_tid, recv_tid;
 
 /*
  * Local functions
  */
-static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int sock_finalize(void);
+static int sock_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int sock_finalize(cci_plugin_core_t * plugin);
 static const char *sock_strerror(cci_endpoint_t * endpoint,
 				 enum cci_status status);
-static int sock_get_devices(cci_device_t * const **devices);
 static int sock_create_endpoint(cci_device_t * device,
 				int flags,
 				cci_endpoint_t ** endpoint,
@@ -121,7 +121,7 @@ cci_plugin_core_t cci_core_sock_plugin = {
 	 CCI_CORE_API_VERSION,
 	 "sock",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
-	 5,
+	 30,
 
 	 /* Bootstrap function pointers */
 	 cci_core_sock_post_load,
@@ -132,7 +132,6 @@ cci_plugin_core_t cci_core_sock_plugin = {
 	sock_init,
 	sock_finalize,
 	sock_strerror,
-	sock_get_devices,
 	sock_create_endpoint,
 	sock_destroy_endpoint,
 	sock_accept,
@@ -204,10 +203,11 @@ static inline const char *sock_msg_type(sock_msg_type_t type)
 	return NULL;
 }
 
-static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+static int sock_init(cci_plugin_core_t *plugin,
+		     uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	int ret;
-	cci__dev_t *dev;
+	cci__dev_t *dev, *ndev;
 	cci_device_t **devices;
 
 	CCI_ENTER;
@@ -251,6 +251,8 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		}
 
 		cci__init_dev(dev);
+		dev->plugin = plugin;
+		dev->priority = plugin->base.priority;
 
 		device = &dev->device;
 		device->max_send_size = SOCK_DEFAULT_MSS;
@@ -271,17 +273,24 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		dev->driver = strdup("sock");
 		dev->is_up = 1;
 		dev->is_default = 1;
-		TAILQ_INSERT_TAIL(&globals->devs, dev, entry);
+		pthread_mutex_lock(&globals->lock);
+		cci__add_dev(dev);
+		pthread_mutex_unlock(&globals->lock);
 		devices[sglobals->count] = device;
 		sglobals->count++;
+		threads_running = 1;
 
 	} else
 	/* find devices that we own */
-	TAILQ_FOREACH(dev, &globals->devs, entry) {
+		TAILQ_FOREACH_SAFE(dev, &globals->configfile_devs, entry, ndev) {
 		if (0 == strcmp("sock", dev->driver)) {
 			const char * const *arg;
 			struct cci_device *device;
 			sock_dev_t *sdev;
+
+			dev->plugin = plugin;
+			if (dev->priority == -1)
+				dev->priority = plugin->base.priority;
 
 			device = &dev->device;
 			device->max_send_size = SOCK_DEFAULT_MSS;
@@ -326,12 +335,17 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
 					assert(mss >= SOCK_MIN_MSS);
 					device->max_send_size = mss;
-				}
+				 }
 			}
 			if (sdev->ip != 0) {
+				pthread_mutex_lock(&globals->lock);
+				TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
+				cci__add_dev(dev);
+				pthread_mutex_unlock(&globals->lock);
 				devices[sglobals->count] = device;
 				sglobals->count++;
 				dev->is_up = 1;
+				threads_running = 1;
 			}
 
 			/* TODO determine if IP is available and up */
@@ -344,13 +358,15 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
 	*((cci_device_t ***) & sglobals->devices) = devices;
 
-	ret = pthread_create(&recv_tid, NULL, sock_recv_thread, NULL);
-	if (ret)
-		goto out;
+	if (threads_running) {
+		ret = pthread_create(&recv_tid, NULL, sock_recv_thread, NULL);
+		if (ret)
+			goto out;
 
-	ret = pthread_create(&progress_tid, NULL, sock_progress_thread, NULL);
-	if (ret)
-		goto out;
+		ret = pthread_create(&progress_tid, NULL, sock_progress_thread, NULL);
+		if (ret)
+			goto out;
+	}
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -384,30 +400,11 @@ static const char *sock_strerror(cci_endpoint_t * endpoint,
 	return NULL;
 }
 
-static int sock_get_devices(cci_device_t * const **devices)
-{
-	CCI_ENTER;
-
-	if (!sglobals) {
-		CCI_EXIT;
-		return CCI_ENODEV;
-	}
-
-/* FIXME: update the devices list (up field, ...).
-   add new devices if !globals->configfile */
-
-	*devices = sglobals->devices;
-
-	CCI_EXIT;
-
-	return CCI_SUCCESS;
-}
-
 /* NOTE the CCI layer has already unbound all devices
  *      and destroyed all endpoints.
  *      All we need to do if free dev->priv
  */
-static int sock_finalize(void)
+static int sock_finalize(cci_plugin_core_t * plugin)
 {
 	cci__dev_t *dev = NULL;
 
@@ -422,8 +419,10 @@ static int sock_finalize(void)
 	pthread_mutex_lock(&globals->lock);
 	sock_shut_down = 1;
 	pthread_mutex_unlock(&globals->lock);
-	pthread_join(progress_tid, NULL);
-	pthread_join(recv_tid, NULL);
+	if (threads_running) {
+		pthread_join(progress_tid, NULL);
+		pthread_join(recv_tid, NULL);
+	}
 
 	pthread_mutex_lock(&globals->lock);
 	TAILQ_FOREACH(dev, &globals->devs, entry)
@@ -856,6 +855,7 @@ static int sock_accept(cci_event_t *event, const void *context)
 		CCI_EXIT;
 		return CCI_ENOMEM;
 	}
+	conn->plugin = ep->plugin;
 
 	conn->tx_timeout = ep->tx_timeout;
 	conn->priv = calloc(1, sizeof(*sconn));
@@ -1261,6 +1261,7 @@ static int sock_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	sdev = dev->priv;
 
 	connection->max_send_size = dev->device.max_send_size;
+	conn->plugin = ep->plugin;
 
 	/* Dealing with keepalive, if set, include the keepalive timeout value into
 	   the connection request */

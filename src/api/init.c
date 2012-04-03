@@ -14,6 +14,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <assert.h>
 
 #include "cci.h"
 #include "cci_lib_types.h"
@@ -125,14 +126,18 @@ void cci__free_dev(cci__dev_t * dev)
 	return;
 }
 
-int cci__free_devs(void)
+static int cci__free_configfile_devs(const char *reason)
 {
 	cci__dev_t *dev;
 
 	pthread_mutex_lock(&globals->lock);
-	while (!TAILQ_EMPTY(&globals->devs)) {
-		dev = TAILQ_FIRST(&globals->devs);
-		TAILQ_REMOVE(&globals->devs, dev, entry);
+	while (!TAILQ_EMPTY(&globals->configfile_devs)) {
+		dev = TAILQ_FIRST(&globals->configfile_devs);
+		TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
+		if (reason)
+			debug(CCI_DB_DRVR,
+			      "destroying device [%s] (driver %s), %s",
+			      dev->device.name, dev->driver, reason);
 		cci__free_dev(dev);
 	}
 	pthread_mutex_unlock(&globals->lock);
@@ -144,39 +149,44 @@ void cci__init_dev(cci__dev_t *dev)
 {
 	struct cci_device *device = &dev->device;
 
-	dev->priority = 50; /* default */
+	dev->priority = -1; /* tell the driver it must initialize it if we didn't */
 	dev->is_default = 0;
 	TAILQ_INIT(&dev->eps);
 	pthread_mutex_init(&dev->lock, NULL);
 	device->up = 1;
 }
 
+/* only used by backends when adding ready devices to the main list
+ * must be called with globals->lock held */
 void cci__add_dev(cci__dev_t * dev)
 {
-	if (TAILQ_EMPTY(&globals->devs)) {
-		/* insert at front */
-		pthread_mutex_lock(&globals->lock);
-		TAILQ_INSERT_HEAD(&globals->devs, dev, entry);
-		pthread_mutex_unlock(&globals->lock);
-	} else {
-		int done = 0;
-		cci__dev_t *dd;
+	int done = 0;
+	cci__dev_t *dd;
 
-		/* walk list and insert in order by priority */
-		TAILQ_FOREACH(dd, &globals->devs, entry) {
-			if (dev->priority > dd->priority) {
-				pthread_mutex_lock(&globals->lock);
-				TAILQ_INSERT_BEFORE(dd, dev, entry);
-				pthread_mutex_unlock(&globals->lock);
-				done = 1;
-				break;
-			}
-		}
-		if (!done) {
-			pthread_mutex_lock(&globals->lock);
-			TAILQ_INSERT_TAIL(&globals->devs, dev, entry);
-			pthread_mutex_unlock(&globals->lock);
-		}
+	assert(NULL != dev->plugin);
+
+	debug(CCI_DB_DRVR,
+	      "adding device [%s] (driver %s)",
+	      dev->device.name, dev->driver);
+
+	/* walk list and insert in order by up/default/priority */
+	TAILQ_FOREACH(dd, &globals->devs, entry) {
+		if (dev->device.up < dd->device.up)
+			continue;
+		if (dev->device.up == dd->device.up
+		    && dev->is_default < dd->is_default)
+			continue;
+		if (dev->device.up == dd->device.up
+		    && dev->is_default == dd->is_default
+		    && dev->priority < dd->priority)
+			continue;
+
+		TAILQ_INSERT_BEFORE(dd, dev, entry);
+		done = 1;
+		break;
+	}
+	if (!done) {
+		TAILQ_INSERT_TAIL(&globals->devs, dev, entry);
 	}
 	return;
 }
@@ -191,7 +201,7 @@ int cci__parse_config(const char *path)
 
 	file = fopen(path, "r");
 	if (!file) {
-		cci__free_devs();
+		cci__free_configfile_devs(NULL);
 		return errno;
 	}
 
@@ -237,10 +247,12 @@ int cci__parse_config(const char *path)
 								      1));
 				}
 				if (driver == 1) {
-					cci__add_dev(dev);
+					pthread_mutex_lock(&globals->lock);
+					TAILQ_INSERT_TAIL(&globals->configfile_devs, dev, entry);
+					pthread_mutex_unlock(&globals->lock);
 					debug(CCI_DB_DRVR,
-					      "adding device [%s] (%d)",
-					      d->name, i);
+					      "read device [%s] (driver %s) from config file",
+					      d->name, dev->driver);
 					i++;
 				} else {
 					/* device does not have a driver, free it */
@@ -271,7 +283,7 @@ int cci__parse_config(const char *path)
 			if (!dev) {
 				debug(CCI_DB_WARN,
 				      "calloc failed for device %s", open);
-				return cci__free_devs();
+				return cci__free_configfile_devs(NULL);
 			}
 			cci__init_dev(dev);
 
@@ -282,7 +294,7 @@ int cci__parse_config(const char *path)
 				      "calloc failed for device %s conf_argv",
 				      open);
 				cci__free_dev(dev);
-				return cci__free_devs();
+				return cci__free_configfile_devs(NULL);
 			}
 
 			arg_cnt = 0;
@@ -292,7 +304,7 @@ int cci__parse_config(const char *path)
 			d->name = strdup(open);
 			if (!d->name) {
 				cci__free_dev(dev);
-				return cci__free_devs();
+				return cci__free_configfile_devs(NULL);
 			}
 			continue;
 		}
@@ -326,7 +338,7 @@ int cci__parse_config(const char *path)
 				((char **) d->conf_argv)[arg_cnt] = strdup(arg);
 				if (!d->conf_argv[arg_cnt]) {
 					cci__free_dev(dev);
-					return cci__free_devs();
+					return cci__free_configfile_devs(NULL);
 				}
 				arg_cnt++;
 				if (0 == strcmp(key, "driver")) {
@@ -334,7 +346,7 @@ int cci__parse_config(const char *path)
 						dev->driver = strdup(value);
 						if (!dev->driver) {
 							cci__free_dev(dev);
-							return cci__free_devs();
+							return cci__free_configfile_devs(NULL);
 						}
 						driver++;
 					} else {
@@ -380,9 +392,12 @@ int cci__parse_config(const char *path)
 				    sizeof(char *) * (arg_cnt + 1));
 		}
 		if (driver == 1) {
-			cci__add_dev(dev);
-			debug(CCI_DB_DRVR, "adding device [%s] (%d)", d->name,
-			      i);
+			pthread_mutex_lock(&globals->lock);
+			TAILQ_INSERT_TAIL(&globals->configfile_devs, dev, entry);
+			pthread_mutex_unlock(&globals->lock);
+			debug(CCI_DB_DRVR,
+			      "read device [%s] (driver %s) from config file",
+			      d->name, dev->driver);
 			i++;
 		} else {
 			/* device does not have a driver, free it */
@@ -396,38 +411,6 @@ int cci__parse_config(const char *path)
 	}
 
 	fclose(file);
-
-	/* free unused devices */
-	if (i < CCI_MAX_DEVICES) {
-		globals->devices = calloc(i + 1, sizeof(*globals->devices));
-		if (!globals->devices) {
-			cci__free_devs();
-			free(globals);
-		}
-		globals->devices[i] = NULL;
-	}
-
-	i = 0;
-	TAILQ_FOREACH(dev, &globals->devs, entry) {
-		debug(CCI_DB_DRVR, "%d: %s", i, dev->device.name);
-		globals->devices[i++] = &dev->device;
-	}
-
-	{
-		/* dump config info */
-		const char *conf;
-
-		for (i = 0, d = globals->devices[0]; d != NULL;
-		     i++, d = globals->devices[i]) {
-			int j;
-
-			debug(CCI_DB_DRVR, "[%s]", d->name);
-			for (j = 0, conf = d->conf_argv[j];
-			     conf != NULL; j++, conf = d->conf_argv[j]) {
-				debug(CCI_DB_DRVR, "\t%s", conf);
-			}
-		}
-	}
 
 	return 0;
 }
@@ -450,7 +433,9 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	pthread_mutex_lock(&init_lock);
 
 	if (0 == initialized) {
+		cci__dev_t *dev;
 		char *str;
+		int i, j;
 
 		/* init globals */
 
@@ -462,6 +447,8 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
 		globals->flags = flags;
 		TAILQ_INIT(&globals->devs);
+		globals->configfile = 0;
+		TAILQ_INIT(&globals->configfile_devs);
 
 		ret = pthread_mutex_init(&globals->lock, NULL);
 		if (ret) {
@@ -476,7 +463,8 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		if (CCI_SUCCESS != (ret = cci_plugins_core_open())) {
 			goto out_with_globals;
 		}
-		if (NULL == cci_core) {
+		if (NULL == cci_all_plugins
+		    || NULL == cci_all_plugins[0].plugin) {
 			ret = CCI_ERR_NOT_FOUND;
 			goto out_with_globals;
 		}
@@ -493,11 +481,44 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			globals->configfile = 1;
 		}
 
-		ret = cci_core->init(abi_ver, flags, caps);
-		if (ret) {
-			perror("cci_core->init failed:");
+		for (i = 0, j = 0;
+		     cci_all_plugins[i].plugin != NULL;
+		     i++) {
+			cci_plugin_core_t *plugin = (cci_plugin_core_t *) cci_all_plugins[i].plugin;
+			ret = plugin->init(plugin, abi_ver, flags, caps);
+			if (!ret)
+				j++;
+		}
+		/* return an error if all plugins init failed */
+		if (!j) {
+			perror("all plugins init failed:");
 			ret = errno;
 			goto out_with_globals;
+		}
+
+		/* drop devices that weren't claimed by any driver,
+		 * they didn't move from configfile_devs to devs */
+		cci__free_configfile_devs("not claimed by any driver");
+
+		/* build devices array and list it */
+		i=0;
+		TAILQ_FOREACH(dev, &globals->devs, entry)
+			i++;
+		globals->devices = calloc(i + 1, sizeof(*globals->devices));
+		if (!globals->devices) {
+			/* FIXME: free everything */
+			return CCI_ENOMEM;
+		}
+		globals->devices[i] = NULL;
+		i=0;
+
+		/* list ready devices */
+		TAILQ_FOREACH(dev, &globals->devs, entry) {
+			debug(CCI_DB_DRVR,
+			      "device [%s] (driver %s, default %d, priority %d, up %d) is ready",
+			      dev->device.name, dev->driver,
+			      dev->is_default, dev->priority, dev->device.up);
+			globals->devices[i++] = &dev->device;
 		}
 
 		/* success */
