@@ -77,6 +77,9 @@ int cci_finalize(void)
 	free(globals->devices);
 	free(globals);
 
+	cci_plugins_core_close();
+	cci_plugins_finalize();
+
 out:
 	pthread_mutex_unlock(&init_lock);
 	return ret;
