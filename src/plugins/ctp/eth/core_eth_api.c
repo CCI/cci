@@ -24,6 +24,8 @@
 
 #define ETH_BUILD_ASSERT(condition) ((void)sizeof(char[1 - 2*!(condition)]))
 
+struct eth__globals *eglobals = NULL;
+
 /*
  * Local functions
  */
@@ -205,15 +207,11 @@ fallback_ioctl:
 	debug(CCI_DB_INFO, "querying interface %s info with custom ioctl",
 	      addr->ifa_name);
 
-	ccifd = open("/dev/ccieth", O_RDONLY);
-	if (ccifd < 0)
-		return -1;
-
 	memcpy(&ioctl_arg.addr, &lladdr->sll_addr, 6);
-	if (ioctl(ccifd, CCIETH_IOCTL_GET_INFO, &ioctl_arg) < 0) {
+	if (ioctl(eglobals->fd, CCIETH_IOCTL_GET_INFO, &ioctl_arg) < 0) {
 		if (errno != ENODEV)
 			perror("ioctl get info");
-		goto out_with_ccifd;
+		goto out_with_sockfd;
 	}
 	CCIETH_VALGRIND_MEMORY_MAKE_READABLE(&ioctl_arg.max_send_size,
 					     sizeof(ioctl_arg.max_send_size));
@@ -240,12 +238,9 @@ done:
 	      device->max_send_size, device->rate,
 	      device->pci.domain, device->pci.bus, device->pci.dev,
 	      device->pci.func);
-	close(ccifd);
 	close(sockfd);
 	return 0;
 
-out_with_ccifd:
-	close(ccifd);
 out_with_sockfd:
 	close(sockfd);
 out:
@@ -450,16 +445,44 @@ out:
 
 static int eth_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
+	int ret;
+
 	CCI_ENTER;
-	eth__get_devices(plugin);
+
+	eglobals = malloc(sizeof(*eglobals));
+	if (!eglobals) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	eglobals->fd = open("/dev/ccieth", O_RDONLY);
+        if (eglobals->fd < 0) {
+		ret = errno;
+                goto out_with_eglobals;
+	}
+
+	ret = eth__get_devices(plugin);
+	if (ret)
+		goto out_with_fd;
+
 	CCI_EXIT;
 	return CCI_SUCCESS;
+
+out_with_fd:
+	close(eglobals->fd);
+out_with_eglobals:
+	free(eglobals);
+out:
+	CCI_EXIT;
+	return ret;
 }
 
 static int eth_finalize(cci_plugin_core_t *plugin)
 {
-	printf("In eth_finalize\n");
-	return CCI_ERR_NOT_IMPLEMENTED;
+	/* FIXME: destroy devices */
+	close(eglobals->fd);
+	free(eglobals);
+	return CCI_SUCCESS;
 }
 
 static const char *eth_strerror(cci_endpoint_t * endpoint, enum cci_status status)

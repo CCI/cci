@@ -40,6 +40,10 @@ typedef struct eth__evt {
 	char data[0];
 } eth__evt_t;
 
+extern struct eth__globals {
+	int fd;
+} * eglobals;
+
 int cci_core_eth_post_load(cci_plugin_t * me);
 int cci_core_eth_pre_unload(cci_plugin_t * me);
 
