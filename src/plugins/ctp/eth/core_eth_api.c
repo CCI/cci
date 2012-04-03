@@ -479,7 +479,14 @@ out:
 
 static int eth_finalize(cci_plugin_core_t *plugin)
 {
-	/* FIXME: destroy devices */
+	cci__dev_t *_dev = NULL;
+
+        pthread_mutex_lock(&globals->lock);
+        TAILQ_FOREACH(_dev, &globals->devs, entry)
+		if (!strcmp(_dev->driver, "eth"))
+			free(_dev->priv);
+        pthread_mutex_unlock(&globals->lock);
+
 	close(eglobals->fd);
 	free(eglobals);
 	return CCI_SUCCESS;
