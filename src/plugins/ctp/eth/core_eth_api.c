@@ -160,6 +160,7 @@ static int eth__get_device_info(cci__dev_t * _dev, struct ifaddrs *addr)
 		assert(errno == ENODEV);
 		goto out_with_sockfd;
 	}
+	CCIETH_VALGRIND_MEMORY_MAKE_READABLE(&ifr.ifr_mtu, sizeof(ifr.ifr_mtu));
 	device->max_send_size = ccieth_max_send_size(ifr.ifr_mtu);
 
 	/* try to get the link rate now, kernel allows non-root since 2.6.37 only */
@@ -179,7 +180,9 @@ static int eth__get_device_info(cci__dev_t * _dev, struct ifaddrs *addr)
 		debug(CCI_DB_INFO,
 		      " ethtool get settings not supported, cannot retrieve link rate");
 	} else {
-		unsigned speed = ethtool_cmd_speed(&ecmd);	/* FIXME: not supported with old linux/ethtool.h */
+		unsigned speed;
+		CCIETH_VALGRIND_MEMORY_MAKE_READABLE(&ecmd, sizeof(ecmd));
+		speed = ethtool_cmd_speed(&ecmd);	/* FIXME: not supported with old linux/ethtool.h */
 		device->rate = speed == -1 ? -1ULL : speed * 1000000ULL;
 	}
 
@@ -196,6 +199,7 @@ static int eth__get_device_info(cci__dev_t * _dev, struct ifaddrs *addr)
 		      " ethtool get drvinfo not supported, cannot retrieve pci id");
 	} else {
 		/* try to parse. if it fails, the device is not pci */
+		CCIETH_VALGRIND_MEMORY_MAKE_READABLE(&edi, sizeof(edi));
 		sscanf(edi.bus_info, "%04x:%02x:%02x.%01x",
 		       &device->pci.domain, &device->pci.bus, &device->pci.dev,
 		       &device->pci.func);
