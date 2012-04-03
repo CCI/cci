@@ -62,6 +62,7 @@ int cci_finalize(void)
 	     cci_all_plugins[i].plugin != NULL;
 	     i++) {
 		cci_plugin_core_t *plugin = (cci_plugin_core_t *) cci_all_plugins[i].plugin;
+		/* FIXME: only finalize if this plugins successfully init() in cci_init() ? */
 		plugin->finalize(plugin);
 	}
 
