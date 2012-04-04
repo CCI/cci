@@ -217,8 +217,8 @@ typedef struct verbs_tx {
 	uint16_t len;		/* length of buffer */
 	 TAILQ_ENTRY(verbs_tx) entry;	/* hang on vep->idle_txs, vdev->queued,
 					   vdev->pending */
-	 TAILQ_ENTRY(verbs_tx) gentry;	/* hangs on vep->txs */
 	struct verbs_rma_op *rma_op;	/* owning RMA if remote completion msg */
+    struct verbs_tx_pool *tx_pool; /* owning tx pool */
 } verbs_tx_t;
 
 typedef struct verbs_rx {
@@ -289,6 +289,16 @@ typedef struct verbs_rx_pool {
 	uint32_t posted;	/* # of posted rxs */
 } verbs_rx_pool_t;
 
+typedef struct verbs_tx_pool {
+	TAILQ_HEAD(v_txsi, verbs_tx) idle_txs; 	/* idle txs */
+	void *buf;				/* active tx buffer */
+	struct ibv_mr *mr;		/* active mr */
+	uint32_t size;			/* current size */
+	uint32_t posted;		/* # of posted txs */
+    int repost;             /* repost txs? */
+	pthread_mutex_t lock;	/* lock, for buf changes */
+} verbs_tx_pool_t;
+
 typedef struct verbs_ep {
 	struct rdma_event_channel *channel;	/* for connection requests */
 	struct rdma_cm_id *id_rc;	/* reliable ID */
@@ -298,13 +308,13 @@ typedef struct verbs_ep {
 	uint32_t cq_size;	/* number of cqe */
 	struct sockaddr_in sin;	/* host address and port */
 
-	void *tx_buf;		/* send buffer */
-	struct ibv_mr *tx_mr;	/* send memory registration */
-	 TAILQ_HEAD(v_txs, verbs_tx) txs;	/* all txs */
-	 TAILQ_HEAD(v_txsi, verbs_tx) idle_txs;	/* idle txs */
-
 	struct ibv_srq *srq;	/* shared recv queue */
-	 TAILQ_HEAD(v_rx_pools, verbs_rx_pool) rx_pools;	/* list of rx pools - usually one */
+    
+    verbs_tx_pool_t *tx_pool;
+    verbs_tx_pool_t *tx_pool_old;
+    int tx_resize_in_progress;
+    
+     TAILQ_HEAD(v_rx_pools, verbs_rx_pool) rx_pools;	/* list of rx pools - usually one */
 	uint32_t rdma_msg_total;	/* total number of connections allowed
 					   to use RDMA MSGs */
 	uint32_t rdma_msg_used;	/* number of connections using
