@@ -34,6 +34,14 @@ volatile int gni_shut_down = 0;
 gni_globals_t *gglobals = NULL;
 pthread_t progress_tid;
 
+#ifdef __GNUC__
+#define likely(x)       __builtin_expect((x),1)
+#define unlikely(x)     __builtin_expect((x),0)
+#else
+#define likely(x)       (x)
+#define unlikely(x)     (x)
+#endif
+
 /*
  * Local functions
  */
@@ -2403,53 +2411,40 @@ out:
 static int gni_progress_connections(cci__ep_t * ep)
 {
 	int ret = CCI_EAGAIN;
-	gni_ep_t *gep = ep->priv;
 	static int count = 0;
 
 	CCI_ENTER;
 
-	if (++count % 1000000 != 0)
+	if (likely(++count != 1000000))
 		return CCI_EAGAIN;
+	else
+		count = 0;
 
-	pthread_mutex_lock(&ep->lock);
-	if (ep->closing || !gep) {
-		pthread_mutex_unlock(&ep->lock);
-		goto out;
-	}
-	pthread_mutex_unlock(&ep->lock);
-
-	/* TODO needs more */
 	ret = gni_check_for_conn_requests(ep);
-	/* TODO error check? debug()? */
 	if (ret && ret != CCI_EAGAIN)
 		debug(CCI_DB_CONN, "%s: gni_check_for_conn_requests() returned %s",
 			__func__, cci_strerror(&ep->endpoint, ret));
 
 	ret = gni_check_passive_connections(ep);
-	/* TODO error check? debug()? */
 	if (ret && ret != CCI_EAGAIN)
 		debug(CCI_DB_CONN, "%s: gni_check_passive_connections() returned %s",
 			__func__, cci_strerror(&ep->endpoint, ret));
 
 	ret = gni_check_passive2_connections(ep);
-	/* TODO error check? debug()? */
 	if (ret && ret != CCI_EAGAIN)
 		debug(CCI_DB_CONN, "%s: gni_check_passive2_connections() returned %s",
 			__func__, cci_strerror(&ep->endpoint, ret));
 
 	ret = gni_check_active_connections(ep);
-	/* TODO error check? debug()? */
 	if (ret && ret != CCI_EAGAIN)
 		debug(CCI_DB_CONN, "%s: gni_check_active_connections() returned %s",
 			__func__, cci_strerror(&ep->endpoint, ret));
 
 	ret = gni_check_for_conn_replies(ep);
-	/* TODO error check? debug()? */
 	if (ret && ret != CCI_EAGAIN)
 		debug(CCI_DB_CONN, "%s: gni_check_for_conn_replies() returned %s",
 			__func__, cci_strerror(&ep->endpoint, ret));
 
-      out:
 	CCI_EXIT;
 	return ret;
 }
@@ -3079,10 +3074,18 @@ typedef enum gni_progress_event {
 static void gni_progress_ep(cci__ep_t * ep)
 {
 	int ret = CCI_SUCCESS;
+	gni_ep_t *gep = ep->priv;
 	static gni_progress_event_t which = GNI_PRG_EVT_CONN;
 	int try = 0;
 
 	CCI_ENTER;
+
+	pthread_mutex_lock(&ep->lock);
+	if (ep->closing || !gep) {
+		pthread_mutex_unlock(&ep->lock);
+		goto out;
+	}
+	pthread_mutex_unlock(&ep->lock);
 
       again:
 	try++;
@@ -3107,6 +3110,7 @@ static void gni_progress_ep(cci__ep_t * ep)
 	if (ret == CCI_EAGAIN && try < GNI_PRG_EVT_MAX)
 		goto again;
 
+out:
 	CCI_EXIT;
 	return;
 }
@@ -3278,7 +3282,7 @@ gni_send_common(cci_connection_t * connection, struct iovec *iov,
 
 	CCI_ENTER;
 
-	if (!gglobals) {
+	if (unlikely(!gglobals)) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
@@ -3286,7 +3290,7 @@ gni_send_common(cci_connection_t * connection, struct iovec *iov,
 	for (i = 0; i < iovcnt; i++)
 		len += (uint32_t) iov[i].iov_len;
 
-	if (len > connection->max_send_size) {
+	if (unlikely(len > connection->max_send_size)) {
 		debug(CCI_DB_MSG, "length %u > connection->max_send_size %u",
 		      len, connection->max_send_size);
 		CCI_EXIT;
@@ -3302,7 +3306,7 @@ gni_send_common(cci_connection_t * connection, struct iovec *iov,
 
 	/* get a tx */
 	tx = gni_get_tx(ep);
-	if (!tx) {
+	if (unlikely(!tx)) {
 		debug(CCI_DB_MSG, "%s: no txs", __func__);
 		CCI_EXIT;
 		return CCI_ENOBUFS;
@@ -3321,25 +3325,31 @@ gni_send_common(cci_connection_t * connection, struct iovec *iov,
 	tx->evt.event.send.context = context;
 	tx->evt.event.send.status = CCI_SUCCESS;	/* for now */
 
-	/* always copy into tx's buffer */
-	if (len) {
-		if (iovcnt > 1) {
-			uint32_t offset = 0;
-
+	if (likely(len)) {
+		if (is_reliable) {
+			/* for GNI_SMSG_TYPE_MBOX_AUTO_RETRANSMIT, the buffers can
+			 * _not_ be reused when GNI_SmsgSend() returns so we do
+			 * need to buffer them. */
 			ptr = tx->buffer;
-			for (i = 0; i < iovcnt; i++) {
-				memcpy(ptr + offset, iov[i].iov_base,
-				       iov[i].iov_len);
-				offset += iov[i].iov_len;
+
+			if (likely(iovcnt == 1)) {
+				memcpy(ptr, iov[0].iov_base, len);
+			} else {
+				uint32_t offset = 0;
+
+				for (i = 0; i < iovcnt; i++) {
+					memcpy(ptr + offset, iov[i].iov_base,
+					iov[i].iov_len);
+					offset += iov[i].iov_len;
+				}
 			}
-		} else if (iovcnt == 1) {
-			/* TODO if reliable, copy to tx->buffer */
+		} else {
+			/* for GNI_SMSG_TYPE_MBOX, the buffers can be reused when
+			 * GNI_SmsgSend() returns so we do _not_ need to buffer them. */
 			ptr = iov[0].iov_base;
 		}
 	}
 	tx->len = len;
-
-	/* TODO copy header to tx->buffer if reliable */
 
 	ret = gni_post_send(conn, tx->id, ptr, tx->len, header);
 	if (ret) {
@@ -3348,12 +3358,23 @@ gni_send_common(cci_connection_t * connection, struct iovec *iov,
 	}
 
 	if (!is_reliable) {
-		pthread_mutex_lock(&ep->lock);
-		TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
-		pthread_mutex_unlock(&ep->lock);
-	}
-
-	if (flags & CCI_FLAG_BLOCKING && is_reliable) {
+		if (likely(!(flags & CCI_FLAG_BLOCKING))) {
+			/* not blocking, queue on ep->evts */
+			pthread_mutex_lock(&ep->lock);
+			TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
+			pthread_mutex_unlock(&ep->lock);
+		} else {
+			/* blocking, suppress completion */
+			/* if successful, queue the tx now,
+			 * if not, queue it below */
+			if (ret == CCI_SUCCESS) {
+				pthread_mutex_lock(&ep->lock);
+				TAILQ_INSERT_HEAD(&gep->idle_txs, tx, entry);
+				pthread_mutex_unlock(&ep->lock);
+			}
+		}
+	} else if (unlikely(flags & CCI_FLAG_BLOCKING)) {
+		/* is_reliable */
 		cci__evt_t *e, *evt = NULL;
 		do {
 			pthread_mutex_lock(&ep->lock);
@@ -3376,7 +3397,7 @@ gni_send_common(cci_connection_t * connection, struct iovec *iov,
 	}
 
       out:
-	if (ret) {
+	if (unlikely(ret)) {
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_INSERT_HEAD(&gep->idle_txs, tx, entry);
 		pthread_mutex_unlock(&ep->lock);
@@ -3394,7 +3415,7 @@ static int gni_send(cci_connection_t * connection,	/* magic number */
 
 	CCI_ENTER;
 
-	if (msg_ptr && msg_len > 0) {
+	if (likely(msg_ptr && msg_len > 0)) {
 		iovcnt = 1;
 		iov.iov_base = msg_ptr;
 		iov.iov_len = msg_len;
