@@ -84,19 +84,13 @@ BEGIN_C_DECLS
       C is reserved
  */
 
-/* A packed structure to hold gni_smsg_attr_t info */
-typedef struct gni_smsg_info {
-	gni_mem_handle_t mem_hndl;	/* two uint64_t */
-	uint64_t msg_buffer;		/* (uint64_t)(uintptr_t)void * */
-	uint32_t nic_id;		/* physical NIC address */
-	uint32_t msg_type;		/* typedef enum gni_smsg_type */
-	uint32_t buff_size;
-	uint32_t mbox_offset;
-	uint32_t mbox_maxcredit;
-	uint32_t msg_maxsize;
-	uint32_t id;			/* conn id */
-	uint32_t pad;
-} gni_smsg_info_t;
+typedef struct gni_conn_request {
+	uint32_t type;
+	uint32_t addr;
+	uint32_t port;
+	uint32_t id;
+	gni_smsg_attr_t attr;
+} gni_conn_request_t;
 
 /* Conn Request (sent over the socket)
 
@@ -105,8 +99,14 @@ typedef struct gni_smsg_info {
    +------------+------------+----+----+
    |      D     |      C     |  B |  A |
    +------------+------------+----+----+
+   |               addr                |
+   +-----------------------------------+
+   |               port                |
+   +-----------------------------------+
+   |                id                 |
+   +-----------------------------------+
    |                                   |
-   |             smsg info             |
+   |             smsg attr             |
    |                                   |
    |                                   |
    +-----------------------------------+
@@ -117,6 +117,10 @@ typedef struct gni_smsg_info {
       B is the connection attribute (UU, RU, RO)
       C is the payload length
       D is reserved
+      addr is the sender's physical Gemini address
+      port is the sender's instance id
+      id is the sender's gconn->id
+      smsg attr is the sender's gni_smsg_attr_t
  */
 
 /* Conn Reply
@@ -312,7 +316,8 @@ typedef struct gni_ep {
 	TAILQ_HEAD(g_crsi, gni_rx) idle_crs;	/* idle conn requests */
 
 	void *tx_buf;			/* send buffer */
-	TAILQ_HEAD(g_txs, gni_tx) txs;	/* all txs */
+	gni_tx_t *txs;			/* array of txs */
+	//TAILQ_HEAD(g_txs, gni_tx) txs;	/* all txs */
 	TAILQ_HEAD(g_txsi, gni_tx) idle_txs;	/* idle txs */
 
 	TAILQ_HEAD(g_rx_pools, gni_rx_pool) rx_pools;	/* list of rx pools - usually one */
@@ -338,13 +343,12 @@ typedef enum gni_conn_state {
 	GNI_CONN_ESTABLISHED,
 } gni_conn_state_t;
 
-typedef struct gni_conn_request {
+typedef struct gni_new_conn {
 	int sock;			/* socket for connection handshake */
-	uint32_t nic_id;		/* peer's physical nic id */
 	void *ptr;			/* application payload */
 	uint32_t len;			/* payload length */
-	gni_smsg_info_t info;		/* sender's smsg info */
-} gni_conn_request_t;
+	gni_conn_request_t cr;		/* conn request */
+} gni_new_conn_t;
 
 typedef struct gni_conn {
 	cci__conn_t *conn;		/* owning conn */
@@ -363,7 +367,7 @@ typedef struct gni_conn {
 	TAILQ_HEAD(w_ops, gni_rma_op) rma_ops;	/* rma ops waiting on remotes */
 	TAILQ_ENTRY(gni_conn) entry;	/* hangs on gep->conns */
 	TAILQ_ENTRY(gni_conn) temp;	/* hangs on gep->active|passive */
-	gni_conn_request_t *conn_req;	/* application conn req info */
+	gni_new_conn_t *new;		/* application conn req info */
 } gni_conn_t;
 
 int cci_core_gni_post_load(cci_plugin_t * me);
