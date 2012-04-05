@@ -667,7 +667,6 @@ static int gni_get_devices(cci_device_t const ***devices)
 static int gni_finalize(void)
 {
 	int ret = CCI_SUCCESS;
-	//int i = 0;
 	cci__dev_t *dev = NULL;
 
 	CCI_ENTER;
@@ -736,7 +735,6 @@ static int gni_create_rx_pool(cci__ep_t * ep, int rx_buf_cnt)
 
 	TAILQ_INIT(&rx_pool->rxs);
 	TAILQ_INIT(&rx_pool->idle_rxs);
-	//rx_pool->repost = 1;
 	rx_pool->size = rx_buf_cnt;
 	len = rx_buf_cnt * dev->device.max_send_size;
 	ret = posix_memalign((void **)&rx_pool->buf, getpagesize(), len);
@@ -772,7 +770,6 @@ static int gni_create_rx_pool(cci__ep_t * ep, int rx_buf_cnt)
 	pthread_mutex_unlock(&ep->lock);
       out:
 	if (ret && rx_pool) {
-		//rx_pool->repost = 0;
 		if (0 /* rx_pool->posted */) {
 			/* we can't free anything since we posted some rxs.
 			 * add this to the tail of the ep->rx_pools and tear
@@ -1044,7 +1041,6 @@ static int gni_destroy_rx_pool(cci__ep_t * ep, gni_rx_pool_t * rx_pool)
 
 static int gni_destroy_endpoint(cci_endpoint_t * endpoint)
 {
-	//int ret = CCI_SUCCESS;
 	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
 	gni_ep_t *gep = ep->priv;
 	gni_return_t grc = GNI_RC_SUCCESS;
@@ -2372,419 +2368,10 @@ static int gni_progress_connections(cci__ep_t * ep)
 	return ret;
 }
 
-#if 0
-static int gni_handle_msg(cci__ep_t * ep, struct ibv_wc wc)
-{
-	int ret = CCI_SUCCESS;
-	gni_conn_t *gconn = NULL;
-	gni_rx_t *rx = NULL;
-	void *ptr = NULL;
-
-	CCI_ENTER;
-
-	/* find the conn for this message */
-	gconn = gni_qp_num_to_conn(ep, wc.qp_num);
-	if (!gconn) {
-		debug(CCI_DB_WARN,
-		      "%s: no conn found for message from qp_num %u", __func__,
-		      wc.qp_num);
-		goto out;
-	}
-
-	rx = (gni_rx_t *) (uintptr_t) wc.wr_id;
-	ptr = rx->rx_pool->buf + rx->offset;
-
-	rx->evt.conn = gconn->conn;
-	rx->evt.event.type = CCI_EVENT_RECV;
-	rx->evt.event.recv.connection = &gconn->conn->connection;
-	*((uint32_t *) & rx->evt.event.recv.len) = wc.byte_len;
-	if (rx->evt.event.recv.len)
-		*((void **)&rx->evt.event.request.data_ptr) = ptr;
-	else
-		*((void **)&rx->evt.event.request.data_ptr) = NULL;
-
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
-	pthread_mutex_unlock(&ep->lock);
-      out:
-	CCI_EXIT;
-	return ret;
-}
-
-static int gni_handle_rdma_msg_ack(cci__ep_t * ep, struct ibv_wc wc)
-{
-	int ret = CCI_SUCCESS;
-	int i = 0;
-	int index = 0;
-	uint32_t header = ntohl(wc.imm_data);
-	gni_conn_t *gconn = NULL;
-	gni_rx_t *rx = (gni_rx_t *) (uintptr_t) wc.wr_id;
-
-	/* find the conn for this message */
-	gconn = gni_qp_num_to_conn(ep, wc.qp_num);
-	if (!gconn) {
-		debug(CCI_DB_WARN,
-		      "%s: no conn found for message from qp_num %u", __func__,
-		      wc.qp_num);
-		goto out;
-	}
-
-	index = (header >> 21) & 0xFF;
-	i = (1 << index);
-
-	pthread_mutex_lock(&ep->lock);
-	gconn->avail |= i;
-	pthread_mutex_unlock(&ep->lock);
-
-      out:
-	gni_post_rx(ep, rx);
-	return ret;
-}
-
-static int gni_handle_rma_remote_request(cci__ep_t * ep, struct ibv_wc wc)
-{
-	int ret = CCI_SUCCESS;
-	cci__conn_t *conn = NULL;
-	gni_conn_t *gconn = NULL;
-	gni_ep_t *gep = ep->priv;
-	gni_rma_handle_t *handle = NULL;
-	gni_rma_handle_t *h = NULL;
-	gni_rx_t *rx = NULL;
-	gni_tx_t *tx = NULL;
-	void *ptr = NULL;
-	uint32_t header = GNI_MSG_RMA_REMOTE_REPLY;
-	uint64_t request = 0ULL;
-	gni_rma_addr_mhndl_t info;
-
-	CCI_ENTER;
-
-	rx = (gni_rx_t *) (uintptr_t) wc.wr_id;
-
-	/* check for a valid uint64_t payload */
-	if (wc.byte_len != 8) {
-		ret = CCI_EMSGSIZE;
-		goto out;
-	}
-
-	/* find the conn for this message */
-	gconn = gni_qp_num_to_conn(ep, wc.qp_num);
-	if (!gconn) {
-		debug(CCI_DB_WARN,
-		      "%s: no conn found for message from qp_num %u", __func__,
-		      wc.qp_num);
-		ret = CCI_ERR_NOT_FOUND;
-		goto out;
-	}
-	conn = gconn->conn;
-
-	/* find the RMA handle */
-	memcpy(&request, rx->rx_pool->buf + rx->offset, sizeof(request));
-	request = gni_ntohll(request);
-
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_FOREACH(h, &gep->handles, entry) {
-		if ((uintptr_t) h == request) {
-			handle = h;
-			break;
-		}
-	}
-	pthread_mutex_unlock(&ep->lock);
-
-	tx = gni_get_tx(ep);
-	if (!tx) {
-		CCI_EXIT;
-		ret = CCI_ENOBUFS;
-		goto out;
-	}
-
-	tx->msg_type = GNI_MSG_RMA_REMOTE_REPLY;
-	memset(&tx->evt, 0, sizeof(tx->evt));
-	tx->evt.conn = conn;
-	tx->evt.event.type = CCI_EVENT_NONE;
-	if (handle) {
-		info.remote_handle = gni_htonll(request);
-		info.remote_addr = gni_htonll((uintptr_t) handle->mr->addr);
-		info.rkey = htonl(handle->mr->rkey);
-		memcpy(tx->buffer, &info, sizeof(info));
-		ptr = tx->buffer;
-		tx->len = sizeof(info);
-		header |= (1 << 4);
-	} else {
-		tx->len = 0;
-	}
-
-	ret = gni_post_send(conn, tx->id, ptr, tx->len, header);
-      out:
-	/* repost rx */
-	gni_post_rx(ep, rx);
-
-	CCI_EXIT;
-	return ret;
-}
-
-static int gni_post_rma(gni_rma_op_t * rma_op);
-
-static int gni_handle_rma_remote_reply(cci__ep_t * ep, struct ibv_wc wc)
-{
-	int ret = CCI_SUCCESS;
-	gni_conn_t *gconn = NULL;
-	gni_ep_t *gep = ep->priv;
-	gni_rx_t *rx = NULL;
-	gni_rma_remote_t *remote = NULL;
-	gni_rma_op_t *rma_op = NULL;
-	gni_rma_op_t *r = NULL;
-
-	CCI_ENTER;
-
-	rx = (gni_rx_t *) (uintptr_t) wc.wr_id;
-
-	gconn = gni_qp_num_to_conn(ep, wc.qp_num);
-
-	if (wc.byte_len == sizeof(gni_rma_addr_mhndl_t)) {
-		remote = calloc(1, sizeof(*remote));
-		if (!remote) {
-			ret = CCI_ENOMEM;
-			goto out;
-		}
-
-		memcpy(&remote->info, rx->rx_pool->buf + rx->offset,
-		       sizeof(remote->info));
-		remote->info.remote_handle =
-		    gni_ntohll(remote->info.remote_handle);
-		remote->info.remote_addr =
-		    gni_ntohll(remote->info.remote_addr);
-		remote->info.rkey = ntohl(remote->info.rkey);
-		if (GNI_RMA_REMOTE_SIZE) {
-			pthread_mutex_lock(&ep->lock);
-			TAILQ_INSERT_HEAD(&gconn->remotes, remote, entry);
-			gconn->num_remotes++;
-			if (gconn->num_remotes > GNI_RMA_REMOTE_SIZE) {
-				gni_rma_remote_t *last =
-				    TAILQ_LAST(&gconn->remotes, s_rems);
-				TAILQ_REMOVE(&gconn->remotes, last, entry);
-				free(last);
-			}
-			pthread_mutex_unlock(&ep->lock);
-		}
-		/* find RMA op waiting for this remote_handle
-		 * and post the RMA */
-		pthread_mutex_lock(&ep->lock);
-		TAILQ_FOREACH(r, &gconn->rma_ops, entry) {
-			if (r->remote_handle == remote->info.remote_handle) {
-				rma_op = r;
-				TAILQ_REMOVE(&gconn->rma_ops, rma_op, entry);
-				TAILQ_INSERT_TAIL(&gep->rma_ops, rma_op, entry);
-				rma_op->remote_addr = remote->info.remote_addr;
-				rma_op->rkey = remote->info.rkey;
-			}
-		}
-		pthread_mutex_unlock(&ep->lock);
-		ret = gni_post_rma(rma_op);
-	}
-      out:
-	gni_post_rx(ep, rx);
-
-	CCI_EXIT;
-	return ret;
-}
-
-static int gni_handle_recv(cci__ep_t * ep, struct ibv_wc wc)
-{
-	int ret = CCI_SUCCESS;
-	uint32_t header = 0;
-	gni_msg_type_t type = 0;
-
-	CCI_ENTER;
-
-	header = ntohl(wc.imm_data);
-	debug(CCI_DB_INFO, "recv'd header 0x%x", header);
-	type = GNI_MSG_TYPE(header);
-
-	switch (type) {
-	case GNI_MSG_CONN_PAYLOAD:
-		ret = gni_handle_conn_payload(ep, wc);
-		break;
-	case GNI_MSG_CONN_REPLY:
-		ret = gni_handle_conn_reply(ep, wc);
-		break;
-	case GNI_MSG_SEND:
-		ret = gni_handle_msg(ep, wc);
-		break;
-	case GNI_MSG_RMA_REMOTE_REQUEST:
-		ret = gni_handle_rma_remote_request(ep, wc);
-		break;
-	case GNI_MSG_RMA_REMOTE_REPLY:
-		ret = gni_handle_rma_remote_reply(ep, wc);
-		break;
-	case GNI_MSG_RDMA_MSG_ACK:
-		ret = gni_handle_rdma_msg_ack(ep, wc);
-		break;
-	default:
-		debug(CCI_DB_INFO, "%s: ignoring %s msg",
-		      __func__, gni_msg_type_str(type));
-		break;
-	}
-
-	CCI_EXIT;
-	return ret;
-}
-
-static int gni_complete_send_msg(cci__ep_t * ep, struct ibv_wc wc)
-{
-	int ret = CCI_SUCCESS;
-	gni_tx_t *tx = (gni_tx_t *) (uintptr_t) wc.wr_id;
-
-	CCI_ENTER;
-
-	tx->evt.event.send.status = gni_to_cci_status(wc.status);
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
-	pthread_mutex_unlock(&ep->lock);
-
-	CCI_EXIT;
-	return ret;
-}
-
-static int gni_complete_send(cci__ep_t * ep, struct ibv_wc wc)
-{
-	int ret = CCI_SUCCESS;
-	gni_msg_type_t type = GNI_MSG_INVALID;
-	gni_tx_t *tx = (gni_tx_t *) (uintptr_t) wc.wr_id;
-	gni_ep_t *gep = ep->priv;
-
-	CCI_ENTER;
-
-	if (tx)
-		type = tx->msg_type;
-
-	switch (type) {
-	case GNI_MSG_SEND:
-		ret = gni_complete_send_msg(ep, wc);
-		break;
-	case GNI_MSG_CONN_REQUEST:
-	case GNI_MSG_CONN_PAYLOAD:
-	case GNI_MSG_CONN_REPLY:
-		break;
-	default:
-		debug(CCI_DB_MSG,
-		      "%s: ignoring send completion for msg type %d", __func__,
-		      type);
-		break;
-	}
-	if (type != GNI_MSG_INVALID && type != GNI_MSG_SEND) {
-		pthread_mutex_lock(&ep->lock);
-		TAILQ_INSERT_HEAD(&gep->idle_txs, tx, entry);
-		pthread_mutex_unlock(&ep->lock);
-	}
-
-	CCI_EXIT;
-	return ret;
-}
-#endif
-
 static int
 gni_send_common(cci_connection_t * connection, struct iovec *iov,
 		  uint32_t iovcnt, void *context, int flags,
 		  gni_rma_op_t * rma_op);
-
-#if 0
-static int gni_handle_rma_completion(cci__ep_t * ep, struct ibv_wc wc)
-{
-	int ret = CCI_SUCCESS;
-	gni_rma_op_t *rma_op = (gni_rma_op_t *) (uintptr_t) wc.wr_id;
-	gni_ep_t *gep = ep->priv;
-
-	CCI_ENTER;
-
-	rma_op->status = gni_to_cci_status(wc.status);
-	if (rma_op->msg_len == 0 || rma_op->status != CCI_SUCCESS) {
-	      queue:
-		/* we are done, queue it for the app */
-		pthread_mutex_lock(&ep->lock);
-		TAILQ_INSERT_TAIL(&ep->evts, &rma_op->evt, entry);
-		pthread_mutex_unlock(&ep->lock);
-	} else {
-		uint32_t iovcnt = 1;
-		struct iovec iov;
-		cci__conn_t *conn = rma_op->evt.conn;
-
-		iov.iov_base = rma_op->msg_ptr;
-		iov.iov_len = rma_op->msg_len;
-		ret = gni_send_common(&conn->connection, &iov, iovcnt,
-					rma_op->context, rma_op->flags, rma_op);
-		if (ret != CCI_SUCCESS) {
-			rma_op->status = ret;
-			goto queue;
-		}
-		/* we will pass the tx completion to the app,
-		 * free the rma_op now */
-		pthread_mutex_lock(&ep->lock);
-		TAILQ_REMOVE(&gep->rma_ops, rma_op, entry);
-		pthread_mutex_unlock(&ep->lock);
-		free(rma_op);
-	}
-
-	CCI_EXIT;
-	return ret;
-}
-
-static int gni_handle_send_completion(cci__ep_t * ep, struct ibv_wc wc)
-{
-	int ret = CCI_SUCCESS;
-	gni_tx_t *tx = (gni_tx_t *) (uintptr_t) wc.wr_id;
-
-	CCI_ENTER;
-
-	if (!tx)
-		goto out;
-
-	switch (tx->msg_type) {
-	case GNI_MSG_CONN_PAYLOAD:
-		debug(CCI_DB_CONN, "%s: send completed of conn_payload",
-		      __func__);
-		break;
-	case GNI_MSG_CONN_REPLY:
-		{
-			cci__conn_t *conn = tx->evt.conn;
-			gni_conn_t *gconn = conn->priv;
-
-			if (gconn->state == GNI_CONN_CLOSED) {
-				rdma_disconnect(gconn->id);
-				rdma_destroy_ep(gconn->id);
-				free(gconn);
-				free(conn);
-			} else {
-				pthread_mutex_lock(&ep->lock);
-				TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
-				pthread_mutex_unlock(&ep->lock);
-			}
-		}
-		break;
-	case GNI_MSG_SEND:
-		debug(CCI_DB_CONN, "%s: send completed", __func__);
-		ret = gni_complete_send(ep, wc);
-		break;
-	case GNI_MSG_RMA_REMOTE_REQUEST:
-	case GNI_MSG_RMA_REMOTE_REPLY:
-		{
-			gni_ep_t *gep = ep->priv;
-
-			pthread_mutex_lock(&ep->lock);
-			TAILQ_INSERT_HEAD(&gep->idle_txs, tx, entry);
-			pthread_mutex_unlock(&ep->lock);
-		}
-		break;
-	default:
-		debug(CCI_DB_INFO, "%s: ignoring %s msg",
-		      __func__, gni_msg_type_str(tx->msg_type));
-		break;
-	}
-
-      out:
-	CCI_EXIT;
-	return ret;
-}
-#endif
 
 static int
 gni_handle_recv(gni_rx_t *rx, void *msg)
@@ -2823,7 +2410,6 @@ gni_handle_rma_remote_request(cci__conn_t *conn, void *msg)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = container_of(conn->connection.endpoint, cci__ep_t, endpoint);
-	//gni_conn_t *gconn = conn->priv;
 	gni_ep_t *gep = ep->priv;
 	gni_tx_t *tx = NULL;
 	void *ptr = NULL;
@@ -2885,7 +2471,6 @@ gni_handle_rma_remote_reply(cci__conn_t *conn, void *msg)
 	cci__ep_t *ep = container_of(conn->connection.endpoint, cci__ep_t, endpoint);
 	gni_conn_t *gconn = conn->priv;
 	gni_ep_t *gep = ep->priv;
-	//gni_tx_t *tx = NULL;
 	gni_rma_remote_t *remote = NULL;
 	gni_rma_op_t *rma_op = NULL;
 	gni_rma_op_t *r = NULL;
@@ -3430,7 +3015,6 @@ gni_send_common(cci_connection_t * connection, struct iovec *iov,
 	cci__conn_t *conn = NULL;
 	cci__ep_t *ep = NULL;
 	gni_ep_t *gep = NULL;
-	//gni_conn_t *gconn = NULL;
 	gni_tx_t *tx = NULL;
 	uint32_t header = GNI_MSG_SEND;
 	void *ptr = NULL;
@@ -3455,7 +3039,6 @@ gni_send_common(cci_connection_t * connection, struct iovec *iov,
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 	gep = ep->priv;
 	conn = container_of(connection, cci__conn_t, connection);
-	//gconn = conn->priv;
 
 	is_reliable = cci_conn_is_reliable(conn);
 
