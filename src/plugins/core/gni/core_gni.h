@@ -156,11 +156,11 @@ typedef struct gni_conn_request {
    The payload is the uint64_t remote handle.
  */
 
-typedef struct gni_rma_addr_rkey {
+typedef struct gni_rma_addr_mhndl {
 	uint64_t remote_handle;		/* the CCI remote handle */
 	uint64_t remote_addr;		/* the gni remote address */
 	gni_mem_handle_t remote_mem_hndl;	/* two uint64_t */
-} gni_rma_addr_rkey_t;
+} gni_rma_addr_mhndl_t;
 
 /* RMA Remote Handle Reply
 
@@ -178,7 +178,7 @@ typedef struct gni_rma_addr_rkey {
 
        uint64_t remote_handle
        uint64_t remote_addr
-       uint32_t rkey
+       gni_mem_handle_t remote_mem_hndl
  */
 
 /* Keepalive
@@ -256,6 +256,7 @@ typedef struct gni_globals {
 extern gni_globals_t *gglobals;
 
 typedef struct gni_rma_handle {
+	uint64_t addr;
 	gni_mem_handle_t mh;		/* memory handle */
 	cci__ep_t *ep;			/* owning endpoint */
 	TAILQ_ENTRY(gni_rma_handle) entry;	/* hang on gep->handles */
@@ -264,12 +265,13 @@ typedef struct gni_rma_handle {
 } gni_rma_handle_t;
 
 typedef struct gni_rma_remote {
-	TAILQ_ENTRY(gni_rma_remote) entry;	/* hang on local RMA handle */
-	gni_rma_addr_rkey_t info;	/* handle, addr, and rkey */
+	TAILQ_ENTRY(gni_rma_remote) entry;	/* hang on gconn->remotes */
+	gni_rma_addr_mhndl_t info;	/* handle, addr, and mem_hndl */
 } gni_rma_remote_t;
 
 typedef struct gni_rma_op {
 	cci__evt_t evt;			/* completion event */
+	gni_post_descriptor_t pd;	/* GNI post descriptor */
 	gni_msg_type_t msg_type;	/* to be compatible with tx */
 	TAILQ_ENTRY(gni_rma_op) entry;	/* gep->rmas */
 	TAILQ_ENTRY(gni_rma_op) gentry;	/* handle->rma_ops */
@@ -281,7 +283,6 @@ typedef struct gni_rma_op {
 	uint64_t remote_addr;
 	gni_mem_handle_t remote_mem_hndl; /* memory handle */
 
-	uint64_t len;
 	cci_status_t status;
 	void *context;
 	int flags;
@@ -317,7 +318,6 @@ typedef struct gni_ep {
 
 	void *tx_buf;			/* send buffer */
 	gni_tx_t *txs;			/* array of txs */
-	//TAILQ_HEAD(g_txs, gni_tx) txs;	/* all txs */
 	TAILQ_HEAD(g_txsi, gni_tx) idle_txs;	/* idle txs */
 
 	TAILQ_HEAD(g_rx_pools, gni_rx_pool) rx_pools;	/* list of rx pools - usually one */
@@ -362,6 +362,8 @@ typedef struct gni_conn {
 	void *msg_buffer;		/* mbox buffer */
 	uint32_t buff_size;		/* length */
 	gni_mem_handle_t mem_hndl;	/* memory handle */
+
+	uint32_t num_remotes;
 
 	TAILQ_HEAD(s_rems, gni_rma_remote) remotes;	/* LRU list of remote handles */
 	TAILQ_HEAD(w_ops, gni_rma_op) rma_ops;	/* rma ops waiting on remotes */
