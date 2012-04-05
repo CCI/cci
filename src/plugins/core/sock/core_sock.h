@@ -43,7 +43,7 @@ BEGIN_C_DECLS
 #define SOCK_PEEK_LEN           (32)	/* large enough for RMA header */
 #define SOCK_CONN_REQ_HDR_LEN   ((int) (sizeof(struct sock_header_r)))
     /* header + seqack */
-#define SOCK_RMA_DEPTH          (16)	/* how many in-flight msgs per RMA */
+#define SOCK_RMA_DEPTH          (12)	/* how many in-flight msgs per RMA */
 static inline uint64_t sock_tv_to_usecs(struct timeval tv)
 {
 	return (tv.tv_sec * 1000000) + tv.tv_usec;
