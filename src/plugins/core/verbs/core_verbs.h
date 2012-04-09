@@ -218,7 +218,7 @@ typedef struct verbs_tx {
 	 TAILQ_ENTRY(verbs_tx) entry;	/* hang on vep->idle_txs, vdev->queued,
 					   vdev->pending */
 	struct verbs_rma_op *rma_op;	/* owning RMA if remote completion msg */
-    struct verbs_tx_pool *tx_pool; /* owning tx pool */
+	struct verbs_tx_pool *tx_pool;	/* owning tx pool */
 } verbs_tx_t;
 
 typedef struct verbs_rx {
@@ -237,7 +237,7 @@ typedef struct verbs_dev {
 
 typedef struct verbs_globals {
 	int count;		/* number of devices */
-	struct cci_device ** devices;	/* array of devices */
+	struct cci_device **devices;	/* array of devices */
 	struct ibv_context **contexts;	/* open devices */
 	struct ifaddrs *ifaddrs;	/* array indexed to contexts */
 } verbs_globals_t;
@@ -290,12 +290,12 @@ typedef struct verbs_rx_pool {
 } verbs_rx_pool_t;
 
 typedef struct verbs_tx_pool {
-	TAILQ_HEAD(v_txsi, verbs_tx) idle_txs; 	/* idle txs */
-	void *buf;				/* active tx buffer */
-	struct ibv_mr *mr;		/* active mr */
-	uint32_t size;			/* current size */
-	uint32_t posted;		/* # of posted txs */
-    int repost;             /* repost txs? */
+	TAILQ_HEAD(v_txsi, verbs_tx) idle_txs;	/* idle txs */
+	void *buf;		/* active tx buffer */
+	struct ibv_mr *mr;	/* active mr */
+	uint32_t size;		/* current size */
+	uint32_t posted;	/* # of posted txs */
+	int repost;		/* repost txs? */
 	pthread_mutex_t lock;	/* lock, for buf changes */
 } verbs_tx_pool_t;
 
@@ -309,12 +309,12 @@ typedef struct verbs_ep {
 	struct sockaddr_in sin;	/* host address and port */
 
 	struct ibv_srq *srq;	/* shared recv queue */
-    
-    verbs_tx_pool_t *tx_pool;
-    verbs_tx_pool_t *tx_pool_old;
-    int tx_resize_in_progress;
-    
-     TAILQ_HEAD(v_rx_pools, verbs_rx_pool) rx_pools;	/* list of rx pools - usually one */
+
+	verbs_tx_pool_t *tx_pool;
+	verbs_tx_pool_t *tx_pool_old;
+	int tx_resize_in_progress;
+
+	 TAILQ_HEAD(v_rx_pools, verbs_rx_pool) rx_pools;	/* list of rx pools - usually one */
 	uint32_t rdma_msg_total;	/* total number of connections allowed
 					   to use RDMA MSGs */
 	uint32_t rdma_msg_used;	/* number of connections using
@@ -373,4 +373,4 @@ int cci_core_verbs_post_load(cci_plugin_t * me);
 int cci_core_verbs_pre_unload(cci_plugin_t * me);
 
 END_C_DECLS
-#endif				/* CCI_CORE_VERBS_H */
+#endif /* CCI_CORE_VERBS_H */
