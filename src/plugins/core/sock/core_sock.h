@@ -1057,6 +1057,9 @@ typedef struct sock_dev {
 	/*! Our IP address in network order */
 	in_addr_t ip;
 
+    /*! Our port in network byte order */
+    in_port_t port;
+
 	/*! Queued sends */
 	 TAILQ_HEAD(s_queued, sock_tx) queued;
 

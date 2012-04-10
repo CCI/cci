@@ -517,6 +517,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			TAILQ_INIT(&sdev->queued);
 			TAILQ_INIT(&sdev->pending);
 			sdev->is_progressing = 0;
+            sdev->port = 0;
 
 			/* parse conf_argv */
 			for (arg = device->conf_argv; *arg != NULL; arg++) {
@@ -534,7 +535,12 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
 					assert(mss >= SOCK_MIN_MSS);
 					device->max_send_size = mss;
-				}
+				} else if (0 == strncmp("port=", *arg, 5)) {
+                    const char *s_port = *arg + 5;
+                    uint16_t    port;
+                    port = atoi (s_port);
+                    sdev->port = htons(port);
+                }
 			}
 			if (sdev->ip != 0) {
 				devices[sglobals->count] = device;
@@ -744,6 +750,8 @@ static int sock_create_endpoint(cci_device_t * device,
 	memset(&sin, 0, sizeof(sin));
 	sin.sin_family = AF_INET;
 	sin.sin_addr.s_addr = sdev->ip;
+    if (sdev->port != 0)
+        sin.sin_port = sdev->port;
 
 	ret = bind(sep->sock, (const struct sockaddr *)&sin, sizeof(sin));
 	if (ret) {
