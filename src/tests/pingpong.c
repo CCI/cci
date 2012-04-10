@@ -404,7 +404,10 @@ void do_server()
 					__func__, event->type);
 				break;
 			}
-
+			ret = cci_return_event(event);
+			if (ret)
+				fprintf(stderr, "cci_return_event() failed with %s\n",
+						cci_strerror(endpoint, ret));
 		}
 	}
 
