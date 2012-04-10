@@ -1155,9 +1155,7 @@ static int gni_finalize(cci_plugin_core_t *plugin<)
 //	debug(CCI_DB_FUNC, "%8s.%5d In gni_free_devices()", gdev->nodename,
 //	      gdev->INST);
 
-	pthread_mutex_lock(&globals->lock);	// Set shutdown
 	gni_shut_down = 1;	// Signal other thread(s)
-	pthread_mutex_unlock(&globals->lock);
 	pthread_join(gni_tid, NULL);	// Other thread(s) gone
 
 	TAILQ_FOREACH(dev, &globals->devs, entry) {

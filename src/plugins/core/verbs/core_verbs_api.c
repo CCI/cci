@@ -500,10 +500,8 @@ static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t fla
 			    verbs_mtu_val(port_attr.max_mtu);
 			device->rate = verbs_device_rate(port_attr);
 
-			pthread_mutex_lock(&globals->lock);
 			TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
 			cci__add_dev(dev);
-			pthread_mutex_unlock(&globals->lock);
 			devices[index] = device;
 			index++;
 			dev->is_up = vdev->ifa->ifa_flags & IFF_UP;
@@ -564,9 +562,7 @@ static int verbs_finalize(cci_plugin_core_t * plugin)
 		return CCI_ENODEV;
 	}
 
-	pthread_mutex_lock(&globals->lock);
 	verbs_shut_down = 1;
-	pthread_mutex_unlock(&globals->lock);
 	/* TODO join progress thread */
 
 	for (i = 0; i < vglobals->count; i++) {
@@ -585,12 +581,10 @@ static int verbs_finalize(cci_plugin_core_t * plugin)
 	if (vglobals->contexts)
 		rdma_free_devices(vglobals->contexts);
 
-	pthread_mutex_lock(&globals->lock);
 	TAILQ_FOREACH(dev, &globals->devs, entry)
 		if (!strcmp(dev->driver, "verbs"))
 			if (dev->priv)
 				free(dev->priv);
-	pthread_mutex_unlock(&globals->lock);
 
 	free(vglobals->devices);
 	free((void *)vglobals);

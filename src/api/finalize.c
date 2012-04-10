@@ -39,12 +39,14 @@ int cci_finalize(void)
 		goto out;
 	}
 
+	/* lock the device list while destroying devices and finalizing CTPs */
+	pthread_mutex_lock(&globals->lock);
+
 	/* for each device
 	 *     for each endpoint
 	 *         close_endpoint
 	 */
 
-	pthread_mutex_lock(&globals->lock);
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
 		pthread_mutex_lock(&dev->lock);
 		while (!TAILQ_EMPTY(&dev->eps)) {
@@ -55,7 +57,6 @@ int cci_finalize(void)
 		}
 		pthread_mutex_unlock(&dev->lock);
 	}
-	pthread_mutex_unlock(&globals->lock);
 
 	/* let the driver clean up the private device */
 	for (i = 0;
@@ -66,16 +67,18 @@ int cci_finalize(void)
 			plugin->finalize(plugin);
 	}
 
-	pthread_mutex_lock(&globals->lock);
 	while (!TAILQ_EMPTY(&globals->devs)) {
 		cci__dev_t *mydev = TAILQ_FIRST(&globals->devs);
 		TAILQ_REMOVE(&globals->devs, mydev, entry);
 		cci__free_dev(mydev);
 	}
+
+	free(globals->devices);
+	globals->devices = NULL;
+
 	pthread_mutex_unlock(&globals->lock);
 
 	/* free globals */
-	free(globals->devices);
 	free(globals);
 
 	cci_plugins_core_close();
