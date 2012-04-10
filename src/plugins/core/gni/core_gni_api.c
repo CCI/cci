@@ -667,6 +667,7 @@ static int gni_get_devices(cci_device_t const ***devices)
 static int gni_finalize(void)
 {
 	int ret = CCI_SUCCESS;
+	int i = 0;
 	cci__dev_t *dev = NULL;
 
 	CCI_ENTER;
@@ -682,11 +683,23 @@ static int gni_finalize(void)
 	/* TODO join progress thread */
 
 	free(gglobals->device_ids);
+	for (i = 0; i < gglobals->count; i++) {
+		struct ifaddrs *ifa = &gglobals->ifaddrs[i];
+
+		if (ifa) {
+			free(ifa->ifa_name);
+			free(ifa->ifa_addr);
+			free(ifa->ifa_netmask);
+			free(ifa->ifa_broadaddr);
+			free(ifa);
+		}
+	}
 
 	pthread_mutex_lock(&globals->lock);
-	TAILQ_FOREACH(dev, &globals->devs, entry)
+	TAILQ_FOREACH(dev, &globals->devs, entry) {
 	    if (dev->priv)
 		free(dev->priv);
+	}
 	pthread_mutex_unlock(&globals->lock);
 
 	free(gglobals->devices);
@@ -700,18 +713,6 @@ static int gni_finalize(void)
 static int gni_destroy_rx_pool(cci__ep_t * ep, gni_rx_pool_t * rx_pool);
 
 static void gni_put_rx(gni_rx_t *rx);
-
-static int gni_post_rx(cci__ep_t * ep, gni_rx_t * rx)
-{
-	int ret = CCI_SUCCESS;
-
-	CCI_ENTER;
-
-	gni_put_rx(rx);
-
-	CCI_EXIT;
-	return ret;
-}
 
 static int gni_create_rx_pool(cci__ep_t * ep, int rx_buf_cnt)
 {
@@ -758,10 +759,6 @@ static int gni_create_rx_pool(cci__ep_t * ep, int rx_buf_cnt)
 		rx->rx_pool = rx_pool;
 		TAILQ_INSERT_TAIL(&rx_pool->rxs, rx, entry);
 		TAILQ_INSERT_TAIL(&rx_pool->idle_rxs, rx, idle);
-
-		ret = gni_post_rx(ep, rx);
-		if (ret)
-			goto out;
 	}
 
 	pthread_mutex_lock(&ep->lock);
@@ -1023,6 +1020,8 @@ gni_create_endpoint(cci_device_t * device,
 static int gni_destroy_rx_pool(cci__ep_t * ep, gni_rx_pool_t * rx_pool)
 {
 	int ret = CCI_SUCCESS;
+
+	CCI_ENTER;
 
 	while (!TAILQ_EMPTY(&rx_pool->rxs)) {
 		gni_rx_t *rx = TAILQ_FIRST(&rx_pool->rxs);
@@ -1366,6 +1365,31 @@ gni_compare_u32(const void *pa, const void *pb)
 }
 
 static int
+gni_find_conn_locked(cci__ep_t *ep, uint32_t id, cci__conn_t ** conn)
+{
+	int ret = CCI_ERROR;
+	gni_ep_t *gep = ep->priv;
+	void *node = NULL;
+	uint32_t *i = NULL;
+
+	CCI_ENTER;
+
+	node = tfind(&id, &gep->conn_tree, gni_compare_u32);
+	if (node) {
+		gni_conn_t *gconn = NULL;
+
+		i = *((uint32_t **)node);
+		gconn = container_of(i, gni_conn_t, id);
+		assert(gconn->id == id);
+		*conn = gconn->conn;
+		ret = CCI_SUCCESS;
+	}
+
+	CCI_EXIT;
+	return ret;
+}
+
+static int
 gni_find_conn(cci__ep_t *ep, uint32_t id, cci__conn_t ** conn)
 {
 	int ret = CCI_ERROR;
@@ -1397,7 +1421,8 @@ gni_insert_conn(cci__conn_t *conn)
 {
 	int ret = CCI_SUCCESS;
 	uint32_t id = 0;
-	cci__ep_t *ep = container_of(conn->connection.endpoint, cci__ep_t, endpoint);
+	cci_endpoint_t *endpoint = conn->connection.endpoint;
+	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
 	cci__conn_t *c = NULL;
 	gni_ep_t *gep = ep->priv;
 	gni_conn_t *gconn = conn->priv;
@@ -1405,16 +1430,20 @@ gni_insert_conn(cci__conn_t *conn)
 
 	CCI_ENTER;
 
-	pthread_rwlock_wrlock(&gep->conn_tree_lock);
+	ret = pthread_rwlock_wrlock(&gep->conn_tree_lock);
+	if (ret)
+		debug(CCI_DB_WARN, "%s: wrlock() failed with %s", __func__, strerror(errno));
 	do {
 		id = random();
-		ret = gni_find_conn(ep, id, &c);
+		ret = gni_find_conn_locked(ep, id, &c);
 	} while (ret == CCI_SUCCESS);
 	gconn->id = id;
 	do {
 		node = tsearch(&gconn->id, &gep->conn_tree, gni_compare_u32);
 	} while (!node);
-	pthread_rwlock_unlock(&gep->conn_tree_lock);
+	ret = pthread_rwlock_unlock(&gep->conn_tree_lock);
+	if (ret)
+		debug(CCI_DB_WARN, "%s: unlock() failed with %s", __func__, strerror(errno));
 
 	debug(CCI_DB_CONN, "%s: inserted conn %u", __func__, gconn->id);
 
@@ -1633,17 +1662,27 @@ static int gni_disconnect(cci_connection_t * connection)
 			close(gconn->new->sock);
 	}
 
+	free((char *)conn->uri);
+
 	grc = GNI_EpDestroy(gconn->peer);
 	if (grc) {
 		/* TODO */
+		ret = gni_to_cci_status(grc);
+		debug(CCI_DB_INFO, "%s: GNI_EpDestroy() failed with %s (%d)",
+				__func__, cci_strerror(&ep->endpoint, ret), grc);
 	}
-
-	/* TODO free mbox */
 
 	grc = GNI_MemDeregister(gep->nic, &gconn->mem_hndl);
 	if (grc) {
 		/* TODO */
+		ret = gni_to_cci_status(grc);
+		debug(CCI_DB_INFO, "%s: GNI_MemDeregister() failed with %s (%d)",
+				__func__, cci_strerror(&ep->endpoint, ret), grc);
 	}
+
+	pthread_rwlock_wrlock(&gep->conn_tree_lock);
+	tdelete(&gconn->id, &gep->conn_tree, gni_compare_u32);
+	pthread_rwlock_unlock(&gep->conn_tree_lock);
 
 	free(gconn->msg_buffer);
 
@@ -2238,6 +2277,8 @@ static int gni_conn_finish(cci__ep_t * ep, cci__conn_t *conn)
 	}
 
 	evt->event.type = CCI_EVENT_ACCEPT;
+	evt->ep = ep;
+	evt->conn = conn;
 
 	ret = recv(new->sock, &header, sizeof(header), 0);
 	if (ret != sizeof(header)) {
@@ -2524,7 +2565,7 @@ static gni_rx_t *gni_get_rx_locked(gni_ep_t * gep)
 
 	if (!TAILQ_EMPTY(&pool->idle_rxs)) {
 		rx = TAILQ_FIRST(&pool->idle_rxs);
-		TAILQ_REMOVE(&pool->idle_rxs, rx, entry);
+		TAILQ_REMOVE(&pool->idle_rxs, rx, idle);
 	}
 	return rx;
 }
@@ -2627,10 +2668,14 @@ static int gni_get_recv_event(cci__ep_t * ep)
 			case GNI_MSG_RMA_REMOTE_REQUEST:
 				/* FIXME do not need the rx, put it */
 				ret = gni_handle_rma_remote_request(conn, msg);
+				gni_put_rx(rx);
+				rx = NULL;
 				break;
 			case GNI_MSG_RMA_REMOTE_REPLY:
 				/* FIXME do not need the rx, put it */
 				ret = gni_handle_rma_remote_reply(conn, msg);
+				gni_put_rx(rx);
+				rx = NULL;
 				break;
 			default:
 				debug(CCI_DB_MSG, "%s: ignoring incoming %s",
@@ -2648,7 +2693,6 @@ static int gni_get_recv_event(cci__ep_t * ep)
 out:
 	if (ret != CCI_SUCCESS) {
 		if (rx) {
-			/* TODO queue rx */
 			gni_put_rx(rx);
 		}
 	}
@@ -2924,10 +2968,11 @@ gni_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
 
 	/* TODO drain fd so that they can block again */
 
-	*event = &ev->event;
+	if (ev)
+		*event = &ev->event;
 
 	if (ret == CCI_SUCCESS)
-		debug(CCI_DB_INFO, "%s: got %s event", __func__,
+		debug(CCI_DB_MSG, "%s: got %s event", __func__,
 			gni_eventstr(*event));
 
 	CCI_EXIT;
@@ -2953,19 +2998,10 @@ static int gni_return_event(cci_event_t * event)
 		break;
 	case CCI_EVENT_RECV:
 		{
-			cci__evt_t *evt =
-			    container_of(event, cci__evt_t, event);
-			cci__ep_t *ep = evt->ep;
 			gni_rx_t *rx = container_of(evt, gni_rx_t, evt);
 
 			if (rx->rx_pool) {
-				ret = gni_post_rx(ep, rx);
-				if (ret) {
-					ret = errno;
-					debug(CCI_DB_MSG,
-					      "%s: post_rx() returned %s",
-					      __func__, strerror(ret));
-				}
+				gni_put_rx(rx);
 			}
 		}
 		break;

@@ -324,6 +324,7 @@ typedef struct gni_ep {
 
 	void *conn_tree;		/* tree of peer conn ids */
 	pthread_rwlock_t conn_tree_lock;	/* rw lock */
+
 	TAILQ_HEAD(g_conns, gni_conn) conns;	/* all conns */
 	TAILQ_HEAD(g_active, gni_conn) active;	/* active conns waiting on connect */
 	TAILQ_HEAD(g_active2, gni_conn) active2;	/* active conns waiting on reply */
