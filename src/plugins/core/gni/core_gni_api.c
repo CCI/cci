@@ -691,9 +691,9 @@ static int gni_finalize(void)
 			free(ifa->ifa_addr);
 			free(ifa->ifa_netmask);
 			free(ifa->ifa_broadaddr);
-			free(ifa);
 		}
 	}
+	free(gglobals->ifaddrs);
 
 	pthread_mutex_lock(&globals->lock);
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
