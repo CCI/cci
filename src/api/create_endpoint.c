@@ -35,16 +35,18 @@ int cci_create_endpoint(cci_device_t * device,
 				break;
 			}
 		}
-		if (!device) {
+		if (!device && !TAILQ_EMPTY(&globals->devs)) {
 			/* no default found, use first (highest priority) device? */
 			dev = TAILQ_FIRST(&globals->devs);
 			device = &dev->device;
 		}
+		if (!device)
+			return CCI_ENODEV;
+	} else {
+		/* use given device */
+		dev = container_of(device, cci__dev_t, device);
 	}
-	if (!device)
-		return CCI_ENODEV;
 
-	dev = container_of(device, cci__dev_t, device);
 	if (dev->is_up == 0)
 		return CCI_ENODEV;
 
