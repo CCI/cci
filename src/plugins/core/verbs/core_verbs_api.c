@@ -1362,7 +1362,6 @@ static int verbs_accept(cci_event_t *event, const void *context)
 		goto out;
 	}
 	conn->connection.max_send_size = vconn->mss;
-	conn->plugin = ep->plugin;
 
 	if (vconn->num_slots) {
 		pthread_mutex_lock(&ep->lock);
@@ -1624,6 +1623,8 @@ verbs_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		ret = CCI_ENOMEM;
 		goto out;
 	}
+	conn->plugin = ep->plugin;
+
 	debug(CCI_DB_CONN, "%s: alloced conn %p", __func__, conn);
 
 	conn->priv = calloc(1, sizeof(*vconn));
