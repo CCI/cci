@@ -1076,6 +1076,9 @@ typedef struct sock_fd_idx {
 } sock_fd_idx_t;
 
 typedef struct sock_globals {
+	/*! Mutex */
+	pthread_mutex_t lock;
+
 	/*! Number of sock devices */
 	int count;
 
