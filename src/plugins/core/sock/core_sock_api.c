@@ -223,6 +223,7 @@ static int sock_init(cci_plugin_core_t *plugin,
 		return CCI_ENOMEM;
 	}
 
+	pthread_mutex_init(&sglobals->lock, NULL);
 	TAILQ_INIT(&sglobals->ka_conns);
 
 	srandom((unsigned int)sock_get_usecs());
@@ -450,14 +451,14 @@ sock_set_nonblocking(cci_os_handle_t sock, sock_fd_type_t type, void *p)
 	ret = fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 	if (-1 == ret)
 		return errno;
-	pthread_mutex_lock(&globals->lock);
+	pthread_mutex_lock(&sglobals->lock);
 	FD_SET(sock, &sglobals->fds);
 	if (sock >= sglobals->nfds)
 		sglobals->nfds = sock + 1;
 	sglobals->fd_idx[sock].type = type;
 	if (type == SOCK_FD_EP)
 		sglobals->fd_idx[sock].ep = p;
-	pthread_mutex_unlock(&globals->lock);
+	pthread_mutex_unlock(&sglobals->lock);
 	return 0;
 }
 
@@ -465,7 +466,7 @@ static inline void sock_close_socket(cci_os_handle_t sock)
 {
 	int found = 0;
 
-	pthread_mutex_lock(&globals->lock);
+	pthread_mutex_lock(&sglobals->lock);
 	FD_CLR(sock, &sglobals->fds);
 	sglobals->fd_idx[sock].type = SOCK_FD_UNUSED;
 	if (sock == sglobals->nfds - 1) {
@@ -482,7 +483,7 @@ static inline void sock_close_socket(cci_os_handle_t sock)
 		if (!found)
 			sglobals->nfds = 0;
 	}
-	pthread_mutex_unlock(&globals->lock);
+	pthread_mutex_unlock(&sglobals->lock);
 	close(sock);
 	return;
 }
@@ -4397,12 +4398,12 @@ static void *sock_progress_thread(void *arg)
 	struct timeval tv = { 0, SOCK_PROG_TIME_US };
 
 	assert(!arg);
-	pthread_mutex_lock(&globals->lock);
+	pthread_mutex_lock(&sglobals->lock);
 	while (!sock_shut_down) {
 		cci__dev_t *dev;
 		cci_device_t const **device;
 
-		pthread_mutex_unlock(&globals->lock);
+		pthread_mutex_unlock(&sglobals->lock);
 
 		/* For each connection with keepalive set. We do here since the list
 		   of such connections is independent from any device (we do not want
@@ -4415,9 +4416,9 @@ static void *sock_progress_thread(void *arg)
 			sock_progress_dev(dev);
 		}
 		select(0, NULL, NULL, NULL, &tv);
-		pthread_mutex_lock(&globals->lock);
+		pthread_mutex_lock(&sglobals->lock);
 	}
-	pthread_mutex_unlock(&globals->lock);
+	pthread_mutex_unlock(&sglobals->lock);
 
 	pthread_exit(NULL);
 	return (NULL);		/* make pgcc happy */
@@ -4433,7 +4434,7 @@ static void *sock_recv_thread(void *arg)
 	fd_set fds;
 
 	assert(!arg);
-	pthread_mutex_lock(&globals->lock);
+	pthread_mutex_lock(&sglobals->lock);
 	while (!sock_shut_down) {
 		nfds = sglobals->nfds;
 		FD_ZERO(&fds);
@@ -4441,7 +4442,7 @@ static void *sock_recv_thread(void *arg)
 			if (sglobals->fd_idx[i].type != SOCK_FD_UNUSED)
 				FD_SET(i, &fds);
 		}
-		pthread_mutex_unlock(&globals->lock);
+		pthread_mutex_unlock(&sglobals->lock);
 
 		ret = select(nfds, &fds, NULL, NULL, &tv);
 		if (ret == -1) {
@@ -4474,9 +4475,9 @@ static void *sock_recv_thread(void *arg)
 			i = (i + 1) % nfds;
 		} while (i != start);
 	      relock:
-		pthread_mutex_lock(&globals->lock);
+		pthread_mutex_lock(&sglobals->lock);
 	}
-	pthread_mutex_unlock(&globals->lock);
+	pthread_mutex_unlock(&sglobals->lock);
 
 	pthread_exit(NULL);
 	return (NULL);		/* make pgcc happy */
