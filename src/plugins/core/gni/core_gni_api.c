@@ -239,7 +239,7 @@ static cci_status_t gni_to_cci_status(gni_return_t rc)
 		ret = CCI_ERROR;
 		break;
 	case GNI_RC_TRANSACTION_ERROR:
-		ret = CCI_ERROR;
+		ret = CCI_ETIMEDOUT;
 		break;
 	case GNI_RC_ILLEGAL_OP:
 		ret = CCI_ERR_RMA_OP;
@@ -1138,23 +1138,65 @@ static const char *gni_msg_type_str(gni_msg_type_t msg_type)
 }
 
 static int
-gni_post_send(cci__conn_t * conn, uint32_t id, void *buffer, uint32_t len,
-		uint32_t header)
+gni_post_send(gni_tx_t *tx)
 {
 	int ret = CCI_SUCCESS;
+	cci__ep_t *ep = tx->evt.ep;
+	cci__conn_t *conn = tx->evt.conn;
 	gni_return_t grc = GNI_RC_SUCCESS;
 	gni_conn_t *gconn = conn->priv;
 
 	CCI_ENTER;
 
-	header |= (len << 4);
-	debug(CCI_DB_MSG, "sending msg 0x%x id %u", header, id);
+	tx->header |= (tx->len << 4);
+	debug(CCI_DB_MSG, "%s: posting msg 0x%x id %u", __func__, tx->header, tx->id);
 
-	grc = GNI_SmsgSend(gconn->peer, &header, sizeof(header), buffer, len, id);
+	pthread_mutex_lock(&ep->lock);
+	if (unlikely(gconn->in_flight)) {
+		TAILQ_INSERT_TAIL(&gconn->pending, tx, entry);
+		pthread_mutex_unlock(&ep->lock);
+		debug(CCI_DB_MSG, "%s: in_flight=1 - queuing msg 0x%x id %u",
+			__func__, tx->header, tx->id);
+		return CCI_SUCCESS;
+	}
+
+	if (unlikely(gconn->need_completion == gconn->max_tx_cnt)) {
+		TAILQ_INSERT_TAIL(&gconn->pending, tx, entry);
+		pthread_mutex_unlock(&ep->lock);
+		debug(CCI_DB_MSG, "%s: max_tx_cnt pending - queuing msg 0x%x id %u",
+			__func__, tx->header, tx->id);
+		return CCI_SUCCESS;
+	}
+
+	if (unlikely(!TAILQ_EMPTY(&gconn->pending))) {
+		uint32_t header = tx->header, id = tx->id;
+
+		TAILQ_INSERT_TAIL(&gconn->pending, tx, entry);
+		tx = TAILQ_FIRST(&gconn->pending);
+		TAILQ_REMOVE(&gconn->pending, tx, entry);
+		debug(CCI_DB_MSG, "%s: sending pending msg 0x%x id %u - queuing 0x%x %u",
+			__func__, tx->header, tx->id, header, id);
+	}
+
+	gconn->in_flight++;
+	gconn->need_completion++;
+	pthread_mutex_unlock(&ep->lock);
+
+	debug(CCI_DB_MSG, "%s: sending msg 0x%x id %u", __func__, tx->header, tx->id);
+	grc = GNI_SmsgSend(gconn->peer, &tx->header, sizeof(tx->header),
+			tx->buffer, tx->len, tx->id);
 	if (grc) {
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_INSERT_HEAD(&gconn->pending, tx, entry);
+		gconn->in_flight--;
+		gconn->need_completion--;
+		pthread_mutex_unlock(&ep->lock);
 		ret = gni_to_cci_status(grc);
-		debug(CCI_DB_MSG, "%s: grc %u ret %u", __func__,
-			grc, ret);
+		debug(CCI_DB_MSG, "%s: SmsgSend() failed grc %u ret %s "
+			"in_flight %d need_completion %d",
+			__func__, grc, cci_strerror(&ep->endpoint, ret),
+			(int) gconn->in_flight, (int) gconn->need_completion);
+		ret = CCI_SUCCESS;
 	}
 
 	CCI_EXIT;
@@ -1493,8 +1535,10 @@ gni_connect(cci_endpoint_t * endpoint, char *server_uri,
 	}
 	gconn = conn->priv;
 	gconn->conn = conn;
+	gconn->max_tx_cnt = GNI_CONN_CREDIT;
 	TAILQ_INIT(&gconn->remotes);
 	TAILQ_INIT(&gconn->rma_ops);
+	TAILQ_INIT(&gconn->pending);
 	*((char **)&conn->uri) = strdup(server_uri);
 	gni_insert_conn(conn);
 
@@ -2163,8 +2207,10 @@ gni_check_for_conn_requests(cci__ep_t *ep)
 
 	gconn = conn->priv;
 	gconn->conn = conn;
+	gconn->max_tx_cnt = GNI_CONN_CREDIT;
 	TAILQ_INIT(&gconn->remotes);
 	TAILQ_INIT(&gconn->rma_ops);
+	TAILQ_INIT(&gconn->pending);
 	gconn->state = GNI_CONN_PASSIVE;
 	memcpy(&gconn->sin, &sin, sizeof(sin));
 	gconn->mss = GNI_EP_MSS;
@@ -2453,10 +2499,8 @@ gni_handle_rma_remote_request(cci__conn_t *conn, void *msg)
 	cci__ep_t *ep = container_of(conn->connection.endpoint, cci__ep_t, endpoint);
 	gni_ep_t *gep = ep->priv;
 	gni_tx_t *tx = NULL;
-	void *ptr = NULL;
 	gni_rma_handle_t *handle = NULL;
 	gni_rma_handle_t *h = NULL;
-	uint32_t header = GNI_MSG_RMA_REMOTE_REPLY;
 	uint64_t *request = (uint64_t *)(msg + sizeof(uint32_t));
 	gni_rma_addr_mhndl_t info;
 
@@ -2480,23 +2524,21 @@ gni_handle_rma_remote_request(cci__conn_t *conn, void *msg)
 		goto out;
 	}
 
+	tx->header = GNI_MSG_RMA_REMOTE_REPLY;
 	tx->msg_type = GNI_MSG_RMA_REMOTE_REPLY;
-	memset(&tx->evt, 0, sizeof(tx->evt));
 	tx->evt.conn = conn;
 	tx->evt.event.type = CCI_EVENT_NONE;
+	memset(&info, 0, sizeof(info));
+	info.remote_handle = *request;
 	if (handle) {
-		info.remote_handle = *request;
 		info.remote_addr = handle->addr;
 		info.remote_mem_hndl = handle->mh;
-		memcpy(tx->buffer, &info, sizeof(info));
-		ptr = tx->buffer;
-		tx->len = sizeof(info);
-		header |= (1 << 4);
-	} else {
-		tx->len = 0;
+		tx->header |= (1 << 16);
 	}
+	memcpy(tx->buffer, &info, sizeof(info));
+	tx->len = sizeof(info);
 
-	ret = gni_post_send(conn, tx->id, ptr, tx->len, header);
+	ret = gni_post_send(tx);
 
       out:
 	CCI_EXIT;
@@ -2515,29 +2557,33 @@ gni_handle_rma_remote_reply(cci__conn_t *conn, void *msg)
 	gni_rma_remote_t *remote = NULL;
 	gni_rma_op_t *rma_op = NULL;
 	gni_rma_op_t *r = NULL;
+	uint32_t *header = (uint32_t *)msg;
 	void *ptr = msg + sizeof(uint32_t);
+	uint32_t found = (*header >> 16) & 0x1;
 
 	CCI_ENTER;
 
-	assert(GNI_MSG_TYPE(*((uint32_t*)msg)) == GNI_MSG_RMA_REMOTE_REPLY);
+	assert(GNI_MSG_TYPE(*header) == GNI_MSG_RMA_REMOTE_REPLY);
 
-	remote = calloc(1, sizeof(*remote));
-	if (!remote) {
-		ret = CCI_ENOMEM;
-		goto out;
-	}
-	memcpy(&remote->info, ptr, sizeof(remote->info));
-	if (GNI_RMA_REMOTE_SIZE) {
-		pthread_mutex_lock(&ep->lock);
-		TAILQ_INSERT_HEAD(&gconn->remotes, remote, entry);
-		gconn->num_remotes++;
-		if (gconn->num_remotes > GNI_RMA_REMOTE_SIZE) {
-			gni_rma_remote_t *last =
-			    TAILQ_LAST(&gconn->remotes, s_rems);
-			TAILQ_REMOVE(&gconn->remotes, last, entry);
-			free(last);
+	if (found) {
+		remote = calloc(1, sizeof(*remote));
+		if (!remote) {
+			ret = CCI_ENOMEM;
+			goto out;
 		}
-		pthread_mutex_unlock(&ep->lock);
+		memcpy(&remote->info, ptr, sizeof(remote->info));
+		if (GNI_RMA_REMOTE_SIZE) {
+			pthread_mutex_lock(&ep->lock);
+			TAILQ_INSERT_HEAD(&gconn->remotes, remote, entry);
+			gconn->num_remotes++;
+			if (gconn->num_remotes > GNI_RMA_REMOTE_SIZE) {
+				gni_rma_remote_t *last =
+				TAILQ_LAST(&gconn->remotes, s_rems);
+			TAILQ_REMOVE(&gconn->remotes, last, entry);
+				free(last);
+			}
+			pthread_mutex_unlock(&ep->lock);
+		}
 	}
 	/* find RMA op waiting for this remote_handle
 	 * and post the RMA */
@@ -2640,6 +2686,34 @@ static int gni_get_recv_event(cci__ep_t * ep)
 		}
 		gconn = conn->priv;
 
+		if (!gconn->in_flight && gconn->need_completion < gconn->max_tx_cnt) {
+			gni_tx_t *next = NULL;
+
+			/* this may be a credit from the peer, try to send a pending msg */
+			pthread_mutex_lock(&ep->lock);
+			next = TAILQ_FIRST(&gconn->pending);
+			if (next) {
+				int ret2 = CCI_SUCCESS;
+				gni_return_t grc;
+
+				TAILQ_REMOVE(&gconn->pending, next, entry);
+				grc = GNI_SmsgSend(gconn->peer, &next->header,
+						sizeof(next->header), next->buffer,
+						next->len, next->id);
+				if (grc) {
+					TAILQ_INSERT_HEAD(&gconn->pending, next, entry);
+					ret2 = gni_to_cci_status(grc);
+					debug(CCI_DB_MSG, "%s: grc %u ret2 %u", __func__,
+						grc, ret2);
+				} else {
+					gconn->in_flight++;
+					gconn->need_completion++;
+				}
+			}
+			pthread_mutex_unlock(&ep->lock);
+		}
+
+
 		/* we may get 0, 1, or many SMSGs */
 		do {
 			grc = GNI_SmsgGetNext(gconn->peer, &msg);
@@ -2682,8 +2756,13 @@ static int gni_get_recv_event(cci__ep_t * ep)
 					__func__, gni_msg_type_str(msg_type));
 				break;
 			}
-		} while (0); /* FIXME we need to get/alloc more rxs if needed */
-		//} while (grc == GNI_RC_SUCCESS);
+
+			rx = gni_get_rx(ep);
+			if (!rx) {
+				ret = CCI_ENOBUFS;
+				goto out;
+			}
+		} while (1);
 	} else if (grc == GNI_RC_NOT_DONE) {
 		ret = CCI_EAGAIN;
 	} else {
@@ -2696,6 +2775,7 @@ out:
 			gni_put_rx(rx);
 		}
 	}
+
 	CCI_EXIT;
 	return ret;
 }
@@ -2707,10 +2787,35 @@ gni_smsg_send_completion(cci__ep_t *ep, gni_cq_entry_t gevt)
 	uint32_t msg_id = GNI_CQ_GET_MSG_ID(gevt);
 	gni_ep_t *gep = ep->priv;
 	gni_tx_t *tx = &gep->txs[msg_id];
+	gni_tx_t *next = NULL;
+	cci__conn_t *conn = tx->evt.conn;
+	gni_conn_t *gconn = conn->priv;
 
 	CCI_ENTER;
 
 	debug(CCI_DB_MSG, "%s: found msg_id %u", __func__, msg_id);
+
+	pthread_mutex_lock(&ep->lock);
+	gconn->in_flight--;
+	gconn->need_completion--;
+	next = TAILQ_FIRST(&gconn->pending);
+	if (next) {
+		gni_return_t grc;
+
+		TAILQ_REMOVE(&gconn->pending, next, entry);
+		grc = GNI_SmsgSend(gconn->peer, &next->header, sizeof(next->header),
+				next->buffer, next->len, next->id);
+		if (grc) {
+			TAILQ_INSERT_HEAD(&gconn->pending, next, entry);
+			ret = gni_to_cci_status(grc);
+			debug(CCI_DB_MSG, "%s: grc %u ret %u", __func__,
+				grc, ret);
+		} else {
+			gconn->in_flight++;
+			gconn->need_completion++;
+		}
+	}
+	pthread_mutex_unlock(&ep->lock);
 
 	switch (tx->msg_type) {
 	case GNI_MSG_SEND:
@@ -3052,7 +3157,6 @@ gni_send_common(cci_connection_t * connection, struct iovec *iov,
 	cci__ep_t *ep = NULL;
 	gni_ep_t *gep = NULL;
 	gni_tx_t *tx = NULL;
-	uint32_t header = GNI_MSG_SEND;
 	void *ptr = NULL;
 
 	CCI_ENTER;
@@ -3098,33 +3202,24 @@ gni_send_common(cci_connection_t * connection, struct iovec *iov,
 	tx->evt.event.send.context = context;
 	tx->evt.event.send.status = CCI_SUCCESS;	/* for now */
 
+	tx->header = GNI_MSG_SEND;
 	if (likely(len)) {
-		if (is_reliable) {
-			/* for GNI_SMSG_TYPE_MBOX_AUTO_RETRANSMIT, the buffers can
-			 * _not_ be reused when GNI_SmsgSend() returns so we do
-			 * need to buffer them. */
-			ptr = tx->buffer;
+		ptr = tx->buffer;
 
-			if (likely(iovcnt == 1)) {
-				memcpy(ptr, iov[0].iov_base, len);
-			} else {
-				uint32_t offset = 0;
-
-				for (i = 0; i < iovcnt; i++) {
-					memcpy(ptr + offset, iov[i].iov_base,
-					iov[i].iov_len);
-					offset += iov[i].iov_len;
-				}
-			}
+		if (likely(iovcnt == 1)) {
+			memcpy(ptr, iov[0].iov_base, len);
 		} else {
-			/* for GNI_SMSG_TYPE_MBOX, the buffers can be reused when
-			 * GNI_SmsgSend() returns so we do _not_ need to buffer them. */
-			ptr = iov[0].iov_base;
+			uint32_t offset = 0;
+
+			for (i = 0; i < iovcnt; i++) {
+				memcpy(ptr + offset, iov[i].iov_base, iov[i].iov_len);
+				offset += iov[i].iov_len;
+			}
 		}
 	}
 	tx->len = len;
 
-	ret = gni_post_send(conn, tx->id, ptr, tx->len, header);
+	ret = gni_post_send(tx);
 	if (ret) {
 		debug(CCI_DB_CONN, "%s: unable to send", __func__);
 		goto out;
@@ -3331,7 +3426,6 @@ gni_conn_request_rma_remote(gni_rma_op_t * rma_op, uint64_t remote_handle)
 	gni_tx_t *tx = NULL;
 	gni_ep_t *gep = NULL;
 	gni_conn_t *gconn = conn->priv;
-	uint32_t header = GNI_MSG_RMA_REMOTE_REQUEST;
 
 	CCI_ENTER;
 
@@ -3348,7 +3442,9 @@ gni_conn_request_rma_remote(gni_rma_op_t * rma_op, uint64_t remote_handle)
 	tx->msg_type = GNI_MSG_RMA_REMOTE_REQUEST;
 	tx->flags = 0;
 	tx->rma_op = rma_op;
+	tx->header = GNI_MSG_RMA_REMOTE_REQUEST;
 	tx->len = sizeof(remote_handle);
+	memcpy(&tx->buffer, &remote_handle, tx->len);
 
 	memset(&tx->evt, 0, sizeof(cci__evt_t));
 	tx->evt.conn = conn;
@@ -3359,12 +3455,13 @@ gni_conn_request_rma_remote(gni_rma_op_t * rma_op, uint64_t remote_handle)
 	TAILQ_INSERT_TAIL(&gconn->rma_ops, rma_op, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-	ret =
-	    gni_post_send(conn, tx->id, &remote_handle, tx->len, header);
+	ret = gni_post_send(tx);
 
 	CCI_EXIT;
 	return ret;
 }
+
+gni_mem_handle_t NULL_HNDL;
 
 static int gni_post_rma(gni_rma_op_t * rma_op)
 {
@@ -3375,6 +3472,17 @@ static int gni_post_rma(gni_rma_op_t * rma_op)
 
 	CCI_ENTER;
 
+	if (rma_op->remote_addr == 0 &&
+		0 == memcmp(&rma_op->remote_mem_hndl, &NULL_HNDL, sizeof(NULL_HNDL))) {
+		cci__ep_t *ep = rma_op->evt.ep;
+
+		/* invalid remote handle, complete now */
+		rma_op->status = CCI_ERR_RMA_HANDLE;
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_INSERT_TAIL(&ep->evts, &rma_op->evt, entry);
+		pthread_mutex_unlock(&ep->lock);
+		goto out;
+	}
 	rma_op->pd.remote_addr = rma_op->remote_addr + rma_op->remote_offset;
 	rma_op->pd.remote_mem_hndl = rma_op->remote_mem_hndl;
 
@@ -3387,6 +3495,7 @@ static int gni_post_rma(gni_rma_op_t * rma_op)
 			__func__, cci_strerror(&ep->endpoint, grc), grc);
 	}
 
+out:
 	CCI_EXIT;
 	return ret;
 }
