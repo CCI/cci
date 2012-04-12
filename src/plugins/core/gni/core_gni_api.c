@@ -1148,6 +1148,7 @@ gni_post_send(gni_tx_t *tx)
 
 	CCI_ENTER;
 
+	assert((tx->len >> 12) == 0);
 	tx->header |= (tx->len << 4);
 	debug(CCI_DB_MSG, "%s: posting msg 0x%x id %u", __func__, tx->header, tx->id);
 
@@ -1183,6 +1184,7 @@ gni_post_send(gni_tx_t *tx)
 	pthread_mutex_unlock(&ep->lock);
 
 	debug(CCI_DB_MSG, "%s: sending msg 0x%x id %u", __func__, tx->header, tx->id);
+
 	grc = GNI_SmsgSend(gconn->peer, &tx->header, sizeof(tx->header),
 			tx->buffer, tx->len, tx->id);
 	if (grc) {
@@ -1280,7 +1282,7 @@ static int gni_accept(union cci_event *event, void *context)
 	grc = GNI_MemRegister(gep->nic, (uintptr_t) gconn->msg_buffer,
 			gconn->buff_size, gep->rx_cq, GNI_MEM_READWRITE,
 			-1, &gconn->mem_hndl);
-	if (grc == -1) {
+	if (grc) {
 		ret = gni_to_cci_status(grc);
 		goto out;
 	}
@@ -2501,12 +2503,13 @@ gni_handle_rma_remote_request(cci__conn_t *conn, void *msg)
 	gni_tx_t *tx = NULL;
 	gni_rma_handle_t *handle = NULL;
 	gni_rma_handle_t *h = NULL;
-	uint64_t *request = (uint64_t *)(msg + sizeof(uint32_t));
+	uint32_t *header = (uint32_t *)msg;
+	uint64_t *request = (uint64_t *)(msg + (uintptr_t) sizeof(*header));
 	gni_rma_addr_mhndl_t info;
 
 	CCI_ENTER;
 
-	assert(GNI_MSG_TYPE(*((uint32_t*)msg)) == GNI_MSG_RMA_REMOTE_REQUEST);
+	assert(GNI_MSG_TYPE(*header) == GNI_MSG_RMA_REMOTE_REQUEST);
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_FOREACH(h, &gep->handles, entry) {
@@ -2516,6 +2519,9 @@ gni_handle_rma_remote_request(cci__conn_t *conn, void *msg)
 		}
 	}
 	pthread_mutex_unlock(&ep->lock);
+
+	debug(CCI_DB_MSG, "%s: peer requested RMA handle 0x%"PRIx64" (%s) 0x%x",
+		__func__, *request, handle ? "found" : "not found", *header);
 
 	tx = gni_get_tx(ep);
 	if (!tx) {
@@ -2671,9 +2677,6 @@ static int gni_get_recv_event(cci__ep_t * ep)
 		uint32_t id = GNI_CQ_GET_INST_ID(gevt);
 		cci__conn_t *conn = NULL;
 		gni_conn_t *gconn = NULL;
-		void *msg = NULL;
-		uint32_t header = 0;
-		gni_msg_type_t msg_type;
 
 		debug(CCI_DB_MSG, "%s: recv'd rx completion on conn %u",
 			__func__, id);
@@ -2716,12 +2719,21 @@ static int gni_get_recv_event(cci__ep_t * ep)
 
 		/* we may get 0, 1, or many SMSGs */
 		do {
+			void *msg = NULL;
+			uint32_t *header = NULL;
+			uint32_t len = 0;
+			gni_msg_type_t msg_type;
+
 			grc = GNI_SmsgGetNext(gconn->peer, &msg);
 			if (grc != GNI_RC_SUCCESS) {
 				ret = gni_to_cci_status(grc);
 				goto out;
 			}
-			memcpy(&header, msg, sizeof(header));
+
+			header = (uint32_t *)msg;
+			msg_type = GNI_MSG_TYPE(*header);
+			len = (*header >> 4) & 0xFFF;
+			memcpy(rx->ptr, msg, sizeof(*header) + len);
 
 			grc = GNI_SmsgRelease(gconn->peer);
 			if (grc != GNI_RC_SUCCESS) {
@@ -2729,25 +2741,23 @@ static int gni_get_recv_event(cci__ep_t * ep)
 				goto out;
 			}
 
-			debug(CCI_DB_MSG, "%s: recv'd rx %d completion from %s:%u",
-				__func__, GNI_MSG_TYPE(header),
-				inet_ntoa(gconn->sin.sin_addr), ntohs(gconn->sin.sin_port));
+			debug(CCI_DB_MSG, "%s: recv'd rx %d completion from %s:%u (0x%x)",
+				__func__, msg_type,
+				inet_ntoa(gconn->sin.sin_addr), ntohs(gconn->sin.sin_port),
+				*((uint32_t *)rx->ptr));
 
-			msg_type = GNI_MSG_TYPE(header);
 			switch (msg_type) {
 			case GNI_MSG_SEND:
 				rx->evt.conn = conn;
-				ret = gni_handle_recv(rx, msg);
+				ret = gni_handle_recv(rx, rx->ptr);
 				break;
 			case GNI_MSG_RMA_REMOTE_REQUEST:
-				/* FIXME do not need the rx, put it */
-				ret = gni_handle_rma_remote_request(conn, msg);
+				ret = gni_handle_rma_remote_request(conn, rx->ptr);
 				gni_put_rx(rx);
 				rx = NULL;
 				break;
 			case GNI_MSG_RMA_REMOTE_REPLY:
-				/* FIXME do not need the rx, put it */
-				ret = gni_handle_rma_remote_reply(conn, msg);
+				ret = gni_handle_rma_remote_reply(conn, rx->ptr);
 				gni_put_rx(rx);
 				rx = NULL;
 				break;
@@ -2882,6 +2892,18 @@ gni_rma_send_completion(cci__ep_t *ep, gni_cq_entry_t gevt)
 
 	rma_op->status = GNI_CQ_GET_STATUS(gevt);
 	rma_op->status = gni_to_cci_status(rma_op->status);
+
+	if (rma_op->status == CCI_SUCCESS && rma_op->buf) {
+		/* TODO copy the data to the user buffer
+		 *      unregister and free buf */
+		void *src = NULL, *dest = NULL;
+		gni_rma_handle_t *local =
+			(gni_rma_handle_t *) (uintptr_t) rma_op->local_handle;
+
+		dest = (void *) (local->addr + rma_op->local_offset);
+		src = rma_op->buf + (((uintptr_t) rma_op->remote_addr) & 0xC);
+		memcpy(dest, src, rma_op->data_len);
+	}
 
 	if (!rma_op->msg_ptr || rma_op->status != CCI_SUCCESS) {
 	      queue:
@@ -3124,6 +3146,21 @@ static int gni_return_event(cci_event_t * event)
 				pthread_mutex_lock(&ep->lock);
 				TAILQ_REMOVE(&gep->rma_ops, rma_op, entry);
 				pthread_mutex_unlock(&ep->lock);
+				if (rma_op->buf) {
+					gni_return_t grc;
+
+					grc = GNI_MemDeregister(gep->nic,
+							&rma_op->pd.local_mem_hndl);
+					if (grc) {
+						debug(CCI_DB_MSG, "%s: unable to "
+							"deregister bounce buffer (%s - %u)",
+							__func__,
+							cci_strerror(&ep->endpoint,
+								gni_to_cci_status(grc)),
+							grc);
+					}
+					free(rma_op->buf);
+				}
 				free(rma_op);
 			} else {
 				tx = container_of(evt, gni_tx_t, evt);
@@ -3438,15 +3475,16 @@ gni_conn_request_rma_remote(gni_rma_op_t * rma_op, uint64_t remote_handle)
 		return CCI_ENOBUFS;
 	}
 
+	debug(CCI_DB_MSG, "%s: requesting remote_handle 0x%"PRIx64, __func__, remote_handle);
+
 	/* tx bookkeeping */
 	tx->msg_type = GNI_MSG_RMA_REMOTE_REQUEST;
 	tx->flags = 0;
 	tx->rma_op = rma_op;
 	tx->header = GNI_MSG_RMA_REMOTE_REQUEST;
 	tx->len = sizeof(remote_handle);
-	memcpy(&tx->buffer, &remote_handle, tx->len);
+	memcpy(tx->buffer, &remote_handle, tx->len);
 
-	memset(&tx->evt, 0, sizeof(cci__evt_t));
 	tx->evt.conn = conn;
 	tx->evt.ep = ep;
 
@@ -3472,8 +3510,8 @@ static int gni_post_rma(gni_rma_op_t * rma_op)
 
 	CCI_ENTER;
 
-	if (rma_op->remote_addr == 0 &&
-		0 == memcmp(&rma_op->remote_mem_hndl, &NULL_HNDL, sizeof(NULL_HNDL))) {
+	if (unlikely(rma_op->remote_addr == 0 &&
+		0 == memcmp(&rma_op->remote_mem_hndl, &NULL_HNDL, sizeof(NULL_HNDL)))) {
 		cci__ep_t *ep = rma_op->evt.ep;
 
 		/* invalid remote handle, complete now */
@@ -3486,13 +3524,70 @@ static int gni_post_rma(gni_rma_op_t * rma_op)
 	rma_op->pd.remote_addr = rma_op->remote_addr + rma_op->remote_offset;
 	rma_op->pd.remote_mem_hndl = rma_op->remote_mem_hndl;
 
+	if (unlikely(rma_op->pd.type == GNI_POST_RDMA_GET &&
+			((rma_op->pd.local_addr & 0x3) ||
+			(rma_op->pd.remote_addr & 0x3) ||
+			(rma_op->pd.length & 0x3)))) {
+		/* GNI requires 4-byte aligned addresses and length
+		 * for GETs. We need to alloc and register a bounce
+		 * buffer and then align the addresses and/or length
+		 * and RMA into the bounce buffer. When complete,
+		 * copy to the user buffer and ignore the extra bytes */
+
+		int local_addr_pad = rma_op->pd.local_addr & 0x3;
+		int remote_addr_pad = rma_op->pd.remote_addr & 0x3;
+		int length_pad = rma_op->pd.length & 0x3;
+		uint32_t new_len = rma_op->pd.length;
+		cci__ep_t *ep = rma_op->evt.ep;
+		gni_ep_t *gep = ep->priv;
+
+		if (remote_addr_pad)
+			new_len += remote_addr_pad;
+		else if (local_addr_pad)
+			new_len += local_addr_pad;
+		else if (length_pad)
+			new_len += 4 - length_pad;
+
+		if (new_len & 0x3)
+			new_len += 4 - (new_len & 0x3);
+
+		rma_op->buf = calloc(1, new_len);
+		if (!rma_op->buf) {
+			rma_op->status = CCI_ENOMEM;
+			pthread_mutex_lock(&ep->lock);
+			TAILQ_INSERT_TAIL(&ep->evts, &rma_op->evt, entry);
+			pthread_mutex_unlock(&ep->lock);
+		}
+		rma_op->pd.length = new_len;
+		grc = GNI_MemRegister(gep->nic, (uintptr_t) rma_op->buf,
+			new_len, NULL, GNI_MEM_READWRITE,
+			-1, &rma_op->pd.local_mem_hndl);
+		if (grc) {
+			debug(CCI_DB_MSG, "%s: unable to register bounce buffer (%s - %u)",
+				__func__,
+				cci_strerror(&ep->endpoint, gni_to_cci_status(grc)),
+				grc);
+			rma_op->status = CCI_ENOMEM;
+			free(rma_op->buf);
+			pthread_mutex_lock(&ep->lock);
+			TAILQ_INSERT_TAIL(&ep->evts, &rma_op->evt, entry);
+			pthread_mutex_unlock(&ep->lock);
+		}
+		rma_op->pd.local_addr = (uintptr_t) rma_op->buf;
+		if (remote_addr_pad)
+			rma_op->pd.remote_addr -= remote_addr_pad;
+		assert((rma_op->pd.local_addr & 0x3) == 0);
+		assert((rma_op->pd.remote_addr & 0x3) == 0);
+		assert((rma_op->pd.length & 0x3) == 0);
+	}
+
 	grc = GNI_PostRdma(gconn->peer, &rma_op->pd);
 	if (grc) {
 		cci__ep_t *ep = rma_op->evt.ep;
 
 		ret = gni_to_cci_status(grc);
-		debug(CCI_DB_MSG, "%s: PostRdma() failed with %s (%d)",
-			__func__, cci_strerror(&ep->endpoint, grc), grc);
+		debug(CCI_DB_MSG, "%s: PostRdma() failed with %s (%d) len %"PRIu64,
+			__func__, cci_strerror(&ep->endpoint, grc), grc, rma_op->pd.length);
 	}
 
 out:
@@ -3543,6 +3638,7 @@ gni_rma(cci_connection_t * connection,
 	rma_op->local_offset = local_offset;
 	rma_op->remote_handle = remote_handle;
 	rma_op->remote_offset = remote_offset;
+	rma_op->data_len = data_len;
 	rma_op->context = context;
 	rma_op->flags = flags;
 	rma_op->msg_len = msg_len;
@@ -3564,10 +3660,6 @@ gni_rma(cci_connection_t * connection,
 	rma_op->pd.local_addr = (uintptr_t) local->addr + local_offset;
 	rma_op->pd.local_mem_hndl = local->mh;
 	rma_op->pd.length = data_len;
-	if (unlikely(rma_op->pd.type == GNI_POST_RDMA_GET &&
-			data_len % 4 != 0)) {
-		rma_op->pd.length += 4 - (data_len % 4);
-	}
 	if (flags & CCI_FLAG_FENCE)
 		rma_op->pd.rdma_mode = GNI_RDMAMODE_FENCE;
 	/* still need remote_addr and remote_mem_hndl */

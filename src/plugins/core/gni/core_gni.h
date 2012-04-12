@@ -280,9 +280,12 @@ typedef struct gni_rma_op {
 	uint64_t local_offset;
 	uint64_t remote_handle;
 	uint64_t remote_offset;
+	uint64_t data_len;
 
 	uint64_t remote_addr;
 	gni_mem_handle_t remote_mem_hndl; /* memory handle */
+
+	void *buf;			/* bounce buffer for unaligned GETs */
 
 	cci_status_t status;
 	void *context;
