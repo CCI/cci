@@ -323,9 +323,7 @@ static int eth__get_devices(cci_plugin_core_t *plugin)
 			if (is_loopback)
 				_dev->is_default = 1;
 
-			pthread_mutex_lock(&globals->lock);
 			cci__add_dev(_dev);
-			pthread_mutex_unlock(&globals->lock);
 		}
 
 	} else {
@@ -403,10 +401,8 @@ static int eth__get_devices(cci_plugin_core_t *plugin)
 				if (_dev->priority == -1)
 					_dev->priority = plugin->base.priority;
 
-				pthread_mutex_lock(&globals->lock);
 				TAILQ_REMOVE(&globals->configfile_devs, _dev, entry);
 				cci__add_dev(_dev);
-				pthread_mutex_unlock(&globals->lock);
 			}
 		}
 	}
@@ -485,11 +481,9 @@ static int eth_finalize(cci_plugin_core_t *plugin)
 {
 	cci__dev_t *_dev = NULL;
 
-        pthread_mutex_lock(&globals->lock);
         TAILQ_FOREACH(_dev, &globals->devs, entry)
 		if (!strcmp(_dev->driver, "eth"))
 			free(_dev->priv);
-        pthread_mutex_unlock(&globals->lock);
 
 	close(eglobals->fd);
 	free(eglobals);
