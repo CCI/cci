@@ -573,11 +573,13 @@ out:
 	return ret;
 }
 
-static int eth_destroy_endpoint(cci_endpoint_t * endpoint)
+static int eth_destroy_endpoint(cci_endpoint_t * endpointp)
 {
+	struct cci_endpoint *endpoint = (struct cci_endpoint *) endpointp;
 	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
 	eth__ep_t *eep = ep->priv;
 	close(eep->fd);
+	free((void *) endpoint->name);
 	free(eep);
 	return CCI_SUCCESS;
 }
