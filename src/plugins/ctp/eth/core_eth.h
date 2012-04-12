@@ -10,6 +10,8 @@
 #include "cci/config.h"
 #include "ccieth_io.h"
 
+#include "bsd/queue.h"
+
 #include <netpacket/packet.h>
 #include <stdint.h>
 
@@ -22,11 +24,17 @@ typedef struct eth__dev {
 
 typedef struct eth__ep {
 	int fd;
+
+	/*! List of connection (for bookkeeping) */
+	TAILQ_HEAD(eep_conns, eth__conn) connections;
 } eth__ep_t;
 
 typedef struct eth__conn {
 	uint32_t id;
 	cci__conn_t _conn;
+
+	/*! Entry for the endpoint connection list */
+	TAILQ_ENTRY(eth__conn) entry;
 } eth__conn_t;
 
 typedef struct eth__evt {

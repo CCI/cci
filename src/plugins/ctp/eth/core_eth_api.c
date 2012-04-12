@@ -560,6 +560,8 @@ static int eth_create_endpoint(cci_device_t * device,
 	ccieth_uri_sprintf(name, (const uint8_t *)&edev->addr.sll_addr, arg.id);
 	endpoint->name = name;
 
+	TAILQ_INIT(&eep->connections);
+
 	*fdp = eep->fd = fd;
 	return CCI_SUCCESS;
 
@@ -578,6 +580,13 @@ static int eth_destroy_endpoint(cci_endpoint_t * endpointp)
 	struct cci_endpoint *endpoint = (struct cci_endpoint *) endpointp;
 	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
 	eth__ep_t *eep = ep->priv;
+
+	while (!TAILQ_EMPTY(&eep->connections)) {
+		eth__conn_t *econn = TAILQ_FIRST(&eep->connections);
+		TAILQ_REMOVE(&eep->connections, econn, entry);
+		free(econn);
+	}
+
 	close(eep->fd);
 	free((void *) endpoint->name);
 	free(eep);
@@ -625,6 +634,11 @@ static int eth_accept(cci_event_t *event, const void *context)
 	_conn->connection.endpoint = &_ep->endpoint;
 	_conn->connection.attribute = ge->connect_request.attribute;
 	_conn->connection.context = (void *)context;
+
+
+	pthread_mutex_lock(&_ep->lock);
+	TAILQ_INSERT_TAIL(&eep->connections, econn, entry);
+	pthread_mutex_unlock(&_ep->lock);
 
 	return CCI_SUCCESS;
 }
@@ -694,6 +708,10 @@ static int eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		free(econn);
 		return errno;
 	}
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_TAIL(&eep->connections, econn, entry);
+	pthread_mutex_unlock(&ep->lock);
 
 	return CCI_SUCCESS;
 }
@@ -822,6 +840,9 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 			if (ge->connect.status != 0) {
 				/* failed */
 				event->connect.connection = NULL;
+				pthread_mutex_lock(&_ep->lock);
+				TAILQ_REMOVE(&eep->connections, econn, entry);
+				pthread_mutex_unlock(&_ep->lock);
 				free(econn);
 			} else {
 				/* success */
@@ -860,6 +881,9 @@ static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 			if (ge->connect.status != 0) {
 				/* failed */
 				event->connect.connection = NULL;
+				pthread_mutex_lock(&_ep->lock);
+				TAILQ_REMOVE(&eep->connections, econn, entry);
+				pthread_mutex_unlock(&_ep->lock);
 				free(econn);
 			} else {
 				/* success */
