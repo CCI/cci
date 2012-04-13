@@ -20,11 +20,6 @@
 
 int cci_get_devices(cci_device_t * const ** devicesp)
 {
-	cci_device_t **devices;
-	cci__dev_t *dev;
-	int ret;
-	int i, nb;
-
 	/* FIXME: if we have to update the device array at runtime,
 	 * add a update_devices plugin callback and call of them here
 	 * (with globals->lock held),

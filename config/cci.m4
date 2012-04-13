@@ -72,6 +72,7 @@ AC_DEFUN([CCI_SETUP_CORE],[
         CPPFLAGS="$CPPFLAGS -I$CCI_top_builddir/include"
     fi
     CPPFLAGS="$CPPFLAGS -I$CCI_top_srcdir/src -I$CCI_top_srcdir/src/libltdl"
+    CPPFLAGS="$CPPFLAGS -I$CCI_top_srcdir/src/api"
 
     # Look for some header files
     AC_CHECK_HEADERS(errno.h stdint.h sys/types.h sys/time.h sys/uio.h)

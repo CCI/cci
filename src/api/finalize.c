@@ -16,6 +16,7 @@
 
 #include "cci.h"
 #include "plugins/base/public.h"
+#include "plugins/core/base/public.h"
 #include "plugins/core/core.h"
 #include "cci-api.h"
 
