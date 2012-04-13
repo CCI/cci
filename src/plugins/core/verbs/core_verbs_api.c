@@ -26,6 +26,7 @@
 
 #include "cci.h"
 #include "plugins/core/core.h"
+#include "cci-api.h"
 #include "core_verbs.h"
 
 volatile int verbs_shut_down = 0;
