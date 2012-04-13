@@ -1561,6 +1561,8 @@ verbs_find_conn(cci__ep_t *ep, uint32_t qp_num, cci__conn_t **conn)
 		assert(vconn->qp_num == qp_num);
 		*conn = vconn->conn;
 		ret = CCI_SUCCESS;
+	} else {
+		debug(CCI_DB_CONN, "%s: unable to find qp_num %u", __func__, qp_num);
 	}
 
 	CCI_EXIT;
@@ -1572,16 +1574,17 @@ verbs_insert_conn(cci__conn_t *conn)
 {
 	cci__ep_t *ep = container_of(conn->connection.endpoint, cci__ep_t, endpoint);
 	verbs_ep_t *vep = ep->priv;
-	verbs_conn_t *gconn = conn->priv;
+	verbs_conn_t *vconn = conn->priv;
 	void *node = NULL;
 
 	CCI_ENTER;
 
 	pthread_rwlock_wrlock(&vep->conn_tree_lock);
 	do {
-		node = tsearch(&gconn->qp_num, &vep->conn_tree, verbs_compare_u32);
+		node = tsearch(&vconn->qp_num, &vep->conn_tree, verbs_compare_u32);
 	} while (!node);
 	pthread_rwlock_unlock(&vep->conn_tree_lock);
+	debug(CCI_DB_CONN, "%s: added conn %p qp_num %u", __func__, conn, vconn->qp_num);
 
 	CCI_EXIT;
 	return;
@@ -1851,6 +1854,10 @@ static int verbs_disconnect(cci_connection_t * connection)
 	verbs_ep_t *vep = ep->priv;
 
 	CCI_ENTER;
+
+	pthread_rwlock_wrlock(&vep->conn_tree_lock);
+	tdelete(&vconn->qp_num, &vep->conn_tree, verbs_compare_u32);
+	pthread_rwlock_unlock(&vep->conn_tree_lock);
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_REMOVE(&vep->conns, vconn, entry);
@@ -2807,7 +2814,6 @@ static int verbs_handle_recv(cci__ep_t * ep, struct ibv_wc wc)
 
 static int verbs_complete_send_msg(cci__ep_t * ep, struct ibv_wc wc)
 {
-	int ret = CCI_SUCCESS;
 	verbs_tx_t *tx = (verbs_tx_t *) (uintptr_t) wc.wr_id;
 
 	CCI_ENTER;
@@ -2818,7 +2824,7 @@ static int verbs_complete_send_msg(cci__ep_t * ep, struct ibv_wc wc)
 	pthread_mutex_unlock(&ep->lock);
 
 	CCI_EXIT;
-	return ret;
+	return CCI_SUCCESS;
 }
 
 static int verbs_complete_send(cci__ep_t * ep, struct ibv_wc wc)
@@ -2826,7 +2832,6 @@ static int verbs_complete_send(cci__ep_t * ep, struct ibv_wc wc)
 	int ret = CCI_SUCCESS;
 	verbs_msg_type_t type = VERBS_MSG_INVALID;
 	verbs_tx_t *tx = (verbs_tx_t *) (uintptr_t) wc.wr_id;
-	verbs_ep_t *vep = ep->priv;
 
 	CCI_ENTER;
 
@@ -2846,11 +2851,6 @@ static int verbs_complete_send(cci__ep_t * ep, struct ibv_wc wc)
 		      "%s: ignoring send completion for msg type %d", __func__,
 		      type);
 		break;
-	}
-	if (type != VERBS_MSG_INVALID && type != VERBS_MSG_SEND) {
-		pthread_mutex_lock(&ep->lock);
-		TAILQ_INSERT_HEAD(&vep->idle_txs, tx, entry);
-		pthread_mutex_unlock(&ep->lock);
 	}
 
 	CCI_EXIT;
@@ -2905,7 +2905,10 @@ static int verbs_handle_rma_completion(cci__ep_t * ep, struct ibv_wc wc)
 static int verbs_handle_send_completion(cci__ep_t * ep, struct ibv_wc wc)
 {
 	int ret = CCI_SUCCESS;
+	int queue_tx = 1;
 	verbs_tx_t *tx = (verbs_tx_t *) (uintptr_t) wc.wr_id;
+	verbs_ep_t *vep = ep->priv;
+
 
 	CCI_ENTER;
 
@@ -2928,6 +2931,7 @@ static int verbs_handle_send_completion(cci__ep_t * ep, struct ibv_wc wc)
 				free(vconn);
 				free(conn);
 			} else {
+				queue_tx = 0;
 				pthread_mutex_lock(&ep->lock);
 				TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
 				pthread_mutex_unlock(&ep->lock);
@@ -2937,16 +2941,11 @@ static int verbs_handle_send_completion(cci__ep_t * ep, struct ibv_wc wc)
 	case VERBS_MSG_SEND:
 		debug(CCI_DB_CONN, "%s: send completed", __func__);
 		ret = verbs_complete_send(ep, wc);
+		if (!ret)
+			queue_tx = 0;
 		break;
 	case VERBS_MSG_RMA_REMOTE_REQUEST:
 	case VERBS_MSG_RMA_REMOTE_REPLY:
-		{
-			verbs_ep_t *vep = ep->priv;
-
-			pthread_mutex_lock(&ep->lock);
-			TAILQ_INSERT_HEAD(&vep->idle_txs, tx, entry);
-			pthread_mutex_unlock(&ep->lock);
-		}
 		break;
 	default:
 		debug(CCI_DB_MSG, "%s: ignoring %s msg",
@@ -2954,6 +2953,11 @@ static int verbs_handle_send_completion(cci__ep_t * ep, struct ibv_wc wc)
 		break;
 	}
 
+	if (queue_tx) {
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_INSERT_HEAD(&vep->idle_txs, tx, entry);
+		pthread_mutex_unlock(&ep->lock);
+	}
       out:
 	CCI_EXIT;
 	return ret;
