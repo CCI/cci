@@ -363,8 +363,6 @@ typedef struct gni_conn {
 	struct sockaddr_in sin;		/* peer address and port */
 	uint32_t mss;			/* max send size */
 	uint32_t max_tx_cnt;		/* max sends in flight */
-	uint32_t in_flight;		/* send in flight */
-	uint32_t need_completion;
 	TAILQ_HEAD(c_txs, gni_tx) pending;
 
 	void *msg_buffer;		/* mbox buffer */
