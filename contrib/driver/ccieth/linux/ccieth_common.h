@@ -269,6 +269,7 @@ extern int ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data);
 extern int ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_request *arg);
 extern int ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_accept *arg);
 extern int ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_reject *arg);
+extern int ccieth_disconnect(struct ccieth_endpoint *ep, struct ccieth_ioctl_disconnect *arg);
 extern void ccieth_deferred_connect_recv_workfunc(struct work_struct *work);
 extern int ccieth_defer_connect_recv(struct net_device *ifp, __u8 type, struct sk_buff *skb);
 

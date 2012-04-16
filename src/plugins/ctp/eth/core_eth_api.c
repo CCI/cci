@@ -718,8 +718,27 @@ static int eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
 
 static int eth_disconnect(cci_connection_t * connection)
 {
-	printf("In eth_disconnect\n");
-	return CCI_ERR_NOT_IMPLEMENTED;
+	cci__conn_t *_conn = container_of(connection, cci__conn_t, connection);
+	eth__conn_t *econn = container_of(_conn, eth__conn_t, _conn);
+	cci_endpoint_t *endpoint = connection->endpoint;
+	cci__ep_t *_ep = container_of(endpoint, cci__ep_t, endpoint);
+	eth__ep_t *eep = _ep->priv;
+	struct ccieth_ioctl_disconnect arg;
+	int ret;
+
+	arg.conn_id = econn->id;
+	ret = ioctl(eep->fd, CCIETH_IOCTL_DISCONNECT, &arg);
+	if (ret < 0) {
+		perror("ioctl disconnect");
+		return errno;
+	}
+
+	pthread_mutex_lock(&_ep->lock);
+	TAILQ_REMOVE(&eep->connections, econn, entry);
+	pthread_mutex_unlock(&_ep->lock);
+	free(econn);
+
+	return CCI_SUCCESS;
 }
 
 static int eth_set_opt(cci_opt_handle_t * handle,

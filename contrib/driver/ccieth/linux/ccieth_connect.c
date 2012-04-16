@@ -1308,6 +1308,45 @@ out:
 	return err;
 }
 
+int
+ccieth_disconnect(struct ccieth_endpoint *ep, struct ccieth_ioctl_disconnect *arg)
+{
+	struct ccieth_connection *conn;
+	int err;
+
+	rcu_read_lock();
+
+	/* find the connection and mark it as CLOSING */
+	err = -EINVAL;
+	conn = idr_find(&ep->connection_idr, arg->conn_id);
+	if (!conn)
+		goto out_with_rculock;
+
+	if (cmpxchg(&conn->status, CCIETH_CONNECTION_READY, CCIETH_CONNECTION_CLOSING)
+	    != CCIETH_CONNECTION_READY)
+		goto out_with_rculock;
+
+	rcu_read_unlock();
+
+	dprintk("destroying disconnected connection %p\n", conn);
+
+	/* we set to CLOSING, we own the connection now, nobody else may destroy it */
+	del_timer_sync(&conn->connect_timer);
+	ccieth_conn_stop_sync(conn);
+	ccieth_conn_stats_destroy(conn);
+	spin_lock(&ep->connection_idr_lock);
+	idr_remove(&ep->connection_idr, conn->id);
+	spin_unlock(&ep->connection_idr_lock);
+	/* destroy the connection immediately (after RCU grace period) */
+	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
+
+	return 0;
+
+out_with_rculock:
+	rcu_read_unlock();
+	return err;
+}
+
 /*
  * Generic receiving of connect packets
  */

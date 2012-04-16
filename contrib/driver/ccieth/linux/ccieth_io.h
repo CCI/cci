@@ -148,6 +148,11 @@ struct ccieth_ioctl_msg {
 };
 #define CCIETH_IOCTL_MSG _IOR(CCIETH_IOCTL_MAGIC, 0x8, struct ccieth_ioctl_msg)
 
+struct ccieth_ioctl_disconnect {
+	__u32 conn_id;
+};
+#define CCIETH_IOCTL_DISCONNECT _IOR(CCIETH_IOCTL_MAGIC, 0x9, struct ccieth_ioctl_disconnect)
+
 #define CCIETH_FLAG_BLOCKING	(1 << 0)
 /* NO_COPY unused in ccieth, 1<<2 unused in cci */
 #define CCIETH_FLAG_SILENT	(1 << 3)

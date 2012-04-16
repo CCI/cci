@@ -441,6 +441,24 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		return 0;
 	}
 
+	case CCIETH_IOCTL_DISCONNECT: {
+		struct ccieth_ioctl_disconnect di_arg;
+		struct ccieth_endpoint *ep = file->private_data;
+
+		if (!ep)
+			return -EINVAL;
+
+		ret = copy_from_user(&di_arg, (__user void *)arg, sizeof(di_arg));
+		if (ret)
+			return -EFAULT;
+
+		ret = ccieth_disconnect(ep, &di_arg);
+		if (ret < 0)
+			return ret;
+
+		return 0;
+	}
+
 	case CCIETH_IOCTL_MSG: {
 		struct ccieth_ioctl_msg ms_arg;
 		struct ccieth_endpoint *ep = file->private_data;
