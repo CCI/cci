@@ -189,7 +189,7 @@ ccieth_conn_stats_init(struct ccieth_connection *conn, const char *prefix)
 }
 
 static void
-ccieth_conn_stats_stop(struct ccieth_connection *conn)
+ccieth_conn_stats_destroy(struct ccieth_connection *conn)
 {
 #ifdef CONFIG_CCIETH_DEBUGFS
 	if (conn->debugfs_dir)
@@ -236,7 +236,7 @@ ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 	del_timer_sync(&conn->connect_timer);
 	ccieth_conn_stop_sync(conn);
 	/* remove our debugfs entries now, so that the caller can remove its endpoint debugfs dir */
-	ccieth_conn_stats_stop(conn);
+	ccieth_conn_stats_destroy(conn);
 	/* the caller will destroy the entire idr, no need to remove us from there */
 	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
 
@@ -301,6 +301,7 @@ void ccieth_connect_request_timer_hdlr(unsigned long _data)
 	idr_remove(&ep->connection_idr, conn->id);
 	spin_unlock(&ep->connection_idr_lock);
 	/* ccieth_conn_stop_sync() not needed, the connection has never been ready */
+	ccieth_conn_stats_destroy(conn);
 
 	dprintk("delivering connection %p timeout\n", conn);
 	conn->embedded_event.event.type = CCIETH_IOCTL_EVENT_CONNECT;
@@ -475,7 +476,7 @@ retry:
 
 out_with_rculock:
 	rcu_read_unlock();
-	ccieth_conn_stats_stop(conn);
+	ccieth_conn_stats_destroy(conn);
 out_with_skb2:
 	kfree_skb(skb2);
 out_with_skb:
@@ -951,6 +952,8 @@ ccieth__recv_connect_reject(struct ccieth_endpoint *ep,
 
 	/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 	del_timer_sync(&conn->connect_timer);
+	/* ccieth_conn_stop_sync() not needed, the connection has never been ready */
+	ccieth_conn_stats_destroy(conn);
 	spin_lock(&ep->connection_idr_lock);
 	idr_remove(&ep->connection_idr, dst_conn_id);
 	spin_unlock(&ep->connection_idr_lock);
@@ -1232,6 +1235,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 		/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 		del_timer_sync(&conn->connect_timer);
 		ccieth_conn_stop_sync(conn);
+		ccieth_conn_stats_destroy(conn);
 		spin_lock(&ep->connection_idr_lock);
 		idr_remove(&ep->connection_idr, dst_conn_id);
 		spin_unlock(&ep->connection_idr_lock);
@@ -1243,6 +1247,7 @@ ccieth__recv_connect_ack(struct ccieth_endpoint *ep,
 		/* we set to CLOSING, we own the connection now, nobody else may destroy it */
 		del_timer_sync(&conn->connect_timer);
 		ccieth_conn_stop_sync(conn);
+		ccieth_conn_stats_destroy(conn);
 		spin_lock(&ep->connection_idr_lock);
 		idr_remove(&ep->connection_idr, conn->id);
 		spin_unlock(&ep->connection_idr_lock);
