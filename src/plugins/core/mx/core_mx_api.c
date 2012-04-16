@@ -57,7 +57,7 @@ static int mx_rma_register(cci_endpoint_t * endpoint,
 			   int flags, uint64_t * rma_handle);
 static int mx_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
 static int mx_rma(cci_connection_t * connection,
-		  void *header_ptr, uint32_t header_len,
+		  const void *header_ptr, uint32_t header_len,
 		  uint64_t local_handle, uint64_t local_offset,
 		  uint64_t remote_handle, uint64_t remote_offset,
 		  uint64_t data_len, void *context, int flags);
@@ -268,7 +268,7 @@ static int mx_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
 }
 
 static int mx_rma(cci_connection_t * connection,
-		  void *header_ptr, uint32_t header_len,
+		  const void *header_ptr, uint32_t header_len,
 		  uint64_t local_handle, uint64_t local_offset,
 		  uint64_t remote_handle, uint64_t remote_offset,
 		  uint64_t data_len, void *context, int flags)

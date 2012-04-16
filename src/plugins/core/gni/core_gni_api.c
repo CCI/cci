@@ -84,10 +84,10 @@ static int gni_rma_register(cci_endpoint_t * endpoint,
 static int gni_rma_deregister(cci_endpoint_t * endpoint,
 			      uint64_t rma_handle);
 static int gni_rma(cci_connection_t * connection,
-		     void *msg_ptr, uint32_t msg_len,
-		     uint64_t local_handle, uint64_t local_offset,
-		     uint64_t remote_handle, uint64_t remote_offset,
-		     uint64_t data_len, const void *context, int flags);
+		   const void *msg_ptr, uint32_t msg_len,
+		   uint64_t local_handle, uint64_t local_offset,
+		   uint64_t remote_handle, uint64_t remote_offset,
+		   uint64_t data_len, const void *context, int flags);
 
 /*
  * Public plugin structure.
@@ -3521,7 +3521,7 @@ out:
 
 static int
 gni_rma(cci_connection_t * connection,
-	  void *msg_ptr, uint32_t msg_len,
+	  const void *msg_ptr, uint32_t msg_len,
 	  uint64_t local_handle, uint64_t local_offset,
 	  uint64_t remote_handle, uint64_t remote_offset,
 	  uint64_t data_len, const void *context, int flags)
@@ -3566,7 +3566,7 @@ gni_rma(cci_connection_t * connection,
 	rma_op->context = (void *) context;
 	rma_op->flags = flags;
 	rma_op->msg_len = msg_len;
-	rma_op->msg_ptr = msg_ptr;
+	rma_op->msg_ptr = (void *) msg_ptr;
 
 	rma_op->evt.event.type = CCI_EVENT_SEND;
 	rma_op->evt.event.send.connection = connection;

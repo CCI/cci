@@ -150,7 +150,7 @@ static int portals_rma_register(cci_endpoint_t * endpoint,
 				int flags, uint64_t * rma_handle);
 static int portals_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
 static int portals_rma(cci_connection_t * connection,
-		       void *msg_ptr,
+		       const void *msg_ptr,
 		       uint32_t msg_len,
 		       uint64_t local_handle,
 		       uint64_t local_offset,
@@ -2480,7 +2480,7 @@ static int portals_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle
 }
 
 static int portals_rma(cci_connection_t * connection,
-		       void *msg_ptr, uint32_t msg_len,
+		       const void *msg_ptr, uint32_t msg_len,
 		       uint64_t local_handle, uint64_t local_offset,
 		       uint64_t remote_handle, uint64_t remote_offset,
 		       uint64_t data_len, const void *context, int flags)
@@ -2567,7 +2567,7 @@ static int portals_rma(cci_connection_t * connection,
 	rma_op->evt.priv = rma_op;
 
 	if (msg_len)
-		rma_op->msg_ptr = msg_ptr;
+		rma_op->msg_ptr = (void *) msg_ptr;
 	else
 		rma_op->msg_ptr = NULL;
 

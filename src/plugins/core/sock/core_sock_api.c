@@ -90,7 +90,7 @@ static int sock_rma_register(cci_endpoint_t * endpoint,
 			     int flags, uint64_t * rma_handle);
 static int sock_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
 static int sock_rma(cci_connection_t * connection,
-		    void *header_ptr, uint32_t header_len,
+		    const void *header_ptr, uint32_t header_len,
 		    uint64_t local_handle, uint64_t local_offset,
 		    uint64_t remote_handle, uint64_t remote_offset,
 		    uint64_t data_len, const void *context, int flags);
@@ -2390,7 +2390,7 @@ generate_context_id(sock_conn_t * sconn, const void *context, uint64_t * context
 }
 
 static int sock_rma(cci_connection_t * connection,
-		    void *msg_ptr, uint32_t msg_len,
+		    const void *msg_ptr, uint32_t msg_len,
 		    uint64_t local_handle, uint64_t local_offset,
 		    uint64_t remote_handle, uint64_t remote_offset,
 		    uint64_t data_len, const void *context, int flags)
@@ -2469,7 +2469,7 @@ static int sock_rma(cci_connection_t * connection,
 	rma_op->tx = NULL;
 
 	if (msg_len)
-		rma_op->msg_ptr = msg_ptr;
+		rma_op->msg_ptr = (void *) msg_ptr;
 	else
 		rma_op->msg_ptr = NULL;
 
