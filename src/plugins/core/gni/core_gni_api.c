@@ -49,7 +49,7 @@ pthread_t progress_tid;
 static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
 static int gni_finalize(void);
 static const char *gni_strerror(cci_endpoint_t * endpoint, enum cci_status status);
-static int gni_get_devices(cci_device_t const ***devices);
+static int gni_get_devices(cci_device_t * const **devices);
 static int gni_create_endpoint(cci_device_t * device,
 				 int flags,
 				 cci_endpoint_t ** endpoint,
@@ -462,7 +462,7 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			const char *interface = NULL;
 			struct in_addr in;
 			uint16_t port = 0;
-			cci_device_t *device = NULL;
+			struct cci_device *device = NULL;
 			gni_dev_t *gdev = NULL;
 
 			in.s_addr = INADDR_ANY;
@@ -643,7 +643,7 @@ static const char *gni_strerror(cci_endpoint_t * endpoint, enum cci_status statu
 	return strerror(status);
 }
 
-static int gni_get_devices(cci_device_t const ***devices)
+static int gni_get_devices(cci_device_t * const **devices)
 {
 	CCI_ENTER;
 
