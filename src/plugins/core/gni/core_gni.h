@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
+ * Copyright © 2011-2012 UT-Battelle, LLC.
  * $COPYRIGHT$
  */
 
@@ -30,7 +31,7 @@ BEGIN_C_DECLS
    port = 12345			# base listening port
 				  the default is a random, ephemeral port
  */
-#define GNI_URI		"gni://"
+#define GNI_URI			"gni://"
 
 #define GNI_DEFAULT_PTAG	(208)
 #define GNI_DEFAULT_COOKIE	(0x73e70000)

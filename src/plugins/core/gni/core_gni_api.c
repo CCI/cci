@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
+ * Copyright © 2011-2012 UT-Battelle, LLC.
  * $COPYRIGHT$
  */
 
@@ -402,7 +403,6 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		goto out;
 	}
 
-#if 1
 	/* for each ifaddr, check if it is a GNI device */
 	ret = gni_find_gni_device_ids(&gglobals->device_ids, count, &ifaddrs);
 	if (ret) {
@@ -411,9 +411,6 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		goto out;
 	}
 	gglobals->ifaddrs = ifaddrs;
-#endif
-
-/* FIXME: if configfile == 0, create default devices */
 
 	if (!configfile) {
 		struct cci_device *device;
