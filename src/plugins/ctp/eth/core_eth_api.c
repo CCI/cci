@@ -578,8 +578,8 @@ out:
 static int eth_destroy_endpoint(cci_endpoint_t * endpointp)
 {
 	struct cci_endpoint *endpoint = (struct cci_endpoint *) endpointp;
-	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
-	eth__ep_t *eep = ep->priv;
+	cci__ep_t *_ep = container_of(endpoint, cci__ep_t, endpoint);
+	eth__ep_t *eep = _ep->priv;
 
 	while (!TAILQ_EMPTY(&eep->connections)) {
 		eth__conn_t *econn = TAILQ_FIRST(&eep->connections);
@@ -675,8 +675,8 @@ static int eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		       cci_conn_attribute_t attribute,
 		       const void *context, int flags, const struct timeval *timeout)
 {
-	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
-	eth__ep_t *eep = ep->priv;
+	cci__ep_t *_ep = container_of(endpoint, cci__ep_t, endpoint);
+	eth__ep_t *eep = _ep->priv;
 	cci__conn_t *_conn;
 	eth__conn_t *econn;
 	struct ccieth_ioctl_connect_request arg;
@@ -690,7 +690,7 @@ static int eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	if (!econn)
 		return CCI_ENOMEM;
 	_conn = &econn->_conn;
-	_conn->plugin = ep->plugin;
+	_conn->plugin = _ep->plugin;
 	_conn->connection.endpoint = endpoint;
 	_conn->connection.attribute = attribute;
 	_conn->connection.context = (void *)context;
@@ -709,9 +709,9 @@ static int eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		return errno;
 	}
 
-	pthread_mutex_lock(&ep->lock);
+	pthread_mutex_lock(&_ep->lock);
 	TAILQ_INSERT_TAIL(&eep->connections, econn, entry);
-	pthread_mutex_unlock(&ep->lock);
+	pthread_mutex_unlock(&_ep->lock);
 
 	return CCI_SUCCESS;
 }
