@@ -55,12 +55,12 @@ static int gni_create_endpoint(cci_device_t * device,
 				 cci_endpoint_t ** endpoint,
 				 cci_os_handle_t * fd);
 static int gni_destroy_endpoint(cci_endpoint_t * endpoint);
-static int gni_accept(cci_event_t *event, void *context);
+static int gni_accept(cci_event_t *event, const void *context);
 static int gni_reject(cci_event_t *event);
 static int gni_connect(cci_endpoint_t * endpoint, char *server_uri,
 			 void *data_ptr, uint32_t data_len,
 			 cci_conn_attribute_t attribute,
-			 void *context, int flags, struct timeval *timeout);
+			 const void *context, int flags, struct timeval *timeout);
 static int gni_disconnect(cci_connection_t * connection);
 static int gni_set_opt(cci_opt_handle_t * handle,
 			 cci_opt_level_t level,
@@ -74,10 +74,10 @@ static int gni_get_event(cci_endpoint_t * endpoint,
 static int gni_return_event(cci_event_t * event);
 static int gni_send(cci_connection_t * connection,
 		      void *msg_ptr, uint32_t msg_len,
-		      void *context, int flags);
+		      const void *context, int flags);
 static int gni_sendv(cci_connection_t * connection,
 		       struct iovec *data, uint32_t iovcnt,
-		       void *context, int flags);
+		       const void *context, int flags);
 static int gni_rma_register(cci_endpoint_t * endpoint,
 			      cci_connection_t * connection,
 			      void *start, uint64_t length,
@@ -87,7 +87,7 @@ static int gni_rma(cci_connection_t * connection,
 		     void *msg_ptr, uint32_t msg_len,
 		     uint64_t local_handle, uint64_t local_offset,
 		     uint64_t remote_handle, uint64_t remote_offset,
-		     uint64_t data_len, void *context, int flags);
+		     uint64_t data_len, const void *context, int flags);
 
 /*
  * Public plugin structure.
@@ -1182,7 +1182,7 @@ gni_post_send(gni_tx_t *tx)
 	return ret;
 }
 
-static int gni_accept(cci_event_t *event, void *context)
+static int gni_accept(cci_event_t *event, const void *context)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
@@ -1214,7 +1214,7 @@ static int gni_accept(cci_event_t *event, void *context)
 	reply.id = gconn->id;
 
 	gconn->state = GNI_CONN_PASSIVE2;
-	conn->connection.context = context;
+	conn->connection.context = (void *) context;
 
 	debug(CCI_DB_INFO, "%s: creating GNI ep with tx cq %p", __func__, gep->tx_cq);
 	grc = GNI_EpCreate(gep->nic, gep->tx_cq, &gconn->peer);
@@ -1476,7 +1476,7 @@ static int
 gni_connect(cci_endpoint_t * endpoint, char *server_uri,
 	      void *data_ptr, uint32_t data_len,
 	      cci_conn_attribute_t attribute,
-	      void *context, int flags, struct timeval *timeout)
+	      const void *context, int flags, struct timeval *timeout)
 {
 	int ret = CCI_SUCCESS;
 	int fflags = 0;
@@ -1505,7 +1505,7 @@ gni_connect(cci_endpoint_t * endpoint, char *server_uri,
 	conn->connection.max_send_size = ep->buffer_len;
 	conn->connection.endpoint = endpoint;
 	conn->connection.attribute = attribute;
-	conn->connection.context = context;
+	conn->connection.context = (void *) context;
 
 	conn->priv = calloc(1, sizeof(*gconn));
 	if (!conn->priv) {
@@ -1925,7 +1925,7 @@ static int gni_handle_conn_reply(cci__ep_t * ep, cci__conn_t *conn)
 
 	evt = calloc(1, sizeof(*evt));
 	evt->event.type = CCI_EVENT_CONNECT;
-	evt->event.connect.context = conn->connection.context;
+	evt->event.connect.context = (void *) conn->connection.context;
 
 	ret = recv(new->sock, &reply, sizeof(reply), 0);
 	if (ret != sizeof(reply)) {
@@ -2316,7 +2316,7 @@ static int gni_conn_finish(cci__ep_t * ep, cci__conn_t *conn)
 	}
 	assert(GNI_MSG_TYPE(header) == GNI_MSG_CONN_ACK);
 	evt->event.accept.status = CCI_SUCCESS;
-	evt->event.accept.context = conn->connection.context;
+	evt->event.accept.context = (void *) conn->connection.context;
 	evt->event.accept.connection = &conn->connection;
 
 	gconn->state = GNI_CONN_ESTABLISHED;
@@ -2437,7 +2437,7 @@ static int gni_progress_connections(cci__ep_t * ep)
 
 static int
 gni_send_common(cci_connection_t * connection, struct iovec *iov,
-		  uint32_t iovcnt, void *context, int flags,
+		  uint32_t iovcnt, const void *context, int flags,
 		  gni_rma_op_t * rma_op);
 
 static int
@@ -3113,7 +3113,7 @@ static int gni_return_event(cci_event_t * event)
 
 static int
 gni_send_common(cci_connection_t * connection, struct iovec *iov,
-		  uint32_t iovcnt, void *context, int flags,
+		  uint32_t iovcnt, const void *context, int flags,
 		  gni_rma_op_t * rma_op)
 {
 	int ret = CCI_SUCCESS;
@@ -3168,7 +3168,7 @@ gni_send_common(cci_connection_t * connection, struct iovec *iov,
 	tx->evt.conn = conn;
 	tx->evt.event.type = CCI_EVENT_SEND;
 	tx->evt.event.send.connection = connection;
-	tx->evt.event.send.context = context;
+	tx->evt.event.send.context = (void *) context;
 	tx->evt.event.send.status = CCI_SUCCESS;	/* for now */
 
 	tx->header = GNI_MSG_SEND;
@@ -3229,7 +3229,7 @@ gni_send_common(cci_connection_t * connection, struct iovec *iov,
 }
 
 static int gni_send(cci_connection_t * connection,	/* magic number */
-		      void *msg_ptr, uint32_t msg_len, void *context, int flags)
+		      void *msg_ptr, uint32_t msg_len, const void *context, int flags)
 {
 	int ret = CCI_SUCCESS;
 	uint32_t iovcnt = 0;
@@ -3251,7 +3251,7 @@ static int gni_send(cci_connection_t * connection,	/* magic number */
 
 static int
 gni_sendv(cci_connection_t * connection,
-	    struct iovec *data, uint32_t iovcnt, void *context, int flags)
+	    struct iovec *data, uint32_t iovcnt, const void *context, int flags)
 {
 	int ret = CCI_SUCCESS;
 
@@ -3519,7 +3519,7 @@ gni_rma(cci_connection_t * connection,
 	  void *msg_ptr, uint32_t msg_len,
 	  uint64_t local_handle, uint64_t local_offset,
 	  uint64_t remote_handle, uint64_t remote_offset,
-	  uint64_t data_len, void *context, int flags)
+	  uint64_t data_len, const void *context, int flags)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
@@ -3558,14 +3558,14 @@ gni_rma(cci_connection_t * connection,
 	rma_op->remote_handle = remote_handle;
 	rma_op->remote_offset = remote_offset;
 	rma_op->data_len = data_len;
-	rma_op->context = context;
+	rma_op->context = (void *) context;
 	rma_op->flags = flags;
 	rma_op->msg_len = msg_len;
 	rma_op->msg_ptr = msg_ptr;
 
 	rma_op->evt.event.type = CCI_EVENT_SEND;
 	rma_op->evt.event.send.connection = connection;
-	rma_op->evt.event.send.context = context;
+	rma_op->evt.event.send.context = (void *) context;
 	rma_op->evt.event.send.status = CCI_SUCCESS;	/* for now */
 	rma_op->evt.ep = ep;
 	rma_op->evt.conn = conn;
