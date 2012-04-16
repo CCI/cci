@@ -81,7 +81,7 @@ cci_plugin_core_t cci_core_mx_plugin = {
 	 CCI_CORE_API_VERSION,
 	 "mx",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
-	 5,
+	 0, /* FIXME: set to 50 when actually implemented */
 
 	 /* Bootstrap function pointers */
 	 cci_core_mx_post_load,

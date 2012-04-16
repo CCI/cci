@@ -96,7 +96,7 @@ cci_plugin_core_t cci_core_verbs_plugin = {
 	 CCI_CORE_API_VERSION,
 	 "verbs",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
-	 10,
+	 50,
 
 	 /* Bootstrap function pointers */
 	 cci_core_verbs_post_load,
@@ -393,6 +393,8 @@ static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t fla
 				goto out;
 			}
 			dev->plugin = plugin;
+			if (dev->priority == -1)
+				dev->priority = plugin->base.priority;
 
 			vdev = dev->priv;
 

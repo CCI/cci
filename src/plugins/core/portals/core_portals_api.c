@@ -183,7 +183,7 @@ cci_plugin_core_t cci_core_portals_plugin = {
 	 CCI_CORE_API_VERSION,
 	 "portals",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
-	 5,
+	 50,
 	 cci_core_portals_post_load,	/* Bootstrap function pointers */
 	 cci_core_portals_pre_unload,
 	 },

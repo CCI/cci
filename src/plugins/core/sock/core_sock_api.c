@@ -123,7 +123,7 @@ cci_plugin_core_t cci_core_sock_plugin = {
 	 CCI_CORE_API_VERSION,
 	 "sock",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
-	 5,
+	 30,
 
 	 /* Bootstrap function pointers */
 	 cci_core_sock_post_load,
@@ -254,6 +254,7 @@ static int sock_init(cci_plugin_core_t *plugin,
 
 		cci__init_dev(dev);
 		dev->plugin = plugin;
+		dev->priority = plugin->base.priority;
 
 		device = &dev->device;
 		device->max_send_size = SOCK_DEFAULT_MSS;
@@ -288,6 +289,8 @@ static int sock_init(cci_plugin_core_t *plugin,
 			sock_dev_t *sdev;
 
 			dev->plugin = plugin;
+			if (dev->priority == -1)
+				dev->priority = plugin->base.priority;
 
 			device = &dev->device;
 			device->max_send_size = SOCK_DEFAULT_MSS;

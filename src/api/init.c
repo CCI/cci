@@ -144,7 +144,7 @@ void cci__init_dev(cci__dev_t *dev)
 {
 	struct cci_device *device = &dev->device;
 
-	dev->priority = 50; /* default */
+	dev->priority = -1; /* tell the driver it must initialize it if we didn't */
 	dev->is_default = 0;
 	TAILQ_INIT(&dev->eps);
 	pthread_mutex_init(&dev->lock, NULL);
