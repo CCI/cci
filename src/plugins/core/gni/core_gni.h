@@ -7,6 +7,7 @@
 #ifndef CCI_CORE_GNI_H
 #define CCI_CORE_GNI_H
 
+#include "cci.h"
 #include "cci/config.h"
 
 #include <netinet/in.h>	/* struck sockaddr_in */

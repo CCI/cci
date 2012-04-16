@@ -28,6 +28,8 @@
 #include <search.h>
 
 #include "cci.h"
+#include "cci_lib_types.h"
+#include "cci-api.h"
 #include "plugins/core/core.h"
 #include "core_gni.h"
 
