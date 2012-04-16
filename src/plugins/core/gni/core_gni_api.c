@@ -46,10 +46,11 @@ pthread_t progress_tid;
 /*
  * Local functions
  */
-static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int gni_finalize(void);
+static int gni_init(cci_plugin_core_t * plugin, uint32_t abi_ver,
+		    uint32_t flags, uint32_t * caps);
+static int gni_finalize(cci_plugin_core_t * plugin);
 static const char *gni_strerror(cci_endpoint_t * endpoint, enum cci_status status);
-static int gni_get_devices(cci_device_t * const **devices);
+static int gni_get_devices(cci_plugin_core_t * plugin, cci_device_t * const **devices);
 static int gni_create_endpoint(cci_device_t * device,
 				 int flags,
 				 cci_endpoint_t ** endpoint,
@@ -349,7 +350,8 @@ gni_cci__init_dev(cci__dev_t *dev)
 	device->up = 1;
 }
 
-static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+static int gni_init(cci_plugin_core_t * plugin, uint32_t abi_ver,
+		    uint32_t flags, uint32_t * caps)
 {
 	int count = 0;
 	int index = 0;
@@ -429,6 +431,7 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		}
 
 		gni_cci__init_dev(dev);
+		dev->plugin = plugin;
 
 		device = &dev->device;
 		device->max_send_size = GNI_EP_MSS;
@@ -464,6 +467,8 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			uint16_t port = 0;
 			struct cci_device *device = NULL;
 			gni_dev_t *gdev = NULL;
+
+			dev->plugin = plugin;
 
 			in.s_addr = INADDR_ANY;
 
@@ -643,7 +648,7 @@ static const char *gni_strerror(cci_endpoint_t * endpoint, enum cci_status statu
 	return strerror(status);
 }
 
-static int gni_get_devices(cci_device_t * const **devices)
+static int gni_get_devices(cci_plugin_core_t * plugin, cci_device_t * const **devices)
 {
 	CCI_ENTER;
 
@@ -661,7 +666,7 @@ static int gni_get_devices(cci_device_t * const **devices)
 	return CCI_SUCCESS;
 }
 
-static int gni_finalize(void)
+static int gni_finalize(cci_plugin_core_t * plugin)
 {
 	int ret = CCI_SUCCESS;
 	int i = 0;
@@ -1502,6 +1507,7 @@ gni_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		ret = CCI_ENOMEM;
 		goto out;
 	}
+	conn->plugin = ep->plugin;
 	conn->connection.max_send_size = ep->buffer_len;
 	conn->connection.endpoint = endpoint;
 	conn->connection.attribute = attribute;
@@ -2175,6 +2181,7 @@ gni_check_for_conn_requests(cci__ep_t *ep)
 		ret = CCI_ENOMEM;
 		goto out;
 	}
+	conn->plugin = ep->plugin;
 
 	conn->priv = calloc(1, sizeof(*gconn));
 	if (!conn->priv) {
