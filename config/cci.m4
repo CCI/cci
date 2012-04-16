@@ -1,6 +1,8 @@
 dnl -*- Autoconf -*-
 dnl
 dnl Copyright © 2010 Cisco Systems, Inc.  All rights reserved.
+dnl Copyright © 2012 UT-Battelle, LLC.  All rights reserved.
+dnl Copyright © 2012 Oak Ridge National Labs.  All rights reserved.
 dnl
 
 # Define CCI configure command line arguments
