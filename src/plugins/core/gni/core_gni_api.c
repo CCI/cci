@@ -57,10 +57,10 @@ static int gni_create_endpoint(cci_device_t * device,
 static int gni_destroy_endpoint(cci_endpoint_t * endpoint);
 static int gni_accept(cci_event_t *event, const void *context);
 static int gni_reject(cci_event_t *event);
-static int gni_connect(cci_endpoint_t * endpoint, char *server_uri,
-			 void *data_ptr, uint32_t data_len,
+static int gni_connect(cci_endpoint_t * endpoint, const char *server_uri,
+			 const void *data_ptr, uint32_t data_len,
 			 cci_conn_attribute_t attribute,
-			 const void *context, int flags, struct timeval *timeout);
+			 const void *context, int flags, const struct timeval *timeout);
 static int gni_disconnect(cci_connection_t * connection);
 static int gni_set_opt(cci_opt_handle_t * handle,
 			 cci_opt_level_t level,
@@ -73,10 +73,10 @@ static int gni_get_event(cci_endpoint_t * endpoint,
 			   cci_event_t ** const event);
 static int gni_return_event(cci_event_t * event);
 static int gni_send(cci_connection_t * connection,
-		      void *msg_ptr, uint32_t msg_len,
+		      const void *msg_ptr, uint32_t msg_len,
 		      const void *context, int flags);
 static int gni_sendv(cci_connection_t * connection,
-		       struct iovec *data, uint32_t iovcnt,
+		       const struct iovec *data, uint32_t iovcnt,
 		       const void *context, int flags);
 static int gni_rma_register(cci_endpoint_t * endpoint,
 			      cci_connection_t * connection,
@@ -1473,10 +1473,10 @@ gni_insert_conn(cci__conn_t *conn)
 }
 
 static int
-gni_connect(cci_endpoint_t * endpoint, char *server_uri,
-	      void *data_ptr, uint32_t data_len,
+gni_connect(cci_endpoint_t * endpoint, const char *server_uri,
+	      const void *data_ptr, uint32_t data_len,
 	      cci_conn_attribute_t attribute,
-	      const void *context, int flags, struct timeval *timeout)
+	      const void *context, int flags, const struct timeval *timeout)
 {
 	int ret = CCI_SUCCESS;
 	int fflags = 0;
@@ -2436,7 +2436,7 @@ static int gni_progress_connections(cci__ep_t * ep)
 }
 
 static int
-gni_send_common(cci_connection_t * connection, struct iovec *iov,
+gni_send_common(cci_connection_t * connection, const struct iovec *iov,
 		  uint32_t iovcnt, const void *context, int flags,
 		  gni_rma_op_t * rma_op);
 
@@ -3112,7 +3112,7 @@ static int gni_return_event(cci_event_t * event)
 }
 
 static int
-gni_send_common(cci_connection_t * connection, struct iovec *iov,
+gni_send_common(cci_connection_t * connection, const struct iovec *iov,
 		  uint32_t iovcnt, const void *context, int flags,
 		  gni_rma_op_t * rma_op)
 {
@@ -3229,7 +3229,7 @@ gni_send_common(cci_connection_t * connection, struct iovec *iov,
 }
 
 static int gni_send(cci_connection_t * connection,	/* magic number */
-		      void *msg_ptr, uint32_t msg_len, const void *context, int flags)
+		      const void *msg_ptr, uint32_t msg_len, const void *context, int flags)
 {
 	int ret = CCI_SUCCESS;
 	uint32_t iovcnt = 0;
@@ -3239,7 +3239,7 @@ static int gni_send(cci_connection_t * connection,	/* magic number */
 
 	if (likely(msg_ptr && msg_len > 0)) {
 		iovcnt = 1;
-		iov.iov_base = msg_ptr;
+		iov.iov_base = (void *) msg_ptr;
 		iov.iov_len = msg_len;
 	}
 
@@ -3251,7 +3251,7 @@ static int gni_send(cci_connection_t * connection,	/* magic number */
 
 static int
 gni_sendv(cci_connection_t * connection,
-	    struct iovec *data, uint32_t iovcnt, const void *context, int flags)
+	    const struct iovec *data, uint32_t iovcnt, const void *context, int flags)
 {
 	int ret = CCI_SUCCESS;
 
