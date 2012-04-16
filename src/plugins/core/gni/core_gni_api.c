@@ -356,7 +356,7 @@ static int gni_init(cci_plugin_core_t * plugin, uint32_t abi_ver,
 	int used[CCI_MAX_DEVICES];
 	int ret = 0;
 	gni_return_t grc = GNI_RC_SUCCESS;
-	cci__dev_t *dev = NULL;
+	cci__dev_t *dev = NULL, *ndev = NULL;
 	cci_device_t **devices = NULL;
 	struct ifaddrs *ifaddrs = NULL;
 	uint32_t cpu_id = 0;
@@ -450,13 +450,15 @@ static int gni_init(cci_plugin_core_t * plugin, uint32_t abi_ver,
 		dev->driver = strdup("gni");
 		dev->is_up = 1;
 		dev->is_default = 1;
-		TAILQ_INSERT_TAIL(&globals->devs, dev, entry);
+		pthread_mutex_lock(&globals->lock);
+		cci__add_dev(dev);
+		pthread_mutex_unlock(&globals->lock);
 		devices[gglobals->count] = device;
 		gglobals->count++;
 
 	} else
 	/* find devices we own */
-	TAILQ_FOREACH(dev, &globals->devs, entry) {
+	TAILQ_FOREACH_SAFE(dev, &globals->configfile_devs, entry, ndev) {
 		if (0 == strcmp("gni", dev->driver)) {
 			int i = 0;
 			const char * const *arg;
@@ -586,6 +588,10 @@ static int gni_init(cci_plugin_core_t * plugin, uint32_t abi_ver,
 			device->max_send_size = GNI_EP_MSS;
 			device->rate = gni_device_rate();
 
+			pthread_mutex_lock(&globals->lock);
+			TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
+			cci__add_dev(dev);
+			pthread_mutex_unlock(&globals->lock);
 			devices[index] = device;
 			index++;
 			dev->is_up = gdev->ifa->ifa_flags & IFF_UP;
