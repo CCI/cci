@@ -55,8 +55,8 @@ static int gni_create_endpoint(cci_device_t * device,
 				 cci_endpoint_t ** endpoint,
 				 cci_os_handle_t * fd);
 static int gni_destroy_endpoint(cci_endpoint_t * endpoint);
-static int gni_accept(union cci_event *event, void *context);
-static int gni_reject(union cci_event *event);
+static int gni_accept(cci_event_t *event, void *context);
+static int gni_reject(cci_event_t *event);
 static int gni_connect(cci_endpoint_t * endpoint, char *server_uri,
 			 void *data_ptr, uint32_t data_len,
 			 cci_conn_attribute_t attribute,
@@ -1182,7 +1182,7 @@ gni_post_send(gni_tx_t *tx)
 	return ret;
 }
 
-static int gni_accept(union cci_event *event, void *context)
+static int gni_accept(cci_event_t *event, void *context)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
@@ -1298,7 +1298,7 @@ static int gni_accept(union cci_event *event, void *context)
 	return ret;
 }
 
-static int gni_reject(union cci_event *event)
+static int gni_reject(cci_event_t *event)
 {
 	int ret = CCI_SUCCESS;
 	cci__conn_t *conn = NULL;
@@ -2450,15 +2450,15 @@ gni_handle_recv(gni_rx_t *rx, void *msg)
 	CCI_ENTER;
 
 	rx->evt.event.type = CCI_EVENT_RECV; //FIXME redundant
-	*((uint32_t *) & rx->evt.event.recv.len) = (*header >> 4) & 0xFFF;
+	rx->evt.event.recv.len = (*header >> 4) & 0xFFF;
 	if (rx->evt.event.recv.len) {
 		void *p = rx->ptr;
 		void *m = msg + (uintptr_t) sizeof(*header);
 
 		memcpy(p, m, rx->evt.event.recv.len);
-		*((void **)&rx->evt.event.recv.ptr) = p;
+		rx->evt.event.recv.ptr = p;
 	} else {
-		*((void **)&rx->evt.event.recv.ptr) = NULL;
+		rx->evt.event.recv.ptr = NULL;
 	}
 	rx->evt.event.recv.connection = &((cci__conn_t*)(rx->evt.conn))->connection;
 
