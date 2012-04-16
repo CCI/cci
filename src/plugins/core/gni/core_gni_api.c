@@ -458,7 +458,7 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
 		if (0 == strcmp("gni", dev->driver)) {
 			int i = 0;
-			const char **arg;
+			const char * const *arg;
 			const char *interface = NULL;
 			struct in_addr in;
 			uint16_t port = 0;
