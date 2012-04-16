@@ -796,7 +796,7 @@ static int gni_create_rx_pool(cci__ep_t * ep, int rx_buf_cnt)
 static int
 gni_create_endpoint(cci_device_t * device,
 		      int flags,
-		      cci_endpoint_t ** endpoint, cci_os_handle_t * fd)
+		      cci_endpoint_t ** endpointp, cci_os_handle_t * fd)
 {
 	int i = 0;
 	int ret = CCI_SUCCESS;
@@ -804,6 +804,7 @@ gni_create_endpoint(cci_device_t * device,
 	int pg_sz = 0;
 	char name[MAXHOSTNAMELEN + 16];	/* gni:// + host + port */
 	size_t len = 0;
+	struct cci_endpoint *endpoint = (struct cci_endpoint *) *endpointp;
 	cci__dev_t *dev = NULL;
 	cci__ep_t *ep = NULL;
 	gni_ep_t *gep = NULL;
@@ -825,7 +826,7 @@ gni_create_endpoint(cci_device_t * device,
 	dev = container_of(device, cci__dev_t, device);
 	gdev = dev->priv;
 
-	ep = container_of(*endpoint, cci__ep_t, endpoint);
+	ep = container_of(endpoint, cci__ep_t, endpoint);
 	ep->priv = calloc(1, sizeof(*gep));
 	if (!ep->priv) {
 		ret = CCI_ENOMEM;
@@ -851,7 +852,7 @@ gni_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 
-	(*endpoint)->max_recv_buffer_count = GNI_EP_RX_CNT;
+	endpoint->max_recv_buffer_count = GNI_EP_RX_CNT;
 	ep->rx_buf_cnt = GNI_EP_RX_CNT;
 	ep->tx_buf_cnt = GNI_EP_TX_CNT;
 	ep->buffer_len = dev->device.max_send_size;
@@ -881,7 +882,7 @@ gni_create_endpoint(cci_device_t * device,
 	memset(name, 0, sizeof(name));
 	sprintf(name, "%s%s:%u", GNI_URI,
 		inet_ntoa(gep->sin.sin_addr), port);
-	*((char **)&ep->endpoint.name) = strdup(name);
+	endpoint->name = strdup(name);
 
 	ret = listen(gep->sock, SOMAXCONN);
 	if (ret == -1) {
