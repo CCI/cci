@@ -295,7 +295,7 @@ static int portals_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
       false_alarm:
 
-/* FIXME: if configfile == 0, create default devices */
+/* FIXME: if globals->configfile == 0, create default devices */
 
 /*
  * Start searching global configuration for portals devices.
@@ -502,7 +502,7 @@ static int portals_get_devices(cci_device_t const ***devices)
 	      pdev->idp.nid, pdev->idp.pid);
 
 /* FIXME: update the devices list (up field, ...).
-   add new devices if !configfile */
+   add new devices if !globals->configfile */
 
 	CCI_EXIT;
 	return CCI_SUCCESS;

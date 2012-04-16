@@ -412,7 +412,7 @@ static int gni_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	}
 	gglobals->ifaddrs = ifaddrs;
 
-	if (!configfile) {
+	if (!globals->configfile) {
 		struct cci_device *device;
 		gni_dev_t *gdev = NULL;
 
