@@ -34,10 +34,10 @@
 #include <inttypes.h>
 
 #include "cci.h"
+#include "cci_lib_types.h"
+#include "cci-api.h"
 #include "plugins/core/core.h"
 #include "core_sock.h"
-
-extern void cci__init_dev(cci__dev_t *dev);
 
 #define DEBUG_RNR 0
 
