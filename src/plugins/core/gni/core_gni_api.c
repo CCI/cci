@@ -685,8 +685,13 @@ static int gni_finalize(cci_plugin_core_t * plugin)
 
 	pthread_mutex_lock(&globals->lock);
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
-	    if (dev->priv)
-		free(dev->priv);
+		if (strcmp(dev->driver, "gni"))
+			continue;
+
+		if (dev->priv) {
+			free(dev->priv);
+			dev->priv = NULL;
+		}
 	}
 	pthread_mutex_unlock(&globals->lock);
 

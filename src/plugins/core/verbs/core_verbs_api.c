@@ -587,8 +587,9 @@ static int verbs_finalize(cci_plugin_core_t * plugin)
 
 	pthread_mutex_lock(&globals->lock);
 	TAILQ_FOREACH(dev, &globals->devs, entry)
-	    if (dev->priv)
-		free(dev->priv);
+		if (!strcmp(dev->driver, "verbs"))
+			if (dev->priv)
+				free(dev->priv);
 	pthread_mutex_unlock(&globals->lock);
 
 	free(vglobals->devices);
