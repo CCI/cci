@@ -89,7 +89,7 @@ static int sock_rma_register(cci_endpoint_t * endpoint,
 			     cci_connection_t * connection,
 			     void *start, uint64_t length,
 			     uint64_t * rma_handle);
-static int sock_rma_deregister(uint64_t rma_handle);
+static int sock_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
 static int sock_rma(cci_connection_t * connection,
 		    void *header_ptr, uint32_t header_len,
 		    uint64_t local_handle, uint64_t local_offset,
@@ -2299,7 +2299,7 @@ static int sock_rma_register(cci_endpoint_t * endpoint,
 	return CCI_SUCCESS;
 }
 
-static int sock_rma_deregister(uint64_t rma_handle)
+static int sock_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
 {
 	int ret = CCI_EINVAL;
 	sock_rma_handle_t *handle =

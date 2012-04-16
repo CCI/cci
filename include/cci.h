@@ -1523,6 +1523,7 @@ CCI_DECLSPEC int cci_rma_register(cci_endpoint_t * endpoint,
 
   Once deregistered, the handle is stale.
 
+  \param[in] endpoint   Local endpoint to use for RMA.
   \param[in] rma_handle Handle for use with cci_rma().
 
   \return CCI_SUCCESS   The memory is deregistered.
@@ -1530,7 +1531,8 @@ CCI_DECLSPEC int cci_rma_register(cci_endpoint_t * endpoint,
 
   \ingroup communications
  */
-CCI_DECLSPEC int cci_rma_deregister(uint64_t rma_handle);
+CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
+				    uint64_t rma_handle);
 
 /*!
   Perform a RMA operation between local and remote memory.

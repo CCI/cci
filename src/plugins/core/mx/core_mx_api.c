@@ -55,7 +55,7 @@ static int mx_sendv(cci_connection_t * connection,
 static int mx_rma_register(cci_endpoint_t * endpoint,
 			   cci_connection_t * connection,
 			   void *start, uint64_t length, uint64_t * rma_handle);
-static int mx_rma_deregister(uint64_t rma_handle);
+static int mx_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
 static int mx_rma(cci_connection_t * connection,
 		  void *header_ptr, uint32_t header_len,
 		  uint64_t local_handle, uint64_t local_offset,
@@ -261,7 +261,7 @@ static int mx_rma_register(cci_endpoint_t * endpoint,
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
-static int mx_rma_deregister(uint64_t rma_handle)
+static int mx_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
 {
 	printf("In mx_rma_deregister\n");
 	return CCI_ERR_NOT_IMPLEMENTED;

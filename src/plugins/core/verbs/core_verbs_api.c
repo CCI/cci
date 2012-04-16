@@ -70,7 +70,7 @@ static int verbs_rma_register(cci_endpoint_t * endpoint,
 			      cci_connection_t * connection,
 			      void *start, uint64_t length,
 			      uint64_t * rma_handle);
-static int verbs_rma_deregister(uint64_t rma_handle);
+static int verbs_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
 static int verbs_rma(cci_connection_t * connection,
 		     void *msg_ptr, uint32_t msg_len,
 		     uint64_t local_handle, uint64_t local_offset,
@@ -3443,7 +3443,7 @@ verbs_rma_register(cci_endpoint_t * endpoint,
 	return ret;
 }
 
-static int verbs_rma_deregister(uint64_t rma_handle)
+static int verbs_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
 {
 	int ret = CCI_SUCCESS;
 	verbs_rma_handle_t *handle =

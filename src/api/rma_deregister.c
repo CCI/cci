@@ -14,7 +14,7 @@
 #include "cci.h"
 #include "plugins/core/core.h"
 
-int cci_rma_deregister(uint64_t rma_handle)
+int cci_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
 {
-	return cci_core->rma_deregister(rma_handle);
+	return cci_core->rma_deregister(endpoint, rma_handle);
 }

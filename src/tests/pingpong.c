@@ -328,7 +328,7 @@ void do_client()
 		poll_events();
 
 	if (opts.method != MSGS) {
-		ret = cci_rma_deregister(local_rma_handle);
+		ret = cci_rma_deregister(endpoint, local_rma_handle);
 		check_return(endpoint, "cci_rma_deregister", ret, 1);
 	}
 
@@ -411,7 +411,7 @@ void do_server()
 		poll_events();
 
 	if (opts.method != MSGS) {
-		ret = cci_rma_deregister(opts.server_rma_handle);
+		ret = cci_rma_deregister(endpoint, opts.server_rma_handle);
 		check_return(endpoint, "cci_rma_deregister", ret, 1);
 	}
 

@@ -134,7 +134,7 @@ int main(int argc, char *argv[])
 		gettimeofday(&start, NULL);
 
 	for (i = 0; i < count; i++) {
-		ret = cci_rma_deregister(handles[i]);
+		ret = cci_rma_deregister(endpoint, handles[i]);
 		check_return(endpoint, "cci_rma_register", ret);
 	}
 

@@ -79,10 +79,11 @@ static int gni_sendv(cci_connection_t * connection,
 		       const struct iovec *data, uint32_t iovcnt,
 		       const void *context, int flags);
 static int gni_rma_register(cci_endpoint_t * endpoint,
-			      cci_connection_t * connection,
-			      void *start, uint64_t length,
-			      uint64_t * rma_handle);
-static int gni_rma_deregister(uint64_t rma_handle);
+			    cci_connection_t * connection,
+			    void *start,
+			    uint64_t length, uint64_t * rma_handle);
+static int gni_rma_deregister(cci_endpoint_t * endpoint,
+			      uint64_t rma_handle);
 static int gni_rma(cci_connection_t * connection,
 		     void *msg_ptr, uint32_t msg_len,
 		     uint64_t local_handle, uint64_t local_offset,
@@ -2866,7 +2867,6 @@ out:
 	return ret;
 }
 
-
 static int gni_get_send_event(cci__ep_t * ep)
 {
 	int ret = CCI_EAGAIN;
@@ -3310,7 +3310,8 @@ out:
 	return ret;
 }
 
-static int gni_rma_deregister(uint64_t rma_handle)
+static int gni_rma_deregister(cci_endpoint_t * endpoint,
+			      uint64_t rma_handle)
 {
 	int ret = CCI_SUCCESS;
 	gni_rma_handle_t *handle =
