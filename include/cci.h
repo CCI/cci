@@ -1486,33 +1486,29 @@ CCI_DECLSPEC int cci_sendv(cci_connection_t * connection,
   not be accessed via another endpoint, unless also registered with
   that endpoint (i.e. an endpoint serves as a protection domain).
 
-  If the connection is provided (and the endpoint's driver supports this
-  feature), the memory is only exposed to that connection. If it is NULL,
-  then any reliable connection on that endpoint can access that memory.
-
   Registration may take awhile depending on the underlying device and
   should not be in the critical path.
 
   It is allowable to have overlapping registrations.
 
   \param[in]  endpoint      Local endpoint to use for RMA.
-  \param[in]  connection    Restrict RMA to this connection.
   \param[in]  start         Pointer to local memory.
   \param[in]  length        Length of local memory.
+  \param[in]  flags         Optional flags:
+    - CCI_FLAG_READ:        Local memory may be read from other endpoints.
+    - CCI_FLAG_WRITE:       Local memory may be written by other endpoints.
   \param[out] rma_handle    Handle for use with cci_rma().
 
   \return CCI_SUCCESS   The memory is ready for RMA.
   \return CCI_EINVAL    endpoint, start, or rma_handle is NULL.
-  \return CCI_EINVAL    connection is unreliable.
-  \return CCI_ENOTSUP   driver does not support setting a connection.
   \return CCI_EINVAL    length is 0.
   \return Each driver may have additional error codes.
 
   \ingroup communications
 */
 CCI_DECLSPEC int cci_rma_register(cci_endpoint_t * endpoint,
-				  cci_connection_t * connection,
 				  void *start, uint64_t length,
+				  int flags,
 				  uint64_t * rma_handle);
 
 /*!

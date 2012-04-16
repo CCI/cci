@@ -67,9 +67,8 @@ static int verbs_sendv(cci_connection_t * connection,
 		       const struct iovec *data, uint32_t iovcnt,
 		       const void *context, int flags);
 static int verbs_rma_register(cci_endpoint_t * endpoint,
-			      cci_connection_t * connection,
 			      void *start, uint64_t length,
-			      uint64_t * rma_handle);
+			      int flags, uint64_t * rma_handle);
 static int verbs_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
 static int verbs_rma(cci_connection_t * connection,
 		     void *msg_ptr, uint32_t msg_len,
@@ -3399,9 +3398,10 @@ verbs_sendv(cci_connection_t * connection,
 
 static int
 verbs_rma_register(cci_endpoint_t * endpoint,
-		   cci_connection_t * connection,
-		   void *start, uint64_t length, uint64_t * rma_handle)
+		   void *start, uint64_t length,
+		   int flags, uint64_t * rma_handle)
 {
+	/* FIXME use read/write flags? */
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
 	verbs_ep_t *vep = ep->priv;

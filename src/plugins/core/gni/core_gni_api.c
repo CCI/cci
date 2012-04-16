@@ -79,9 +79,8 @@ static int gni_sendv(cci_connection_t * connection,
 		       const struct iovec *data, uint32_t iovcnt,
 		       const void *context, int flags);
 static int gni_rma_register(cci_endpoint_t * endpoint,
-			    cci_connection_t * connection,
-			    void *start,
-			    uint64_t length, uint64_t * rma_handle);
+			    void *start, uint64_t length,
+			    int flags, uint64_t * rma_handle);
 static int gni_rma_deregister(cci_endpoint_t * endpoint,
 			      uint64_t rma_handle);
 static int gni_rma(cci_connection_t * connection,
@@ -3265,14 +3264,14 @@ gni_sendv(cci_connection_t * connection,
 
 static int
 gni_rma_register(cci_endpoint_t * endpoint,
-		   cci_connection_t * connection,
-		   void *start, uint64_t length, uint64_t * rma_handle)
+		 void *start, uint64_t length, int flags, uint64_t * rma_handle)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
 	gni_ep_t *gep = ep->priv;
 	gni_rma_handle_t *handle = NULL;
 	gni_return_t grc = GNI_RC_SUCCESS;
+	uint32_t gflags = 0;
 
 	CCI_ENTER;
 
@@ -3291,8 +3290,13 @@ gni_rma_register(cci_endpoint_t * endpoint,
 	handle->addr = (uintptr_t) start;
 	handle->ep = ep;
 
+	if (!(flags & CCI_FLAG_WRITE))
+		gflags = GNI_MEM_READ_ONLY;
+	else
+		gflags = GNI_MEM_READWRITE;
+
 	grc = GNI_MemRegister(gep->nic, (uint64_t)(uintptr_t)start,
-		length, NULL, GNI_MEM_READWRITE, -1, &handle->mh);
+		length, NULL, gflags, -1, &handle->mh);
 	if (grc != GNI_RC_SUCCESS) {
 		free(handle);
 		ret = gni_to_cci_status(grc);
