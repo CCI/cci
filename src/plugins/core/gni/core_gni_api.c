@@ -50,7 +50,6 @@ static int gni_init(cci_plugin_core_t * plugin, uint32_t abi_ver,
 		    uint32_t flags, uint32_t * caps);
 static int gni_finalize(cci_plugin_core_t * plugin);
 static const char *gni_strerror(cci_endpoint_t * endpoint, enum cci_status status);
-static int gni_get_devices(cci_plugin_core_t * plugin, cci_device_t * const **devices);
 static int gni_create_endpoint(cci_device_t * device,
 				 int flags,
 				 cci_endpoint_t ** endpoint,
@@ -121,7 +120,6 @@ cci_plugin_core_t cci_core_gni_plugin = {
 	gni_init,
 	gni_finalize,
 	gni_strerror,
-	gni_get_devices,
 	gni_create_endpoint,
 	gni_destroy_endpoint,
 	gni_accept,
@@ -646,24 +644,6 @@ static const char *gni_strerror(cci_endpoint_t * endpoint, enum cci_status statu
 {
 	debug(CCI_DB_INFO, "%s: status %d", __func__, status);
 	return strerror(status);
-}
-
-static int gni_get_devices(cci_plugin_core_t * plugin, cci_device_t * const **devices)
-{
-	CCI_ENTER;
-
-	if (!gglobals) {
-		CCI_EXIT;
-		return CCI_ENODEV;
-	}
-
-/* FIXME: update the devices list (up field, ...).
-   add new devices if !configfile */
-
-	*devices = gglobals->devices;
-
-	CCI_EXIT;
-	return CCI_SUCCESS;
 }
 
 static int gni_finalize(cci_plugin_core_t * plugin)

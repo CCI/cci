@@ -114,7 +114,6 @@ do {                                                        \
 static int portals_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
 static int portals_finalize(void);
 static const char *portals_strerror(cci_endpoint_t * endpoint, enum cci_status status);
-static int portals_get_devices(cci_device_t * const **devices);
 static int portals_create_endpoint(cci_device_t * device,
 				   int flags,
 				   cci_endpoint_t ** endpoint,
@@ -193,7 +192,6 @@ cci_plugin_core_t cci_core_portals_plugin = {
 	portals_init,
 	portals_finalize,
 	portals_strerror,
-	portals_get_devices,
 	portals_create_endpoint,
 	portals_destroy_endpoint,
 	portals_accept,
@@ -474,38 +472,6 @@ static const char *portals_strerror(cci_endpoint_t * endpoint, enum cci_status s
 	CCI_EXIT;
 
 	return cp;
-}
-
-static int portals_get_devices(cci_device_t * const **devices)
-{
-
-	cci_device_t const *device;
-	cci__dev_t *dev;
-	portals_dev_t *pdev;
-
-	CCI_ENTER;
-
-	if (!pglobals) {
-
-		CCI_EXIT;
-		return CCI_ENODEV;
-	}
-
-	*devices = pglobals->devices;
-	debug(CCI_DB_INFO, "There are %d devices.", pglobals->count);
-
-	device = **devices;
-	dev = container_of(device, cci__dev_t, device);
-	pdev = dev->priv;
-
-	debug(CCI_DB_INFO, "Got portals ID of: %u:%hu",
-	      pdev->idp.nid, pdev->idp.pid);
-
-/* FIXME: update the devices list (up field, ...).
-   add new devices if !globals->configfile */
-
-	CCI_EXIT;
-	return CCI_SUCCESS;
 }
 
 static int portals_finalize(void)

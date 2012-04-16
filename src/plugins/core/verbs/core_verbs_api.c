@@ -38,7 +38,6 @@ pthread_t progress_tid;
 static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
 static int verbs_finalize(cci_plugin_core_t * plugin);
 static const char *verbs_strerror(cci_endpoint_t * endpoint, enum cci_status status);
-static int verbs_get_devices(cci_plugin_core_t * plugin, cci_device_t * const **devices);
 static int verbs_create_endpoint(cci_device_t * device,
 				 int flags,
 				 cci_endpoint_t ** endpoint,
@@ -108,7 +107,6 @@ cci_plugin_core_t cci_core_verbs_plugin = {
 	verbs_init,
 	verbs_finalize,
 	verbs_strerror,
-	verbs_get_devices,
 	verbs_create_endpoint,
 	verbs_destroy_endpoint,
 	verbs_accept,
@@ -549,24 +547,6 @@ static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t fla
 static const char *verbs_strerror(cci_endpoint_t * endpoint, enum cci_status status)
 {
 	return strerror(status);
-}
-
-static int verbs_get_devices(cci_plugin_core_t * plugin, cci_device_t * const **devices)
-{
-	CCI_ENTER;
-
-	if (!vglobals) {
-		CCI_EXIT;
-		return CCI_ENODEV;
-	}
-
-/* FIXME: update the devices list (up field, ...).
-   add new devices if !globals->configfile */
-
-	*devices = (cci_device_t * const *) vglobals->devices;
-
-	CCI_EXIT;
-	return CCI_SUCCESS;
 }
 
 static int verbs_finalize(cci_plugin_core_t * plugin)

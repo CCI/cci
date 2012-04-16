@@ -58,7 +58,6 @@ static int sock_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags
 static int sock_finalize(cci_plugin_core_t * plugin);
 static const char *sock_strerror(cci_endpoint_t * endpoint,
 				 enum cci_status status);
-static int sock_get_devices(cci_plugin_core_t * plugin, cci_device_t * const **devices);
 static int sock_create_endpoint(cci_device_t * device,
 				int flags,
 				cci_endpoint_t ** endpoint,
@@ -135,7 +134,6 @@ cci_plugin_core_t cci_core_sock_plugin = {
 	sock_init,
 	sock_finalize,
 	sock_strerror,
-	sock_get_devices,
 	sock_create_endpoint,
 	sock_destroy_endpoint,
 	sock_accept,
@@ -397,26 +395,6 @@ static const char *sock_strerror(cci_endpoint_t * endpoint,
 
 	CCI_EXIT;
 	return NULL;
-}
-
-static int sock_get_devices(cci_plugin_core_t * plugin,
-			    cci_device_t * const **devices)
-{
-	CCI_ENTER;
-
-	if (!sglobals) {
-		CCI_EXIT;
-		return CCI_ENODEV;
-	}
-
-/* FIXME: update the devices list (up field, ...).
-   add new devices if !globals->configfile */
-
-	*devices = sglobals->devices;
-
-	CCI_EXIT;
-
-	return CCI_SUCCESS;
 }
 
 /* NOTE the CCI layer has already unbound all devices

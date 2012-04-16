@@ -40,8 +40,6 @@ typedef int (*cci_init_fn_t) (struct cci_plugin_core *plugin,
 typedef int (*cci_finalize_fn_t)(struct cci_plugin_core *plugin);
 typedef const char *(*cci_strerror_fn_t) (cci_endpoint_t * endpoint,
 					  enum cci_status status);
-typedef int (*cci_get_devices_fn_t) (struct cci_plugin_core *plugin,
-				     cci_device_t * const **devices);
 typedef int (*cci_create_endpoint_fn_t) (cci_device_t * device,
 					 int flags,
 					 cci_endpoint_t ** endpoint,
@@ -91,7 +89,6 @@ typedef struct cci_plugin_core {
 	cci_init_fn_t init;
 	cci_finalize_fn_t finalize;
 	cci_strerror_fn_t strerror;
-	cci_get_devices_fn_t get_devices;
 	cci_create_endpoint_fn_t create_endpoint;
 	cci_destroy_endpoint_fn_t destroy_endpoint;
 	cci_accept_fn_t accept;
