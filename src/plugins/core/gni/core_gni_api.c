@@ -450,9 +450,7 @@ static int gni_init(cci_plugin_core_t * plugin, uint32_t abi_ver,
 		dev->driver = strdup("gni");
 		dev->is_up = 1;
 		dev->is_default = 1;
-		pthread_mutex_lock(&globals->lock);
 		cci__add_dev(dev);
-		pthread_mutex_unlock(&globals->lock);
 		devices[gglobals->count] = device;
 		gglobals->count++;
 
@@ -588,10 +586,8 @@ static int gni_init(cci_plugin_core_t * plugin, uint32_t abi_ver,
 			device->max_send_size = GNI_EP_MSS;
 			device->rate = gni_device_rate();
 
-			pthread_mutex_lock(&globals->lock);
 			TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
 			cci__add_dev(dev);
-			pthread_mutex_unlock(&globals->lock);
 			devices[index] = device;
 			index++;
 			dev->is_up = gdev->ifa->ifa_flags & IFF_UP;
@@ -665,9 +661,7 @@ static int gni_finalize(cci_plugin_core_t * plugin)
 		return CCI_ENODEV;
 	}
 
-	pthread_mutex_lock(&globals->lock);
 	gni_shut_down = 1;
-	pthread_mutex_unlock(&globals->lock);
 	/* TODO join progress thread */
 
 	free(gglobals->device_ids);
@@ -683,7 +677,6 @@ static int gni_finalize(cci_plugin_core_t * plugin)
 	}
 	free(gglobals->ifaddrs);
 
-	pthread_mutex_lock(&globals->lock);
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
 		if (strcmp(dev->driver, "gni"))
 			continue;
@@ -693,7 +686,6 @@ static int gni_finalize(cci_plugin_core_t * plugin)
 			dev->priv = NULL;
 		}
 	}
-	pthread_mutex_unlock(&globals->lock);
 
 	free(gglobals->devices);
 	free((void *)gglobals);

@@ -277,9 +277,7 @@ static int sock_init(cci_plugin_core_t *plugin,
 		dev->driver = strdup("sock");
 		dev->is_up = 1;
 		dev->is_default = 1;
-		pthread_mutex_lock(&globals->lock);
 		cci__add_dev(dev);
-		pthread_mutex_unlock(&globals->lock);
 		devices[sglobals->count] = device;
 		sglobals->count++;
 		threads_running = 1;
@@ -343,10 +341,8 @@ static int sock_init(cci_plugin_core_t *plugin,
 				 }
 			}
 			if (sdev->ip != 0) {
-				pthread_mutex_lock(&globals->lock);
 				TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
 				cci__add_dev(dev);
-				pthread_mutex_unlock(&globals->lock);
 				devices[sglobals->count] = device;
 				sglobals->count++;
 				dev->is_up = 1;
@@ -421,19 +417,15 @@ static int sock_finalize(cci_plugin_core_t * plugin)
 	}
 
 	/* let the progress thread know we are going away */
-	pthread_mutex_lock(&globals->lock);
 	sock_shut_down = 1;
-	pthread_mutex_unlock(&globals->lock);
 	if (threads_running) {
 		pthread_join(progress_tid, NULL);
 		pthread_join(recv_tid, NULL);
 	}
 
-	pthread_mutex_lock(&globals->lock);
 	TAILQ_FOREACH(dev, &globals->devs, entry)
 		if (!strcmp(dev->driver, "sock"))
 			free(dev->priv);
-	pthread_mutex_unlock(&globals->lock);
 
 	free(sglobals->devices);
 	free((void *)sglobals);

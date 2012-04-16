@@ -26,7 +26,8 @@ int cci_get_devices(cci_device_t * const ** devicesp)
 	int i, nb;
 
 	/* FIXME: if we have to update the device array at runtime,
-	 * add a update_devices plugin callback and call of them here,
+	 * add a update_devices plugin callback and call of them here
+	 * (with globals->lock held),
 	 * to update the TAILQ. then update the devices array.
 	 */
 
