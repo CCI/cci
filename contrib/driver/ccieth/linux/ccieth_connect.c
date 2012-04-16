@@ -161,6 +161,44 @@ ccieth_conn_stop_sync(struct ccieth_connection *conn)
  * Per connection statistics
  */
 
+#ifdef CONFIG_CCIETH_DEBUGFS
+static int ccieth_conn_status_debugfs_show(struct seq_file *m, void *v)
+{
+	struct ccieth_connection *conn = m->private;
+
+	switch (conn->status) {
+	case CCIETH_CONNECTION_READY:		seq_printf(m, "ready    "); break;
+	case CCIETH_CONNECTION_CLOSING:		seq_printf(m, "closing  "); break;
+	case CCIETH_CONNECTION_REQUESTED:	seq_printf(m, "requested"); break;
+	case CCIETH_CONNECTION_RECEIVED:	seq_printf(m, "received "); break;
+	case CCIETH_CONNECTION_ACCEPTING:	seq_printf(m, "accepting"); break;
+	case CCIETH_CONNECTION_REJECTING:	seq_printf(m, "rejecting"); break;
+	default: seq_printf(m, "invalid status %u", (unsigned) conn->status); break;
+	}
+
+	seq_printf(m, "  local ep %u conn %u", conn->ep->id, conn->id);
+	seq_printf(m, "  remote mac %02x:%02x:%02x:%02x:%02x:%02x ep %u conn %u",
+		   conn->dest_addr[0], conn->dest_addr[1], conn->dest_addr[2],
+		   conn->dest_addr[3], conn->dest_addr[4], conn->dest_addr[5],
+		   conn->dest_eid, conn->dest_id);
+
+	seq_putc(m, '\n');
+	return 0;
+}
+
+static int ccieth_conn_status_debugfs_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, ccieth_conn_status_debugfs_show, inode->i_private);
+}
+
+static const struct file_operations ccieth_conn_status_debugfs_fops = {
+	.open		= ccieth_conn_status_debugfs_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+#endif
+
 static void
 ccieth_conn_stats_init(struct ccieth_connection *conn, const char *prefix)
 {
@@ -173,6 +211,7 @@ ccieth_conn_stats_init(struct ccieth_connection *conn, const char *prefix)
 			struct dentry *d = debugfs_create_dir(name, conn->ep->debugfs_dir);
 			if (!IS_ERR(d)) {
 				conn->debugfs_dir = d;
+				debugfs_create_file("status", 0444, d, conn, &ccieth_conn_status_debugfs_fops);
 				debugfs_create_u32("send", 0444, d, &conn->stats.send);
 				debugfs_create_u32("send_resend", 0444, d, &conn->stats.send_resend);
 				debugfs_create_u32("send_reordered_event", 0444, d, &conn->stats.send_reordered_event);
