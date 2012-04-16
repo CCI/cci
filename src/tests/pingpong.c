@@ -247,8 +247,19 @@ void do_client()
 	memset(buffer, 'b', max);
 
 	if (opts.method != MSGS) {
-		ret = cci_rma_register(endpoint, buffer, max,
-				       opts.method == RMA_WRITE ? CCI_FLAG_WRITE : CCI_FLAG_READ,
+		int flags = 0;
+
+		/* for the client, we want the opposite of the opts.method.
+		 * when testing RMA WRITE, we only need READ access.
+		 * when testing RMA READ, we need WRITE access.
+		 */
+
+		if (opts.method == RMA_WRITE)
+			flags = CCI_FLAG_READ;
+		else if (opts.method == RMA_READ)
+			flags = CCI_FLAG_WRITE;
+
+		ret = cci_rma_register(endpoint, buffer, max, flags,
 				       &local_rma_handle);
 		check_return(endpoint, "cci_rma_register", ret, 1);
 		fprintf(stderr, "local_rma_handle is 0x%" PRIx64 "\n",
