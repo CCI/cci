@@ -19,5 +19,6 @@
 
 int cci_get_event(cci_endpoint_t * endpoint, cci_event_t ** event)
 {
-	return cci_core->get_event(endpoint, event);
+	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
+	return ep->plugin->get_event(endpoint, event);
 }

@@ -111,24 +111,23 @@ do {                                                        \
 /*
  * Local functions
  */
-static int portals_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int portals_finalize(void);
+static int portals_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int portals_finalize(cci_plugin_core_t *plugin);
 static const char *portals_strerror(cci_endpoint_t * endpoint, enum cci_status status);
-static int portals_get_devices(cci_device_t const ***devices);
 static int portals_create_endpoint(cci_device_t * device,
 				   int flags,
 				   cci_endpoint_t ** endpoint,
 				   cci_os_handle_t * fd);
 static int portals_destroy_endpoint(cci_endpoint_t * endpoint);
-static int portals_accept(union cci_event *event,
-			  void *context);
-static int portals_reject(union cci_event *event);
+static int portals_accept(cci_event_t *event,
+			  const void *context);
+static int portals_reject(cci_event_t *event);
 static int portals_connect(cci_endpoint_t * endpoint,
-			   char *server_uri,
-			   void *data_ptr,
+			   const char *server_uri,
+			   const void *data_ptr,
 			   uint32_t data_len,
 			   cci_conn_attribute_t attribute,
-			   void *context, int flags, struct timeval *timeout);
+			   const void *context, int flags, const struct timeval *timeout);
 static int portals_disconnect(cci_connection_t * connection);
 static int portals_set_opt(cci_opt_handle_t * handle,
 			   cci_opt_level_t level,
@@ -138,26 +137,25 @@ static int portals_get_opt(cci_opt_handle_t * handle,
 			   cci_opt_name_t name, void **val, int *len);
 static int portals_arm_os_handle(cci_endpoint_t * endpoint, int flags);
 static int portals_get_event(cci_endpoint_t * endpoint,
-			     cci_event_t ** const event);
+			     cci_event_t ** event);
 static int portals_return_event(cci_event_t * event);
 static int portals_send(cci_connection_t * connection,
-			void *ptr, uint32_t len, void *context, int flags);
+			const void *ptr, uint32_t len, const void *context, int flags);
 static int portals_sendv(cci_connection_t * connection,
-			 struct iovec *data,
-			 uint32_t iovcnt, void *context, int flags);
+			 const struct iovec *data,
+			 uint32_t iovcnt, const void *context, int flags);
 static int portals_rma_register(cci_endpoint_t * endpoint,
-				cci_connection_t * connection,
-				void *start,
-				uint64_t length, uint64_t * rma_handle);
-static int portals_rma_deregister(uint64_t rma_handle);
+				void *start, uint64_t length,
+				int flags, uint64_t * rma_handle);
+static int portals_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
 static int portals_rma(cci_connection_t * connection,
-		       void *msg_ptr,
+		       const void *msg_ptr,
 		       uint32_t msg_len,
 		       uint64_t local_handle,
 		       uint64_t local_offset,
 		       uint64_t remote_handle,
 		       uint64_t remote_offset,
-		       uint64_t data_len, void *context, int flags);
+		       uint64_t data_len, const void *context, int flags);
 
 static void *portals_progress_thread(void *arg);
 static inline void portals_progress_dev(cci__dev_t * dev);
@@ -185,7 +183,7 @@ cci_plugin_core_t cci_core_portals_plugin = {
 	 CCI_CORE_API_VERSION,
 	 "portals",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
-	 5,
+	 50,
 	 cci_core_portals_post_load,	/* Bootstrap function pointers */
 	 cci_core_portals_pre_unload,
 	 },
@@ -194,7 +192,6 @@ cci_plugin_core_t cci_core_portals_plugin = {
 	portals_init,
 	portals_finalize,
 	portals_strerror,
-	portals_get_devices,
 	portals_create_endpoint,
 	portals_destroy_endpoint,
 	portals_accept,
@@ -213,7 +210,7 @@ cci_plugin_core_t cci_core_portals_plugin = {
 	portals_rma
 };
 
-static int portals_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+static int portals_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 
 	int iRC;
@@ -296,7 +293,7 @@ static int portals_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
       false_alarm:
 
-/* FIXME: if configfile == 0, create default devices */
+/* FIXME: if globals->configfile == 0, create default devices */
 
 /*
  * Start searching global configuration for portals devices.
@@ -304,8 +301,8 @@ static int portals_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	iReject = 1;
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
 
-		const char **arg;
-		cci_device_t *device;
+		const char * const *arg;
+		struct cci_device *device;
 		portals_dev_t *pdev;
 
 /*      Reject until portals driver found in configuration. */
@@ -477,39 +474,7 @@ static const char *portals_strerror(cci_endpoint_t * endpoint, enum cci_status s
 	return cp;
 }
 
-static int portals_get_devices(cci_device_t const ***devices)
-{
-
-	cci_device_t const *device;
-	cci__dev_t *dev;
-	portals_dev_t *pdev;
-
-	CCI_ENTER;
-
-	if (!pglobals) {
-
-		CCI_EXIT;
-		return CCI_ENODEV;
-	}
-
-	*devices = pglobals->devices;
-	debug(CCI_DB_INFO, "There are %d devices.", pglobals->count);
-
-	device = **devices;
-	dev = container_of(device, cci__dev_t, device);
-	pdev = dev->priv;
-
-	debug(CCI_DB_INFO, "Got portals ID of: %u:%hu",
-	      pdev->idp.nid, pdev->idp.pid);
-
-/* FIXME: update the devices list (up field, ...).
-   add new devices if !configfile */
-
-	CCI_EXIT;
-	return CCI_SUCCESS;
-}
-
-static int portals_finalize(void)
+static int portals_finalize(cci_plugin_core_t *plugin)
 {
 	cci__dev_t *dev;
 
@@ -521,14 +486,16 @@ static int portals_finalize(void)
 		return CCI_ENODEV;
 	}
 
-	pthread_mutex_lock(&globals->lock);
 	portals_shut_down = 1;
-	pthread_mutex_unlock(&globals->lock);
 	pthread_join(progress_tid, NULL);
 
-	pthread_mutex_lock(&globals->lock);
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
-		portals_dev_t *pdev = dev->priv;
+		portals_dev_t *pdev;
+
+		if (strcmp(dev->driver, "portals"))
+			continue;
+
+		pdev = dev->priv;
 		if (pdev) {	// Only for portals device
 			PtlNIFini(pdev->niHandle);
 			if (pdev->ep_idxs)
@@ -536,7 +503,6 @@ static int portals_finalize(void)
 			free(dev->priv);
 		}
 	}
-	pthread_mutex_unlock(&globals->lock);
 	PtlFini();
 
 	free(pglobals->devices);
@@ -868,7 +834,7 @@ static void portals_free_orphan_ams(portals_ep_t * pep)
 
 static int portals_create_endpoint(cci_device_t * device,
 				   int flags,
-				   cci_endpoint_t ** endpoint,
+				   cci_endpoint_t ** endpointp,
 				   cci_os_handle_t * fd)
 {
 
@@ -879,6 +845,7 @@ static int portals_create_endpoint(cci_device_t * device,
 	cci__ep_t *ep = NULL;
 	portals_ep_t *pep = NULL;
 	portals_dev_t *pdev = NULL;
+	struct cci_endpoint *endpoint = (struct cci_endpoint *) *endpointp;
 	uint32_t msg_length;
 	char name[64];
 
@@ -898,7 +865,7 @@ static int portals_create_endpoint(cci_device_t * device,
 	}
 	pdev = dev->priv;
 
-	ep = container_of(*endpoint, cci__ep_t, endpoint);
+	ep = container_of(endpoint, cci__ep_t, endpoint);
 	ep->priv = calloc(1, sizeof(*pep));
 	if (!ep->priv) {
 
@@ -906,7 +873,7 @@ static int portals_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 
-	(*endpoint)->max_recv_buffer_count = PORTALS_EP_RX_CNT;
+	endpoint->max_recv_buffer_count = PORTALS_EP_RX_CNT;
 	ep->rx_buf_cnt = PORTALS_EP_RX_CNT;
 	ep->tx_buf_cnt = PORTALS_EP_TX_CNT;
 	ep->buffer_len = dev->device.max_send_size;
@@ -991,13 +958,13 @@ static int portals_create_endpoint(cci_device_t * device,
 	memset(name, 0, sizeof(name));
 	snprintf(name, 64, "%s%u:%hu:%u", PORTALS_URI, pdev->idp.nid,
 		 pdev->idp.pid, pep->idx);
-	*((char **)(&(*endpoint)->name)) = strdup(name);
-	if (!(*endpoint)->name) {
+	endpoint->name = strdup(name);
+	if (!endpoint->name) {
 		iRC = CCI_ENOMEM;
 		goto out;
 	}
 
-	debug(CCI_DB_EP, "opening %s", (*endpoint)->name);
+	debug(CCI_DB_EP, "opening %s", endpoint->name);
 
 	pthread_mutex_lock(&dev->lock);
 	pdev->is_progressing = 0;
@@ -1050,7 +1017,7 @@ static int portals_create_endpoint(cci_device_t * device,
 
 	if (ep)
 		free(ep);
-	*endpoint = NULL;
+	*endpointp = NULL;
 
 	CCI_EXIT;
 	return iRC;
@@ -1157,8 +1124,8 @@ static int portals_destroy_endpoint(cci_endpoint_t * endpoint)
 	return CCI_SUCCESS;
 }
 
-static int portals_accept(union cci_event *event,
-			  void *context)
+static int portals_accept(cci_event_t *event,
+			  const void *context)
 {
 
 	int ret;
@@ -1231,7 +1198,7 @@ static int portals_accept(union cci_event *event,
 
 	conn->connection.attribute = event->request.attribute;
 	conn->connection.endpoint = endpoint;
-	conn->connection.context = context;
+	conn->connection.context = (void *) context;
 	conn->connection.max_send_size = dev->device.max_send_size;
 
 	pconn->idp = rx->pevent.initiator;
@@ -1318,7 +1285,7 @@ static int portals_accept(union cci_event *event,
 	return ret;
 }
 
-static int portals_reject(union cci_event *event)
+static int portals_reject(cci_event_t *event)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
@@ -1461,11 +1428,11 @@ static int portals_getaddrinfo(const char *uri,
 }
 
 static int portals_connect(cci_endpoint_t * endpoint,
-			   char *server_uri,
-			   void *data_ptr,
+			   const char *server_uri,
+			   const void *data_ptr,
 			   uint32_t data_len,
 			   cci_conn_attribute_t attribute,
-			   void *context, int flags, struct timeval *timeout)
+			   const void *context, int flags, const struct timeval *timeout)
 {
 
 	int iRC;
@@ -1474,11 +1441,11 @@ static int portals_connect(cci_endpoint_t * endpoint,
 	cci__conn_t *conn = NULL;
 	portals_ep_t *pep = NULL;
 	portals_dev_t *pdev = NULL;
-	cci_connection_t *connection = NULL;
+	struct cci_connection *connection = NULL;
 	portals_conn_t *pconn = NULL;
 	portals_tx_t *tx = NULL;
 	cci__evt_t *evt = NULL;
-	cci_event_t *event = NULL;
+	union cci_event *event = NULL;
 	ptl_process_id_t idp;
 	uint32_t idx;
 	portals_conn_request_t conn_request;
@@ -1515,7 +1482,7 @@ static int portals_connect(cci_endpoint_t * endpoint,
 	connection = &conn->connection;
 	connection->attribute = attribute;
 	connection->endpoint = endpoint;
-	connection->context = context;
+	connection->context = (void *) context;
 
 	memset(&idp, 0, sizeof(idp));	/* satisfy -Wall -Werror */
 	iRC = portals_getaddrinfo(server_uri, &idp, &idx);
@@ -1557,8 +1524,8 @@ static int portals_connect(cci_endpoint_t * endpoint,
 	evt->conn = conn;
 	event = &evt->event;
 	event->type = CCI_EVENT_CONNECT;	/* for now */
-	event->status = CCI_SUCCESS;
-	event->connect.context = context;
+	event->connect.status = CCI_SUCCESS;
+	event->connect.context = (void *) context;
 	event->connect.connection=connection;
 
 	/* pack the bits */
@@ -2074,9 +2041,9 @@ static int portals_return_event(cci_event_t * event)
  * will trigger our CCI event.
  */
 static int portals_send_common(cci_connection_t * connection,
-			       struct iovec *data,
+			       const struct iovec *data,
 			       uint32_t iovcnt,
-			       void *context,
+			       const void *context,
 			       int flags, portals_rma_op_t * rma_op)
 {
 
@@ -2143,7 +2110,7 @@ static int portals_send_common(cci_connection_t * connection,
 	tx->evt.ep = ep;
 	tx->evt.event.type = CCI_EVENT_SEND;
 	tx->evt.event.send.connection = connection;
-	tx->evt.event.send.context = context;
+	tx->evt.event.send.context = (void *) context;
 	tx->evt.event.send.status = CCI_SUCCESS;	/* for now */
 
 	/* pack match bits */
@@ -2257,8 +2224,8 @@ static int portals_send_common(cci_connection_t * connection,
 }
 
 static int portals_sendv(cci_connection_t * connection,
-			 struct iovec *data,
-			 uint32_t iovcnt, void *context, int flags)
+			 const struct iovec *data,
+			 uint32_t iovcnt, const void *context, int flags)
 {
 
 	int i, ret;
@@ -2277,8 +2244,8 @@ static int portals_sendv(cci_connection_t * connection,
 }
 
 static int portals_send(cci_connection_t * connection,
-			void *msg_ptr,
-			uint32_t msg_len, void *context, int flags)
+			const void *msg_ptr,
+			uint32_t msg_len, const void *context, int flags)
 {
 
 	int ret = CCI_SUCCESS;
@@ -2289,7 +2256,7 @@ static int portals_send(cci_connection_t * connection,
 
 	if (msg_ptr && msg_len > 0) {
 		iovcnt = 1;
-		iov.iov_base = msg_ptr;
+		iov.iov_base = (void *) msg_ptr;
 		iov.iov_len = msg_len;
 	}
 
@@ -2298,6 +2265,8 @@ static int portals_send(cci_connection_t * connection,
 	CCI_EXIT;
 	return ret;
 }
+
+#warning FIXME: no connection anymore in rma_register
 
 /* We do not know if this buffer will be the source or sink,
  * so we must post a ME in case it will be a sink.
@@ -2308,14 +2277,13 @@ static int portals_send(cci_connection_t * connection,
  * to that connection since we cannot check the connection
  * before Portals matches the ME. */
 static int portals_rma_register(cci_endpoint_t * endpoint,
-				cci_connection_t * connection,
-				void *start,
-				uint64_t length, uint64_t * rma_handle)
+				void *start, uint64_t length,
+				int flags, uint64_t * rma_handle)
 {
-
+	/* FIXME use read/write flags? */
 	int iRC = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
-	cci__conn_t *conn = NULL;
+//	cci__conn_t *conn = NULL;
 	portals_ep_t *pep = NULL;
 	portals_dev_t *pdev = NULL;
 	portals_rma_handle_t *handle = NULL;
@@ -2332,7 +2300,7 @@ static int portals_rma_register(cci_endpoint_t * endpoint,
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 	pep = ep->priv;
 	pdev = ep->dev->priv;
-	conn = container_of(connection, cci__conn_t, connection);
+//	conn = container_of(connection, cci__conn_t, connection);
 
 	handle = calloc(1, sizeof(*handle));
 	if (!handle) {
@@ -2342,7 +2310,7 @@ static int portals_rma_register(cci_endpoint_t * endpoint,
 	}
 
 	handle->ep = ep;
-	handle->conn = conn;
+//	handle->conn = conn;
 	handle->length = length;
 	handle->start = start;
 	handle->refcnt = 1;
@@ -2437,7 +2405,7 @@ static void portals_rma_handle_decref(portals_rma_handle_t * handle)
 	return;
 }
 
-static int portals_rma_deregister(uint64_t rma_handle)
+static int portals_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
 {
 	int ret = CCI_EINVAL;
 	portals_rma_handle_t *handle = (portals_rma_handle_t *) rma_handle;
@@ -2479,10 +2447,10 @@ static int portals_rma_deregister(uint64_t rma_handle)
 }
 
 static int portals_rma(cci_connection_t * connection,
-		       void *msg_ptr, uint32_t msg_len,
+		       const void *msg_ptr, uint32_t msg_len,
 		       uint64_t local_handle, uint64_t local_offset,
 		       uint64_t remote_handle, uint64_t remote_offset,
-		       uint64_t data_len, void *context, int flags)
+		       uint64_t data_len, const void *context, int flags)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
@@ -2552,21 +2520,21 @@ static int portals_rma(cci_connection_t * connection,
 	rma_op->remote_offset = remote_offset;
 	rma_op->completed = 0;
 	rma_op->status = CCI_SUCCESS;	/* for now */
-	rma_op->context = context;
+	rma_op->context = (void *) context;
 	rma_op->flags = flags;
 	rma_op->msg_len = (uint16_t) msg_len;
 	rma_op->tx = NULL;
 
 	rma_op->evt.event.type = CCI_EVENT_SEND;
 	rma_op->evt.event.send.connection = connection;
-	rma_op->evt.event.send.context = context;
+	rma_op->evt.event.send.context = (void *) context;
 	rma_op->evt.event.send.status = CCI_SUCCESS;	/* for now */
 	rma_op->evt.ep = ep;
 	rma_op->evt.conn = conn;
 	rma_op->evt.priv = rma_op;
 
 	if (msg_len)
-		rma_op->msg_ptr = msg_ptr;
+		rma_op->msg_ptr = (void *) msg_ptr;
 	else
 		rma_op->msg_ptr = NULL;
 
@@ -2849,7 +2817,7 @@ static void portals_handle_conn_reply(cci__ep_t * ep, ptl_event_t pevent)
 		pconn->peer_conn |= (uint64_t) accept->server_conn_lower;
 
 		evt->event.type = CCI_EVENT_CONNECT;
-		evt->event.status = CCI_SUCCESS;
+		evt->event.connect.status = CCI_SUCCESS;
 		evt->event.connect.connection = &conn->connection;
 
 		pthread_mutex_lock(&ep->lock);
@@ -2862,7 +2830,7 @@ static void portals_handle_conn_reply(cci__ep_t * ep, ptl_event_t pevent)
 			free((void *)conn->uri);
 		free(conn);
 		evt->event.type = CCI_EVENT_CONNECT;
-		evt->event.status = CCI_ECONNREFUSED;
+		evt->event.connect.status = CCI_ECONNREFUSED;
 		evt->event.connect.connection = NULL;
 
 		/* context already set in connect() */

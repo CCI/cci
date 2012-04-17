@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2011 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2011 Oak Ridge National Labs.  All rights reserved.
+ *
+ * See COPYING in top-level directory
+ *
+ * $COPYRIGHT$
+ *
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -122,7 +132,7 @@ int main(int argc, char *argv[])
 	for (i = 0; i < count; i++) {
 		void *p = ptr + (uintptr_t) i;
 
-		ret = cci_rma_register(endpoint, NULL, p, length, &handles[i]);
+		ret = cci_rma_register(endpoint, p, length, CCI_FLAG_READ|CCI_FLAG_WRITE, &handles[i]);
 		check_return(endpoint, "cci_rma_register", ret);
 	}
 
@@ -134,7 +144,7 @@ int main(int argc, char *argv[])
 		gettimeofday(&start, NULL);
 
 	for (i = 0; i < count; i++) {
-		ret = cci_rma_deregister(handles[i]);
+		ret = cci_rma_deregister(endpoint, handles[i]);
 		check_return(endpoint, "cci_rma_register", ret);
 	}
 

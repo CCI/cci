@@ -1,5 +1,7 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2011-2012 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2011-2012 Oak Ridge National Labs.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -308,6 +310,9 @@ typedef struct verbs_ep {
 	uint32_t cq_size;	/* number of cqe */
 	struct sockaddr_in sin;	/* host address and port */
 
+	void *conn_tree;	/* rbtree of conns sorted by qp_num */
+	pthread_rwlock_t conn_tree_lock;
+
 	struct ibv_srq *srq;	/* shared recv queue */
 
 	verbs_tx_pool_t *tx_pool;
@@ -345,6 +350,7 @@ typedef struct verbs_conn_request {
 
 typedef struct verbs_conn {
 	cci__conn_t *conn;	/* owning conn */
+	uint32_t qp_num;	/* id->qp->qp_num for vep->conn_tree */
 	struct rdma_cm_id *id;	/* peer info */
 	verbs_conn_state_t state;	/* current state */
 	uint32_t mss;		/* max send size */

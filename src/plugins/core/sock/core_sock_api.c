@@ -34,6 +34,8 @@
 #include <inttypes.h>
 
 #include "cci.h"
+#include "cci_lib_types.h"
+#include "cci-api.h"
 #include "plugins/core/core.h"
 #include "core_sock.h"
 
@@ -46,16 +48,16 @@ bool conn_established = false;
 
 volatile int sock_shut_down = 0;
 sock_globals_t *sglobals = NULL;
+static int threads_running = 0;
 pthread_t progress_tid, recv_tid;
 
 /*
  * Local functions
  */
-static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int sock_finalize(void);
+static int sock_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int sock_finalize(cci_plugin_core_t * plugin);
 static const char *sock_strerror(cci_endpoint_t * endpoint,
 				 enum cci_status status);
-static int sock_get_devices(cci_device_t * const **devices);
 static int sock_create_endpoint(cci_device_t * device,
 				int flags,
 				cci_endpoint_t ** endpoint,
@@ -84,12 +86,11 @@ static int sock_sendv(cci_connection_t * connection,
 		      const struct iovec *data, uint32_t iovcnt,
 		      const void *context, int flags);
 static int sock_rma_register(cci_endpoint_t * endpoint,
-			     cci_connection_t * connection,
 			     void *start, uint64_t length,
-			     uint64_t * rma_handle);
-static int sock_rma_deregister(uint64_t rma_handle);
+			     int flags, uint64_t * rma_handle);
+static int sock_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
 static int sock_rma(cci_connection_t * connection,
-		    void *header_ptr, uint32_t header_len,
+		    const void *header_ptr, uint32_t header_len,
 		    uint64_t local_handle, uint64_t local_offset,
 		    uint64_t remote_handle, uint64_t remote_offset,
 		    uint64_t data_len, const void *context, int flags);
@@ -122,7 +123,7 @@ cci_plugin_core_t cci_core_sock_plugin = {
 	 CCI_CORE_API_VERSION,
 	 "sock",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
-	 5,
+	 30,
 
 	 /* Bootstrap function pointers */
 	 cci_core_sock_post_load,
@@ -133,7 +134,6 @@ cci_plugin_core_t cci_core_sock_plugin = {
 	sock_init,
 	sock_finalize,
 	sock_strerror,
-	sock_get_devices,
 	sock_create_endpoint,
 	sock_destroy_endpoint,
 	sock_accept,
@@ -205,10 +205,11 @@ static inline const char *sock_msg_type(sock_msg_type_t type)
 	return NULL;
 }
 
-static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+static int sock_init(cci_plugin_core_t *plugin,
+		     uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	int ret;
-	cci__dev_t *dev;
+	cci__dev_t *dev, *ndev;
 	cci_device_t **devices;
 
 	CCI_ENTER;
@@ -224,6 +225,7 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		return CCI_ENOMEM;
 	}
 
+	pthread_mutex_init(&sglobals->lock, NULL);
 	TAILQ_INIT(&sglobals->ka_conns);
 
 	srandom((unsigned int)sock_get_usecs());
@@ -234,7 +236,8 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		goto out;
 	}
 
-	if (!configfile) {
+	if (!globals->configfile) {
+#if 0
 		/* create a loopback device for now */
 		struct cci_device *device;
 		sock_dev_t *sdev;
@@ -252,6 +255,8 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		}
 
 		cci__init_dev(dev);
+		dev->plugin = plugin;
+		dev->priority = plugin->base.priority;
 
 		device = &dev->device;
 		device->max_send_size = SOCK_DEFAULT_MSS;
@@ -272,17 +277,23 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		dev->driver = strdup("sock");
 		dev->is_up = 1;
 		dev->is_default = 1;
-		TAILQ_INSERT_TAIL(&globals->devs, dev, entry);
+		cci__add_dev(dev);
 		devices[sglobals->count] = device;
 		sglobals->count++;
+		threads_running = 1;
+#endif
 
 	} else
 	/* find devices that we own */
-	TAILQ_FOREACH(dev, &globals->devs, entry) {
+		TAILQ_FOREACH_SAFE(dev, &globals->configfile_devs, entry, ndev) {
 		if (0 == strcmp("sock", dev->driver)) {
 			const char * const *arg;
 			struct cci_device *device;
 			sock_dev_t *sdev;
+
+			dev->plugin = plugin;
+			if (dev->priority == -1)
+				dev->priority = plugin->base.priority;
 
 			device = &dev->device;
 			device->max_send_size = SOCK_DEFAULT_MSS;
@@ -327,12 +338,15 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
 					assert(mss >= SOCK_MIN_MSS);
 					device->max_send_size = mss;
-				}
+				 }
 			}
 			if (sdev->ip != 0) {
+				TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
+				cci__add_dev(dev);
 				devices[sglobals->count] = device;
 				sglobals->count++;
 				dev->is_up = 1;
+				threads_running = 1;
 			}
 
 			/* TODO determine if IP is available and up */
@@ -345,13 +359,15 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
 	*((cci_device_t ***) & sglobals->devices) = devices;
 
-	ret = pthread_create(&recv_tid, NULL, sock_recv_thread, NULL);
-	if (ret)
-		goto out;
+	if (threads_running) {
+		ret = pthread_create(&recv_tid, NULL, sock_recv_thread, NULL);
+		if (ret)
+			goto out;
 
-	ret = pthread_create(&progress_tid, NULL, sock_progress_thread, NULL);
-	if (ret)
-		goto out;
+		ret = pthread_create(&progress_tid, NULL, sock_progress_thread, NULL);
+		if (ret)
+			goto out;
+	}
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -385,30 +401,11 @@ static const char *sock_strerror(cci_endpoint_t * endpoint,
 	return NULL;
 }
 
-static int sock_get_devices(cci_device_t * const **devices)
-{
-	CCI_ENTER;
-
-	if (!sglobals) {
-		CCI_EXIT;
-		return CCI_ENODEV;
-	}
-
-/* FIXME: update the devices list (up field, ...).
-   add new devices if !configfile */
-
-	*devices = sglobals->devices;
-
-	CCI_EXIT;
-
-	return CCI_SUCCESS;
-}
-
 /* NOTE the CCI layer has already unbound all devices
  *      and destroyed all endpoints.
  *      All we need to do if free dev->priv
  */
-static int sock_finalize(void)
+static int sock_finalize(cci_plugin_core_t * plugin)
 {
 	cci__dev_t *dev = NULL;
 
@@ -420,16 +417,15 @@ static int sock_finalize(void)
 	}
 
 	/* let the progress thread know we are going away */
-	pthread_mutex_lock(&globals->lock);
 	sock_shut_down = 1;
-	pthread_mutex_unlock(&globals->lock);
-	pthread_join(progress_tid, NULL);
-	pthread_join(recv_tid, NULL);
+	if (threads_running) {
+		pthread_join(progress_tid, NULL);
+		pthread_join(recv_tid, NULL);
+	}
 
-	pthread_mutex_lock(&globals->lock);
 	TAILQ_FOREACH(dev, &globals->devs, entry)
-	    free(dev->priv);
-	pthread_mutex_unlock(&globals->lock);
+		if (!strcmp(dev->driver, "sock"))
+			free(dev->priv);
 
 	free(sglobals->devices);
 	free((void *)sglobals);
@@ -449,14 +445,14 @@ sock_set_nonblocking(cci_os_handle_t sock, sock_fd_type_t type, void *p)
 	ret = fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 	if (-1 == ret)
 		return errno;
-	pthread_mutex_lock(&globals->lock);
+	pthread_mutex_lock(&sglobals->lock);
 	FD_SET(sock, &sglobals->fds);
 	if (sock >= sglobals->nfds)
 		sglobals->nfds = sock + 1;
 	sglobals->fd_idx[sock].type = type;
 	if (type == SOCK_FD_EP)
 		sglobals->fd_idx[sock].ep = p;
-	pthread_mutex_unlock(&globals->lock);
+	pthread_mutex_unlock(&sglobals->lock);
 	return 0;
 }
 
@@ -464,7 +460,7 @@ static inline void sock_close_socket(cci_os_handle_t sock)
 {
 	int found = 0;
 
-	pthread_mutex_lock(&globals->lock);
+	pthread_mutex_lock(&sglobals->lock);
 	FD_CLR(sock, &sglobals->fds);
 	sglobals->fd_idx[sock].type = SOCK_FD_UNUSED;
 	if (sock == sglobals->nfds - 1) {
@@ -481,7 +477,7 @@ static inline void sock_close_socket(cci_os_handle_t sock)
 		if (!found)
 			sglobals->nfds = 0;
 	}
-	pthread_mutex_unlock(&globals->lock);
+	pthread_mutex_unlock(&sglobals->lock);
 	close(sock);
 	return;
 }
@@ -857,6 +853,7 @@ static int sock_accept(cci_event_t *event, const void *context)
 		CCI_EXIT;
 		return CCI_ENOMEM;
 	}
+	conn->plugin = ep->plugin;
 
 	conn->tx_timeout = ep->tx_timeout;
 	conn->priv = calloc(1, sizeof(*sconn));
@@ -1262,6 +1259,7 @@ static int sock_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	sdev = dev->priv;
 
 	connection->max_send_size = dev->device.max_send_size;
+	conn->plugin = ep->plugin;
 
 	/* Dealing with keepalive, if set, include the keepalive timeout value into
 	   the connection request */
@@ -2254,12 +2252,11 @@ static int sock_sendv(cci_connection_t * connection,
 }
 
 static int sock_rma_register(cci_endpoint_t * endpoint,
-			     cci_connection_t * connection,
 			     void *start, uint64_t length,
-			     uint64_t * rma_handle)
+			     int flags, uint64_t * rma_handle)
 {
+	/* FIXME use read/write flags? */
 	cci__ep_t *ep = NULL;
-	cci__conn_t *conn = NULL;
 	sock_ep_t *sep = NULL;
 	sock_rma_handle_t *handle = NULL;
 
@@ -2272,7 +2269,6 @@ static int sock_rma_register(cci_endpoint_t * endpoint,
 
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 	sep = ep->priv;
-	conn = container_of(connection, cci__conn_t, connection);
 
 	handle = calloc(1, sizeof(*handle));
 	if (!handle) {
@@ -2281,7 +2277,6 @@ static int sock_rma_register(cci_endpoint_t * endpoint,
 	}
 
 	handle->ep = ep;
-	handle->conn = conn;
 	handle->length = length;
 	handle->start = start;
 	handle->refcnt = 1;
@@ -2297,7 +2292,7 @@ static int sock_rma_register(cci_endpoint_t * endpoint,
 	return CCI_SUCCESS;
 }
 
-static int sock_rma_deregister(uint64_t rma_handle)
+static int sock_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
 {
 	int ret = CCI_EINVAL;
 	sock_rma_handle_t *handle =
@@ -2392,7 +2387,7 @@ generate_context_id(sock_conn_t * sconn, const void *context, uint64_t * context
 }
 
 static int sock_rma(cci_connection_t * connection,
-		    void *msg_ptr, uint32_t msg_len,
+		    const void *msg_ptr, uint32_t msg_len,
 		    uint64_t local_handle, uint64_t local_offset,
 		    uint64_t remote_handle, uint64_t remote_offset,
 		    uint64_t data_len, const void *context, int flags)
@@ -2425,11 +2420,6 @@ static int sock_rma(cci_connection_t * connection,
 
 	if (!local) {
 		debug(CCI_DB_INFO, "%s: invalid local RMA handle", __func__);
-		CCI_EXIT;
-		return CCI_EINVAL;
-	} else if (local->conn && local->conn != conn) {
-		debug(CCI_DB_INFO, "%s: invalid connection for this RMA handle",
-		      __func__);
 		CCI_EXIT;
 		return CCI_EINVAL;
 	}
@@ -2476,7 +2466,7 @@ static int sock_rma(cci_connection_t * connection,
 	rma_op->tx = NULL;
 
 	if (msg_len)
-		rma_op->msg_ptr = msg_ptr;
+		rma_op->msg_ptr = (void *) msg_ptr;
 	else
 		rma_op->msg_ptr = NULL;
 
@@ -2584,7 +2574,7 @@ static int sock_rma(cci_connection_t * connection,
 		sock_rma_header_t *read = NULL;
 		//uint32_t seq;
 		uint64_t context_id;
-		void *msg_ptr = NULL;
+		//void *msg_ptr = NULL;
 
 		/* RMA_READ is implemented using RMA_WRITE: we send a request to the
 		   remote peer which will perform a RMA_WRITE */
@@ -2610,7 +2600,7 @@ static int sock_rma(cci_connection_t * connection,
 		tx->len = sizeof(sock_rma_header_t);
 		generate_context_id(sconn, context, &context_id);
 		memcpy(read->data, &data_len, sizeof(uint64_t));
-		msg_ptr = (void *)(read->data + sizeof(uint64_t));
+		//msg_ptr = (void *)(read->data + sizeof(uint64_t));
 		memcpy((void *)(((char *)read->data) + sizeof(uint64_t)),
 		       &context_id, sizeof(uint64_t));
 		tx->len += 2 * sizeof(uint64_t);
@@ -3685,7 +3675,7 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	//uint32_t msg_len = 1;
 	//void *msg_ptr = (void *)"RMAREAD";
 	int flags = 0;
-	sock_rma_handle_t *remote;
+	//sock_rma_handle_t *remote;
 	uint64_t msg_local_handle;
 	uint64_t msg_local_offset;
 	uint64_t msg_remote_handle;
@@ -3696,8 +3686,8 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	uint64_t remote_offset;
 	uint32_t seq, ts;
 	int rc;
-	cci__dev_t *dev = NULL;
-	sock_dev_t *sdev = NULL;
+	//cci__dev_t *dev = NULL;
+	//sock_dev_t *sdev = NULL;
 	uint64_t context_id;
 	uint64_t toto;
 	//cci__evt_t *evt;
@@ -3709,8 +3699,8 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	connection = &conn->connection;
 	ep = container_of(connection->endpoint, cci__ep_t, endpoint);
 	sep = ep->priv;
-	dev = ep->dev;
-	sdev = dev->priv;
+	//dev = ep->dev;
+	//sdev = dev->priv;
 
 	hdr_r = (sock_header_r_t *) rx->buffer;
 
@@ -3722,7 +3712,7 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 
 	sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
 	sock_handle_seq(sconn, seq);
-	remote = (sock_rma_handle_t *) (uintptr_t) remote_handle;
+	//remote = (sock_rma_handle_t *) (uintptr_t) remote_handle;
 	memcpy(&toto, read->data, sizeof(uint64_t));
 	memcpy(&context_id, (void *)((char *)read->data + sizeof(uint64_t)),
 	       sizeof(uint64_t));
@@ -4402,12 +4392,12 @@ static void *sock_progress_thread(void *arg)
 	struct timeval tv = { 0, SOCK_PROG_TIME_US };
 
 	assert(!arg);
-	pthread_mutex_lock(&globals->lock);
+	pthread_mutex_lock(&sglobals->lock);
 	while (!sock_shut_down) {
 		cci__dev_t *dev;
 		cci_device_t const **device;
 
-		pthread_mutex_unlock(&globals->lock);
+		pthread_mutex_unlock(&sglobals->lock);
 
 		/* For each connection with keepalive set. We do here since the list
 		   of such connections is independent from any device (we do not want
@@ -4420,9 +4410,9 @@ static void *sock_progress_thread(void *arg)
 			sock_progress_dev(dev);
 		}
 		select(0, NULL, NULL, NULL, &tv);
-		pthread_mutex_lock(&globals->lock);
+		pthread_mutex_lock(&sglobals->lock);
 	}
-	pthread_mutex_unlock(&globals->lock);
+	pthread_mutex_unlock(&sglobals->lock);
 
 	pthread_exit(NULL);
 	return (NULL);		/* make pgcc happy */
@@ -4438,7 +4428,7 @@ static void *sock_recv_thread(void *arg)
 	fd_set fds;
 
 	assert(!arg);
-	pthread_mutex_lock(&globals->lock);
+	pthread_mutex_lock(&sglobals->lock);
 	while (!sock_shut_down) {
 		nfds = sglobals->nfds;
 		FD_ZERO(&fds);
@@ -4446,7 +4436,7 @@ static void *sock_recv_thread(void *arg)
 			if (sglobals->fd_idx[i].type != SOCK_FD_UNUSED)
 				FD_SET(i, &fds);
 		}
-		pthread_mutex_unlock(&globals->lock);
+		pthread_mutex_unlock(&sglobals->lock);
 
 		ret = select(nfds, &fds, NULL, NULL, &tv);
 		if (ret == -1) {
@@ -4479,9 +4469,9 @@ static void *sock_recv_thread(void *arg)
 			i = (i + 1) % nfds;
 		} while (i != start);
 	      relock:
-		pthread_mutex_lock(&globals->lock);
+		pthread_mutex_lock(&sglobals->lock);
 	}
-	pthread_mutex_unlock(&globals->lock);
+	pthread_mutex_unlock(&sglobals->lock);
 
 	pthread_exit(NULL);
 	return (NULL);		/* make pgcc happy */

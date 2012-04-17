@@ -14,10 +14,9 @@
 /*
  * Local functions
  */
-static int mx_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int mx_finalize(void);
+static int mx_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int mx_finalize(cci_plugin_core_t *plugin);
 static const char *mx_strerror(cci_endpoint_t * endpoint, enum cci_status status);
-static int mx_get_devices(cci_device_t const ***devices);
 static int mx_create_endpoint(cci_device_t * device,
 			      int flags,
 			      cci_endpoint_t ** endpoint, cci_os_handle_t * fd);
@@ -53,11 +52,11 @@ static int mx_sendv(cci_connection_t * connection,
 		    struct iovec *data, uint32_t iovcnt,
 		    void *context, int flags);
 static int mx_rma_register(cci_endpoint_t * endpoint,
-			   cci_connection_t * connection,
-			   void *start, uint64_t length, uint64_t * rma_handle);
-static int mx_rma_deregister(uint64_t rma_handle);
+			   void *start, uint64_t length,
+			   int flags, uint64_t * rma_handle);
+static int mx_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
 static int mx_rma(cci_connection_t * connection,
-		  void *header_ptr, uint32_t header_len,
+		  const void *header_ptr, uint32_t header_len,
 		  uint64_t local_handle, uint64_t local_offset,
 		  uint64_t remote_handle, uint64_t remote_offset,
 		  uint64_t data_len, void *context, int flags);
@@ -82,7 +81,7 @@ cci_plugin_core_t cci_core_mx_plugin = {
 	 CCI_CORE_API_VERSION,
 	 "mx",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
-	 5,
+	 0, /* FIXME: set to 50 when actually implemented */
 
 	 /* Bootstrap function pointers */
 	 cci_core_mx_post_load,
@@ -93,7 +92,6 @@ cci_plugin_core_t cci_core_mx_plugin = {
 	mx_init,
 	mx_finalize,
 	mx_strerror,
-	mx_get_devices,
 	mx_create_endpoint,
 	mx_destroy_endpoint,
 	mx_bind,
@@ -115,13 +113,13 @@ cci_plugin_core_t cci_core_mx_plugin = {
 	mx_rma
 };
 
-static int mx_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+static int mx_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	printf("In mx_init\n");
 	return CCI_SUCCESS;
 }
 
-static int mx_finalize(void)
+static int mx_finalize(cci_plugin_core_t *plugin)
 {
 	printf("In mx_finalize\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
@@ -131,12 +129,6 @@ static const char *mx_strerror(cci_endpoint_t * endpoint, enum cci_status status
 {
 	printf("In mx_sterrror\n");
 	return NULL;
-}
-
-static int mx_get_devices(cci_device_t const ***devices)
-{
-	printf("In mx_get_devices\n");
-	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 static int mx_create_endpoint(cci_device_t * device,
@@ -254,21 +246,21 @@ static int mx_sendv(cci_connection_t * connection,
 }
 
 static int mx_rma_register(cci_endpoint_t * endpoint,
-			   cci_connection_t * connection,
-			   void *start, uint64_t length, uint64_t * rma_handle)
+			   void *start, uint64_t length,
+			   int flags, uint64_t * rma_handle)
 {
 	printf("In mx_rma_register\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
-static int mx_rma_deregister(uint64_t rma_handle)
+static int mx_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
 {
 	printf("In mx_rma_deregister\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 static int mx_rma(cci_connection_t * connection,
-		  void *header_ptr, uint32_t header_len,
+		  const void *header_ptr, uint32_t header_len,
 		  uint64_t local_handle, uint64_t local_offset,
 		  uint64_t remote_handle, uint64_t remote_offset,
 		  uint64_t data_len, void *context, int flags)

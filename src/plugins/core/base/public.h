@@ -1,5 +1,7 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2012 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2012 Oak Ridge National Labs.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -8,7 +10,8 @@
 
 #include "cci.h"
 
-BEGIN_C_DECLS int cci_plugins_core_open(void);
+BEGIN_C_DECLS
+int cci_plugins_core_open(void);
 int cci_plugins_core_verify(cci_plugin_t * plugin);
 int cci_plugins_core_close(void);
 

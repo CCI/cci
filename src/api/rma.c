@@ -18,7 +18,7 @@
 #include "plugins/core/core.h"
 
 int cci_rma(cci_connection_t * connection,
-	    void *header_ptr, uint32_t header_len,
+	    const void *header_ptr, uint32_t header_len,
 	    uint64_t local_handle, uint64_t local_offset,
 	    uint64_t remote_handle, uint64_t remote_offset,
 	    uint64_t data_len, const void *context, int flags)
@@ -54,8 +54,8 @@ int cci_rma(cci_connection_t * connection,
 		return CCI_EINVAL;
 	}
 
-	return cci_core->rma(connection, header_ptr, header_len,
-			     local_handle, local_offset,
-			     remote_handle, remote_offset,
-			     data_len, context, flags);
+	return conn->plugin->rma(connection, header_ptr, header_len,
+				 local_handle, local_offset,
+				 remote_handle, remote_offset,
+				 data_len, context, flags);
 }

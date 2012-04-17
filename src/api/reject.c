@@ -19,5 +19,6 @@
 
 int cci_reject(cci_event_t *conn_req)
 {
-	return cci_core->reject(conn_req);
+	cci__evt_t *ev = container_of(conn_req, cci__evt_t, event);
+	return ev->ep->plugin->reject(conn_req);
 }

@@ -2,8 +2,8 @@
  * Copyright (c) 2010-2011 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2010-2011 Myricom, Inc.  All rights reserved.
  * Copyright (c) 2010-2011 Qlogic Corporation.  All rights reserved.
- * Copyright (c) 2010-2011 UT-Battelle, LLC.  All rights reserved.
- * Copyright (c) 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright (c) 2010-2012 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2010-2012 Oak Ridge National Labs.  All rights reserved.
  * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
@@ -778,9 +778,8 @@ CCI_DECLSPEC int cci_connect(cci_endpoint_t * endpoint, const char *server_uri,
 /*!
   Tear down an existing connection.
 
-  Operation is local, remote side is not notified. From that point,
-  both local and remote side will get a DISCONNECTED communication error
-  if sends are initiated on  this connection.
+  Operation is local, remote side is not notified. Any future attempt
+  to use the connection will result in undefined behavior.
 
   \param[in] connection	Connection to server.
 
@@ -1375,11 +1374,11 @@ CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
   When cci_send() returns, the application buffer is reusable. By
   default, CCI will buffer the data internally.
 
-  \param[in] connection	Connection (destination/reliability).
+  \param[in] connection	Connection (destination/reliability/ordering).
   \param[in] msg_ptr    Pointer to local segment.
   \param[in] msg_len    Length of local segment (limited to max send size).
   \param[in] context	Cookie to identify the completion through a Send event
-				    when non-blocking.
+			when non-blocking.
   \param[in] flags      Optional flags: CCI_FLAG_BLOCKING,
                         CCI_FLAG_NO_COPY, CCI_FLAG_SILENT.  These flags
                         are explained below.
@@ -1410,7 +1409,7 @@ CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
   When cci_send() returns, the buffer is re-usable by the application.
 
   \anchor CCI_FLAG_BLOCKING
-  If the CCI_FLAG_BLOCKING flag is specified, cci_send() will \a also
+  If the CCI_FLAG_BLOCKING flag is specified, cci_send() will also
   block until the send completion has occurred.  In this case, there
   is no event returned for this send via cci_get_event(); the send
   completion status is returned via cci_send().
@@ -1419,7 +1418,7 @@ CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
   If the CCI_FLAG_NO_COPY is specified, the application is
   indicating that it does not need the buffer back until the send
   completion occurs (which is most useful when CCI_FLAG_BLOCKING is
-  \a not specified).  The CCI implementation is therefore free to use
+  not specified).  The CCI implementation is therefore free to use
   "zero copy" types of transmission with the buffer -- if it wants to.
 
   \anchor CCI_FLAG_SILENT
@@ -1432,9 +1431,10 @@ CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
   semantics imply specific unordered SILENT send completions.  The
   only ways to know when unordered SILENT sends have completed (and
   that the local send buffer is "owned" by the application again) is
-  either to close the connection or issue a non-SILENT send.  The
-  completion of a non-SILENT send guarantees the completion of all
-  previous SILENT sends.
+  to close the connection.
+
+  Note, using both CCI_FLAG_NO_COPY and CCI_FLAG_SILENT is only allowed
+  on RO connections.
 */
 CCI_DECLSPEC int cci_send(cci_connection_t * connection,
 			  const void *msg_ptr, uint32_t msg_len,
@@ -1486,33 +1486,29 @@ CCI_DECLSPEC int cci_sendv(cci_connection_t * connection,
   not be accessed via another endpoint, unless also registered with
   that endpoint (i.e. an endpoint serves as a protection domain).
 
-  If the connection is provided (and the endpoint's driver supports this
-  feature), the memory is only exposed to that connection. If it is NULL,
-  then any reliable connection on that endpoint can access that memory.
-
   Registration may take awhile depending on the underlying device and
   should not be in the critical path.
 
   It is allowable to have overlapping registrations.
 
   \param[in]  endpoint      Local endpoint to use for RMA.
-  \param[in]  connection    Restrict RMA to this connection.
   \param[in]  start         Pointer to local memory.
   \param[in]  length        Length of local memory.
+  \param[in]  flags         Optional flags:
+    - CCI_FLAG_READ:        Local memory may be read from other endpoints.
+    - CCI_FLAG_WRITE:       Local memory may be written by other endpoints.
   \param[out] rma_handle    Handle for use with cci_rma().
 
   \return CCI_SUCCESS   The memory is ready for RMA.
   \return CCI_EINVAL    endpoint, start, or rma_handle is NULL.
-  \return CCI_EINVAL    connection is unreliable.
-  \return CCI_ENOTSUP   driver does not support setting a connection.
   \return CCI_EINVAL    length is 0.
   \return Each driver may have additional error codes.
 
   \ingroup communications
 */
 CCI_DECLSPEC int cci_rma_register(cci_endpoint_t * endpoint,
-				  cci_connection_t * connection,
 				  void *start, uint64_t length,
+				  int flags,
 				  uint64_t * rma_handle);
 
 /*!
@@ -1523,6 +1519,7 @@ CCI_DECLSPEC int cci_rma_register(cci_endpoint_t * endpoint,
 
   Once deregistered, the handle is stale.
 
+  \param[in] endpoint   Local endpoint to use for RMA.
   \param[in] rma_handle Handle for use with cci_rma().
 
   \return CCI_SUCCESS   The memory is deregistered.
@@ -1530,7 +1527,8 @@ CCI_DECLSPEC int cci_rma_register(cci_endpoint_t * endpoint,
 
   \ingroup communications
  */
-CCI_DECLSPEC int cci_rma_deregister(uint64_t rma_handle);
+CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
+				    uint64_t rma_handle);
 
 /*!
   Perform a RMA operation between local and remote memory.
@@ -1588,7 +1586,7 @@ CCI_DECLSPEC int cci_rma_deregister(uint64_t rma_handle);
   \note READ may not be performance efficient.
 */
 CCI_DECLSPEC int cci_rma(cci_connection_t * connection,
-			 void *msg_ptr, uint32_t msg_len,
+			 const void *msg_ptr, uint32_t msg_len,
 			 uint64_t local_handle, uint64_t local_offset,
 			 uint64_t remote_handle, uint64_t remote_offset,
 			 uint64_t data_len, const void *context, int flags);

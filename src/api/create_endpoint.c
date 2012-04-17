@@ -2,6 +2,7 @@
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright © 2010-2011 UT-Battelle, LLC. All rights reserved.
  * Copyright © 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -26,6 +27,8 @@ int cci_create_endpoint(cci_device_t * device,
 	cci__ep_t *ep;
 	cci__dev_t *dev;
 
+	pthread_mutex_lock(&globals->lock);
+
 	if (NULL == device) {
 		/* walk list of devs to find default device */
 		TAILQ_FOREACH(dev, &globals->devs, entry) {
@@ -34,29 +37,34 @@ int cci_create_endpoint(cci_device_t * device,
 				break;
 			}
 		}
-		if (!device) {
+		if (!device && !TAILQ_EMPTY(&globals->devs)) {
 			/* no default found, use first (highest priority) device? */
 			dev = TAILQ_FIRST(&globals->devs);
 			device = &dev->device;
 		}
+		if (!device)
+			goto out_enodev;
+	} else {
+		/* use given device */
+		dev = container_of(device, cci__dev_t, device);
 	}
-	if (!device)
-		return CCI_ENODEV;
 
-	dev = container_of(device, cci__dev_t, device);
 	if (dev->is_up == 0)
-		return CCI_ENODEV;
+		goto out_enodev;
 
 	ep = calloc(1, sizeof(*ep));
 	if (!ep)
-		return CCI_ENOMEM;
+		goto out_enodev;
 
 	TAILQ_INIT(&ep->evts);
 	pthread_mutex_init(&ep->lock, NULL);
 	ep->dev = dev;
 	*endpoint = &ep->endpoint;
 
-	ret = cci_core->create_endpoint(device, flags, endpoint, fd);
+	ret = dev->plugin->create_endpoint(device, flags, endpoint, fd);
+
+	ep->plugin = dev->plugin;
+	pthread_mutex_unlock(&globals->lock);
 
 	pthread_mutex_lock(&dev->lock);
 	/* TODO check dev's state */
@@ -64,4 +72,8 @@ int cci_create_endpoint(cci_device_t * device,
 	pthread_mutex_unlock(&dev->lock);
 
 	return ret;
+
+out_enodev:
+	pthread_mutex_unlock(&globals->lock);
+	return CCI_ENODEV;
 }

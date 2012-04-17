@@ -1,5 +1,7 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
+ * Copyright (c) 2011-2012 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2011-2012 Oak Ridge National Labs.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -22,9 +24,11 @@
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <netdb.h>
+#include <search.h>
 
 #include "cci.h"
 #include "plugins/core/core.h"
+#include "cci-api.h"
 #include "core_verbs.h"
 
 volatile int verbs_shut_down = 0;
@@ -34,11 +38,9 @@ pthread_t progress_tid;
 /*
  * Local functions
  */
-static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int verbs_finalize(void);
-static const char *verbs_strerror(cci_endpoint_t * endpoint,
-				  enum cci_status status);
-static int verbs_get_devices(cci_device_t * const **devices);
+static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int verbs_finalize(cci_plugin_core_t * plugin);
+static const char *verbs_strerror(cci_endpoint_t * endpoint, enum cci_status status);
 static int verbs_create_endpoint(cci_device_t * device,
 				 int flags,
 				 cci_endpoint_t ** endpoint,
@@ -69,12 +71,11 @@ static int verbs_sendv(cci_connection_t * connection,
 		       const struct iovec *data, uint32_t iovcnt,
 		       const void *context, int flags);
 static int verbs_rma_register(cci_endpoint_t * endpoint,
-			      cci_connection_t * connection,
 			      void *start, uint64_t length,
-			      uint64_t * rma_handle);
-static int verbs_rma_deregister(uint64_t rma_handle);
+			      int flags, uint64_t * rma_handle);
+static int verbs_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
 static int verbs_rma(cci_connection_t * connection,
-		     void *msg_ptr, uint32_t msg_len,
+		     const void *msg_ptr, uint32_t msg_len,
 		     uint64_t local_handle, uint64_t local_offset,
 		     uint64_t remote_handle, uint64_t remote_offset,
 		     uint64_t data_len, const void *context, int flags);
@@ -99,7 +100,7 @@ cci_plugin_core_t cci_core_verbs_plugin = {
 	 CCI_CORE_API_VERSION,
 	 "verbs",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
-	 10,
+	 50,
 
 	 /* Bootstrap function pointers */
 	 cci_core_verbs_post_load,
@@ -110,7 +111,6 @@ cci_plugin_core_t cci_core_verbs_plugin = {
 	verbs_init,
 	verbs_finalize,
 	verbs_strerror,
-	verbs_get_devices,
 	verbs_create_endpoint,
 	verbs_destroy_endpoint,
 	verbs_accept,
@@ -250,7 +250,7 @@ verbs_find_rdma_devices(struct ibv_context **contexts, int count,
 			struct ifaddrs **ifaddrs)
 {
 	int ret = CCI_SUCCESS;
-	int i, j;
+	int i;
 	struct ifaddrs *addrs = NULL;
 	struct ifaddrs *ifa = NULL;
 	struct ifaddrs *tmp = NULL;
@@ -269,9 +269,8 @@ verbs_find_rdma_devices(struct ibv_context **contexts, int count,
 		goto out;
 	}
 
-	for (i = j = 0; i < count; i++) {
+	for (i = 0; i < count; i++) {
 		struct ibv_context *c = contexts[i];
-		//char ip[256];
 
 		for (tmp = ifa; tmp != NULL; tmp = tmp->ifa_next) {
 			if (tmp->ifa_addr->sa_family == AF_INET &&
@@ -279,19 +278,18 @@ verbs_find_rdma_devices(struct ibv_context **contexts, int count,
 				ret = verbs_ifa_to_context(c, tmp->ifa_addr);
 				if (!ret) {
 					int len = sizeof(struct sockaddr);
-					addrs[j].ifa_name =
+					addrs[i].ifa_name =
 					    strdup(tmp->ifa_name);
-					addrs[j].ifa_flags = tmp->ifa_flags;
-					addrs[j].ifa_addr = calloc(1, len);
-					memcpy(addrs[j].ifa_addr, tmp->ifa_addr,
+					addrs[i].ifa_flags = tmp->ifa_flags;
+					addrs[i].ifa_addr = calloc(1, len);
+					memcpy(addrs[i].ifa_addr, tmp->ifa_addr,
 					       len);
-					addrs[j].ifa_netmask = calloc(1, len);
-					memcpy(addrs[j].ifa_netmask,
+					addrs[i].ifa_netmask = calloc(1, len);
+					memcpy(addrs[i].ifa_netmask,
 					       tmp->ifa_netmask, len);
-					addrs[j].ifa_broadaddr = calloc(1, len);
-					memcpy(addrs[j].ifa_broadaddr,
+					addrs[i].ifa_broadaddr = calloc(1, len);
+					memcpy(addrs[i].ifa_broadaddr,
 					       tmp->ifa_broadaddr, len);
-					j++;
 					break;
 				}
 			}
@@ -362,19 +360,19 @@ static int verbs_return_tx(struct verbs_tx *tx)
 	return ret;
 }
 
-static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	int count = 0;
 	int index = 0;
 	int used[CCI_MAX_DEVICES];
 	int ret = 0;
-	cci__dev_t *dev = NULL;
+	cci__dev_t *dev = NULL, *ndev;
 	struct cci_device **devices = NULL;
 	struct ifaddrs *ifaddrs = NULL;
 
 	CCI_ENTER;
 
-	memset(used, 0, CCI_MAX_DEVICES);
+	memset(used, 0, sizeof(int) * CCI_MAX_DEVICES);
 
 	/* init driver globals */
 	vglobals = calloc(1, sizeof(*vglobals));
@@ -405,14 +403,13 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	}
 	vglobals->ifaddrs = ifaddrs;
 
-/* FIXME: if configfile == 0, create default devices */
+/* FIXME: if globals->configfile == 0, create default devices */
 
 	/* find devices we own */
-	TAILQ_FOREACH(dev, &globals->devs, entry) {
+	TAILQ_FOREACH_SAFE(dev, &globals->configfile_devs, entry, ndev) {
 		if (0 == strcmp("verbs", dev->driver)) {
 			int i = 0;
-			const char *const *arg;
-			const char *hca_id = NULL;
+			const char * const *arg;
 			const char *interface = NULL;
 			struct in_addr in;
 			uint16_t port = 0;
@@ -433,6 +430,9 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 				ret = CCI_ENOMEM;
 				goto out;
 			}
+			dev->plugin = plugin;
+			if (dev->priority == -1)
+				dev->priority = plugin->base.priority;
 
 			vdev = dev->priv;
 
@@ -451,8 +451,6 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 					port =
 					    (uint16_t) strtoul(port_str, NULL,
 							       0);
-				} else if (0 == strncmp("hca_id=", *arg, 7)) {
-					hca_id = *arg + 7;
 				} else if (0 == strncmp("interface=", *arg, 10)) {
 					interface = *arg + 10;
 				} else if (0 == strncmp("driver=", *arg, 7)) {
@@ -504,24 +502,6 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 						used[i]++;
 						break;
 					}
-				} else if (hca_id) {
-					if (0 ==
-					    strcmp(hca_id, ctx->device->name)) {
-						if (used[i]) {
-							debug(CCI_DB_WARN,
-							      "device already assigned "
-							      "%s %s %s",
-							      ctx->device->name,
-							      ifa->ifa_name,
-							      inet_ntoa
-							      (sin->sin_addr));
-							goto out;
-						}
-						vdev->context = ctx;
-						vdev->ifa = ifa;
-						used[i]++;
-						break;
-					}
 				} else {
 					if (used[i]) {
 						debug(CCI_DB_WARN,
@@ -558,6 +538,8 @@ static int verbs_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			    verbs_mtu_val(port_attr.max_mtu);
 			device->rate = verbs_device_rate(port_attr);
 
+			TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
+			cci__add_dev(dev);
 			devices[index] = device;
 			index++;
 			dev->is_up = vdev->ifa->ifa_flags & IFF_UP;
@@ -606,25 +588,7 @@ static const char *verbs_strerror(cci_endpoint_t * endpoint,
 	return strerror(status);
 }
 
-static int verbs_get_devices(cci_device_t * const **devices)
-{
-	CCI_ENTER;
-
-	if (!vglobals) {
-		CCI_EXIT;
-		return CCI_ENODEV;
-	}
-
-/* FIXME: update the devices list (up field, ...).
-   add new devices if !configfile */
-
-	*devices = (cci_device_t * const *)vglobals->devices;
-
-	CCI_EXIT;
-	return CCI_SUCCESS;
-}
-
-static int verbs_finalize(void)
+static int verbs_finalize(cci_plugin_core_t * plugin)
 {
 	int ret = CCI_SUCCESS;
 	int i = 0;
@@ -637,9 +601,7 @@ static int verbs_finalize(void)
 		return CCI_ENODEV;
 	}
 
-	pthread_mutex_lock(&globals->lock);
 	verbs_shut_down = 1;
-	pthread_mutex_unlock(&globals->lock);
 	/* TODO join progress thread */
 
 	for (i = 0; i < vglobals->count; i++) {
@@ -658,11 +620,10 @@ static int verbs_finalize(void)
 	if (vglobals->contexts)
 		rdma_free_devices(vglobals->contexts);
 
-	pthread_mutex_lock(&globals->lock);
 	TAILQ_FOREACH(dev, &globals->devs, entry)
-	    if (dev->priv)
-		free(dev->priv);
-	pthread_mutex_unlock(&globals->lock);
+		if (!strcmp(dev->driver, "verbs"))
+			if (dev->priv)
+				free(dev->priv);
 
 	free(vglobals->devices);
 	free((void *)vglobals);
@@ -1013,6 +974,7 @@ verbs_create_endpoint(cci_device_t * device,
 	TAILQ_INIT(&vep->passive);
 	TAILQ_INIT(&vep->handles);
 	TAILQ_INIT(&vep->rma_ops);
+	pthread_rwlock_init(&vep->conn_tree_lock, NULL);
 
 	endpoint->max_recv_buffer_count = VERBS_EP_RX_CNT;
 	ep->rx_buf_cnt = VERBS_EP_RX_CNT;
@@ -1380,7 +1342,8 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 	ep = container_of(conn->connection.endpoint, cci__ep_t, endpoint);
 	vep = ep->priv;
 
-	debug(CCI_DB_MSG, "sending msg 0x%x", header);
+	debug(CCI_DB_MSG, "sending msg 0x%x conn %p qp_num %u",
+		header, conn, ((verbs_conn_t*)conn->priv)->id->qp->qp_num);
 
 	memset(&wr, 0, sizeof(wr));
 	wr.wr_id = id;
@@ -1690,6 +1653,66 @@ out:
 }
 
 static int
+verbs_compare_u32(const void *pa, const void *pb)
+{
+	if (*(uint32_t*) pa < *(uint32_t*) pb)
+		return -1;
+	if (*(uint32_t*) pa > *(uint32_t*) pb)
+		return 1;
+	return 0;
+}
+
+static int
+verbs_find_conn(cci__ep_t *ep, uint32_t qp_num, cci__conn_t **conn)
+{
+	int ret = CCI_ERROR;
+	verbs_ep_t *vep = ep->priv;
+	void *node = NULL;
+	uint32_t *q = NULL;
+
+	CCI_ENTER;
+
+	pthread_rwlock_rdlock(&vep->conn_tree_lock);
+	node = tfind(&qp_num, &vep->conn_tree, verbs_compare_u32);
+	pthread_rwlock_unlock(&vep->conn_tree_lock);
+	if (node) {
+		verbs_conn_t *vconn = NULL;
+
+		q = *((uint32_t**)node);
+		vconn = container_of(q, verbs_conn_t, qp_num);
+		assert(vconn->qp_num == qp_num);
+		*conn = vconn->conn;
+		ret = CCI_SUCCESS;
+	} else {
+		debug(CCI_DB_CONN, "%s: unable to find qp_num %u", __func__, qp_num);
+	}
+
+	CCI_EXIT;
+	return ret;
+}
+
+static void
+verbs_insert_conn(cci__conn_t *conn)
+{
+	cci__ep_t *ep = container_of(conn->connection.endpoint, cci__ep_t, endpoint);
+	verbs_ep_t *vep = ep->priv;
+	verbs_conn_t *vconn = conn->priv;
+	void *node = NULL;
+
+	CCI_ENTER;
+
+	pthread_rwlock_wrlock(&vep->conn_tree_lock);
+	do {
+		node = tsearch(&vconn->qp_num, &vep->conn_tree, verbs_compare_u32);
+	} while (!node);
+	pthread_rwlock_unlock(&vep->conn_tree_lock);
+	debug(CCI_DB_CONN, "%s: added conn %p qp_num %u", __func__, conn, vconn->qp_num);
+
+	CCI_EXIT;
+	return;
+}
+
+static int
 verbs_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	      const void *data_ptr, uint32_t data_len,
 	      cci_conn_attribute_t attribute,
@@ -1720,6 +1743,9 @@ verbs_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		ret = CCI_ENOMEM;
 		goto out;
 	}
+	conn->plugin = ep->plugin;
+
+	debug(CCI_DB_CONN, "%s: alloced conn %p", __func__, conn);
 
 	conn->priv = calloc(1, sizeof(*vconn));
 	if (!conn->priv) {
@@ -1739,7 +1765,7 @@ verbs_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		}
 		vconn->conn_req = cr;
 
-		cr->context = (void *)context;
+		cr->context = (void *) context;
 		cr->attr = attribute;
 		if (data_len) {
 			cr->len = data_len;
@@ -1756,7 +1782,7 @@ verbs_connect(cci_endpoint_t * endpoint, const char *server_uri,
 
 	conn->connection.attribute = attribute;
 	conn->connection.endpoint = endpoint;
-	conn->connection.context = (void *)context;
+	conn->connection.context = (void *) context;
 
 	ret = verbs_parse_uri(server_uri, &node, &service);
 	if (ret)
@@ -1794,8 +1820,6 @@ verbs_connect(cci_endpoint_t * endpoint, const char *server_uri,
 #else
 	{
 		struct sockaddr_in dst;
-		debug(CCI_DB_ALL,
-		      "not using rdma_create_ep() or rdma_getaddrinfo()");
 
 		{
 			struct addrinfo *res, hints;
@@ -1886,6 +1910,9 @@ verbs_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	}
 #endif /* HAVE_RDMA_ADDRINFO */
 
+	vconn->qp_num = vconn->id->qp->qp_num;
+	verbs_insert_conn(conn);
+
 	ret = rdma_migrate_id(vconn->id, vep->channel);
 	if (ret == -1) {
 		ret = errno;
@@ -1949,6 +1976,10 @@ static int verbs_disconnect(cci_connection_t * connection)
 	verbs_ep_t *vep = ep->priv;
 
 	CCI_ENTER;
+
+	pthread_rwlock_wrlock(&vep->conn_tree_lock);
+	tdelete(&vconn->qp_num, &vep->conn_tree, verbs_compare_u32);
+	pthread_rwlock_unlock(&vep->conn_tree_lock);
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_REMOVE(&vep->conns, vconn, entry);
@@ -2145,9 +2176,6 @@ verbs_set_opt(cci_opt_handle_t * handle,
 			/*
 			 * Now destroy the previous TX Pool
 			 */
-
-			// TODO: this could yank memory out from under someone, need 
-			//  to fix this, probably by doing the 
 			ret = verbs_destroy_tx_pool(vep->tx_pool_old);
 			vep->tx_pool_old = NULL;
 
@@ -2308,6 +2336,7 @@ verbs_handle_conn_request(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 		ret = CCI_ENOMEM;
 		goto out;
 	}
+	conn->plugin = ep->plugin;
 
 	conn->priv = calloc(1, sizeof(*vconn));
 	if (!conn->priv) {
@@ -2321,8 +2350,10 @@ verbs_handle_conn_request(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 	vconn->state = VERBS_CONN_PASSIVE;
 	TAILQ_INIT(&vconn->remotes);
 	TAILQ_INIT(&vconn->rma_ops);
+	vconn->qp_num = vconn->id->qp->qp_num;
 
 	conn->connection.endpoint = &ep->endpoint;
+	verbs_insert_conn(conn);
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&vep->passive, vconn, temp);
@@ -2397,6 +2428,7 @@ static int verbs_conn_est_active(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 		goto out;
 	}
 
+	tx->msg_type = VERBS_MSG_INVALID;
 	tx->evt.event.type = CCI_EVENT_NONE;	/* never hand to application */
 	tx->evt.conn = conn;
 
@@ -2496,8 +2528,6 @@ verbs_handle_conn_established(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 	assert(conn);
 	vconn = conn->priv;
 	assert(vconn);
-	assert(vconn->state == VERBS_CONN_ACTIVE
-	       || vconn->state == VERBS_CONN_PASSIVE);
 
 	switch (vconn->state) {
 	case VERBS_CONN_ACTIVE:
@@ -2505,6 +2535,8 @@ verbs_handle_conn_established(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 		break;
 	case VERBS_CONN_PASSIVE:
 		ret = verbs_conn_est_passive(ep, cm_evt);
+		break;
+	case VERBS_CONN_ESTABLISHED:
 		break;
 	default:
 		debug(CCI_DB_INFO, "%s: incorrect conn state %s", __func__,
@@ -2613,7 +2645,6 @@ static int verbs_handle_conn_payload(cci__ep_t * ep, struct ibv_wc wc)
 	rx->evt.event.request.attribute = conn->connection.attribute;
 	ptr = rx->rx_pool->buf + rx->offset;
 	if (need_rdma) {
-		len -= 12;	/* magic number => uint64_t + uint32_t */
 		ptr = ptr + (uintptr_t) 12;
 		vconn->num_slots = VERBS_CONN_RMSG_DEPTH;	/* indicate peer wants RDMA */
 
@@ -2656,7 +2687,7 @@ static int verbs_handle_conn_reply(cci__ep_t * ep, struct ibv_wc wc)
 			vconn = vc;
 			conn = vconn->conn;
 			assert(conn == vc->id->context);
-			TAILQ_REMOVE(&vep->passive, vconn, temp);
+			TAILQ_REMOVE(&vep->active, vconn, temp);
 			break;
 		}
 	}
@@ -2674,8 +2705,7 @@ static int verbs_handle_conn_reply(cci__ep_t * ep, struct ibv_wc wc)
 	rx = (verbs_rx_t *) (uintptr_t) wc.wr_id;
 	rx->evt.event.type = CCI_EVENT_CONNECT;
 	rx->evt.event.connect.status = (header >> 4) & 0xF;	/* magic number */
-	rx->evt.event.connect.context =
-	    vconn->conn_req ? vconn->conn_req->context : NULL;
+	rx->evt.event.connect.context = conn->connection.context;
 	rx->evt.conn = conn;
 	if (rx->evt.event.connect.status == CCI_SUCCESS) {
 		int use_rdma = (header >> 8) & 0x1;
@@ -2719,29 +2749,6 @@ out:
 	return ret;
 }
 
-static verbs_conn_t *verbs_qp_num_to_conn(cci__ep_t * ep, uint32_t qp_num)
-{
-	verbs_ep_t *vep = ep->priv;
-	verbs_conn_t *vconn = NULL;
-	verbs_conn_t *vc = NULL;
-
-	CCI_ENTER;
-
-	/* find the conn for this QP */
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_FOREACH(vc, &vep->conns, temp) {
-		if (vc->id->qp->qp_num == qp_num) {
-			vconn = vc;
-			assert(vconn->conn == vc->id->context);
-			break;
-		}
-	}
-	pthread_mutex_unlock(&ep->lock);
-
-	CCI_EXIT;
-	return vconn;
-}
-
 static int verbs_poll_rdma_msgs(verbs_conn_t * vconn)
 {
 	int ret = CCI_EAGAIN;
@@ -2758,8 +2765,8 @@ static int verbs_poll_rdma_msgs(verbs_conn_t * vconn)
 			uint32_t len = (header >> 5) & 0xFFFF;
 			uint32_t pad = len % 8 == 0 ? 0 : 8 - (len % 8);
 
-			debug(CCI_DB_MSG, "%s: recv'd 0x%x len %u slot %d",
-			      __func__, header, len, i);
+			debug(CCI_DB_MSG, "%s: recv'd 0x%x len %u slot %d conn %p qp %u",
+			      __func__, header, len, i, vconn->conn, vconn->id->qp->qp_num);
 
 			//ptr = vconn->rbuf + (uintptr_t)(((i + 1) * (vconn->mss + 4)) - 4);
 			ptr = (void *)vconn->slots[i];
@@ -2787,6 +2794,7 @@ static int verbs_poll_rdma_msgs(verbs_conn_t * vconn)
 static int verbs_handle_msg(cci__ep_t * ep, struct ibv_wc wc)
 {
 	int ret = CCI_SUCCESS;
+	cci__conn_t *conn = NULL;
 	verbs_conn_t *vconn = NULL;
 	verbs_rx_t *rx = NULL;
 	void *ptr = NULL;
@@ -2794,13 +2802,14 @@ static int verbs_handle_msg(cci__ep_t * ep, struct ibv_wc wc)
 	CCI_ENTER;
 
 	/* find the conn for this message */
-	vconn = verbs_qp_num_to_conn(ep, wc.qp_num);
-	if (!vconn) {
+	ret = verbs_find_conn(ep, wc.qp_num, &conn);
+	if (ret) {
 		debug(CCI_DB_WARN,
 		      "%s: no conn found for message from qp_num %u", __func__,
 		      wc.qp_num);
 		goto out;
 	}
+	vconn = conn->priv;
 
 	rx = (verbs_rx_t *) (uintptr_t) wc.wr_id;
 	ptr = rx->rx_pool->buf + rx->offset;
@@ -2828,17 +2837,19 @@ static int verbs_handle_rdma_msg_ack(cci__ep_t * ep, struct ibv_wc wc)
 	int i = 0;
 	int index = 0;
 	uint32_t header = ntohl(wc.imm_data);
+	cci__conn_t *conn = NULL;
 	verbs_conn_t *vconn = NULL;
 	verbs_rx_t *rx = (verbs_rx_t *) (uintptr_t) wc.wr_id;
 
 	/* find the conn for this message */
-	vconn = verbs_qp_num_to_conn(ep, wc.qp_num);
-	if (!vconn) {
+	ret = verbs_find_conn(ep, wc.qp_num, &conn);
+	if (ret) {
 		debug(CCI_DB_WARN,
 		      "%s: no conn found for message from qp_num %u", __func__,
 		      wc.qp_num);
 		goto out;
 	}
+	vconn = conn->priv;
 
 	index = (header >> 21) & 0xFF;
 	i = (1 << index);
@@ -2878,15 +2889,14 @@ static int verbs_handle_rma_remote_request(cci__ep_t * ep, struct ibv_wc wc)
 	}
 
 	/* find the conn for this message */
-	vconn = verbs_qp_num_to_conn(ep, wc.qp_num);
-	if (!vconn) {
+	ret = verbs_find_conn(ep, wc.qp_num, &conn);
+	if (ret) {
 		debug(CCI_DB_WARN,
 		      "%s: no conn found for message from qp_num %u", __func__,
 		      wc.qp_num);
-		ret = CCI_ERR_NOT_FOUND;
 		goto out;
 	}
-	conn = vconn->conn;
+	vconn = conn->priv;
 
 	/* find the RMA handle */
 	memcpy(&request, rx->rx_pool->buf + rx->offset, sizeof(request));
@@ -2938,6 +2948,7 @@ static int verbs_post_rma(verbs_rma_op_t * rma_op);
 static int verbs_handle_rma_remote_reply(cci__ep_t * ep, struct ibv_wc wc)
 {
 	int ret = CCI_SUCCESS;
+	cci__conn_t *conn = NULL;
 	verbs_conn_t *vconn = NULL;
 	verbs_ep_t *vep = ep->priv;
 	verbs_rx_t *rx = NULL;
@@ -2949,7 +2960,14 @@ static int verbs_handle_rma_remote_reply(cci__ep_t * ep, struct ibv_wc wc)
 
 	rx = (verbs_rx_t *) (uintptr_t) wc.wr_id;
 
-	vconn = verbs_qp_num_to_conn(ep, wc.qp_num);
+	ret = verbs_find_conn(ep, wc.qp_num, &conn);
+	if (ret) {
+		debug(CCI_DB_WARN,
+		      "%s: no conn found for message from qp_num %u", __func__,
+		      wc.qp_num);
+		goto out;
+	}
+	vconn = conn->priv;
 
 	if (wc.byte_len == sizeof(verbs_rma_addr_rkey_t)) {
 		remote = calloc(1, sizeof(*remote));
@@ -3137,6 +3155,8 @@ static int verbs_handle_send_completion(cci__ep_t * ep, struct ibv_wc wc)
 	int ret = CCI_SUCCESS;
 	int queue_tx = 1;
 	verbs_tx_t *tx = (verbs_tx_t *) (uintptr_t) wc.wr_id;
+	verbs_ep_t *vep = ep->priv;
+
 
 	CCI_ENTER;
 
@@ -3176,7 +3196,7 @@ static int verbs_handle_send_completion(cci__ep_t * ep, struct ibv_wc wc)
 	case VERBS_MSG_RMA_REMOTE_REPLY:
 		break;
 	default:
-		debug(CCI_DB_INFO, "%s: ignoring %s msg",
+		debug(CCI_DB_MSG, "%s: ignoring %s msg",
 		      __func__, verbs_msg_type_str(tx->msg_type));
 		break;
 	}
@@ -3184,7 +3204,6 @@ static int verbs_handle_send_completion(cci__ep_t * ep, struct ibv_wc wc)
 	if (queue_tx) {
 		verbs_return_tx(tx);
 	}
-
 out:
 	CCI_EXIT;
 	return ret;
@@ -3254,7 +3273,7 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 				ret = verbs_handle_rma_completion(ep, wc[i]);
 				break;
 			default:
-				debug(CCI_DB_ALL,
+				debug(CCI_DB_WARN,
 				      "%s: missed opcode %u status %s wr_id 0x%"
 				      PRIx64, __func__, wc[i].opcode,
 				      ibv_wc_status_str(wc[i].status),
@@ -3635,9 +3654,10 @@ verbs_sendv(cci_connection_t * connection,
 
 static int
 verbs_rma_register(cci_endpoint_t * endpoint,
-		   cci_connection_t * connection,
-		   void *start, uint64_t length, uint64_t * rma_handle)
+		   void *start, uint64_t length,
+		   int flags, uint64_t * rma_handle)
 {
+	/* FIXME use read/write flags? */
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
 	verbs_ep_t *vep = ep->priv;
@@ -3679,7 +3699,7 @@ verbs_rma_register(cci_endpoint_t * endpoint,
 	return ret;
 }
 
-static int verbs_rma_deregister(uint64_t rma_handle)
+static int verbs_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
 {
 	int ret = CCI_SUCCESS;
 	verbs_rma_handle_t *handle =
@@ -3830,7 +3850,7 @@ static int verbs_post_rma(verbs_rma_op_t * rma_op)
 
 static int
 verbs_rma(cci_connection_t * connection,
-	  void *msg_ptr, uint32_t msg_len,
+	  const void *msg_ptr, uint32_t msg_len,
 	  uint64_t local_handle, uint64_t local_offset,
 	  uint64_t remote_handle, uint64_t remote_offset,
 	  uint64_t data_len, const void *context, int flags)
@@ -3874,7 +3894,7 @@ verbs_rma(cci_connection_t * connection,
 	rma_op->context = (void *)context;
 	rma_op->flags = flags;
 	rma_op->msg_len = msg_len;
-	rma_op->msg_ptr = msg_ptr;
+	rma_op->msg_ptr = (void *) msg_ptr;
 
 	rma_op->evt.event.type = CCI_EVENT_SEND;
 	rma_op->evt.event.send.connection = connection;
@@ -3888,7 +3908,7 @@ verbs_rma(cci_connection_t * connection,
 	TAILQ_INSERT_TAIL(&vep->rma_ops, rma_op, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-	/* Do we have this remote handle info?
+	/* Do we have this remote handle info?s
 	 * If not, request it from the peer */
 	ret = verbs_conn_get_remote(rma_op, remote_handle);
 	if (ret == CCI_SUCCESS)

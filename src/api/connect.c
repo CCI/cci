@@ -28,6 +28,7 @@ int cci_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	/* NOTE the driver does all of the connection management
 	 * It allocates whatever it needs in addition to the cci__conn_t
 	 */
-	return cci_core->connect(endpoint, server_uri, data_ptr, data_len,
-				 attribute, context, flags, timeout);
+	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
+	return ep->plugin->connect(endpoint, server_uri, data_ptr, data_len,
+				   attribute, context, flags, timeout);
 }
