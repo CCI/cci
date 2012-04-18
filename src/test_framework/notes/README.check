@@ -1,3 +1,14 @@
+#
+# The check package needs to be installed for the test_framework
+# Currently, the version is 0.9.8. The package is found under the CCI
+# main directory in src/test_framework/notes/check-0.9.8.tar.gz and
+# is easily installed:
+#
+# tar xjvf check-0.9.8.tar.gz
+# ./configure
+# make
+# sudo make install
+#
 # environment variables for check software package
 
 CK_FORK=no|yes
