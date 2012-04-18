@@ -486,12 +486,9 @@ static int portals_finalize(cci_plugin_core_t *plugin)
 		return CCI_ENODEV;
 	}
 
-	pthread_mutex_lock(&globals->lock);
 	portals_shut_down = 1;
-	pthread_mutex_unlock(&globals->lock);
 	pthread_join(progress_tid, NULL);
 
-	pthread_mutex_lock(&globals->lock);
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
 		portals_dev_t *pdev;
 
@@ -506,7 +503,6 @@ static int portals_finalize(cci_plugin_core_t *plugin)
 			free(dev->priv);
 		}
 	}
-	pthread_mutex_unlock(&globals->lock);
 	PtlFini();
 
 	free(pglobals->devices);

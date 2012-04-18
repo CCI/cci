@@ -130,7 +130,6 @@ static int cci__free_configfile_devs(const char *reason)
 {
 	cci__dev_t *dev;
 
-	pthread_mutex_lock(&globals->lock);
 	while (!TAILQ_EMPTY(&globals->configfile_devs)) {
 		dev = TAILQ_FIRST(&globals->configfile_devs);
 		TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
@@ -140,7 +139,6 @@ static int cci__free_configfile_devs(const char *reason)
 			      dev->device.name, dev->driver, reason);
 		cci__free_dev(dev);
 	}
-	pthread_mutex_unlock(&globals->lock);
 
 	return CCI_ENOMEM;
 }
@@ -247,9 +245,7 @@ int cci__parse_config(const char *path)
 								      1));
 				}
 				if (driver == 1) {
-					pthread_mutex_lock(&globals->lock);
 					TAILQ_INSERT_TAIL(&globals->configfile_devs, dev, entry);
-					pthread_mutex_unlock(&globals->lock);
 					debug(CCI_DB_DRVR,
 					      "read device [%s] (driver %s) from config file",
 					      d->name, dev->driver);
@@ -392,9 +388,7 @@ int cci__parse_config(const char *path)
 				    sizeof(char *) * (arg_cnt + 1));
 		}
 		if (driver == 1) {
-			pthread_mutex_lock(&globals->lock);
 			TAILQ_INSERT_TAIL(&globals->configfile_devs, dev, entry);
-			pthread_mutex_unlock(&globals->lock);
 			debug(CCI_DB_DRVR,
 			      "read device [%s] (driver %s) from config file",
 			      d->name, dev->driver);
@@ -469,6 +463,9 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			goto out_with_plugins_core_open;
 		}
 
+		/* lock the device list while initializing CTPs and devices */
+		pthread_mutex_lock(&globals->lock);
+
 		str = getenv("CCI_CONFIG");
 		if (str && str[0] != '\0') {
 			ret = cci__parse_config(str);
@@ -476,7 +473,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 				debug(CCI_DB_ERR, "unable to parse CCI_CONFIG file %s",
 				      str);
 				ret = CCI_ERROR;
-				goto out_with_plugins_core_open;
+				goto out_with_glock;
 			}
 			globals->configfile = 1;
 		}
@@ -521,6 +518,8 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			globals->devices[i++] = &dev->device;
 		}
 
+		pthread_mutex_unlock(&globals->lock);
+
 		/* success */
 		initialized++;
 
@@ -553,6 +552,8 @@ out_with_plugins:
 	}
 out_with_config_file:
 	/* FIXME? */
+out_with_glock:
+	pthread_mutex_unlock(&globals->lock);
 out_with_plugins_core_open:
 	cci_plugins_core_close();
 out_with_plugins_init:

@@ -21,6 +21,7 @@
 #include "cci/config.h"
 #include "cci.h"
 #include "cci_lib_types.h"
+#include "cci-api.h"
 
 BEGIN_C_DECLS
 #define SOCK_UDP_MAX            (65508)	/* 64 KB - 8 B UDP - 20 B IP */
@@ -1076,6 +1077,9 @@ typedef struct sock_fd_idx {
 } sock_fd_idx_t;
 
 typedef struct sock_globals {
+	/*! Mutex */
+	pthread_mutex_t lock;
+
 	/*! Number of sock devices */
 	int count;
 

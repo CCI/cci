@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2011 UT-Battelle, LLC.  All rights reserved.
- * Copyright (c) 2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright (c) 2011-2012 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2011-2012 Oak Ridge National Labs.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -247,8 +247,19 @@ void do_client()
 	memset(buffer, 'b', max);
 
 	if (opts.method != MSGS) {
-		ret = cci_rma_register(endpoint, buffer, max,
-				       opts.method == RMA_WRITE ? CCI_FLAG_WRITE : CCI_FLAG_READ,
+		int flags = 0;
+
+		/* for the client, we want the opposite of the opts.method.
+		 * when testing RMA WRITE, we only need READ access.
+		 * when testing RMA READ, we need WRITE access.
+		 */
+
+		if (opts.method == RMA_WRITE)
+			flags = CCI_FLAG_READ;
+		else if (opts.method == RMA_READ)
+			flags = CCI_FLAG_WRITE;
+
+		ret = cci_rma_register(endpoint, buffer, max, flags,
 				       &local_rma_handle);
 		check_return(endpoint, "cci_rma_register", ret, 1);
 		fprintf(stderr, "local_rma_handle is 0x%" PRIx64 "\n",
@@ -404,7 +415,10 @@ void do_server()
 					__func__, event->type);
 				break;
 			}
-
+			ret = cci_return_event(event);
+			if (ret)
+				fprintf(stderr, "cci_return_event() failed with %s\n",
+						cci_strerror(endpoint, ret));
 		}
 	}
 

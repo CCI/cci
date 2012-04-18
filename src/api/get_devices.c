@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
- * Copyright © 2010-2011 UT-Battelle, LLC. All rights reserved.
- * Copyright © 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2010-2012 UT-Battelle, LLC. All rights reserved.
+ * Copyright © 2010-2012 Oak Ridge National Labs.  All rights reserved.
  * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
@@ -20,13 +20,9 @@
 
 int cci_get_devices(cci_device_t * const ** devicesp)
 {
-	cci_device_t **devices;
-	cci__dev_t *dev;
-	int ret;
-	int i, nb;
-
 	/* FIXME: if we have to update the device array at runtime,
-	 * add a update_devices plugin callback and call of them here,
+	 * add a update_devices plugin callback and call of them here
+	 * (with globals->lock held),
 	 * to update the TAILQ. then update the devices array.
 	 */
 

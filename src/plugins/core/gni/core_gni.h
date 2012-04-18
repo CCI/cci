@@ -1,262 +1,387 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
+ * Copyright © 2011-2012 UT-Battelle, LLC.
  * $COPYRIGHT$
  */
 
-#ifndef   CCI_CORE_GNI_H
-#define   CCI_CORE_GNI_H
+#ifndef CCI_CORE_GNI_H
+#define CCI_CORE_GNI_H
 
-#include  <inttypes.h>
-#include  <assert.h>
-#include  <stdio.h>
-#include  <stdlib.h>
-#include  <string.h>
-#include  <unistd.h>
-#include  <gni_pub.h>
-#include  <resolv.h>
-#include  <ifaddrs.h>
-#include  <netdb.h>
-#include  <fcntl.h>
-#include  <net/if.h>
-#include  <sys/time.h>
-#include  <sys/utsname.h>
-#include  <arpa/inet.h>
-#include  <netinet/in.h>
-#include  "cci/config.h"
+#include "cci.h"
+#include "cci/config.h"
+
+#include <netinet/in.h>	/* struck sockaddr_in */
+#include <assert.h>
+#include <gni_pub.h>
 
 BEGIN_C_DECLS
-// The format of the GNI URI is:
-//
-//     gni://{NODENAME}.{NIC ADDRESS}.{INSTANCE ID}
-//
-#define   GNI_URI             "gni://"
-#define   GNI_URI_MAX_LENGTH  (256)
-#define   GNI_LINE_SIZE       (64)	// .. if not tuned via OS
-#define   GNI_PAGE_SIZE       (4096)	// .. if not tuned via OS
-#define   GNI_IP_IF           "ipogif"
-#define   GNI_LISTEN_PORT     (60000)	// server initialization
-#define   GNI_MAX_HDR_SIZE    (32)	// per CCI spec
-#define   GNI_DEFAULT_MSS     (1024)	//
-#define   GNI_MIN_MSS         (128)
-#define   GNI_MAX_SIZE        (64 * 1024 - 1)	// max payload + header
-#define   GNI_MAX_MSS         (GNI_MAX_SIZE - GNI_MAX_HDR_SIZE - 8)
-#define   GNI_MBOX_MAX_CREDIT (16)	// MAX in-flight tx's
-#define   GNI_BLOCK_SIZE      (64)	// bytes for id storage
-#define   GNI_EP_MAX_HDR_SIZE (GNI_MAX_HDR_SIZE)
-#define   GNI_EP_BUF_LEN      (GNI_MAX_MSS)	// 65495 B
-#define   GNI_EP_RX_CNT       (1024)	// MAX rx messages
-#define   GNI_EP_TX_CNT       (1024)	// MAX tx messages
-#define   GNI_NUM_BLOCKS      (16384)	// number of blocks
-#define   GNI_MAX_EP_ID       (GNI_BLOCK_SIZE * GNI_NUM_BLOCKS)
-#define   GNI_EP_BITS         (32)
-#define   GNI_EP_SHIFT        (32)
-#define   GNI_PROG_TIME_US    (10000)	// progress delay micro-sec
-#define   GNI_EP_MATCH        ((uint64_t)0)
-#define   GNI_EP_IGNORE       (~((uint64_t)0))
-static inline uint64_t gni_tv_to_usecs(struct timeval tv)
-{
+/* Valid URI include:
+ *
+ * gni://hostname:port	# Hostname or IPv4 address and port
+ */
+/* A gni device needs the following items in the config file:
 
-	return ((tv.tv_sec * 1000000) + tv.tv_usec);
-}
+   driver = gni		# must be lowercase
 
-#define   GNI_TV_TO_USECS(tv) (((tv).tv_sec*1000000)+(tv).tv_usec)
-static inline uint64_t gni_get_usecs(void)
-{
+   A gni device may have these items:
 
-	struct timeval tv;
+   ip = 1.2.3.4			# IPv4 address of device
 
-	gettimeofday(&tv, NULL);
-	return gni_tv_to_usecs(tv);
-}
+   interface = ipogif0		# Ethernet interface name
 
-#if 0
-static inline uint64_t gni_get_nsecs(void)
-{
-	struct timespec ts;
+   port = 12345			# base listening port
+				  the default is a random, ephemeral port
+ */
+#define GNI_URI			"gni://"
 
-	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
-	return ((ts.tv_sec * 1000000000) + ts.tv_nsec);
-}
-#else
-static inline uint64_t rdtsc(void)
-{
+#define GNI_DEFAULT_PTAG	(208)
+#define GNI_DEFAULT_COOKIE	(0x73e70000)
 
-	uint32_t lo;
-	uint32_t hi;
-
-	__asm__ __volatile__(	// serialize
-				    "xorl %%eax,%%eax \n        cpuid":::"%rax",
-				    "%rbx", "%rcx", "%rdx");
-//  We cannot use "=A", since this would use %rax on x86_64
-//  and return only the lower 32bits of the TSC
-	__asm__ __volatile__("rdtsc":"=a"(lo), "=d"(hi));
-	return ((uint64_t) hi << 32 | lo);
-}
-
-static inline uint64_t gni_get_nsecs(void)
-{
-
-	return ((uint64_t) ((double)rdtsc() / 2.6));
-}
-#endif
-
-// Use "double" data type, if no statistcal processing on the raw time
-// variable is to be done.  IEEE will provide almost 16 digits of
-// precision; while current date requires only slightly above 15 digits.
-// If standard deviations are to be computed, time^2 requires somewhat
-// more than 30 digits, necessitating use of "long double".  For further
-// reference, see:
-//
-//     http://en.wikipedia.org/wiki/IEEE_754-2008
-static inline long double gni_get_time(void)
-{
-
-	struct timeval tv;	// time temp
-
-	gettimeofday(&tv, NULL);
-	return (((long double)tv.tv_usec / (long double)1000000) +
-		(long double)tv.tv_sec);
-}
-
-typedef struct gni_globals {
-
-	int32_t count;		// GNI devices
-	const cci_device_t **devices;	// Array of devices
-} gni_globals_t;
-
-typedef struct gni__dev {
-
-	uint8_t kid;		// 
-	uint8_t ptag;		// protection tag
-	uint16_t pad;		// pad
-	uint32_t cookie;	// GNI cookie
-	uint32_t modes;		// CD flag(s)
-	uint32_t NIC;		// NIC address of device
-	uint32_t INST;		// instance ID/PID
-	int32_t sd;		// listen sd (always open)
-	uint32_t progressing;	// Being progressed?
-	uint32_t port;		// Override port
-	gni_cdm_handle_t cd_hndl;	// CD handle
-	gni_nic_handle_t nic_hndl;	// NIC handle
-	char *nodename;		// 
-	uint64_t *ep_ids;	// Endpoint id blocks
-} gni__dev_t;
-
-// Limit of 4 message types to ensure we only use 2 bits for msg type
-typedef enum gni_msg_type {
-
+/* Wire Header Specification */
+    typedef enum gni_msg_type {
+	GNI_MSG_INVALID = 0,
+	GNI_MSG_CONN_REQUEST,		/* client -> server */
+	GNI_MSG_CONN_PAYLOAD,
+	GNI_MSG_CONN_REPLY,		/* client <- server */
+	GNI_MSG_CONN_ACK,		/* client -> server */
+	GNI_MSG_DISCONNECT,
 	GNI_MSG_SEND,
-	GNI_MSG_RMA_WRITE,
-	GNI_MSG_RMA_READ,
-	GNI_MSG_OOB
+	GNI_MSG_RMA_REMOTE_REQUEST,
+	GNI_MSG_RMA_REMOTE_REPLY,
+	GNI_MSG_KEEPALIVE,
+	GNI_MSG_RMA,
+	GNI_MSG_TYPE_MAX,
 } gni_msg_type_t;
 
-// OOB msg types
-typedef enum gni_msg_oob_type {
+/* MSG header */
 
-	GNI_MSG_KEEPALIVE
-} gni_msg_oob_type_t;
+/* Generic header
 
-// GNI connection status
-typedef enum gni_conn_status {
+    <----------- 32 bits ----------->
+    <---------- 28b ----------->  4b
+   +----------------------------+----+
+   |             B              |  A |
+   +----------------------------+----+
 
-	GNI_CONN_PENDING_REQUEST,
-	GNI_CONN_PENDING_REPLY,
-	GNI_CONN_ACCEPTED,
-	GNI_CONN_REJECTED,
-	GNI_CONN_FAILED,
-	GNI_CONN_DISCONNECTED
-} gni_conn_status_t;
+   where:
+      A is the msg type
+      B is set by each message type
+ */
 
-typedef struct gni_rx {
-	cci__evt_t evt;		// associated event
-	 TAILQ_ENTRY(gni_rx) centry;	// Hangs on ep->rx_all
-	 TAILQ_ENTRY(gni_rx) entry;	// Hangs on ep->rx
-} gni_rx_t;
+#define GNI_MSG_TYPE_BITS	(4)
+#define GNI_MSG_TYPE_MASK	((1 << GNI_MSG_TYPE_BITS) - 1)
+#define GNI_MSG_TYPE(x)		((x) & GNI_MSG_TYPE_MASK)
+
+/* Send
+
+    <------------ 32 bits ----------->
+    <----- 28b ----> <--- 12b -->  4b
+   +----------------+------------+----+
+   |        C       |      B     |  A |
+   +----------------+------------+----+
+
+   where:
+      A is GNI_MSG_SEND
+      B is msg length
+      C is reserved
+ */
+
+typedef struct gni_conn_request {
+	uint32_t type;
+	uint32_t addr;
+	uint32_t port;
+	uint32_t id;
+	gni_smsg_attr_t attr;
+} gni_conn_request_t;
+
+/* Conn Request (sent over the socket)
+
+    <----------- 32 bits ----------->
+    <--- 12b --> <--- 12b -->  4b   4b
+   +------------+------------+----+----+
+   |      D     |      C     |  B |  A |
+   +------------+------------+----+----+
+   |               addr                |
+   +-----------------------------------+
+   |               port                |
+   +-----------------------------------+
+   |                id                 |
+   +-----------------------------------+
+   |                                   |
+   |             smsg attr             |
+   |                                   |
+   |                                   |
+   +-----------------------------------+
+   |             payload               |
+
+   where:
+      A is GNI_MSG_CONN_REQUEST
+      B is the connection attribute (UU, RU, RO)
+      C is the payload length
+      D is reserved
+      addr is the sender's physical Gemini address
+      port is the sender's instance id
+      id is the sender's gconn->id
+      smsg attr is the sender's gni_smsg_attr_t
+ */
+
+/* Conn Reply
+
+    <------------ 32 bits ----------->
+    <--------- 27b ---------> 1  4b
+   +--------------------------+-+----+
+   |            C             |B|  A |
+   +--------------------------+-+----+
+   |                                  |
+   |             smsg info            |
+   |                                  |
+   |                                  |
+   +----------------------------------+
+
+   where:
+      A is GNI_MSG_CONN_REPLY
+      B is CCI_SUCCESS or CCI_ECONNREFUSED
+      C is reserved
+      If success, return server's smsg info
+ */
+
+/* RMA Remote Handle Request
+
+    <----------- 32 bits ----------->
+    <---------- 28b ----------->  4b
+   +----------------------------+----+
+   |             B              |  A |
+   +----------------------------+----+
+
+   where A is GNI_MSG_RMA_REMOTE_REQUEST and B is unused.
+
+   The payload is the uint64_t remote handle.
+ */
+
+typedef struct gni_rma_addr_mhndl {
+	uint64_t remote_handle;		/* the CCI remote handle */
+	uint64_t remote_addr;		/* the gni remote address */
+	gni_mem_handle_t remote_mem_hndl;	/* two uint64_t */
+} gni_rma_addr_mhndl_t;
+
+/* RMA Remote Handle Reply
+
+    <----------- 32 bits ----------->
+    <---------- 27b ----------> 1  4b
+   +---------------------------+-+----+
+   |             C             |B|  A |
+   +---------------------------+-+----+
+
+   where A is GNI_MSG_RMA_REMOTE_REPLY
+   B is 0 for ERR_NOT_FOUND and 1 for SUCCESS
+   C is unused
+
+   The payload is:
+
+       uint64_t remote_handle
+       uint64_t remote_addr
+       gni_mem_handle_t remote_mem_hndl
+ */
+
+/* Keepalive
+
+    <----------- 32 bits ----------->
+    <---------- 28b ----------->  4b
+   +----------------------------+----+
+   |             B              |  A |
+   +----------------------------+----+
+
+   where A is GNI_MSG_KEEPALIVE and B is unused.
+ */
+
+/* Set some driver defaults */
+#define GNI_EP_MSS		(128)		/* default MSS */
+#define GNI_EP_MSS_MAX		((1 << 12) -1)	/* largest MSS allowed */
+#define GNI_EP_RX_CNT		(32 * 1024)	/* default recv buffer count */
+#define GNI_EP_TX_CNT		(16 * 1024)	/* default send buffer count */
+#define GNI_EP_CQ_CNT		(GNI_EP_RX_CNT + GNI_EP_TX_CNT)	/* default CQ count */
+#define GNI_PROG_TIME_US	(100000)	/* try to progress every N microseconds */
+#define GNI_CONN_CREDIT		(8)		/* mbox max msgs */
+
+/* RMA Remote Cache
+ *
+ * gni needs 96 bits of info to post an RDMA (remote_addr and rkey). Since the
+ * CCI remote handle is a uint64_t, we need to use a rendezvous to obtain the
+ * remote_addr and rkey for a given handle. We can cache the most recently used
+ * remote handle information on a LRU list attached to the local RMA handle. Each
+ * RMA remote uses 36 bytes on a 64-bit machine. There is a scaling trade-off
+ * in order to avoid additional rendezvous round-trips since the memory usage
+ * will be up to (number of connections * size of LRU list * 36 bytes).
+ */
+#define GNI_RMA_REMOTE_SIZE	(4)	/* size of LRU list of RMA remote handles */
+
+/* Data structures */
 
 typedef struct gni_tx {
-	cci__evt_t evt;		// associated event
-	uint32_t id;		// ID of tx; returned by CQ
-	void *ptr;		// send buffer
-	void *user_ptr;		// user send buffer
-	uint32_t len;		// length of buffer used
-	uint32_t zero_copy;	// zero copy
-	 TAILQ_ENTRY(gni_tx) centry;	// Hangs on ep->tx_all
-	 TAILQ_ENTRY(gni_tx) entry;	// Hangs on ep->tx
-	 TAILQ_ENTRY(gni_tx) qentry;	// Hangs on ep->tx_queue
+	cci__evt_t evt;			/* associated event (connection) */
+	gni_msg_type_t msg_type;	/* message type */
+	int flags;			/* (CCI_FLAG_[BLOCKING|SILENT|NO_COPY]) */
+	uint32_t header;
+	void *buffer;			/* registered send buffer */
+	uint16_t len;			/* length of buffer */
+	uint32_t id;			/* use for SMSG msg_id */
+	TAILQ_ENTRY(gni_tx) entry;	/* hang on gep->idle_txs, gdev->queued,
+					   gdev->pending */
+	TAILQ_ENTRY(gni_tx) gentry;	/* hangs on gep->txs */
+	struct gni_rma_op *rma_op;	/* owning RMA if remote completion msg */
 } gni_tx_t;
 
-typedef struct gni_mailbox {
-	uint32_t NIC;		// NIC address of instance
-	uint32_t INST;		// PID of instance
-	gni_smsg_attr_t attr;	// mailbox attributes
-	cci_conn_attribute_t cci_attr;	// connection attributes
-	void *gconn;
-	union {
-		uint32_t length;	// connection payload size
-		gni_conn_status_t reply;	// connection reply
-	} info;
-} gni_mailbox_t;
+typedef struct gni_rx {
+	cci__evt_t evt;			/* associated event */
+	void *ptr;			/* start of buffer */
+	uint32_t offset;		/* offset in gep->buffer */
+	TAILQ_ENTRY(gni_rx) entry;	/* hangs on rx_pool->rxs */
+	TAILQ_ENTRY(gni_rx) idle;	/* hangs on rx_pool->idle_rxs */
+	struct gni_rx_pool *rx_pool;	/* owning rx pool */
+} gni_rx_t;
 
-typedef struct gni_rhd {
+typedef struct gni_dev {
+	int device_id;			/* GNI device id */
+	uint32_t ptag;
+	uint32_t cookie;
+	struct ifaddrs *ifa;		/* device's interface addr */
+	int is_progressing;		/* being progressed? */
+} gni_dev_t;
 
-	cci__ep_t *ep;		// Owning endpoint
-	void *start;		// app memory address
-	uint64_t length;	// max RMA transfer
-	gni_mem_handle_t mem_hndl;	// GNI memory handle
-	void *vmd;		// GNI VMD
-	uint64_t vmd_length;
-	 TAILQ_ENTRY(gni_rhd) entry;	// 
-	uint32_t refcnt;	// Reference count
-} gni_rma_hndl_t;
+typedef struct gni_globals {
+	uint32_t phys_addr;		/* physical Gemini address */
+	int count;			/* number of devices */
+	int *device_ids;		/* local device ids */
+	struct ifaddrs *ifaddrs;
+	cci_device_t const **const devices;	/* array of devices */
+} gni_globals_t;
 
-typedef struct gni_rop {
-	uint64_t rma_op;
-	 TAILQ_ENTRY(gni_rop) entry;	// Hangs on gep->rma_ops
+extern gni_globals_t *gglobals;
+
+typedef struct gni_rma_handle {
+	uint64_t addr;
+	gni_mem_handle_t mh;		/* memory handle */
+	cci__ep_t *ep;			/* owning endpoint */
+	TAILQ_ENTRY(gni_rma_handle) entry;	/* hang on gep->handles */
+	uint32_t refcnt;		/* reference count */
+	TAILQ_HEAD(s_rma_ops, gni_rma_op) rma_ops;	/* list of all rma_ops */
+} gni_rma_handle_t;
+
+typedef struct gni_rma_remote {
+	TAILQ_ENTRY(gni_rma_remote) entry;	/* hang on gconn->remotes */
+	gni_rma_addr_mhndl_t info;	/* handle, addr, and mem_hndl */
+} gni_rma_remote_t;
+
+typedef struct gni_rma_op {
+	cci__evt_t evt;			/* completion event */
+	gni_post_descriptor_t pd;	/* GNI post descriptor */
+	gni_msg_type_t msg_type;	/* to be compatible with tx */
+	TAILQ_ENTRY(gni_rma_op) entry;	/* gep->rmas */
+	TAILQ_ENTRY(gni_rma_op) gentry;	/* handle->rma_ops */
+	uint64_t local_handle;
+	uint64_t local_offset;
+	uint64_t remote_handle;
+	uint64_t remote_offset;
+	uint64_t data_len;
+
+	uint64_t remote_addr;
+	gni_mem_handle_t remote_mem_hndl; /* memory handle */
+
+	void *buf;			/* bounce buffer for unaligned GETs */
+
+	cci_status_t status;
+	void *context;
+	int flags;
+	gni_tx_t *tx;
+	uint32_t msg_len;
+	char *msg_ptr;
 } gni_rma_op_t;
 
-typedef struct gni__conn {
+/* This is the endpoint recv buffer container. It does not need to be
+ * registered. Unfortunately, each connection with have a SMSG mailbox
+ * (which is registered) but can only support one message outstanding.
+ * To support multiple events outstanding, we will copy from the mbox
+ * to here.
+ */
+typedef struct gni_rx_pool {
+	TAILQ_ENTRY(gni_rx_pool) entry;	/* hang on ep->rx_pools */
+	void *buf;			/* recv buffer */
+	TAILQ_HEAD(g_rxs, gni_rx) rxs;	/* all rxs */
+	TAILQ_HEAD(g_irxs, gni_rx) idle_rxs;	/* available rxs */
+	uint32_t size;			/* current size */
+} gni_rx_pool_t;
 
-	cci__conn_t *conn;	// point back to container
-	void *data_ptr;		// Optional CCI payload
-	uint32_t data_len;	// Length of payload
-	struct sockaddr_in sin;
-	gni_conn_status_t status;	// status of connection
-	uint32_t credits;	// tracking send credits
-	uint32_t in_use;	// token for lockout
-	gni_cq_handle_t src_cq_hndl;	// Local CQ handle
-	gni_cq_handle_t dst_cq_hndl;	// Destination CQ handle
-	gni_mailbox_t src_box;	// Local SMSG mailbox
-	gni_ep_handle_t ep_hndl;	// GNI ep handle
-	gni_mailbox_t dst_box;	// Destination SMSG mailbox
-	 TAILQ_ENTRY(gni__conn) entry;
-} gni__conn_t;
+typedef struct gni_ep {
+	gni_cdm_handle_t cdm;		/* communication domain handle */
+	gni_nic_handle_t nic;		/* NIC handle */
+	gni_cq_handle_t tx_cq;		/* source CQ for SMSG sends and RDMAs */
+	gni_cq_handle_t rx_cq;		/* destination CQ for SMSG recvs */
 
-typedef struct gni__ep {
+	int sock;			/* listening socket for connection setup */
+	struct sockaddr_in sin;		/* host address and port */
+	TAILQ_HEAD(g_crs, gni_rx) crs;	/* all conn requests */
+	TAILQ_HEAD(g_crsi, gni_rx) idle_crs;	/* idle conn requests */
 
-	uint32_t id;		// id for multiplexing
-	int32_t sd;		// request sd
-	int32_t rx_used;	// to serialize get_event
-	int32_t tx_used;	// to serialize get_event
-	void *rxbuf;		// Large buffer for rx's
-	void *txbuf;		// Large buffer for tx's
-	gni_mailbox_t *dst_box;	// Incoming mailbox request
-	int32_t vmd_index;	// VMD option(s)
-	uint64_t vmd_flags;	// VMD flag(s)
-	gni_cq_handle_t src_cq_hndl;	// Local RM CQ handle
-	gni_cq_handle_t dst_cq_hndl;	// Destination RM CQ handle
-	 TAILQ_HEAD(g_rxa, gni_rx) rx_all;	// List of all rx's
-	 TAILQ_HEAD(g_rx, gni_rx) rx;	// List of available rx's
-	 TAILQ_HEAD(g_txa, gni_tx) tx_all;	// List of all tx's
-	 TAILQ_HEAD(g_tx, gni_tx) tx;	// List of available tx
-	 TAILQ_HEAD(g_txq, gni_tx) tx_queue;	// List of queued tx
-	 TAILQ_HEAD(g_cx, gni__conn) gconn;	// List of all conns
-	 TAILQ_HEAD(g_hndl, gni_rhd) rma_hndls;	// List of RMA handles
-	 TAILQ_HEAD(g_op, gni_rop) rma_ops;	// List of RMA operations
-} gni__ep_t;
+	void *tx_buf;			/* send buffer */
+	gni_tx_t *txs;			/* array of txs */
+	TAILQ_HEAD(g_txsi, gni_tx) idle_txs;	/* idle txs */
+
+	TAILQ_HEAD(g_rx_pools, gni_rx_pool) rx_pools;	/* list of rx pools - usually one */
+
+	void *conn_tree;		/* tree of peer conn ids */
+	pthread_rwlock_t conn_tree_lock;	/* rw lock */
+
+	TAILQ_HEAD(g_conns, gni_conn) conns;	/* all conns */
+	TAILQ_HEAD(g_active, gni_conn) active;	/* active conns waiting on connect */
+	TAILQ_HEAD(g_active2, gni_conn) active2;	/* active conns waiting on reply */
+	TAILQ_HEAD(g_passive, gni_conn) passive;	/* passive conns on request */
+	TAILQ_HEAD(g_passive2, gni_conn) passive2;	/* passive conns waitin on ack */
+	TAILQ_HEAD(g_hdls, gni_rma_handle) handles;	/* all rma registrations */
+	TAILQ_HEAD(g_ops, gni_rma_op) rma_ops;	/* all rma ops */
+} gni_ep_t;
+
+typedef enum gni_conn_state {
+	GNI_CONN_CLOSED = -2,
+	GNI_CONN_CLOSING = -1,
+	GNI_CONN_INIT = 0,
+	GNI_CONN_ACTIVE,
+	GNI_CONN_PASSIVE,
+	GNI_CONN_PASSIVE2,
+	GNI_CONN_ESTABLISHED,
+} gni_conn_state_t;
+
+typedef struct gni_new_conn {
+	int sock;			/* socket for connection handshake */
+	void *ptr;			/* application payload */
+	uint32_t len;			/* payload length */
+	gni_conn_request_t cr;		/* conn request */
+} gni_new_conn_t;
+
+typedef struct gni_conn {
+	cci__conn_t *conn;		/* owning conn */
+	gni_ep_handle_t peer;		/* peer ep handle */
+	uint32_t id;			/* peer sets remote_event to this */
+	gni_conn_state_t state;		/* current state */
+	struct sockaddr_in sin;		/* peer address and port */
+	uint32_t mss;			/* max send size */
+	uint32_t max_tx_cnt;		/* max sends in flight */
+	TAILQ_HEAD(c_txs, gni_tx) pending;
+
+	void *msg_buffer;		/* mbox buffer */
+	uint32_t buff_size;		/* length */
+	gni_mem_handle_t mem_hndl;	/* memory handle */
+
+	uint32_t num_remotes;
+
+	TAILQ_HEAD(s_rems, gni_rma_remote) remotes;	/* LRU list of remote handles */
+	TAILQ_HEAD(w_ops, gni_rma_op) rma_ops;	/* rma ops waiting on remotes */
+	TAILQ_ENTRY(gni_conn) entry;	/* hangs on gep->conns */
+	TAILQ_ENTRY(gni_conn) temp;	/* hangs on gep->active|passive */
+	gni_new_conn_t *new;		/* application conn req info */
+} gni_conn_t;
 
 int cci_core_gni_post_load(cci_plugin_t * me);
 int cci_core_gni_pre_unload(cci_plugin_t * me);
 
 END_C_DECLS
-#endif				// CCI_CORE_GNI_H
+#endif				/* CCI_CORE_GNI_H */
