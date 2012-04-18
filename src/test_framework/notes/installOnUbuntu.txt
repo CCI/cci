@@ -1,0 +1,28 @@
+Install at least the following packages:
+
+autoconf
+libtool
+texlive
+texlive-fonts-extra
+texlive-fonts-recommended
+doxygen
+
+Build the code
+
+cd (Top level of CCI directory)
+./autogen.pl
+./configure
+doxygen Doxyfile
+make
+make install
+cd doc/latex
+make pdf
+
+Update the code from github (Master Repository)
+cd (Top level of CCI directory)
+git pull
+Username: lawrencem
+Password: whatever
+...
+
+then rebuild as if from scratch

@@ -1,0 +1,11 @@
+# environment variables for check software package
+
+CK_FORK=no|yes
+
+CK_VERBOSITY=silent|minimal|normal|verbose
+
+CK_TIMEOUT=<timeout in seconds>
+
+CK_TIMEOUT_MULTIPLIER=<integer>
+	Timeouts are only available in CK_FORK mode
+	Default timeout is 4 seconds
