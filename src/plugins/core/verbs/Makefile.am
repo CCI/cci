@@ -5,7 +5,7 @@
 
 pkglib_LTLIBRARIES = cci_core_verbs.la
 
-cci_core_verbs_la_LDFLAGS = -module -avoid-version
+cci_core_verbs_la_LDFLAGS = -module -avoid-version $(core_verbs_LDFLAGS)
 cci_core_verbs_la_SOURCES = \
         core_verbs.h \
         core_verbs_module.c \
