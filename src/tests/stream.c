@@ -27,8 +27,7 @@
 #include "mpi.h"
 #endif
 
-#define ITERS       100000
-#define TIMEOUT     30		/* seconds */
+#define TIMEOUT     10		/* seconds */
 #define MAX_PENDING 16
 
 /* Globals */
@@ -43,10 +42,10 @@ char *buffer;
 int timeout = TIMEOUT;
 int running = 1;
 pthread_mutex_t lock;
-uint32_t current_size = 32;
-cci_device_t * const *devices = NULL;
+uint32_t current_size = 1;
 cci_endpoint_t *endpoint = NULL;
-cci_connection_t *connection = NULL;
+cci_connection_t *control_conn = NULL;
+cci_connection_t *test_conn = NULL;
 cci_conn_attribute_t attr = CCI_CONN_ATTR_UU;
 struct timeval start, end;
 
@@ -101,7 +100,7 @@ static void poll_events(void)
 			if (running) {
 				UNLOCK;
 				ret =
-				    cci_send(connection, buffer,
+				    cci_send(test_conn, buffer,
 					     current_size, NULL, 0);
 				if (ret && 1) {
 					fprintf(stderr,
@@ -126,13 +125,16 @@ static void poll_events(void)
 					if (event->recv.len >
 					    current_size
 					    || event->recv.len == 3) {
+						double mbs = 0.0;
+
 						gettimeofday(&end, NULL);
+
+						mbs = (double)recv * (double)current_size
+							* 8.0 / usecs(start, end);
 						printf
-						    ("recv: %5d\t\t%6d\t\t%6.2lf Mb/s\n",
+						    ("recv: %7d\t%12d\t%8.2lf Mb/s\t%8.2lf MB/s\n",
 						     current_size, recv,
-						     (double)recv * (double)
-						     current_size *
-						     8.0 / usecs(start, end));
+						     mbs, mbs / 8.0);
 						current_size = event->recv.len;
 						gettimeofday(&start, NULL);
 						recv = 1;
@@ -146,39 +148,33 @@ static void poll_events(void)
 		}
 	case CCI_EVENT_CONNECT:
 		if (!is_server) {
-			connect_done = 1;
-			connection = event->connect.connection;
+			cci_connection_t **conn = event->connect.context;
+			*conn = event->connect.connection;
+			connect_done++;
 		}
 		break;
 	case CCI_EVENT_CONNECT_REQUEST:{
-			ready = 1;
-			ret = cci_accept(event, NULL);
-
-/*
-			cci_accept(event, NULL);
-
-			buffer = calloc(1, connection->max_send_size);
-			if (!buffer) {
-				fprintf(stderr, "unable to alloc buffer\n");
-				return;
-			}
-			gettimeofday(&start, NULL);
-			cci_send(connection, buffer, current_size, NULL, 0);
-			printf("Bytes\t\t# Rcvd\t\tRcvd\n");
-*/
+			uintptr_t control = event->request.data_len ? 1 : 0;
+			ret = cci_accept(event, (void*)control);
 			break;
 		}
 	case CCI_EVENT_ACCEPT:{
-			ready = 1;
-			connection = event->accept.connection;
-			buffer = calloc(1, connection->max_send_size);
-			if (!buffer) {
-				fprintf(stderr, "unable to alloc buffer\n");
-				return;
+			ready++;
+			if (event->accept.context) {
+				control_conn = event->accept.connection;
+			} else {
+				test_conn = event->accept.connection;
+				buffer = calloc(1, test_conn->max_send_size);
+				if (!buffer) {
+					fprintf(stderr, "unable to alloc buffer\n");
+					return;
+				}
 			}
-			gettimeofday(&start, NULL);
-			cci_send(connection, buffer, current_size, NULL, 0);
-			printf("Bytes\t\t# Rcvd\t\tRcvd\n");
+			if (ready == 2) {
+				gettimeofday(&start, NULL);
+				cci_send(control_conn, buffer, current_size, NULL, 0);
+				printf("\tBytes\t     # Rcvd\t     Rcvd\n");
+			}
 			break;
 		}
 	default:
@@ -199,11 +195,23 @@ void handle_alarm(int sig)
 void do_client()
 {
 	int ret;
+	int control = 1;
 
-	sleep(3);
+#if MPI_DEBUG
+	sleep(1);
+#endif
 
 	/* initiate connect */
-	ret = cci_connect(endpoint, server_uri, NULL, 0, attr, NULL, 0, NULL);
+	ret = cci_connect(endpoint, server_uri, &control, sizeof(control),
+				CCI_CONN_ATTR_RU, &control_conn, 0, NULL);
+	if (ret) {
+		fprintf(stderr, "cci_connect() returned %s\n",
+			cci_strerror(endpoint, ret));
+		return;
+	}
+
+	ret = cci_connect(endpoint, server_uri, NULL, 0, attr,
+			&test_conn, 0, NULL);
 	if (ret) {
 		fprintf(stderr, "cci_connect() returned %s\n",
 			cci_strerror(endpoint, ret));
@@ -211,15 +219,15 @@ void do_client()
 	}
 
 	/* poll for connect completion */
-	while (!connect_done)
+	while (connect_done < 2)
 		poll_events();
 
-	if (!connection) {
+	if (!control_conn || !test_conn) {
 		fprintf(stderr, "no connection\n");
 		return;
 	}
 
-	buffer = calloc(1, connection->max_send_size);
+	buffer = calloc(1, test_conn->max_send_size);
 	if (!buffer) {
 		fprintf(stderr, "unable to alloc buffer\n");
 		return;
@@ -228,13 +236,14 @@ void do_client()
 	while (!ready)
 		poll_events();
 
-	printf("Bytes\t\t# Sent\t\tSent\n");
+	printf("\tBytes\t     # Sent\t     Sent\n");
 
 	signal(SIGALRM, handle_alarm);
 
 	/* begin communication with server */
-	for (current_size = 32; current_size <= connection->max_send_size;) {
+	for (current_size = 1; current_size <= test_conn->max_send_size;) {
 		int i;
+		double mbs = 0.0;
 
 		send = send_completed = recv = 0;
 		LOCK;
@@ -246,7 +255,7 @@ void do_client()
 
 		for (i = 0; i < MAX_PENDING; i++) {
 			ret =
-			    cci_send(connection, buffer, current_size, NULL, 0);
+			    cci_send(test_conn, buffer, current_size, NULL, 0);
 			if (!ret)
 				send++;
 		}
@@ -261,20 +270,15 @@ void do_client()
 
 		gettimeofday(&end, NULL);
 
-		printf("sent: %5d\t\t%6d\t\t%6.2lf Mb/s\n",
+		mbs = (double)send * (double)current_size * 8.0 / usecs(start, end);
+
+		printf("sent: %7d\t%12d\t%8.2lf Mb/s\t%8.2lf MB/s\n",
 		       current_size, send,
-		       (double)send * (double)current_size * 8.0 /
-		       usecs(start, end));
+		       mbs, mbs / 8.0);
 
-		if (current_size == 0)
-			current_size++;
-		else
-			current_size *= 2;
-
-		//cci_send(connection, "reset", 5, &current_size, sizeof(current_size), NULL, 0);
-		sleep(1);
+		current_size *= 2;
 	}
-	cci_send(connection, "bye", 3, NULL, 0);
+	cci_send(control_conn, "bye", 3, NULL, 0);
 
 	return;
 }
@@ -341,13 +345,6 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	ret = cci_get_devices(&devices);
-	if (ret) {
-		fprintf(stderr, "cci_get_devices() failed with %s\n",
-			cci_strerror(NULL, ret));
-		exit(EXIT_FAILURE);
-	}
-
 	/* create an endpoint */
 	ret = cci_create_endpoint(NULL, 0, &endpoint, &ep_fd);
 	if (ret) {
@@ -359,6 +356,8 @@ int main(int argc, char *argv[])
 
 #if MPI_DEBUG
 	MPI_Init(&argc, &argv);
+
+	MPI_barrier(MPI_COMM_WORLD);
 #endif
 
 	if (is_server)
@@ -375,6 +374,7 @@ int main(int argc, char *argv[])
 	}
 	if (buffer)
 		free(buffer);
+
 	ret = cci_finalize();
 	if (ret) {
 		fprintf(stderr, "cci_finalize() failed with %s\n",
@@ -382,6 +382,10 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	free(server_uri);
+
+#if MPI_DEBUG
+	MPI_Finalize();
+#endif
 
 	return 0;
 }
