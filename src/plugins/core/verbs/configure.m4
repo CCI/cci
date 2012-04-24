@@ -30,7 +30,7 @@ AC_DEFUN([PLUGINS_cci_core_verbs_CONFIG],[
                              [rdma/rdma_cma.h],
                              [rdmacm],
                              [rdma_create_id],
-                             [],
+                             [-libverbs],
                              [$1],
                              [$2])
     AC_CHECK_TYPE([struct rdma_addrinfo],
