@@ -91,14 +91,14 @@ int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
 			*val = timeout;
 			break;
 		}
-	case CCI_OPT_ENDPT_ALIGN:
+	case CCI_OPT_ENDPT_RMA_ALIGN:
 		{
 			int l = sizeof(cci_alignment_t);
 			cci_alignment_t *align = calloc(1, sizeof(l));
 			if (!align)
 				return CCI_ENOMEM;
 
-			memcpy(align, &ep->dev.align, l);
+			memcpy(align, &ep->dev->align, l);
 			*len = l;
 			*val = align;
 			break;

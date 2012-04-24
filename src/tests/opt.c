@@ -25,6 +25,7 @@ uint32_t tx_timeout = -1;
 uint32_t rx_buf_cnt = -1;
 uint32_t tx_buf_cnt = -1;
 uint32_t keepalive = -1;
+int align = -1;
 
 cci_opt_handle_t handle;
 cci_opt_level_t level;
@@ -41,7 +42,7 @@ void check_return(char *func, cci_endpoint_t *endpoint, int ret)
 void usage(void)
 {
 	printf("usage: %s [-G | -S] [-t[<usecs>]] [-r[<count>]] [-s[<count>]] "
-	       "[-k[<usecs>]]\n", proc_name);
+	       "[-k[<usecs>]] [-a]\n", proc_name);
 	printf("where:\n");
 	printf("\t-G\tGet value. If no other options set, get all options.\n");
 	printf
@@ -52,6 +53,7 @@ void usage(void)
 	printf("\t-r\tReceive buffer count.\n");
 	printf("\t-s\tSend buffer count.\n");
 	printf("\t-k\tKeepalive timeout in microsconds (us).\n");
+	printf("\t-a\tRMA Alignment values.\n");
 	printf
 	    ("Note: There are no spaces between option flags and optional values.\n");
 	printf("If no options are given, enter interactive mode.\n");
@@ -77,32 +79,44 @@ void test(cci_endpoint_t *endpoint, cci_opt_name_t name)
 	case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
 		val = keepalive;
 		break;
+	case CCI_OPT_ENDPT_RMA_ALIGN:
+		break;
 	default:
 		printf("unknown option\n");
 		break;
 	}
 
 	ret = cci_get_opt(&handle, level, name, &ptr, &len);
-	printf("cci_get_opt() returned %s", cci_strerror(endpoint, ret));
+	printf("cci_get_opt() returned %s\n", cci_strerror(endpoint, ret));
 
 	if (ret == CCI_SUCCESS) {
-		printf(" (val = %u)\n", *((uint32_t *) ptr));
-		if (set) {
-			ret = cci_set_opt(&handle, level, name,
-					  &val, (int)sizeof(val));
-			printf("cci_set_opt() returned %s\n",
-			       cci_strerror(endpoint, ret));
-			if (ret == CCI_SUCCESS) {
-				ret = cci_get_opt(&handle, level, name,
-						  &ptr, &len);
-				printf("cci_get_opt() returned %s",
-				       cci_strerror(endpoint, ret));
-				if (ret == CCI_SUCCESS)
-					printf(" (val = %u)\n",
-					       *((uint32_t *) ptr));
-				else
-					printf("\n");
+		if (CCI_OPT_ENDPT_RMA_ALIGN != name) {
+			printf(" (val = %u)\n", *((uint32_t *) ptr));
+			if (set) {
+				ret = cci_set_opt(&handle, level, name,
+							&val, (int)sizeof(val));
+				printf("cci_set_opt() returned %s\n",
+					cci_strerror(endpoint, ret));
+				if (ret == CCI_SUCCESS) {
+					ret = cci_get_opt(&handle, level, name,
+								&ptr, &len);
+					printf("cci_get_opt() returned %s\n",
+					cci_strerror(endpoint, ret));
+					if (ret == CCI_SUCCESS)
+						printf(" (val = %u)\n",
+							*((uint32_t *) ptr));
+					else
+						printf("\n");
+				}
 			}
+		} else {
+			cci_alignment_t *align = (cci_alignment_t *)ptr;
+			printf("rma_write_local_addr = %u\n", align->rma_write_local_addr);
+			printf("rma_write_remote_addr = %u\n", align->rma_write_remote_addr);
+			printf("rma_write_length = %u\n", align->rma_write_length);
+			printf("rma_read_local_addr = %u\n", align->rma_read_local_addr);
+			printf("rma_read_remote_addr = %u\n", align->rma_read_remote_addr);
+			printf("rma_read_length = %u\n", align->rma_read_length);
 		}
 	} else {
 		printf("\n");
@@ -114,12 +128,11 @@ int main(int argc, char *argv[])
 {
 	int c, ret, fd;
 	uint32_t caps = 0;
-	cci_device_t **devices;
 	cci_endpoint_t *endpoint;
 
 	proc_name = argv[0];
 
-	while ((c = getopt(argc, argv, "GSt::r::s::k::")) != -1) {
+	while ((c = getopt(argc, argv, "GSt::r::s::k::a")) != -1) {
 		switch (c) {
 		case 'G':
 			if (set)
@@ -155,6 +168,9 @@ int main(int argc, char *argv[])
 			else
 				keepalive = 0;
 			break;
+		case 'a':
+			align = 1;
+			break;
 		default:
 			usage();
 			break;
@@ -168,9 +184,12 @@ int main(int argc, char *argv[])
 
 	if ((tx_timeout == (uint32_t) - 1) &&
 	    (rx_buf_cnt == (uint32_t) - 1) &&
-	    (tx_buf_cnt == (uint32_t) - 1) && (keepalive == (uint32_t) - 1)) {
+	    (tx_buf_cnt == (uint32_t) - 1) &&
+	    (keepalive == (uint32_t) - 1) &&
+	    (align == -1)) {
 		if (get) {
 			tx_timeout = rx_buf_cnt = tx_buf_cnt = keepalive = 0;
+			align = 1;
 		} else {
 			printf("Set requires an option and value to set");
 			usage();
@@ -179,9 +198,6 @@ int main(int argc, char *argv[])
 
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
 	check_return("cci_init", endpoint, ret);
-
-	ret = cci_get_devices((cci_device_t const * const **)&devices);
-	check_return("cci_get_devices", endpoint, ret);
 
 	ret = cci_create_endpoint(NULL, 0, &endpoint, &fd);
 	check_return("cci_create_endpoint", endpoint, ret);
@@ -209,6 +225,11 @@ int main(int argc, char *argv[])
 	if (keepalive != (uint32_t) - 1) {
 		printf("Testing CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT\n");
 		test(endpoint, CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT);
+	}
+
+	if (align) {
+		printf("Testing CCI_OPT_ENDPT_RMA_ALIGN\n");
+		test(endpoint, CCI_OPT_ENDPT_RMA_ALIGN);
 	}
 
 	ret = cci_destroy_endpoint(endpoint);
