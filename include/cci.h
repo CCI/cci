@@ -1302,18 +1302,19 @@ typedef enum cci_opt_name {
 	 */
 	CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT,
 
-        /*! RMA registration alignment requirements, if any, for this endpoint.
-           This option needs the address of a valid cci_alignment_t passed in.
-           The CTP will fill in the struct with the minimal alignment needed
-           for each member of the struct. A value of 0 indicates that there
-           are no alignment requirements for that member. A value of 4, for
-           example, indicates that that member must be 4-byte aligned.
+	/*! RMA registration alignment requirements, if any, for this endpoint.
+	   This option needs the address of a cci_alignment_t pointer passed in.
+	   The CTP will allocate and fill in the struct with the minimal
+	   alignment needed for each member of the struct. A value of 0
+	   indicates that there are no alignment requirements for that member. A
+	   value of 4, for example, indicates that that member must be 4-byte
+	   aligned.
 
-           If the CTP requires RMA alignment and the application passes in an
-           un-aligned parameter, the CTP may need to allocate a temporary buffer,
-           register it, and use it instead. This will also require a copy of the
-           data to the correct location. This will decrease performance for
-           these cases.
+	   If the CTP requires RMA alignment and the application passes in an
+	   un-aligned parameter, the CTP may need to allocate a temporary
+	   buffer, register it, and use it instead. This will also require a
+	   copy of the data to the correct location. This will decrease
+	   performance for these cases.
 
            cci_get_opt() only.
         */
