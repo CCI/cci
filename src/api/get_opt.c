@@ -91,6 +91,16 @@ int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
 			*val = timeout;
 			break;
 		}
+	case CCI_OPT_ENDPT_URI:
+		{
+			char *uri = strdup(ep->uri);
+			if (!uri)
+				return CCI_ENOMEM;
+
+			*len = strlen(uri);
+			*val = uri;
+			break;
+		}
 	case CCI_OPT_CONN_SEND_TIMEOUT:
 		{
 			uint32_t *timeout = calloc(1, sizeof(*timeout));

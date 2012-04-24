@@ -517,7 +517,6 @@ static int sock_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 
-	endpoint->max_recv_buffer_count = SOCK_EP_RX_CNT;
 	ep->rx_buf_cnt = SOCK_EP_RX_CNT;
 	ep->tx_buf_cnt = SOCK_EP_TX_CNT;
 	ep->buffer_len = dev->device.max_send_size + SOCK_MAX_HDRS;
@@ -558,7 +557,7 @@ static int sock_create_endpoint(cci_device_t * device,
 	memset(name, 0, sizeof(name));
 	sprintf(name, "ip://");
 	sock_sin_to_name(sep->sin, name + (uintptr_t) 5, sizeof(name) - 5);
-	endpoint->name = strdup(name);
+	ep->uri = strdup(name);
 
 	for (i = 0; i < SOCK_EP_HASH_SIZE; i++) {
 		TAILQ_INIT(&sep->conn_hash[i]);
@@ -749,8 +748,8 @@ static int sock_destroy_endpoint(cci_endpoint_t * endpoint)
 		free(sep);
 		ep->priv = NULL;
 	}
-	if (endpoint->name)
-		free((char *)endpoint->name);
+	if (ep->uri)
+		free((char *)ep->uri);
 	pthread_mutex_unlock(&ep->lock);
 	pthread_mutex_unlock(&dev->lock);
 
@@ -953,7 +952,7 @@ static int sock_accept(cci_event_t *event, const void *context)
 			 (uint32_t) sconn->last_ack_ts);
 	hs = (sock_handshake_t *) (tx->buffer + sizeof(*hdr_r));
 	sock_pack_handshake(hs, sconn->id, peer_seq,
-			    ep->endpoint.max_recv_buffer_count,
+			    ep->rx_buf_cnt,
 			    conn->connection.max_send_size, 0);
 
 	tx->len = sizeof(*hdr_r) + sizeof(*hs);
@@ -1324,7 +1323,7 @@ static int sock_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	if (keepalive != 0UL)
 		conn->keepalive_timeout = keepalive;
 	sock_pack_handshake(hs, sconn->id, 0,
-			    endpoint->max_recv_buffer_count,
+			    ep->rx_buf_cnt,
 			    connection->max_send_size, keepalive);
 
 	tx->len += sizeof(*hs);

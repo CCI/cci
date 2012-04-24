@@ -475,17 +475,6 @@ typedef enum cci_endpoint_flags {
   \ingroup endpoints
 */
 typedef const struct cci_endpoint {
-	/*! Maximum number of receive buffers on this endpoint that can be
-	   loaned to the application.  When this number of buffers have
-	   been loaned to the application, incoming messages may be
-	   dropped. */
-	uint32_t max_recv_buffer_count;
-
-	/*! Driver created name of the endpoint. May be passed to clients out-of-band
-	   to pass to cci_connect(). The application should never need to parse
-	   this URI. */
-	char const * name;
-
 	/*! Application-provided, private context. */
 	void *context;
 } cci_endpoint_t;
@@ -1301,6 +1290,13 @@ typedef enum cci_opt_name {
 	   cci_get_opt() and cci_set_opt().
 	 */
 	CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT,
+
+	/*! Retrieve the endpoint's URI used for listening for connection
+	   requests. The application should never need to parse this URI.
+
+	   cci_get_opt() only.
+	 */
+	CCI_OPT_ENDPT_URI,
 
 	/*! Reliable send timeout in microseconds.
 

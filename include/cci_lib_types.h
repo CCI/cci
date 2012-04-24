@@ -83,19 +83,19 @@ typedef struct cci__ep {
 	/*! Public endpoint (max_recv_buffer_count) */
 	struct cci_endpoint endpoint;
 
-	/*! Number of rx buffers */
+	/*! Number of rx buffers. Used for CCI_OPT_ENDPT_RECV_BUF_COUNT. */
 	uint32_t rx_buf_cnt;
 
-	/*! Number of tx buffers */
+	/*! Number of tx buffers. Used for CCI_OPT_ENDPT_SEND_BUF_COUNT. */
 	uint32_t tx_buf_cnt;
 
-	/*! Size of rx/tx buffers */
+	/*! Size of rx/tx buffers. Sets initial connection->max_send_size. */
 	uint32_t buffer_len;
 
-	/*! Send timeout in microseconds */
+	/*! Send timeout in microseconds. Used for CCI_OPT_ENDPT_SEND_TIMEOUT. */
 	uint32_t tx_timeout;
 
-	/*! Keepalive timeout in microseconds */
+	/*! Keepalive timeout in microseconds. Used for CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT. */
 	uint32_t keepalive_timeout;
 
 	/*! Events ready for process */
@@ -115,6 +115,11 @@ typedef struct cci__ep {
 
 	/*! Pointer to device specific struct */
 	void *priv;
+
+	/*! Endpoint URI. Used for CCI_OPT_ENDPT_URI. This endpoint's
+	    listening address that client's can pass to cci_connect().
+	    The application should never need to parse this URI. */
+	char *uri;
 } cci__ep_t;
 
 /*! CCI private connection */
