@@ -44,6 +44,8 @@ BEGIN_C_DECLS
 #define SOCK_CONN_REQ_HDR_LEN   ((int) (sizeof(struct sock_header_r)))
     /* header + seqack */
 #define SOCK_RMA_DEPTH          (12)	/* how many in-flight msgs per RMA */
+#define ACK_TIMEOUT             (1000000) /* Timeout associated to ACK blocks */
+#define PENDING_ACK_THRESHOLD   (SOCK_RMA_DEPTH-1) /* Maximum size of a ACK block */
 static inline uint64_t sock_tv_to_usecs(struct timeval tv)
 {
 	return (tv.tv_sec * 1000000) + tv.tv_usec;
@@ -245,9 +247,10 @@ sock_parse_seq_ts(sock_seq_ts_t * sa, uint32_t * seq, uint32_t * ts)
 /* reliable header */
 
 typedef struct sock_header_r {
-	sock_header_t header;
-	sock_seq_ts_t seq_ts;
-	char data[0];		/* start reliable payload here */
+	sock_header_t   header;
+	sock_seq_ts_t   seq_ts;
+	uint32_t        pb_ack; /*piggybacked ACK */
+	char            data[0]; /* start reliable payload here */
 } sock_header_r_t;
 
 /* Common message headers (RO, RU, and UU) */
@@ -595,6 +598,10 @@ typedef struct sock_rma_header {
    +-------------------------------+
 
    +-------------------------------+
+   |        ACK Piggyback          |
+   +-------------------------------+
+
+   +-------------------------------+
    |     local handle (0 - 31)     |
    +-------------------------------+
    |     local handle (32 - 63)    |
@@ -713,14 +720,15 @@ sock_pack_rma_read(sock_rma_header_t * read, uint64_t data_len,
    |           timestamp           |
    +-------------------------------+
 
+   TODO: description
  */
 
 static inline void
-sock_pack_rma_write_done(sock_rma_header_t * write, uint32_t peer_id,
-			 uint32_t seq, uint32_t ts)
+sock_pack_rma_write_done(sock_rma_header_t * write, uint16_t data_len,
+            uint32_t peer_id, uint32_t seq, uint32_t ts)
 {
 	sock_pack_header(&write->header_r.header, SOCK_MSG_RMA_WRITE_DONE,
-			 0, 0, peer_id);
+			 0, data_len, peer_id);
 	sock_pack_seq_ts(&write->header_r.seq_ts, seq, ts);
 }
 
@@ -1025,13 +1033,13 @@ typedef struct sock_conn {
 	int ack_queued;
 
 	/*! List of sequence numbers to ack */
-	 TAILQ_HEAD(s_acks, sock_ack) acks;
+	TAILQ_HEAD(s_acks, sock_ack) acks;
 
 	/*! Last RMA started */
 	uint32_t rma_id;
 
 	/*! List of RMA ops in process in case of fence */
-	 TAILQ_HEAD(s_rmas, sock_rma_op) rmas;
+	TAILQ_HEAD(s_rmas, sock_rma_op) rmas;
 
 	/*! Flag to know if the receiver is ready or not */
 	uint32_t rnr;
