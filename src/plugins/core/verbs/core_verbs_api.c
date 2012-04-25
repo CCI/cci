@@ -416,6 +416,7 @@ static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t fla
 	vglobals->ifaddrs = ifaddrs;
 
 	if (!globals->configfile) {
+		int i;
 		struct cci_device *device = NULL;
 		verbs_dev_t *vdev = NULL;
 		struct ibv_port_attr port_attr;
@@ -443,8 +444,22 @@ static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t fla
 		}
 		vdev = dev->priv;
 
-		vdev->context = vglobals->contexts[0];
-		vdev->ifa = &ifaddrs[0];
+		/* if we get here, there is at least one RDMA device
+		   with a valid interface. Use the first one
+		   that is up. */
+		for (i = 0; i < count; i++) {
+			if (ifaddrs[i].ifa_flags & IFF_UP) {
+				vdev->context = vglobals->contexts[i];
+				vdev->ifa = &ifaddrs[i];
+				break;
+			}
+		}
+		if (!vdev->context) {
+			debug(CCI_DB_DRVR, "%s: no RDMA devices with an up interface",
+					__func__);
+			ret = CCI_ENODEV;
+			goto out;
+		}
 
 		ret = ibv_query_port(vdev->context, 1, &port_attr);
 		if (ret) {
