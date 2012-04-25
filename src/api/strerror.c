@@ -64,6 +64,9 @@ const char *cci_strerror(cci_endpoint_t *endpoint, enum cci_status status)
 	case CCI_ENODEV:
 		return "CCI_ENODEV";
 
+	case CCI_ENETDOWN:
+		return "CCI_ENETDOWN";
+
 	case CCI_EBUSY:
 		return "CCI_EBUSY";
 

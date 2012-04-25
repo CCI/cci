@@ -238,6 +238,9 @@ typedef enum cci_status {
 	/*! No device available */
 	CCI_ENODEV = ENODEV,
 
+	/*! The requested device is down */
+	CCI_ENETDOWN = ENETDOWN,
+
 	/*! Resource busy (e.g. port in use) */
 	CCI_EBUSY = EBUSY,
 

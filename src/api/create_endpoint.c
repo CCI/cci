@@ -42,19 +42,24 @@ int cci_create_endpoint(cci_device_t * device,
 			dev = TAILQ_FIRST(&globals->devs);
 			device = &dev->device;
 		}
-		if (!device)
-			goto out_enodev;
+		if (!device || !dev->is_up) {
+			ret = CCI_ENODEV;
+			goto out;
+		}
 	} else {
 		/* use given device */
 		dev = container_of(device, cci__dev_t, device);
+		if (dev->is_up == 0) {
+			ret = CCI_ENETDOWN;
+			goto out;
+		}
 	}
 
-	if (dev->is_up == 0)
-		goto out_enodev;
-
 	ep = calloc(1, sizeof(*ep));
-	if (!ep)
-		goto out_enodev;
+	if (!ep) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
 
 	TAILQ_INIT(&ep->evts);
 	pthread_mutex_init(&ep->lock, NULL);
@@ -73,7 +78,7 @@ int cci_create_endpoint(cci_device_t * device,
 
 	return ret;
 
-out_enodev:
+out:
 	pthread_mutex_unlock(&globals->lock);
-	return CCI_ENODEV;
+	return ret;
 }
