@@ -312,6 +312,7 @@ static int portals_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t fl
 		iReject = 0;	/* portals configured */
 		device = &dev->device;	/* Select device */
 
+		device->up = 1;
 		device->max_send_size = PORTALS_DEFAULT_MSS;
 		device->rate = 46000000000;	/* SeaStar2+, 6 ports, bps */
 		device->pci.domain = -1;	/* per CCI spec */
@@ -374,7 +375,6 @@ static int portals_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t fl
 		}
 		ds[pglobals->count] = device;
 		pglobals->count++;
-		dev->is_up = 1;
 		pdev->min_idx = PORTALS_MIN_INDEX;
 
 		/* parse conf_argv */

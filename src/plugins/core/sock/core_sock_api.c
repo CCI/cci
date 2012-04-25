@@ -261,6 +261,7 @@ static int sock_init(cci_plugin_core_t *plugin,
 		device = &dev->device;
 		device->max_send_size = SOCK_DEFAULT_MSS;
 		device->name = strdup("loopback");
+		device->up = 1;
 
 		device->rate = 10000000000ULL;
 		device->pci.domain = -1;    /* per CCI spec */
@@ -275,7 +276,6 @@ static int sock_init(cci_plugin_core_t *plugin,
 		sdev->ip = inet_addr("127.0.0.1"); /* network order */
 
 		dev->driver = strdup("sock");
-		dev->is_up = 1;
 		dev->is_default = 1;
 		cci__add_dev(dev);
 		devices[sglobals->count] = device;
@@ -342,10 +342,10 @@ static int sock_init(cci_plugin_core_t *plugin,
 			}
 			if (sdev->ip != 0) {
 				TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
+				device->up = 1;
 				cci__add_dev(dev);
 				devices[sglobals->count] = device;
 				sglobals->count++;
-				dev->is_up = 1;
 				threads_running = 1;
 			}
 

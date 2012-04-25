@@ -462,7 +462,7 @@ static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t fla
 					verbs_mtu_val(port_attr.max_mtu);
 				device->rate = verbs_device_rate(port_attr);
 				device->name = vdev->ifa->ifa_name;
-				dev->is_up = vdev->ifa->ifa_flags & IFF_UP;
+				device->up = vdev->ifa->ifa_flags & IFF_UP;
 
 				cci__add_dev(dev);
 				devices[index] = device;
@@ -602,12 +602,12 @@ static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t fla
 			device->max_send_size =
 			    verbs_mtu_val(port_attr.max_mtu);
 			device->rate = verbs_device_rate(port_attr);
+			device->up = vdev->ifa->ifa_flags & IFF_UP;
 
 			TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
 			cci__add_dev(dev);
 			devices[index] = device;
 			index++;
-			dev->is_up = vdev->ifa->ifa_flags & IFF_UP;
 		}
 	}
 

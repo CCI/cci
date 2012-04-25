@@ -338,18 +338,6 @@ static gni_tx_t *gni_get_tx(cci__ep_t * ep)
 	return tx;
 }
 
-void
-gni_cci__init_dev(cci__dev_t *dev)
-{
-	struct cci_device *device = &dev->device;
-
-	dev->priority = 50; /* default */
-	dev->is_default = 0;
-	TAILQ_INIT(&dev->eps);
-	pthread_mutex_init(&dev->lock, NULL);
-	device->up = 1;
-}
-
 static int gni_init(cci_plugin_core_t * plugin, uint32_t abi_ver,
 		    uint32_t flags, uint32_t * caps)
 {
@@ -430,13 +418,14 @@ static int gni_init(cci_plugin_core_t * plugin, uint32_t abi_ver,
 			goto out;
 		}
 
-		gni_cci__init_dev(dev);
+		cci__init_dev(dev);
 		dev->plugin = plugin;
 
 		device = &dev->device;
 		device->max_send_size = GNI_EP_MSS;
 		device->name = strdup("ipogif0");
 
+		device->up = 1;
 		device->rate = gni_device_rate();
 		device->pci.domain = -1;	/* per CCI spec */
 		device->pci.bus = -1;		/* per CCI spec */
@@ -450,7 +439,6 @@ static int gni_init(cci_plugin_core_t * plugin, uint32_t abi_ver,
 		gdev->ifa = &gglobals->ifaddrs[0];
 
 		dev->driver = strdup("gni");
-		dev->is_up = 1;
 		dev->is_default = 1;
 		dev->align.rma_read_local_addr = 4;
 		dev->align.rma_read_remote_addr = 4;
@@ -595,7 +583,7 @@ static int gni_init(cci_plugin_core_t * plugin, uint32_t abi_ver,
 			cci__add_dev(dev);
 			devices[index] = device;
 			index++;
-			dev->is_up = gdev->ifa->ifa_flags & IFF_UP;
+			device->up = gdev->ifa->ifa_flags & IFF_UP;
 			debug(CCI_DB_INFO, "%s: device[%d] is up (%s %s)", __func__,
 				i, gdev->ifa->ifa_name,
 				inet_ntoa(((struct sockaddr_in*)gdev->ifa->ifa_addr)->sin_addr));

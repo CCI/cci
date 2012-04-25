@@ -151,7 +151,7 @@ void cci__init_dev(cci__dev_t *dev)
 	dev->is_default = 0;
 	TAILQ_INIT(&dev->eps);
 	pthread_mutex_init(&dev->lock, NULL);
-	device->up = 1;
+	device->up = 0;
 }
 
 /* only used by backends when adding ready devices to the main list

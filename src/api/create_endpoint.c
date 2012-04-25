@@ -42,17 +42,17 @@ int cci_create_endpoint(cci_device_t * device,
 			dev = TAILQ_FIRST(&globals->devs);
 			device = &dev->device;
 		}
-		if (!device || !dev->is_up) {
+		if (!device || !device->up) {
 			ret = CCI_ENODEV;
 			goto out;
 		}
 	} else {
 		/* use given device */
-		dev = container_of(device, cci__dev_t, device);
-		if (dev->is_up == 0) {
+		if (!device->up) {
 			ret = CCI_ENETDOWN;
 			goto out;
 		}
+		dev = container_of(device, cci__dev_t, device);
 	}
 
 	ep = calloc(1, sizeof(*ep));
