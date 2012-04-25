@@ -417,66 +417,58 @@ static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t fla
 
 	if (!globals->configfile) {
 		int i;
-		struct cci_device *device = NULL;
-		verbs_dev_t *vdev = NULL;
-		struct ibv_port_attr port_attr;
-
-		dev = calloc(1, sizeof(*dev));
-		if (!dev) {
-			ret = CCI_ENOMEM;
-			goto out;
-		}
-
-		cci__init_dev(dev);
-		dev->plugin = plugin;
-		dev->priority = plugin->base.priority;
-
-		device = &dev->device;
-		device->pci.domain = -1;	/* per CCI spec */
-		device->pci.bus = -1;		/* per CCI spec */
-		device->pci.dev = -1;		/* per CCI spec */
-		device->pci.func = -1;		/* per CCI spec */
-
-		dev->priv = calloc(1, sizeof(*vdev));
-		if (!dev->priv) {
-			ret = CCI_ENOMEM;
-			goto out;
-		}
-		vdev = dev->priv;
-
-		/* if we get here, there is at least one RDMA device
-		   with a valid interface. Use the first one
-		   that is up. */
 		for (i = 0; i < count; i++) {
-			if (ifaddrs[i].ifa_flags & IFF_UP) {
+			if (ifaddrs[i].ifa_name) {
+				struct cci_device *device = NULL;
+				verbs_dev_t *vdev = NULL;
+				struct ibv_port_attr port_attr;
+
+				dev = calloc(1, sizeof(*dev));
+				if (!dev) {
+					/* FIXME this is a bit harsh */
+					ret = CCI_ENOMEM;
+					goto out;
+				}
+
+				cci__init_dev(dev);
+				dev->plugin = plugin;
+				dev->priority = plugin->base.priority;
+
+				device = &dev->device;
+				device->pci.domain = -1;	/* per CCI spec */
+				device->pci.bus = -1;		/* per CCI spec */
+				device->pci.dev = -1;		/* per CCI spec */
+				device->pci.func = -1;		/* per CCI spec */
+
+				dev->priv = calloc(1, sizeof(*vdev));
+				if (!dev->priv) {
+					/* FIXME this is a bit harsh */
+					ret = CCI_ENOMEM;
+					goto out;
+				}
+				vdev = dev->priv;
+
 				vdev->context = vglobals->contexts[i];
 				vdev->ifa = &ifaddrs[i];
-				break;
+
+				ret = ibv_query_port(vdev->context, 1, &port_attr);
+				if (ret) {
+					/* FIXME this is a bit harsh */
+					ret = errno;
+					goto out;
+				}
+
+				device->max_send_size =
+					verbs_mtu_val(port_attr.max_mtu);
+				device->rate = verbs_device_rate(port_attr);
+				device->name = vdev->ifa->ifa_name;
+				dev->is_up = vdev->ifa->ifa_flags & IFF_UP;
+
+				cci__add_dev(dev);
+				devices[index] = device;
+				index++;
 			}
 		}
-		if (!vdev->context) {
-			debug(CCI_DB_DRVR, "%s: no RDMA devices with an up interface",
-					__func__);
-			ret = CCI_ENODEV;
-			goto out;
-		}
-
-		ret = ibv_query_port(vdev->context, 1, &port_attr);
-		if (ret) {
-			ret = errno;
-			goto out;
-		}
-
-		device->max_send_size =
-		    verbs_mtu_val(port_attr.max_mtu);
-		device->rate = verbs_device_rate(port_attr);
-		device->name = vdev->ifa->ifa_name;
-
-		cci__add_dev(dev);
-		devices[index] = device;
-		index++;
-		dev->is_up = vdev->ifa->ifa_flags & IFF_UP;
-
 	} else
 	/* find devices we own */
 	TAILQ_FOREACH_SAFE(dev, &globals->configfile_devs, entry, ndev) {
