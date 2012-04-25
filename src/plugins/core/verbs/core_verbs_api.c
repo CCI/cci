@@ -250,7 +250,7 @@ verbs_find_rdma_devices(struct ibv_context **contexts, int count,
 			struct ifaddrs **ifaddrs)
 {
 	int ret = CCI_SUCCESS;
-	int i;
+	int i, found = 0;
 	struct ifaddrs *addrs = NULL;
 	struct ifaddrs *ifa = NULL;
 	struct ifaddrs *tmp = NULL;
@@ -266,6 +266,8 @@ verbs_find_rdma_devices(struct ibv_context **contexts, int count,
 	ret = getifaddrs(&ifa);
 	if (ret) {
 		ret = errno;
+		debug(CCI_DB_DRVR, "%s: getifaddrs() returned %s",
+				__func__, strerror(ret));
 		goto out;
 	}
 
@@ -275,8 +277,10 @@ verbs_find_rdma_devices(struct ibv_context **contexts, int count,
 		for (tmp = ifa; tmp != NULL; tmp = tmp->ifa_next) {
 			if (tmp->ifa_addr->sa_family == AF_INET &&
 			    !(tmp->ifa_flags & IFF_LOOPBACK)) {
-				ret = verbs_ifa_to_context(c, tmp->ifa_addr);
-				if (!ret) {
+				int rc = 0;
+
+				rc = verbs_ifa_to_context(c, tmp->ifa_addr);
+				if (!rc) {
 					int len = sizeof(struct sockaddr);
 					addrs[i].ifa_name =
 					    strdup(tmp->ifa_name);
@@ -290,6 +294,7 @@ verbs_find_rdma_devices(struct ibv_context **contexts, int count,
 					addrs[i].ifa_broadaddr = calloc(1, len);
 					memcpy(addrs[i].ifa_broadaddr,
 					       tmp->ifa_broadaddr, len);
+					found++;
 					break;
 				}
 			}
@@ -299,6 +304,9 @@ verbs_find_rdma_devices(struct ibv_context **contexts, int count,
 	freeifaddrs(ifa);
 	*ifaddrs = addrs;
 out:
+	if (!ret && found == 0)
+		ret = CCI_ENODEV;
+
 	CCI_EXIT;
 	return ret;
 }
@@ -389,7 +397,9 @@ static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t fla
 
 	vglobals->contexts = rdma_get_devices(&count);
 	if (!vglobals->contexts) {
-		ret = -errno;
+		ret = errno;
+		debug(CCI_DB_DRVR, "%s: no RDMA devices found (%s)",
+				__func__, strerror(ret));
 		goto out;
 	}
 	vglobals->count = count;
@@ -397,14 +407,62 @@ static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t fla
 	/* for each ifaddr, check if it is a RDMA device */
 	ret = verbs_find_rdma_devices(vglobals->contexts, count, &ifaddrs);
 	if (ret) {
-		/* TODO */
+		ret = errno;
+		debug(CCI_DB_DRVR, "%s: no RDMA devices with ifaddrs (%s)",
+				__func__, strerror(ret));
 		ret = CCI_ENODEV;
 		goto out;
 	}
 	vglobals->ifaddrs = ifaddrs;
 
-/* FIXME: if globals->configfile == 0, create default devices */
+	if (!globals->configfile) {
+		struct cci_device *device = NULL;
+		verbs_dev_t *vdev = NULL;
+		struct ibv_port_attr port_attr;
 
+		dev = calloc(1, sizeof(*dev));
+		if (!dev) {
+			ret = CCI_ENOMEM;
+			goto out;
+		}
+
+		cci__init_dev(dev);
+		dev->plugin = plugin;
+		dev->priority = plugin->base.priority;
+
+		device = &dev->device;
+		device->pci.domain = -1;	/* per CCI spec */
+		device->pci.bus = -1;		/* per CCI spec */
+		device->pci.dev = -1;		/* per CCI spec */
+		device->pci.func = -1;		/* per CCI spec */
+
+		dev->priv = calloc(1, sizeof(*vdev));
+		if (!dev->priv) {
+			ret = CCI_ENOMEM;
+			goto out;
+		}
+		vdev = dev->priv;
+
+		vdev->context = vglobals->contexts[0];
+		vdev->ifa = &ifaddrs[0];
+
+		ret = ibv_query_port(vdev->context, 1, &port_attr);
+		if (ret) {
+			ret = errno;
+			goto out;
+		}
+
+		device->max_send_size =
+		    verbs_mtu_val(port_attr.max_mtu);
+		device->rate = verbs_device_rate(port_attr);
+		device->name = vdev->ifa->ifa_name;
+
+		cci__add_dev(dev);
+		devices[index] = device;
+		index++;
+		dev->is_up = vdev->ifa->ifa_flags & IFF_UP;
+
+	} else
 	/* find devices we own */
 	TAILQ_FOREACH_SAFE(dev, &globals->configfile_devs, entry, ndev) {
 		if (0 == strcmp("verbs", dev->driver)) {
@@ -3155,8 +3213,6 @@ static int verbs_handle_send_completion(cci__ep_t * ep, struct ibv_wc wc)
 	int ret = CCI_SUCCESS;
 	int queue_tx = 1;
 	verbs_tx_t *tx = (verbs_tx_t *) (uintptr_t) wc.wr_id;
-	verbs_ep_t *vep = ep->priv;
-
 
 	CCI_ENTER;
 
