@@ -19,7 +19,10 @@
 
 const char *cci_strerror(cci_endpoint_t *endpoint, enum cci_status status)
 {
-	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
+	cci__ep_t *ep = NULL;
+
+	if (endpoint)
+		ep = container_of(endpoint, cci__ep_t, endpoint);
 
 	switch (status) {
 	case CCI_SUCCESS:
@@ -83,6 +86,9 @@ const char *cci_strerror(cci_endpoint_t *endpoint, enum cci_status status)
 		return "CCI_EADDRNOTAVAIL";
 
 	default:
-		return ep->plugin->strerror(endpoint, status);
+		if (ep)
+			return ep->plugin->strerror(endpoint, status);
+		else
+			return "unknown error";
 	}
 }
