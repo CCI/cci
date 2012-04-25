@@ -14,6 +14,7 @@ check_PROGRAMS = \
 	client	\
 	pingpong	\
 	stream	\
-	register
+	register	\
+	opt
 
 TESTS =

@@ -452,6 +452,9 @@ static int gni_init(cci_plugin_core_t * plugin, uint32_t abi_ver,
 		dev->driver = strdup("gni");
 		dev->is_up = 1;
 		dev->is_default = 1;
+		dev->align.rma_read_local_addr = 4;
+		dev->align.rma_read_remote_addr = 4;
+		dev->align.rma_read_length = 4;
 		cci__add_dev(dev);
 		devices[gglobals->count] = device;
 		gglobals->count++;

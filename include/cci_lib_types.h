@@ -70,6 +70,9 @@ BEGIN_C_DECLS
 
 	/*! Pointer to device specific struct */
 	void *priv;
+
+	/*! Device RMA alignment requirements. Used for CCI_OPT_ENDPT_RMA_ALIGN. */
+	cci_alignment_t align;
 } cci__dev_t;
 
 /* export for transports as needed */
