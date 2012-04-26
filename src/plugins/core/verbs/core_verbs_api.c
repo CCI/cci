@@ -1073,7 +1073,6 @@ verbs_create_endpoint(cci_device_t * device,
 	TAILQ_INIT(&vep->rma_ops);
 	pthread_rwlock_init(&vep->conn_tree_lock, NULL);
 
-	endpoint->max_recv_buffer_count = VERBS_EP_RX_CNT;
 	ep->rx_buf_cnt = VERBS_EP_RX_CNT;
 	ep->tx_buf_cnt = VERBS_EP_TX_CNT;
 	ep->buffer_len = dev->device.max_send_size;
@@ -1133,7 +1132,7 @@ verbs_create_endpoint(cci_device_t * device,
 	memset(name, 0, sizeof(name));
 	sprintf(name, "%s%s:%hu", VERBS_URI,
 		inet_ntoa(vep->sin.sin_addr), ntohs(vep->sin.sin_port));
-	endpoint->name = strdup(name);
+	ep->uri = strdup(name);
 
 	vep->pd = ibv_alloc_pd(vdev->context);
 	if (!vep->pd) {

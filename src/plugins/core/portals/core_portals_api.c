@@ -873,7 +873,6 @@ static int portals_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 
-	endpoint->max_recv_buffer_count = PORTALS_EP_RX_CNT;
 	ep->rx_buf_cnt = PORTALS_EP_RX_CNT;
 	ep->tx_buf_cnt = PORTALS_EP_TX_CNT;
 	ep->buffer_len = dev->device.max_send_size;
@@ -958,13 +957,13 @@ static int portals_create_endpoint(cci_device_t * device,
 	memset(name, 0, sizeof(name));
 	snprintf(name, 64, "%s%u:%hu:%u", PORTALS_URI, pdev->idp.nid,
 		 pdev->idp.pid, pep->idx);
-	endpoint->name = strdup(name);
-	if (!endpoint->name) {
+	ep->uri = strdup(name);
+	if (!ep->uri) {
 		iRC = CCI_ENOMEM;
 		goto out;
 	}
 
-	debug(CCI_DB_EP, "opening %s", endpoint->name);
+	debug(CCI_DB_EP, "opening %s", ep->uri);
 
 	pthread_mutex_lock(&dev->lock);
 	pdev->is_progressing = 0;
@@ -1536,7 +1535,7 @@ static int portals_connect(cci_endpoint_t * endpoint,
 
 	/* pack the payload */
 	conn_request.max_send_size = connection->max_send_size;
-	conn_request.max_recv_buffer_count = endpoint->max_recv_buffer_count;
+	conn_request.max_recv_buffer_count = ep->rx_buf_cnt;
 	conn_request.client_ep_idx = pep->idx;
 
 	memcpy(tx->buffer, &conn_request, cr_len);

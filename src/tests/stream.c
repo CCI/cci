@@ -296,6 +296,9 @@ int main(int argc, char *argv[])
 	int ret, c;
 	uint32_t caps = 0;
 	cci_os_handle_t ep_fd;
+	cci_opt_handle_t handle;
+	char *uri = NULL;
+	int len = 0;
 
 	name = argv[0];
 
@@ -352,7 +355,15 @@ int main(int argc, char *argv[])
 			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
-	printf("opened %s\n", endpoint->name);
+
+	handle.endpoint = endpoint;
+	ret = cci_get_opt(&handle, CCI_OPT_LEVEL_ENDPOINT,
+			CCI_OPT_ENDPT_URI, (void *)&uri, &len);
+	if (ret) {
+		fprintf(stderr, "cci_get_opt() failed with %s\n", cci_strerror(NULL, ret));
+		exit(EXIT_FAILURE);
+	}
+	printf("Opened %s\n", uri);
 
 #if MPI_DEBUG
 	MPI_Init(&argc, &argv);

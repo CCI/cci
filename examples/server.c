@@ -17,10 +17,12 @@
 
 int main(int argc, char *argv[])
 {
-	int ret;
+	int ret, len = 0;;
 	uint32_t caps = 0;
+	char *uri = NULL;
 	cci_device_t **devices = NULL;
 	cci_endpoint_t *endpoint = NULL;
+	cci_opt_handle_t handle;
 	cci_os_handle_t ep_fd;
 	cci_connection_t *connection = NULL;
 
@@ -39,7 +41,15 @@ int main(int argc, char *argv[])
 			cci_strerror(ret));
 		exit(EXIT_FAILURE);
 	}
-	printf("opened %s\n", endpoint->name);
+
+	handle.endpoint = endpoint;
+	ret = cci_get_opt(&handle, CCI_OPT_LEVEL_ENDPOINT,
+			CCI_OPT_ENDPT_URI, (void*)&uri, &len);
+	if (ret) {
+		fprintf(stderr, "cci_get_opt() failed with %s\n", cci_strerror(NULL, ret));
+		exit(EXIT_FAILURE);
+	}
+	printf("Opened %s\n", uri);
 
 	while (1) {
 		char *buffer;

@@ -834,7 +834,6 @@ gni_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 
-	endpoint->max_recv_buffer_count = GNI_EP_RX_CNT;
 	ep->rx_buf_cnt = GNI_EP_RX_CNT;
 	ep->tx_buf_cnt = GNI_EP_TX_CNT;
 	ep->buffer_len = dev->device.max_send_size;
@@ -864,7 +863,7 @@ gni_create_endpoint(cci_device_t * device,
 	memset(name, 0, sizeof(name));
 	sprintf(name, "%s%s:%u", GNI_URI,
 		inet_ntoa(gep->sin.sin_addr), port);
-	endpoint->name = strdup(name);
+	ep->uri = strdup(name);
 
 	ret = listen(gep->sock, SOMAXCONN);
 	if (ret == -1) {
