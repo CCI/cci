@@ -137,7 +137,7 @@ static int eth__get_device_info(cci__dev_t * _dev, struct ifaddrs *addr)
 	device->pci.func = (unsigned char)-1;
 
 	/* up flag is easy */
-	_dev->is_up = (addr->ifa_flags & IFF_UP != 0);
+	device->up = (addr->ifa_flags & IFF_UP != 0);
 
 	if (getenv("CCIETH_FORCE_GET_INFO_IOCTL"))
 		/* force testing of our fallback for old kernels */
@@ -420,7 +420,7 @@ static int eth__get_devices(cci_plugin_core_t *plugin)
 				no_default = 0;
 				break;
 			}
-			if (!_dev->is_up)
+			if (!device->up)
 				continue;
 			if (device->rate != -1ULL
 			    && (!maxrate_dev || device->rate > maxrate)) {
