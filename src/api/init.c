@@ -184,6 +184,11 @@ void cci__add_dev(cci__dev_t * dev)
 		    && dev->is_default == dd->is_default
 		    && dev->priority < dd->priority)
 			continue;
+		if (dev->device.up == dd->device.up
+		    && dev->is_default == dd->is_default
+		    && dev->priority == dd->priority
+		    && dev->device.rate < dd->device.rate)
+			continue;
 
 		TAILQ_INSERT_BEFORE(dd, dev, entry);
 		done = 1;
