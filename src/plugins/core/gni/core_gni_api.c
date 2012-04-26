@@ -420,6 +420,7 @@ static int gni_init(cci_plugin_core_t * plugin, uint32_t abi_ver,
 
 		cci__init_dev(dev);
 		dev->plugin = plugin;
+		dev->priority = plugin->base.priority;
 
 		device = &dev->device;
 		device->max_send_size = GNI_EP_MSS;
