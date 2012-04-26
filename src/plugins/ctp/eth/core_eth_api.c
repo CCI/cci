@@ -249,14 +249,13 @@ out:
 static int eth__get_devices(cci_plugin_core_t *plugin)
 {
 	int ret;
-	cci__dev_t *_dev, *_ndev, *maxrate_dev;
+	cci__dev_t *_dev, *_ndev;
 	unsigned count = 0;
 	struct cci_device *device;
 	eth__dev_t *edev;
 	struct ifaddrs *addrs = NULL, *addr;
 	struct sockaddr_ll *lladdr;
 	int no_default;
-	int maxrate;
 
 	CCI_ENTER;
 
@@ -404,28 +403,6 @@ static int eth__get_devices(cci_plugin_core_t *plugin)
 
 	freeifaddrs(addrs);
 	addrs = NULL;
-
-	/* find the default if it doesn't exist yet */
-	maxrate = 0;
-	maxrate_dev = NULL;
-	no_default = 1;
-	TAILQ_FOREACH(_dev, &globals->devs, entry) {
-		if (0 == strcmp("eth", _dev->driver)) {
-			if (_dev->is_default) {
-				no_default = 0;
-				break;
-			}
-			if (!device->up)
-				continue;
-			if (device->rate != -1ULL
-			    && (!maxrate_dev || device->rate > maxrate)) {
-				maxrate_dev = _dev;
-				maxrate = device->rate;
-			}
-		}
-	}
-	if (no_default && maxrate_dev)
-		maxrate_dev->is_default = 1;
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
