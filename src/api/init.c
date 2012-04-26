@@ -152,6 +152,12 @@ void cci__init_dev(cci__dev_t *dev)
 	TAILQ_INIT(&dev->eps);
 	pthread_mutex_init(&dev->lock, NULL);
 	device->up = 0;
+
+	device->rate = 0;		/* unknown */
+	device->pci.domain = -1;	/* per CCI spec */
+	device->pci.bus = -1;		/* per CCI spec */
+	device->pci.dev = -1;		/* per CCI spec */
+	device->pci.func = -1;		/* per CCI spec */
 }
 
 /* only used by backends when adding ready devices to the main list
