@@ -130,11 +130,6 @@ static int eth__get_device_info(cci__dev_t * _dev, struct ifaddrs *addr)
 
 	/* default values */
 	device->max_send_size = -1;
-	device->rate = -1ULL;
-	device->pci.domain = (unsigned)-1;
-	device->pci.bus = (unsigned short)-1;
-	device->pci.dev = (unsigned short)-1;
-	device->pci.func = (unsigned char)-1;
 
 	/* up flag is easy */
 	device->up = (addr->ifa_flags & IFF_UP != 0);
@@ -305,6 +300,13 @@ static int eth__get_devices(cci_plugin_core_t *plugin)
 			device = &_dev->device;
 			_dev->priv = edev;
 
+			cci__init_dev(_dev);
+			_dev->plugin = plugin;
+			_dev->priority = plugin->base.priority;
+			_dev->driver = strdup("eth");
+			if (is_loopback)
+				_dev->is_default = 1;
+
 			/* get what would have been in the config file */
 			device->name = strdup(addr->ifa_name);
 			memcpy(&edev->addr.sll_addr, &lladdr->sll_addr, 6);
@@ -315,13 +317,6 @@ static int eth__get_devices(cci_plugin_core_t *plugin)
 				free(edev);
 				continue;
 			}
-
-			cci__init_dev(_dev);
-			_dev->plugin = plugin;
-			_dev->priority = plugin->base.priority;
-			_dev->driver = strdup("eth");
-			if (is_loopback)
-				_dev->is_default = 1;
 
 			cci__add_dev(_dev);
 		}
