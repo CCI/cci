@@ -433,6 +433,7 @@ static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t fla
 				cci__init_dev(dev);
 				dev->plugin = plugin;
 				dev->priority = plugin->base.priority;
+				dev->driver = strdup("verbs");
 
 				device = &dev->device;
 				device->pci.domain = -1;	/* per CCI spec */
