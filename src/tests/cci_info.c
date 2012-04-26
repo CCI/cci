@@ -39,12 +39,27 @@ int main(int argc, char *argv[])
 			break;
 	printf("Found %d CCI devices%s\n", i, i?":":".");
 	for(i=0; ; i++) {
-		if (!devices[i])
+		char pcibusid[64] = "", rate[64] = "";
+		cci_device_t *device = devices[i];
+
+		if (!device)
 			break;
-		printf("% 2d: %s%s%s\n",
-		       i, devices[i]->name,
+
+		if (device->pci.domain != -1
+		    && device->pci.bus != -1
+		    && device->pci.dev != -1
+		    && device->pci.func != -1)
+			snprintf(pcibusid, sizeof(pcibusid), " %04x:%02x:%02x.%01x",
+				 device->pci.domain, device->pci.bus,
+				 device->pci.dev, device->pci.func);
+
+		if (device->rate)
+			snprintf(rate, sizeof(rate), " %uMBit/s", device->rate / 1000000);
+
+		printf("% 2d: %s%s%s%s%s\n",
+		       i, device->name, pcibusid, rate,
 		       i ? "" : " (default)",
-		       devices[i]->up ? "" : " (not up)");
+		       device->up ? "" : " (not up)");
 	}
 
 	cci_finalize();
