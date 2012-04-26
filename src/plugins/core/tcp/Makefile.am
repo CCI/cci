@@ -4,10 +4,10 @@
 # $COPYRIGHT$
 #
 
-pkglib_LTLIBRARIES = cci_core_stcp.la
+pkglib_LTLIBRARIES = cci_core_tcp.la
 
-cci_core_stcp_la_LDFLAGS = -module -avoid-version -lpthread
-cci_core_stcp_la_SOURCES = \
-        core_stcp.h \
-        core_stcp_module.c \
-        core_stcp_api.c
+cci_core_tcp_la_LDFLAGS = -module -avoid-version -lpthread
+cci_core_tcp_la_SOURCES = \
+        core_tcp.h \
+        core_tcp_module.c \
+        core_tcp_api.c

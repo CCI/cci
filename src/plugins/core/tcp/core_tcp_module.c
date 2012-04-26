@@ -16,18 +16,18 @@
 #include "cci.h"
 #include "plugins/core/core.h"
 
-#include "core_stcp.h"
+#include "core_tcp.h"
 
-int cci_core_stcp_post_load(cci_plugin_t * me)
+int cci_core_tcp_post_load(cci_plugin_t * me)
 {
 	assert(me);
-	debug(CCI_DB_DRVR, "In stcp post_load");
+	debug(CCI_DB_DRVR, "In tcp post_load");
 	return CCI_SUCCESS;
 }
 
-int cci_core_stcp_pre_unload(cci_plugin_t * me)
+int cci_core_tcp_pre_unload(cci_plugin_t * me)
 {
 	assert(me);
-	debug(CCI_DB_DRVR, "In stcp pre_unload");
+	debug(CCI_DB_DRVR, "In tcp pre_unload");
 	return CCI_SUCCESS;
 }

@@ -10,8 +10,8 @@
  *
  */
 
-#ifndef CCI_CORE_STCP_H
-#define CCI_CORE_STCP_H
+#ifndef CCI_CORE_TCP_H
+#define CCI_CORE_TCP_H
 
 #include <netinet/in.h>
 #include <assert.h>
@@ -24,41 +24,41 @@
 #include "cci-api.h"
 
 BEGIN_C_DECLS
-#define STCP_MAX_HDR_SIZE       (44) /* max header size (RMA READ) */
-#define STCP_DEFAULT_MSS        (4096)	/* 4 KB */
-#define STCP_MIN_MSS            (STCP_MAX_HDR_SIZE + 64)
-#define STCP_MAX_MSS            (64*1024)
-#define STCP_MAX_SACK           (32)		/* pairs of start/end acks */
-#define STCP_ACK_DELAY          (1)		/* send an ack after every Nth rx */
-#define STCP_EP_TX_TIMEOUT_SEC  (64)		/* seconds for now */
-#define STCP_EP_RX_CNT          (4096)	/* number of rx MSGs */
-#define STCP_EP_TX_CNT          (1024)	/* number of tx MSGs */
-//#define STCP_EP_HASH_SIZE       (256)	/* nice round number */
-#define STCP_MAX_EPS            (256)	/* max sock fd value - 1 */
-//#define STCP_BLOCK_SIZE         (64)		/* use 64b blocks for id storage */
-//#define STCP_NUM_BLOCKS         (16384)	/* number of blocks */
-//#define STCP_MAX_ID             (STCP_BLOCK_SIZE * STCP_NUM_BLOCKS)
+#define TCP_MAX_HDR_SIZE       (44) /* max header size (RMA READ) */
+#define TCP_DEFAULT_MSS        (4096)	/* 4 KB */
+#define TCP_MIN_MSS            (TCP_MAX_HDR_SIZE + 64)
+#define TCP_MAX_MSS            (64*1024)
+#define TCP_MAX_SACK           (32)		/* pairs of start/end acks */
+#define TCP_ACK_DELAY          (1)		/* send an ack after every Nth rx */
+#define TCP_EP_TX_TIMEOUT_SEC  (64)		/* seconds for now */
+#define TCP_EP_RX_CNT          (4096)	/* number of rx MSGs */
+#define TCP_EP_TX_CNT          (1024)	/* number of tx MSGs */
+//#define TCP_EP_HASH_SIZE       (256)	/* nice round number */
+#define TCP_MAX_EPS            (256)	/* max sock fd value - 1 */
+//#define TCP_BLOCK_SIZE         (64)		/* use 64b blocks for id storage */
+//#define TCP_NUM_BLOCKS         (16384)	/* number of blocks */
+//#define TCP_MAX_ID             (TCP_BLOCK_SIZE * TCP_NUM_BLOCKS)
     /* 1048576 conns per endpoint */
-#define STCP_PROG_TIME_US       (100000)	/* try to progress every N microseconds */
-#define STCP_RESEND_TIME_SEC    (1)		/* time between resends in seconds */
-//#define STCP_PEEK_LEN           (32)	/* large enough for RMA header */
-#define STCP_CONN_REQ_HDR_LEN   ((int) (sizeof(struct stcp_header_r)))
+#define TCP_PROG_TIME_US       (100000)	/* try to progress every N microseconds */
+#define TCP_RESEND_TIME_SEC    (1)		/* time between resends in seconds */
+//#define TCP_PEEK_LEN           (32)	/* large enough for RMA header */
+#define TCP_CONN_REQ_HDR_LEN   ((int) (sizeof(struct tcp_header_r)))
 					/* header + seqack */
-#define STCP_RMA_DEPTH          (16)	/* how many in-flight msgs per RMA */
-#define STCP_RMA_FRAG_LEN       (1024*1024)
+#define TCP_RMA_DEPTH          (16)	/* how many in-flight msgs per RMA */
+#define TCP_RMA_FRAG_LEN       (1024*1024)
 
-static inline uint64_t stcp_tv_to_usecs(struct timeval tv)
+static inline uint64_t tcp_tv_to_usecs(struct timeval tv)
 {
 	return (tv.tv_sec * 1000000) + tv.tv_usec;
 }
 
-#define STCP_TV_TO_USECS(tv)    (((tv).tv_sec * 1000000) + (tv).tv_usec)
+#define TCP_TV_TO_USECS(tv)    (((tv).tv_sec * 1000000) + (tv).tv_usec)
 
-static inline uint64_t stcp_get_usecs(void)
+static inline uint64_t tcp_get_usecs(void)
 {
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
-	return stcp_tv_to_usecs(tv);
+	return tcp_tv_to_usecs(tv);
 }
 
 /* Valid URI include:
@@ -95,28 +95,28 @@ static inline uint64_t stcp_get_usecs(void)
 
 /* Message types */
 
-typedef enum stcp_msg_type {
-	STCP_MSG_INVALID = 0,
-	STCP_MSG_CONN_REQUEST,	/* SYN */
-	STCP_MSG_CONN_REPLY,		/* SYN-ACK */
-	STCP_MSG_CONN_ACK,		/* ACK */
-	STCP_MSG_DISCONNECT,		/* spec says no disconnect is sent */
-	STCP_MSG_SEND,		/* a MSG */
-	STCP_MSG_RNR,		/* for both active msg and RMA */
-	STCP_MSG_KEEPALIVE,
+typedef enum tcp_msg_type {
+	TCP_MSG_INVALID = 0,
+	TCP_MSG_CONN_REQUEST,	/* SYN */
+	TCP_MSG_CONN_REPLY,		/* SYN-ACK */
+	TCP_MSG_CONN_ACK,		/* ACK */
+	TCP_MSG_DISCONNECT,		/* spec says no disconnect is sent */
+	TCP_MSG_SEND,		/* a MSG */
+	TCP_MSG_RNR,		/* for both active msg and RMA */
+	TCP_MSG_KEEPALIVE,
 
 	/* the rest apply to reliable connections only */
 
-	STCP_MSG_PING,		/* no data, just echo timestamp for RTTM */
-	STCP_MSG_ACK_ONLY,		/* ack only this seqno */
-	STCP_MSG_ACK_UP_TO,		/* ack up to and including this seqno */
-	STCP_MSG_SACK,		/* ack these blocks of sequences */
-	STCP_MSG_RMA_WRITE,
-	STCP_MSG_RMA_READ_REQUEST,
-	STCP_MSG_RMA_READ_REPLY,
-	STCP_MSG_RMA_INVALID,	/* invalid handle */
-	STCP_MSG_TYPE_MAX
-} stcp_msg_type_t;
+	TCP_MSG_PING,		/* no data, just echo timestamp for RTTM */
+	TCP_MSG_ACK_ONLY,		/* ack only this seqno */
+	TCP_MSG_ACK_UP_TO,		/* ack up to and including this seqno */
+	TCP_MSG_SACK,		/* ack these blocks of sequences */
+	TCP_MSG_RMA_WRITE,
+	TCP_MSG_RMA_READ_REQUEST,
+	TCP_MSG_RMA_READ_REPLY,
+	TCP_MSG_RMA_INVALID,	/* invalid handle */
+	TCP_MSG_TYPE_MAX
+} tcp_msg_type_t;
 
 /* Wire format */
 
@@ -140,73 +140,73 @@ typedef enum stcp_msg_type {
 
  */
 
-typedef struct stcp_header {
+typedef struct tcp_header {
 	uint32_t type;		/* upper 8b are type, next 8b are A and rest are B */
 	char data[0];		/* start unreliable payload here */
-} stcp_header_t;
+} tcp_header_t;
 
 /* bit mangling */
 
-#define STCP_TYPE_BITS	(8)
-#define STCP_TYPE_MASK	(0xFF)
-#define STCP_TYPE_SHIFT	(0)
+#define TCP_TYPE_BITS	(8)
+#define TCP_TYPE_MASK	(0xFF)
+#define TCP_TYPE_SHIFT	(0)
 
-#define STCP_A_BITS		(24)
-#define STCP_A_MASK		(STCP_A_BITS - 1)
-#define STCP_A_MAX		(STCP_A_MASK)
-#define STCP_A_SHIFT		(STCP_TYPE_BITS)
+#define TCP_A_BITS		(24)
+#define TCP_A_MASK		(TCP_A_BITS - 1)
+#define TCP_A_MAX		(TCP_A_MASK)
+#define TCP_A_SHIFT		(TCP_TYPE_BITS)
 
-#define STCP_TYPE(x)		((uint8_t)  ((x) & STCP_TYPE_MASK))
-#define STCP_A(x)		((uint32_t) (((x) >> STCP_TYPE_SHIFT) & \
-                                                    STCP_A_MASK))
+#define TCP_TYPE(x)		((uint8_t)  ((x) & TCP_TYPE_MASK))
+#define TCP_A(x)		((uint32_t) (((x) >> TCP_TYPE_SHIFT) & \
+                                                    TCP_A_MASK))
 
-#define STCP_PACK_TYPE(type,a)			\
-	((((uint32_t) (a)) << STCP_A_SHIFT) | ((uint8_t) (type)))
+#define TCP_PACK_TYPE(type,a)			\
+	((((uint32_t) (a)) << TCP_A_SHIFT) | ((uint8_t) (type)))
 
 static inline void
-stcp_pack_header(stcp_header_t * header,
-		 stcp_msg_type_t type, uint32_t a)
+tcp_pack_header(tcp_header_t * header,
+		 tcp_msg_type_t type, uint32_t a)
 {
-	assert(type < STCP_MSG_TYPE_MAX && type > STCP_MSG_INVALID);
+	assert(type < TCP_MSG_TYPE_MAX && type > TCP_MSG_INVALID);
 
-	header->type = htonl(STCP_PACK_TYPE(type, a));
+	header->type = htonl(TCP_PACK_TYPE(type, a));
 }
 
 static inline void
-stcp_parse_header(stcp_header_t * header, stcp_msg_type_t * type, uint8_t * a)
+tcp_parse_header(tcp_header_t * header, tcp_msg_type_t * type, uint8_t * a)
 {
 	uint32_t hl = ntohl(header->type);
 
-	*type = (enum stcp_msg_type)STCP_TYPE(hl);
-	*a = STCP_A(hl);
+	*type = (enum tcp_msg_type)TCP_TYPE(hl);
+	*a = TCP_A(hl);
 }
 
 /* Reliable message headers (RO and RU) add a seq and timestamp */
 
-#define STCP_SEQ_BITS       (32)
-#define STCP_SEQ_MASK       (~0)
-#define STCP_ACK_MASK       (STCP_SEQ_MASK)
+#define TCP_SEQ_BITS       (32)
+#define TCP_SEQ_MASK       (~0)
+#define TCP_ACK_MASK       (TCP_SEQ_MASK)
 
-#define STCP_U32_LT(a,b)    ((int)((a)-(b)) < 0)
-#define STCP_U32_LTE(a,b)   ((int)((a)-(b)) <= 0)
-#define STCP_U32_GT(a,b)    ((int)((a)-(b)) > 0)
-#define STCP_U32_GTE(a,b)   ((int)((a)-(b)) >= 0)
-#define STCP_U32_MIN(a,b)   ((STCP_U32_LT(a, b)) ? (a) : (b))
-#define STCP_U32_MAX(a,b)   ((STCP_U32_GT(a, b)) ? (a) : (b))
+#define TCP_U32_LT(a,b)    ((int)((a)-(b)) < 0)
+#define TCP_U32_LTE(a,b)   ((int)((a)-(b)) <= 0)
+#define TCP_U32_GT(a,b)    ((int)((a)-(b)) > 0)
+#define TCP_U32_GTE(a,b)   ((int)((a)-(b)) >= 0)
+#define TCP_U32_MIN(a,b)   ((TCP_U32_LT(a, b)) ? (a) : (b))
+#define TCP_U32_MAX(a,b)   ((TCP_U32_GT(a, b)) ? (a) : (b))
 
-#define STCP_U64_LT(a,b)    ((int64_t)((a)-(b)) < 0)
-#define STCP_U64_LTE(a,b)   ((int64_t)((a)-(b)) <= 0)
-#define STCP_U64_GT(a,b)    ((int64_t)((a)-(b)) > 0)
-#define STCP_U64_GTE(a,b)   ((int64_t)((a)-(b)) >= 0)
-#define STCP_U64_MIN(a,b)   ((STCP_U64_LT(a, b)) ? (a) : (b))
-#define STCP_U64_MAX(a,b)   ((STCP_U64_GT(a, b)) ? (a) : (b))
+#define TCP_U64_LT(a,b)    ((int64_t)((a)-(b)) < 0)
+#define TCP_U64_LTE(a,b)   ((int64_t)((a)-(b)) <= 0)
+#define TCP_U64_GT(a,b)    ((int64_t)((a)-(b)) > 0)
+#define TCP_U64_GTE(a,b)   ((int64_t)((a)-(b)) >= 0)
+#define TCP_U64_MIN(a,b)   ((TCP_U64_LT(a, b)) ? (a) : (b))
+#define TCP_U64_MAX(a,b)   ((TCP_U64_GT(a, b)) ? (a) : (b))
 
-#define STCP_SEQ_LT(a,b)    STCP_U32_LT(a,b)
-#define STCP_SEQ_LTE(a,b)   STCP_U32_LTE(a,b)
-#define STCP_SEQ_GT(a,b)    STCP_U32_GT(a,b)
-#define STCP_SEQ_GTE(a,b)   STCP_U32_GTE(a,b)
-#define STCP_SEQ_MIN(a,b)   STCP_U32_MIN(a,b)
-#define STCP_SEQ_MAX(a,b)   STCP_U32_MAX(a,b)
+#define TCP_SEQ_LT(a,b)    TCP_U32_LT(a,b)
+#define TCP_SEQ_LTE(a,b)   TCP_U32_LTE(a,b)
+#define TCP_SEQ_GT(a,b)    TCP_U32_GT(a,b)
+#define TCP_SEQ_GTE(a,b)   TCP_U32_GTE(a,b)
+#define TCP_SEQ_MIN(a,b)   TCP_U32_MIN(a,b)
+#define TCP_SEQ_MAX(a,b)   TCP_U32_MAX(a,b)
 
 /* sequence and ack
 
@@ -219,20 +219,20 @@ stcp_parse_header(stcp_header_t * header, stcp_msg_type_t * type, uint8_t * a)
 
 */
 
-typedef struct stcp_seq_ack {
+typedef struct tcp_seq_ack {
 	uint32_t seq;
 	uint32_t ack;
-} stcp_seq_ack_t;
+} tcp_seq_ack_t;
 
 static inline void
-stcp_pack_seq_ack(stcp_seq_ack_t * sa, uint32_t seq, uint32_t ack)
+tcp_pack_seq_ack(tcp_seq_ack_t * sa, uint32_t seq, uint32_t ack)
 {
 	sa->seq = htonl(seq);
 	sa->ack = htonl(ack);
 }
 
 static inline void
-stcp_parse_seq_ack(stcp_seq_ack_t * sa, uint32_t * seq, uint32_t * ack)
+tcp_parse_seq_ack(tcp_seq_ack_t * sa, uint32_t * seq, uint32_t * ack)
 {
 	*seq = ntohl(sa->seq);
 	*ack = ntohl(sa->ack);
@@ -240,27 +240,27 @@ stcp_parse_seq_ack(stcp_seq_ack_t * sa, uint32_t * seq, uint32_t * ack)
 
 /* reliable header */
 
-typedef struct stcp_header_r {
-	stcp_header_t header;
-	stcp_seq_ack_t seq_ack;
+typedef struct tcp_header_r {
+	tcp_header_t header;
+	tcp_seq_ack_t seq_ack;
 	char data[0];		/* start reliable payload here */
-} stcp_header_r_t;
+} tcp_header_r_t;
 
 /* Common message headers (RO, RU, and UU) */
 
 /* connection request/reply */
-typedef struct stcp_handshake {
+typedef struct tcp_handshake {
 	uint32_t max_recv_buffer_count;	/* max recvs that I can handle */
 	uint32_t mss;		/* lower of each endpoint */
 	uint32_t keepalive;	/* keepalive timeout (when activated) */
-} stcp_handshake_t;
+} tcp_handshake_t;
 
 static inline void
-stcp_pack_handshake(stcp_handshake_t * hs, uint32_t max_recv_buffer_count,
+tcp_pack_handshake(tcp_handshake_t * hs, uint32_t max_recv_buffer_count,
 		uint32_t mss, uint32_t keepalive)
 {
-	assert(mss <= STCP_MAX_MSS);
-	assert(mss >= STCP_MIN_MSS);
+	assert(mss <= TCP_MAX_MSS);
+	assert(mss >= TCP_MIN_MSS);
 
 	hs->max_recv_buffer_count = htonl(max_recv_buffer_count);
 	hs->mss = htonl(mss);
@@ -268,7 +268,7 @@ stcp_pack_handshake(stcp_handshake_t * hs, uint32_t max_recv_buffer_count,
 }
 
 static inline void
-stcp_parse_handshake(stcp_handshake_t * hs, uint32_t * max_recv_buffer_count,
+tcp_parse_handshake(tcp_handshake_t * hs, uint32_t * max_recv_buffer_count,
 		uint32_t * mss, uint32_t * ka)
 {
 	*max_recv_buffer_count = ntohl(hs->max_recv_buffer_count);
@@ -310,12 +310,12 @@ stcp_parse_handshake(stcp_handshake_t * hs, uint32_t * max_recv_buffer_count,
  */
 
 static inline void
-stcp_pack_conn_request(stcp_header_t * header, cci_conn_attribute_t attr,
+tcp_pack_conn_request(tcp_header_t * header, cci_conn_attribute_t attr,
 		       uint16_t data_len, uint32_t id)
 {
 	uint32_t a = (data_len << 8) | attr;
 
-	stcp_pack_header(header, STCP_MSG_CONN_REQUEST, a);
+	tcp_pack_header(header, TCP_MSG_CONN_REQUEST, a);
 }
 
 /* connection reply header:
@@ -345,9 +345,9 @@ stcp_pack_conn_request(stcp_header_t * header, cci_conn_attribute_t attr,
  */
 
 static inline void
-stcp_pack_conn_reply(stcp_header_t * header, uint8_t reply)
+tcp_pack_conn_reply(tcp_header_t * header, uint8_t reply)
 {
-	stcp_pack_header(header, STCP_MSG_CONN_REPLY, reply);
+	tcp_pack_header(header, TCP_MSG_CONN_REPLY, reply);
 }
 
 /* connection ack header:
@@ -360,9 +360,9 @@ stcp_pack_conn_reply(stcp_header_t * header, uint8_t reply)
 
  */
 
-static inline void stcp_pack_conn_ack(stcp_header_t * header)
+static inline void tcp_pack_conn_ack(tcp_header_t * header)
 {
-	stcp_pack_header(header, STCP_MSG_CONN_ACK, 0);
+	tcp_pack_header(header, TCP_MSG_CONN_ACK, 0);
 }
 
 /* send header:
@@ -380,9 +380,9 @@ static inline void stcp_pack_conn_ack(stcp_header_t * header)
  */
 
 static inline void
-stcp_pack_send(stcp_header_t * header, uint16_t len)
+tcp_pack_send(tcp_header_t * header, uint16_t len)
 {
-	stcp_pack_header(header, STCP_MSG_SEND, len);
+	tcp_pack_header(header, TCP_MSG_SEND, len);
 }
 
 /* keepalive header:
@@ -395,9 +395,9 @@ stcp_pack_send(stcp_header_t * header, uint16_t len)
 
  */
 
-static inline void stcp_pack_keepalive(stcp_header_t * header)
+static inline void tcp_pack_keepalive(tcp_header_t * header)
 {
-	stcp_pack_header(header, STCP_MSG_KEEPALIVE, 0);
+	tcp_pack_header(header, TCP_MSG_KEEPALIVE, 0);
 }
 
 /* nack header and nack(s)
@@ -412,18 +412,18 @@ static inline void stcp_pack_keepalive(stcp_header_t * header)
    |              ack              |
    +-------------------------------+
 
-   type: STCP_MSG_RNR
+   type: TCP_MSG_RNR
 
  */
 static inline void
-stcp_pack_nack(stcp_header_r_t * header_r, uint32_t seq, uint32_t ack)
+tcp_pack_nack(tcp_header_r_t * header_r, uint32_t seq, uint32_t ack)
 {
-	stcp_pack_header(&header_r->header, STCP_MSG_RNR, 0);
-	stcp_pack_seq_ack(&header_r->seq_ack, seq, ack);
+	tcp_pack_header(&header_r->header, TCP_MSG_RNR, 0);
+	tcp_pack_seq_ack(&header_r->seq_ack, seq, ack);
 }
 
 static inline void
-stcp_parse_nack(stcp_header_r_t * header_r)
+tcp_parse_nack(tcp_header_r_t * header_r)
 {
 	/* Nothing to do? */
 }
@@ -440,7 +440,7 @@ stcp_parse_nack(stcp_header_r_t * header_r)
    |              ack              |
    +-------------------------------+
 
-   type: STCP_MSG_[ACK_ONLY|ACK_UP_TO|SACK]
+   type: TCP_MSG_[ACK_ONLY|ACK_UP_TO|SACK]
    cnt: number of acks
    ack: ack payload starting at header->data
 
@@ -448,30 +448,30 @@ stcp_parse_nack(stcp_header_r_t * header_r)
  */
 
 static inline void
-stcp_pack_ack(stcp_header_t * header, stcp_msg_type_t type,
+tcp_pack_ack(tcp_header_t * header, tcp_msg_type_t type,
 	      uint32_t * ack, int count)
 {
 	int i;
 	uint32_t *p = (uint32_t *) & header->data;
 
 	if (count == 1)
-		assert(type == STCP_MSG_ACK_ONLY || type == STCP_MSG_ACK_UP_TO);
+		assert(type == TCP_MSG_ACK_ONLY || type == TCP_MSG_ACK_UP_TO);
 	else {
-		assert(type == STCP_MSG_SACK);
+		assert(type == TCP_MSG_SACK);
 		assert(count >= 2);
 		assert(count % 2 == 0);
-		assert(count / 2 <= STCP_MAX_SACK);
+		assert(count / 2 <= TCP_MAX_SACK);
 	}
 
-	stcp_pack_header(header, type, (uint8_t) count);
+	tcp_pack_header(header, type, (uint8_t) count);
 	for (i = 0; i < count; i++)
 		p[i] = htonl(ack[i]);
 }
 
-/* Caller must provide storage for (STCP_MAX_SACK * 2) acks */
+/* Caller must provide storage for (TCP_MAX_SACK * 2) acks */
 /* Count = number of acks. If sack, count each start and end */
 static inline void
-stcp_parse_ack(stcp_header_t * header, stcp_msg_type_t type,
+tcp_parse_ack(tcp_header_t * header, tcp_msg_type_t type,
 	       uint32_t * ack, int count)
 {
 	int i;
@@ -500,15 +500,15 @@ stcp_parse_ack(stcp_header_t * header, stcp_msg_type_t type,
 
  */
 
-typedef struct stcp_rma_handle_offset {
+typedef struct tcp_rma_handle_offset {
 	uint32_t handle_high;
 	uint32_t handle_low;
 	uint32_t offset_high;
 	uint32_t offset_low;
-} stcp_rma_handle_offset_t;
+} tcp_rma_handle_offset_t;
 
 static inline void
-stcp_pack_rma_handle_offset(stcp_rma_handle_offset_t * ho,
+tcp_pack_rma_handle_offset(tcp_rma_handle_offset_t * ho,
 			    uint64_t handle, uint64_t offset)
 {
 	ho->handle_high = htonl((uint32_t) (handle >> 32));
@@ -518,7 +518,7 @@ stcp_pack_rma_handle_offset(stcp_rma_handle_offset_t * ho,
 }
 
 static inline void
-stcp_parse_rma_handle_offset(stcp_rma_handle_offset_t * ho,
+tcp_parse_rma_handle_offset(tcp_rma_handle_offset_t * ho,
 			     uint64_t * handle, uint64_t * offset)
 {
 	*handle = ((uint64_t) ntohl(ho->handle_high)) << 32;
@@ -527,11 +527,11 @@ stcp_parse_rma_handle_offset(stcp_rma_handle_offset_t * ho,
 	*offset |= (uint64_t) ntohl(ho->offset_low);
 }
 
-typedef struct stcp_rma_write_header {
-	stcp_header_r_t header_r;
-	stcp_rma_handle_offset_t remote;
+typedef struct tcp_rma_write_header {
+	tcp_header_r_t header_r;
+	tcp_rma_handle_offset_t remote;
 	char data[0];
-} stcp_rma_write_header_t;
+} tcp_rma_write_header_t;
 
 /* RMA write
 
@@ -569,14 +569,14 @@ typedef struct stcp_rma_write_header {
  */
 
 static inline void
-stcp_pack_rma_write(stcp_rma_write_header_t * write, uint32_t data_len,
+tcp_pack_rma_write(tcp_rma_write_header_t * write, uint32_t data_len,
 		    uint32_t seq, uint32_t ack,
 		    uint64_t remote_handle, uint64_t remote_offset)
 {
 	assert(data_len < (1 << 24));
-	stcp_pack_header(&write->header_r.header, STCP_MSG_RMA_WRITE, data_len);
-	stcp_pack_seq_ack(&write->header_r.seq_ack, seq, ack);
-	stcp_pack_rma_handle_offset(&write->remote, remote_handle, remote_offset);
+	tcp_pack_header(&write->header_r.header, TCP_MSG_RMA_WRITE, data_len);
+	tcp_pack_seq_ack(&write->header_r.seq_ack, seq, ack);
+	tcp_pack_rma_handle_offset(&write->remote, remote_handle, remote_offset);
 }
 
 /* RMA read request
@@ -617,24 +617,24 @@ stcp_pack_rma_write(stcp_rma_write_header_t * write, uint32_t data_len,
    remote offset: offset into the remote handle (changes for each packet)
  */
 
-typedef struct stcp_rma_read_header {
-	stcp_header_r_t header_r;
-	stcp_rma_handle_offset_t local;
-	stcp_rma_handle_offset_t remote;
+typedef struct tcp_rma_read_header {
+	tcp_header_r_t header_r;
+	tcp_rma_handle_offset_t local;
+	tcp_rma_handle_offset_t remote;
 	char data[0];
-} stcp_rma_read_header_t;
+} tcp_rma_read_header_t;
 
 static inline void
-stcp_pack_rma_read(stcp_rma_read_header_t * read, uint64_t data_len,
+tcp_pack_rma_read(tcp_rma_read_header_t * read, uint64_t data_len,
 		   uint32_t seq, uint32_t ack,
 		   uintptr_t rma_op, uint64_t local_offset,
 		   uint64_t remote_handle, uint64_t remote_offset)
 {
-	stcp_pack_header(&read->header_r.header, STCP_MSG_RMA_READ_REQUEST,
+	tcp_pack_header(&read->header_r.header, TCP_MSG_RMA_READ_REQUEST,
 			 data_len);
-	stcp_pack_seq_ack(&read->header_r.seq_ack, seq, ack);
-	stcp_pack_rma_handle_offset(&read->local, (uint64_t)rma_op, local_offset);
-	stcp_pack_rma_handle_offset(&read->remote, remote_handle,
+	tcp_pack_seq_ack(&read->header_r.seq_ack, seq, ack);
+	tcp_pack_rma_handle_offset(&read->local, (uint64_t)rma_op, local_offset);
+	tcp_pack_rma_handle_offset(&read->remote, remote_handle,
 				    remote_offset);
 }
 
@@ -668,54 +668,54 @@ stcp_pack_rma_read(stcp_rma_read_header_t * read, uint64_t data_len,
    remote offset: offset into the remote handle (changes for each packet)
  */
 
-typedef struct stcp_rma_read_reply_header {
-	stcp_header_r_t header_r;
-	stcp_rma_handle_offset_t local;
+typedef struct tcp_rma_read_reply_header {
+	tcp_header_r_t header_r;
+	tcp_rma_handle_offset_t local;
 	char data[0];
-} stcp_rma_read_reply_header_t;
+} tcp_rma_read_reply_header_t;
 
 static inline void
-stcp_pack_rma_read_reply(stcp_rma_read_reply_header_t * read_reply, uint64_t data_len,
+tcp_pack_rma_read_reply(tcp_rma_read_reply_header_t * read_reply, uint64_t data_len,
 		   uint32_t seq, uint32_t ack,
 		   uintptr_t rma_op, uint64_t local_offset)
 {
-	stcp_pack_header(&read_reply->header_r.header, STCP_MSG_RMA_READ_REQUEST,
+	tcp_pack_header(&read_reply->header_r.header, TCP_MSG_RMA_READ_REQUEST,
 			 data_len);
-	stcp_pack_seq_ack(&read_reply->header_r.seq_ack, seq, ack);
-	stcp_pack_rma_handle_offset(&read_reply->local, (uint64_t)rma_op, local_offset);
+	tcp_pack_seq_ack(&read_reply->header_r.seq_ack, seq, ack);
+	tcp_pack_rma_handle_offset(&read_reply->local, (uint64_t)rma_op, local_offset);
 }
 
-/************* STCP private structures ****************/
+/************* TCP private structures ****************/
 
-typedef enum stcp_tx_state_t {
+typedef enum tcp_tx_state_t {
 	/*! available, held by endpoint */
-	STCP_TX_IDLE = 0,
+	TCP_TX_IDLE = 0,
 
 	/*! queued for sending */
-	STCP_TX_QUEUED,
+	TCP_TX_QUEUED,
 
 	/*! sent, waiting ack */
-	STCP_TX_PENDING,
+	TCP_TX_PENDING,
 
 	/*! completed with status set */
-	STCP_TX_COMPLETED
-} stcp_tx_state_t;
+	TCP_TX_COMPLETED
+} tcp_tx_state_t;
 
 /*! Send active message context.
 *
 * \ingroup messages */
-typedef struct stcp_tx {
+typedef struct tcp_tx {
 	/*! Associated event (includes public cci_event_t) */
 	cci__evt_t evt;
 
 	/*! Message type */
-	stcp_msg_type_t msg_type;
+	tcp_msg_type_t msg_type;
 
 	/*! Flags (CCI_FLAG_[BLOCKING|SILENT|NO_COPY]) */
 	int flags;
 
 	/*! State of send - not to be confused with completion status */
-	stcp_tx_state_t state;
+	tcp_tx_state_t state;
 
 	/*! Buffer (wire header, data) */
 	void *buffer;
@@ -724,13 +724,13 @@ typedef struct stcp_tx {
 	uint16_t len;
 
 	/*! Entry for hanging on ep->idle_txs, dev->queued, dev->pending */
-	 TAILQ_ENTRY(stcp_tx) entry;
+	 TAILQ_ENTRY(tcp_tx) entry;
 
 	/*! Entry for hanging on ep->txs */
-	 TAILQ_ENTRY(stcp_tx) tentry;
+	 TAILQ_ENTRY(tcp_tx) tentry;
 
 	/*! Entry for sconn->tx_seqs */
-	 TAILQ_ENTRY(stcp_tx) tx_seq;
+	 TAILQ_ENTRY(tcp_tx) tx_seq;
 
 	/*! If reliable, use the following: */
 
@@ -741,16 +741,16 @@ typedef struct stcp_tx {
 	uint64_t timeout_us;
 
 	/*! Owning RMA op if not MSG */
-	struct stcp_rma_op *rma_op;
+	struct tcp_rma_op *rma_op;
 
 	/*! Number of RNR nacks received */
 	uint32_t rnr;
-} stcp_tx_t;
+} tcp_tx_t;
 
 /*! Receive active message context.
  *
  * \ingroup messages */
-typedef struct stcp_rx {
+typedef struct tcp_rx {
 	/*! Associated event (includes public cci_event_t) */
 	cci__evt_t evt;
 
@@ -761,13 +761,13 @@ typedef struct stcp_rx {
 	uint16_t len;
 
 	/*! Entry for hanging on ep->idle_rxs, ep->loaned */
-	 TAILQ_ENTRY(stcp_rx) entry;
+	 TAILQ_ENTRY(tcp_rx) entry;
 
 	/*! Entry for hanging on ep->rxs */
-	 TAILQ_ENTRY(stcp_rx) gentry;
-} stcp_rx_t;
+	 TAILQ_ENTRY(tcp_rx) gentry;
+} tcp_rx_t;
 
-typedef struct stcp_rma_handle {
+typedef struct tcp_rma_handle {
 	/*! Owning endpoint */
 	cci__ep_t *ep;
 
@@ -778,18 +778,18 @@ typedef struct stcp_rma_handle {
 	void *start;
 
 	/* Entry for hanging on ep->handles */
-	 TAILQ_ENTRY(stcp_rma_handle) entry;
+	 TAILQ_ENTRY(tcp_rma_handle) entry;
 
 	/*! Reference count */
 	uint32_t refcnt;
-} stcp_rma_handle_t;
+} tcp_rma_handle_t;
 
-typedef struct stcp_rma_op {
+typedef struct tcp_rma_op {
 	/*! Entry to hang on sep->rma_ops */
-	TAILQ_ENTRY(stcp_rma_op) entry;
+	TAILQ_ENTRY(tcp_rma_op) entry;
 
 	/*! Entry to hang on sconn->rmas */
-	TAILQ_ENTRY(stcp_rma_op) rmas;
+	TAILQ_ENTRY(tcp_rma_op) rmas;
 
 	uint64_t local_handle;
 	uint64_t local_offset;
@@ -823,16 +823,16 @@ typedef struct stcp_rma_op {
 	int flags;
 
 	/*! Pointer to tx for remote completion if needed */
-	stcp_tx_t *tx;
+	tcp_tx_t *tx;
 
 	/*! Optional MSG len */
 	uint16_t msg_len;
 
 	/*! Optional MSG ptr if provided */
 	char *msg_ptr;
-} stcp_rma_op_t;
+} tcp_rma_op_t;
 
-typedef struct stcp_ep {
+typedef struct tcp_ep {
 	/*! Our IP and port */
 	struct sockaddr_in sin;
 
@@ -846,37 +846,37 @@ typedef struct stcp_ep {
 	void *conns;
 
 	/*! List of all txs */
-	TAILQ_HEAD(s_txs, stcp_tx) txs;
+	TAILQ_HEAD(s_txs, tcp_tx) txs;
 
 	/*! List of idle txs */
-	TAILQ_HEAD(s_txsi, stcp_tx) idle_txs;
+	TAILQ_HEAD(s_txsi, tcp_tx) idle_txs;
 
 	/*! List of all rxs */
-	TAILQ_HEAD(s_rxs, stcp_rx) rxs;
+	TAILQ_HEAD(s_rxs, tcp_rx) rxs;
 
 	/*! List of idle rxs */
-	TAILQ_HEAD(s_rxsi, stcp_rx) idle_rxs;
+	TAILQ_HEAD(s_rxsi, tcp_rx) idle_rxs;
 
 	/*! List of active connections awaiting replies */
-	TAILQ_HEAD(s_active, stcp_conn) active;
+	TAILQ_HEAD(s_active, tcp_conn) active;
 
 	/*! List of passive connections awaiting replies */
-	TAILQ_HEAD(s_passive, stcp_conn) passive;
+	TAILQ_HEAD(s_passive, tcp_conn) passive;
 
 	/*! List of RMA registrations */
-	TAILQ_HEAD(s_handles, stcp_rma_handle) handles;
+	TAILQ_HEAD(s_handles, tcp_rma_handle) handles;
 
 	/*! List of RMA ops */
-	TAILQ_HEAD(s_ops, stcp_rma_op) rma_ops;
+	TAILQ_HEAD(s_ops, tcp_rma_op) rma_ops;
 
 	/*! Queued sends */
-	TAILQ_HEAD(s_queued, stcp_tx) queued;
+	TAILQ_HEAD(s_queued, tcp_tx) queued;
 
 	/*! Pending (in-flight) sends */
-	TAILQ_HEAD(s_pending, stcp_tx) pending;
+	TAILQ_HEAD(s_pending, tcp_tx) pending;
 
 	/*! List of all connections with keepalive enabled */
-	TAILQ_HEAD(s_ka, stcp_conn) ka_conns;
+	TAILQ_HEAD(s_ka, tcp_conn) ka_conns;
 
 	/*! Being progressed? */
 	int is_progressing;
@@ -889,35 +889,35 @@ typedef struct stcp_ep {
 
 	/*! fd_set for open conn sock fds */
 	fd_set fds;
-} stcp_ep_t;
+} tcp_ep_t;
 
 /* Connection info */
 
-typedef enum stcp_conn_status {
+typedef enum tcp_conn_status {
 	/*! Shutdown */
-	STCP_CONN_CLOSED = -2,
+	TCP_CONN_CLOSED = -2,
 
 	/*! Disconnect called */
-	STCP_CONN_CLOSING = -1,
+	TCP_CONN_CLOSING = -1,
 
 	/*! NULL (intial) state */
-	STCP_CONN_INIT = 0,
+	TCP_CONN_INIT = 0,
 
 	/*! Waiting on server ACK */
-	STCP_CONN_ACTIVE,
+	TCP_CONN_ACTIVE,
 
 	/*! Waiting on client ACK */
-	STCP_CONN_PASSIVE,
+	TCP_CONN_PASSIVE,
 
 	/*! Connection open and useable */
-	STCP_CONN_READY
-} stcp_conn_status_t;
+	TCP_CONN_READY
+} tcp_conn_status_t;
 
 /* ACK_ONLY:    start == end, one item in list
  * ACK_UP_TO:   end > start, one item in list
  * SACK:        multiple items in list
  */
-typedef struct stcp_ack {
+typedef struct tcp_ack {
 	/*! Starting seq inclusive */
 	uint32_t start;
 
@@ -925,15 +925,15 @@ typedef struct stcp_ack {
 	uint32_t end;
 
 	/*! Hang on sconn->to_ack */
-	 TAILQ_ENTRY(stcp_ack) entry;
-} stcp_ack_t;
+	 TAILQ_ENTRY(tcp_ack) entry;
+} tcp_ack_t;
 
-typedef struct stcp_conn {
+typedef struct tcp_conn {
 	/*! Owning conn */
 	cci__conn_t *conn;
 
 	/*! Status */
-	stcp_conn_status_t status;
+	tcp_conn_status_t status;
 
 	/*! Peer's sockaddr_in (IP, port) */
 	const struct sockaddr_in sin;
@@ -954,7 +954,7 @@ typedef struct stcp_conn {
 	uint32_t pending;
 
 	/*! Pending sends waiting on acks */
-	 TAILQ_HEAD(s_tx_seqs, stcp_tx) tx_seqs;
+	 TAILQ_HEAD(s_tx_seqs, tcp_tx) tx_seqs;
 
 	/*! Peer's last contiguous seqno acked (ACK_UP_TO) */
 	uint32_t acked;
@@ -966,13 +966,13 @@ typedef struct stcp_conn {
 	int ack_queued;
 
 	/*! List of sequence numbers to ack */
-	 TAILQ_HEAD(s_acks, stcp_ack) acks;
+	 TAILQ_HEAD(s_acks, tcp_ack) acks;
 
 	/*! Last RMA started */
 	uint32_t rma_id;
 
 	/*! List of RMA ops in process in case of fence */
-	 TAILQ_HEAD(s_rmas, stcp_rma_op) rmas;
+	 TAILQ_HEAD(s_rmas, tcp_rma_op) rmas;
 
 	/*! Flag to know if the receiver is ready or not */
 	uint32_t rnr;
@@ -982,24 +982,24 @@ typedef struct stcp_conn {
 
 	/*! Current size of the array of RMA contexts */
 	uint32_t max_rma_contexts;
-} stcp_conn_t;
+} tcp_conn_t;
 
 /* Only call if holding the ep->lock and sconn->acks is not empty
  *
  * If only one item, return 0
  * If more than one item, return 1
  */
-static inline int stcp_need_sack(stcp_conn_t * sconn)
+static inline int tcp_need_sack(tcp_conn_t * sconn)
 {
 	return TAILQ_FIRST(&sconn->acks) != TAILQ_LAST(&sconn->acks, s_acks);
 }
 
-typedef struct stcp_dev {
+typedef struct tcp_dev {
 	/*! Our ifaddr */
 	struct ifaddrs *ifa;
-} stcp_dev_t;
+} tcp_dev_t;
 
-typedef struct stcp_globals {
+typedef struct tcp_globals {
 	/*! Mutex */
 	pthread_mutex_t lock;
 
@@ -1016,7 +1016,7 @@ typedef struct stcp_globals {
 	int ifa_count;
 #if 0
 	/*! Array of devices indexed by sock fd */
-	stcp_fd_idx_t fd_idx[STCP_MAX_EPS];
+	tcp_fd_idx_t fd_idx[TCP_MAX_EPS];
 
 	/*! Highest open endpoint sock fd + 1 for select */
 	int nfds;
@@ -1024,16 +1024,16 @@ typedef struct stcp_globals {
 	/*! fd_set for open endpoint sock fds */
 	fd_set fds;
 #endif
-} stcp_globals_t;
+} tcp_globals_t;
 
 #ifndef FD_COPY
 #define FD_COPY(a,b) memcpy(a,b,sizeof(fd_set))
 #endif
 
-extern stcp_globals_t *sglobals;
+extern tcp_globals_t *sglobals;
 
-int cci_core_stcp_post_load(cci_plugin_t * me);
-int cci_core_stcp_pre_unload(cci_plugin_t * me);
+int cci_core_tcp_post_load(cci_plugin_t * me);
+int cci_core_tcp_pre_unload(cci_plugin_t * me);
 
 END_C_DECLS
-#endif				/* CCI_CORE_STCP_H */
+#endif				/* CCI_CORE_TCP_H */
