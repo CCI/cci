@@ -368,6 +368,39 @@ static int verbs_return_tx(struct verbs_tx *tx)
 	return ret;
 }
 
+static int verbs_get_pci_info(struct cci_device * device, struct ibv_context *context)
+{
+#ifdef __linux__
+	const char * name = ibv_get_device_name(context->device);
+	char path[128];
+	char buf[128], *tmp = buf;
+	int err;
+	unsigned domain = 0 /* not always in the bus id */, bus, dev, func;
+	snprintf(path, sizeof(path), "/sys/class/infiniband/%s/device", name);
+	err = readlink(path, buf, sizeof(buf));
+	if (!err)
+		return -1;
+	/* buf contains some '../' followed by the busid followed by '/' */
+	while (1) {
+		if (strncmp(tmp, "../", 3))
+			break;
+		tmp += 3;
+	}
+	/* buf doesn't start with ../ anymore */
+	if (sscanf(tmp, "%x:%x:%x.%x", &domain, &bus, &dev, &func) != 4
+	    && sscanf(tmp, "%x:%x.%x", &bus, &dev, &func) != 3)
+		return -1;
+	/* got it! */
+	device->pci.domain = domain;
+	device->pci.bus = bus;
+	device->pci.dev = dev;
+	device->pci.func = func;
+	return 0;
+#else
+	return -1;
+#endif
+}
+
 static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	int count = 0;
@@ -436,10 +469,6 @@ static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t fla
 				dev->driver = strdup("verbs");
 
 				device = &dev->device;
-				device->pci.domain = -1;	/* per CCI spec */
-				device->pci.bus = -1;		/* per CCI spec */
-				device->pci.dev = -1;		/* per CCI spec */
-				device->pci.func = -1;		/* per CCI spec */
 
 				dev->priv = calloc(1, sizeof(*vdev));
 				if (!dev->priv) {
@@ -464,6 +493,7 @@ static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t fla
 				device->rate = verbs_device_rate(port_attr);
 				device->name = vdev->ifa->ifa_name;
 				device->up = vdev->ifa->ifa_flags & IFF_UP;
+				verbs_get_pci_info(device, vdev->context);
 
 				cci__add_dev(dev);
 				devices[index] = device;
@@ -604,6 +634,7 @@ static int verbs_init(cci_plugin_core_t * plugin, uint32_t abi_ver, uint32_t fla
 			    verbs_mtu_val(port_attr.max_mtu);
 			device->rate = verbs_device_rate(port_attr);
 			device->up = vdev->ifa->ifa_flags & IFF_UP;
+			verbs_get_pci_info(device, vdev->context);
 
 			TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
 			cci__add_dev(dev);
