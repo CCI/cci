@@ -263,7 +263,7 @@ static int sock_init(cci_plugin_core_t *plugin,
 		device->name = strdup("loopback");
 		device->up = 1;
 
-		device->rate = 10000000000ULL;
+		device->rate = 0;
 		device->pci.domain = -1;    /* per CCI spec */
 		device->pci.bus = -1;       /* per CCI spec */
 		device->pci.dev = -1;       /* per CCI spec */
@@ -304,7 +304,7 @@ static int sock_init(cci_plugin_core_t *plugin,
 			 * bsd/darwin->ioctl(SIOCGIFMEDIA)->ifm_active
 			 * windows ?
 			 */
-			device->rate = 10000000000ULL;
+			device->rate = 0;
 
 			device->pci.domain = -1;	/* per CCI spec */
 			device->pci.bus = -1;	/* per CCI spec */
