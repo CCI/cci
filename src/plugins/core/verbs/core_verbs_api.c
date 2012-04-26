@@ -151,7 +151,7 @@ static uint32_t verbs_mtu_val(enum ibv_mtu mtu)
 
 static uint64_t verbs_device_rate(struct ibv_port_attr attr)
 {
-	uint64_t rate = 2500000000ULL;	/* 2.5 Gbps */
+	uint64_t rate = 2000000000ULL;	/* 2.5 Gbps signal, 2 Gbps data rate */
 
 	rate *= attr.active_speed;
 
