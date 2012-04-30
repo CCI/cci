@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <inttypes.h>
+#include <string.h>
 
 #include "cci.h"
 
@@ -27,8 +28,7 @@ uint32_t tx_buf_cnt = -1;
 uint32_t keepalive = -1;
 int align = -1;
 
-cci_opt_handle_t handle;
-cci_opt_level_t level;
+void * handle;
 
 void check_return(char *func, cci_endpoint_t *endpoint, int ret)
 {
@@ -60,66 +60,133 @@ void usage(void)
 	exit(EXIT_FAILURE);
 }
 
+const char *
+opt_name(cci_opt_name_t name)
+{
+	char *str = NULL;
+
+	switch (name) {
+		case CCI_OPT_ENDPT_RECV_BUF_COUNT:
+			str = "CCI_OPT_ENDPT_RECV_BUF_COUNT";
+			break;
+		case CCI_OPT_ENDPT_SEND_BUF_COUNT:
+			str = "CCI_OPT_ENDPT_SEND_BUF_COUNT";
+			break;
+		case CCI_OPT_ENDPT_SEND_TIMEOUT:
+			str = "CCI_OPT_ENDPT_SEND_TIMEOUT";
+			break;
+		case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
+			str = "CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT";
+			break;
+		case CCI_OPT_ENDPT_URI:
+			str = "CCI_OPT_ENDPT_URI";
+			break;
+		case CCI_OPT_ENDPT_RMA_ALIGN:
+			str = "CCI_OPT_ENDPT_RMA_ALIGN";
+			break;
+		case CCI_OPT_CONN_SEND_TIMEOUT:
+			str = "CCI_OPT_CONN_SEND_TIMEOUT";
+			break;
+	}
+	return str;
+}
+
+void print_result(cci_opt_name_t name, cci_opt_t val)
+{
+	printf("cci_get_opt(%s) returned", opt_name(name));
+	switch (name) {
+		case CCI_OPT_ENDPT_RECV_BUF_COUNT:
+			printf(" %u\n", val.endpt_recv_buf_count);
+			break;
+		case CCI_OPT_ENDPT_SEND_BUF_COUNT:
+			printf(" %u\n", val.endpt_send_buf_count);
+			break;
+		case CCI_OPT_ENDPT_SEND_TIMEOUT:
+			printf(" %u\n", val.endpt_send_timeout);
+			break;
+		case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
+			printf(" %u\n", val.endpt_keepalive_timeout);
+			break;
+		case CCI_OPT_ENDPT_URI:
+			printf(" %s\n", val.endpt_uri);
+			break;
+		case CCI_OPT_ENDPT_RMA_ALIGN:
+			printf(":\n");
+			printf("rma_write_local_addr  = %8u\n",
+					val.endpt_rma_align.rma_write_local_addr);
+			printf("rma_write_remote_addr = %8u\n",
+					val.endpt_rma_align.rma_write_remote_addr);
+			printf("rma_write_length      = %8u\n",
+					val.endpt_rma_align.rma_write_length);
+			printf("rma_read_local_addr   = %8u\n",
+					val.endpt_rma_align.rma_read_local_addr);
+			printf("rma_read_remote_addr  = %8u\n",
+					val.endpt_rma_align.rma_read_remote_addr);
+			printf("rma_read_length       = %8u\n",
+					val.endpt_rma_align.rma_read_length);
+			break;
+		case CCI_OPT_CONN_SEND_TIMEOUT:
+			printf(" not implemented.\n");
+			break;
+	}
+}
+
 void test(cci_endpoint_t *endpoint, cci_opt_name_t name)
 {
-	int ret, len;
-	uint32_t val;
-	void *ptr;
+	int ret;
+	cci_opt_t val;
+
+	memset(&val, 0, sizeof(val));
 
 	switch (name) {
 	case CCI_OPT_ENDPT_SEND_TIMEOUT:
-		val = tx_timeout;
+		handle = (void *)endpoint;
+		val.endpt_send_timeout = tx_timeout;
 		break;
 	case CCI_OPT_ENDPT_RECV_BUF_COUNT:
-		val = tx_timeout;
+		handle = (void *)endpoint;
+		val.endpt_recv_buf_count = rx_buf_cnt;
 		break;
 	case CCI_OPT_ENDPT_SEND_BUF_COUNT:
-		val = tx_buf_cnt;
+		handle = (void *)endpoint;
+		val.endpt_send_buf_count = tx_buf_cnt;
 		break;
 	case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
-		val = keepalive;
+		handle = (void *)endpoint;
+		val.endpt_keepalive_timeout = keepalive;
 		break;
 	case CCI_OPT_ENDPT_RMA_ALIGN:
+		handle = (void *)endpoint;
+		break;
+	case CCI_OPT_ENDPT_URI:
+		handle = (void *)endpoint;
 		break;
 	default:
 		printf("unknown option\n");
 		break;
 	}
 
-	ret = cci_get_opt(&handle, level, name, &ptr, &len);
-	printf("cci_get_opt() returned %s\n", cci_strerror(endpoint, ret));
+	ret = cci_get_opt(handle, name, &val);
+	if (ret) {
+		printf("cci_get_opt() returned %s\n", cci_strerror(endpoint, ret));
+		return;
+	}
 
-	if (ret == CCI_SUCCESS) {
-		if (CCI_OPT_ENDPT_RMA_ALIGN != name) {
-			printf(" (val = %u)\n", *((uint32_t *) ptr));
-			if (set) {
-				ret = cci_set_opt(&handle, level, name,
-							&val, (int)sizeof(val));
-				printf("cci_set_opt() returned %s\n",
-					cci_strerror(endpoint, ret));
-				if (ret == CCI_SUCCESS) {
-					ret = cci_get_opt(&handle, level, name,
-								&ptr, &len);
-					printf("cci_get_opt() returned %s\n",
-					cci_strerror(endpoint, ret));
-					if (ret == CCI_SUCCESS)
-						printf(" (val = %u)\n",
-							*((uint32_t *) ptr));
-					else
-						printf("\n");
-				}
-			}
-		} else {
-			cci_alignment_t *align = (cci_alignment_t *)ptr;
-			printf("rma_write_local_addr = %u\n", align->rma_write_local_addr);
-			printf("rma_write_remote_addr = %u\n", align->rma_write_remote_addr);
-			printf("rma_write_length = %u\n", align->rma_write_length);
-			printf("rma_read_local_addr = %u\n", align->rma_read_local_addr);
-			printf("rma_read_remote_addr = %u\n", align->rma_read_remote_addr);
-			printf("rma_read_length = %u\n", align->rma_read_length);
+	print_result(name, val);
+	if (set) {
+		ret = cci_set_opt(handle, name, &val);
+		if (ret) {
+			printf("cci_set_opt() returned %s\n",
+				cci_strerror(endpoint, ret));
+			return;
 		}
-	} else {
-		printf("\n");
+		ret = cci_get_opt(handle, name, &val);
+		if (ret == CCI_SUCCESS) {
+			print_result(name, val);
+		} else {
+			printf("cci_get_opt() returned %s\n",
+				cci_strerror(endpoint, ret));
+		}
 	}
 	return;
 }
@@ -204,8 +271,7 @@ int main(int argc, char *argv[])
 
 	/* start tests */
 
-	handle.endpoint = endpoint;
-	level = CCI_OPT_LEVEL_ENDPOINT;
+	handle = (void *)endpoint;
 
 	if (tx_timeout != (uint32_t) - 1) {
 		printf("Testing CCI_OPT_ENDPT_SEND_TIMEOUT\n");

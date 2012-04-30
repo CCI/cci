@@ -63,16 +63,15 @@ poll_events(cci_endpoint_t * endpoint, cci_connection_t ** connection,
 
 int main(int argc, char *argv[])
 {
-	int done = 0, ret, i = 0, c, len;
+	int done = 0, ret, i = 0, c;
 	uint32_t caps = 0;
 	char *server_uri = NULL;	/* ip://1.2.3.4 */
-	char *uri = NULL;
 	cci_os_handle_t fd;
 	cci_device_t **devices = NULL;
 	cci_endpoint_t *endpoint = NULL;
-	cci_opt_handle_t handle;
+	void * handle;
+	cci_opt_t val;
 	cci_connection_t *connection = NULL;
-	cci_opt_handle_t handle;
 	uint32_t timeout_us = 30 * 1000000;	/* microseconds */
 
 	proc_name = argv[0];
@@ -102,14 +101,14 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	handle.endpoint = endpoint;
-	ret = cci_get_opt(&handle, CCI_OPT_LEVEL_ENDPOINT,
-			CCI_OPT_ENDPT_URI, (void*) &uri, &len);
+	memset(&val, 0, sizeof(val));
+	handle = (void *)endpoint;
+	ret = cci_get_opt(handle, CCI_OPT_ENDPT_URI, &val);
 	if (ret) {
 		fprintf(stderr, "cci_get_opt() failed with %s\n", cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
-	printf("Opened %s\n", uri);
+	printf("Opened %s\n", val.endpt_uri);
 
 	/* set endpoint tx timeout */
 	handle.endpoint = endpoint;

@@ -64,12 +64,8 @@ static int gni_connect(cci_endpoint_t * endpoint, const char *server_uri,
 			 cci_conn_attribute_t attribute,
 			 const void *context, int flags, const struct timeval *timeout);
 static int gni_disconnect(cci_connection_t * connection);
-static int gni_set_opt(cci_opt_handle_t * handle,
-			 cci_opt_level_t level,
-			 cci_opt_name_t name, const void *val, int len);
-static int gni_get_opt(cci_opt_handle_t * handle,
-			 cci_opt_level_t level,
-			 cci_opt_name_t name, void **val, int *len);
+static int gni_set_opt(void * handle, cci_opt_name_t name, cci_opt_t *val);
+static int gni_get_opt(void * handle, cci_opt_name_t name, cci_opt_t *val);
 static int gni_arm_os_handle(cci_endpoint_t * endpoint, int flags);
 static int gni_get_event(cci_endpoint_t * endpoint,
 			   cci_event_t ** const event);
@@ -1700,16 +1696,9 @@ static int gni_disconnect(cci_connection_t * connection)
 }
 
 static int
-gni_set_opt(cci_opt_handle_t * handle,
-	      cci_opt_level_t level,
-	      cci_opt_name_t name, const void *val, int len)
+gni_set_opt(void * handle, cci_opt_name_t name, cci_opt_t *val)
 {
 	int ret = CCI_ERR_NOT_IMPLEMENTED;
-	//cci_endpoint_t *endpoint = NULL;
-	//cci__ep_t *ep = NULL;
-	//cci__dev_t *dev = NULL;
-	//gni_ep_t *gep = NULL;
-	//gni_dev_t *gdev = NULL;
 
 	CCI_ENTER;
 
@@ -1717,12 +1706,6 @@ gni_set_opt(cci_opt_handle_t * handle,
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
-
-	//endpoint = handle->endpoint;
-	//ep = container_of(endpoint, cci__ep_t, endpoint);
-	//gep = ep->priv;
-	//dev = ep->dev;
-	//gdev = dev->priv;
 
 	switch (name) {
 	case CCI_OPT_ENDPT_SEND_TIMEOUT:
@@ -1743,8 +1726,7 @@ gni_set_opt(cci_opt_handle_t * handle,
 }
 
 static int
-gni_get_opt(cci_opt_handle_t * handle,
-	      cci_opt_level_t level, cci_opt_name_t name, void **val, int *len)
+gni_get_opt(void * handle, cci_opt_name_t name, cci_opt_t *val)
 {
 	CCI_ENTER;
 	CCI_EXIT;

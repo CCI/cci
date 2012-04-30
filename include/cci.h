@@ -1216,30 +1216,6 @@ CCI_DECLSPEC int cci_return_event(cci_event_t * event);
 /*! \defgroup opts Endpoint / Connection Options */
 
 /*!
-  Handle defining the scope of an option
-
-  \ingroup opts
-*/
-typedef union cci_opt_handle {
-	/*! Endpoint */
-	cci_endpoint_t *endpoint;
-	/*! Connection */
-	cci_connection_t *connection;
-} cci_opt_handle_t;
-
-/*!
-  Level defining the scope of an option
-
-  \ingroup opts
-*/
-typedef enum cci_opt_level {
-	/*! Flag indicating that the union is an endpoint */
-	CCI_OPT_LEVEL_ENDPOINT,
-	/*! Flag indicating that the union is a connection */
-	CCI_OPT_LEVEL_CONNECTION
-} cci_opt_level_t;
-
-/*!
   Name of options
 
   \ingroup opts
@@ -1335,18 +1311,25 @@ typedef struct cci_alignment {
 	uint32_t rma_read_length;	/*!< READ length */
 } cci_alignment_t;
 
+typedef union cci_opt {
+	uint32_t endpt_send_timeout;
+	uint32_t endpt_recv_buf_count;
+	uint32_t endpt_send_buf_count;
+	const char * endpt_uri;
+	uint32_t endpt_keepalive_timeout;
+	cci_alignment_t endpt_rma_align;
+	uint32_t conn_send_timeout;
+} cci_opt_t;
+
 /*!
   Set an endpoint or connection option value.
 
   \param[in] handle Endpoint or connection handle.
-  \param[in] level  Indicates type of handle.
   \param[in] name   Which option to set the value of.
-  \param[in] val    Pointer to the value.
-  \param[in] len    Length of value to be set.
+  \param[in] val    Pointer to a valid cci_opt_t.
 
   \return CCI_SUCCESS   Value successfully set.
-  \return CCI_EINVAL    Handle or val is NULL or len is 0.
-  \return CCI_EINVAL    Level/name mismatch.
+  \return CCI_EINVAL    Handle or val is NULL.
   \return CCI_EINVAL    Trying to set a get-only option.
   \return CCI_ERR_NOT_IMPLEMENTED   Not supported by this driver.
   \return Each driver may have additional error codes.
@@ -1356,28 +1339,23 @@ typedef struct cci_alignment {
 
   \ingroup opts
 */
-CCI_DECLSPEC int cci_set_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
-			     cci_opt_name_t name, const void *val, int len);
+CCI_DECLSPEC int cci_set_opt(void * handle, cci_opt_name_t name, cci_opt_t * val);
 
 /*!
   Get an endpoint or connection option value.
 
   \param[in] handle Endpoint or connection handle.
-  \param[in] level  Indicates type of handle.
   \param[in] name   Which option to set the value of.
-  \param[in] val    Address of the pointer to the value.
-  \param[in] len    Address of the length of value.
+  \param[in] val    Pointer to a valid cci_opt_t.
 
   \return CCI_SUCCESS   Value successfully retrieved.
-  \return CCI_EINVAL    Handle or val is NULL or len is 0.
-  \return CCI_EINVAL    Level/name mismatch.
+  \return CCI_EINVAL    Handle or val is NULL.
   \return CCI_ERR_NOT_IMPLEMENTED   Not supported by this driver.
   \return Each driver may have additional error codes.
 
   \ingroup opts
 */
-CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
-			     cci_opt_name_t name, void **val, int *len);
+CCI_DECLSPEC int cci_get_opt(void * handle, cci_opt_name_t name, cci_opt_t *val);
 
 /* ================================================================== */
 /*                                                                    */

@@ -129,12 +129,8 @@ static int portals_connect(cci_endpoint_t * endpoint,
 			   cci_conn_attribute_t attribute,
 			   const void *context, int flags, const struct timeval *timeout);
 static int portals_disconnect(cci_connection_t * connection);
-static int portals_set_opt(cci_opt_handle_t * handle,
-			   cci_opt_level_t level,
-			   cci_opt_name_t name, const void *val, int len);
-static int portals_get_opt(cci_opt_handle_t * handle,
-			   cci_opt_level_t level,
-			   cci_opt_name_t name, void **val, int *len);
+static int portals_set_opt(void * handle, cci_opt_name_t name, cci_opt_t *val);
+static int portals_get_opt(void * handle, cci_opt_name_t name, cci_opt_t *val);
 static int portals_arm_os_handle(cci_endpoint_t * endpoint, int flags);
 static int portals_get_event(cci_endpoint_t * endpoint,
 			     cci_event_t ** event);
@@ -1774,9 +1770,7 @@ static int portals_set_ep_rx_buf_cnt(cci__ep_t * ep, uint32_t new_count)
 	return ret;
 }
 
-static int portals_set_opt(cci_opt_handle_t * handle,
-			   cci_opt_level_t level,
-			   cci_opt_name_t name, const void *val, int len)
+static int portals_set_opt(void * handle, cci_opt_name_t name, cci_opt_t *val)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
@@ -1791,13 +1785,13 @@ static int portals_set_opt(cci_opt_handle_t * handle,
 		return CCI_ENODEV;
 	}
 
-	if (CCI_OPT_LEVEL_ENDPOINT == level) {
-		ep = container_of(handle->endpoint, cci__ep_t, endpoint);
-		pep = ep->priv;
-	} else {
+	if (CCI_OPT_CONN_SEND_TIMEOUT == name) {
 		conn =
-		    container_of(handle->connection, cci__conn_t, connection);
+		    container_of((cci_connection_t*)handle, cci__conn_t, connection);
 		pconn = conn->priv;
+	} else {
+		ep = container_of((cci_endpoint_t*)handle, cci__ep_t, endpoint);
+		pep = ep->priv;
 	}
 
 	switch (name) {
@@ -1805,36 +1799,17 @@ static int portals_set_opt(cci_opt_handle_t * handle,
 		ret = CCI_ERR_NOT_IMPLEMENTED;	/* not supported */
 		break;
 	case CCI_OPT_ENDPT_RECV_BUF_COUNT:
-		{
-			uint32_t new_count;
-
-			if (len != sizeof(new_count)) {
-				ret = CCI_EINVAL;
-				break;
-			}
-			memcpy(&new_count, val, len);
-			pthread_mutex_lock(&ep->lock);
-			ret = portals_set_ep_rx_buf_cnt(ep, new_count);
-			pthread_mutex_unlock(&ep->lock);
-			break;
-		}
+		pthread_mutex_lock(&ep->lock);
+		ret = portals_set_ep_rx_buf_cnt(ep, val->endpt_recv_buf_count);
+		pthread_mutex_unlock(&ep->lock);
+		break;
 	case CCI_OPT_ENDPT_SEND_BUF_COUNT:
-		{
-			uint32_t new_count;
-
-			if (len != sizeof(new_count)) {
-				ret = CCI_EINVAL;
-				break;
-			}
-			memcpy(&new_count, val, len);
-			pthread_mutex_lock(&ep->lock);
-			ret = portals_set_ep_tx_buf_cnt(ep, new_count);
-			pthread_mutex_unlock(&ep->lock);
-			break;
-		}
+		pthread_mutex_lock(&ep->lock);
+		ret = portals_set_ep_tx_buf_cnt(ep, val->endpt_send_buf_count);
+		pthread_mutex_unlock(&ep->lock);
+		break;
 	case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
-		assert(len == sizeof(ep->keepalive_timeout));
-		memcpy(&ep->keepalive_timeout, val, len);
+		ep->keepalive_timeout = val->endpt_keepalive_timeout;
 		break;
 	case CCI_OPT_CONN_SEND_TIMEOUT:
 		ret = CCI_ERR_NOT_IMPLEMENTED;	/* not supported */
@@ -1850,15 +1825,13 @@ static int portals_set_opt(cci_opt_handle_t * handle,
 	return ret;
 }
 
-static int portals_get_opt(cci_opt_handle_t * handle,
-			   cci_opt_level_t level,
-			   cci_opt_name_t name, void **val, int *len)
+static int portals_get_opt(void * handle, cci_opt_name_t name, cci_opt_t *val)
 {
 
 	CCI_ENTER;
 	CCI_EXIT;
 
-	return CCI_EINVAL;
+	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 // Todo

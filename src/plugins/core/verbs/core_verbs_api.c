@@ -54,12 +54,8 @@ static int verbs_connect(cci_endpoint_t * endpoint, const char *server_uri,
 			 const void *context, int flags,
 			 const struct timeval *timeout);
 static int verbs_disconnect(cci_connection_t * connection);
-static int verbs_set_opt(cci_opt_handle_t * handle,
-			 cci_opt_level_t level,
-			 cci_opt_name_t name, const void *val, int len);
-static int verbs_get_opt(cci_opt_handle_t * handle,
-			 cci_opt_level_t level,
-			 cci_opt_name_t name, void **val, int *len);
+static int verbs_set_opt(void * handle, cci_opt_name_t name, cci_opt_t *val);
+static int verbs_get_opt(void * handle, cci_opt_name_t name, cci_opt_t *val);
 static int verbs_arm_os_handle(cci_endpoint_t * endpoint, int flags);
 static int verbs_get_event(cci_endpoint_t * endpoint,
 			   cci_event_t ** const event);
@@ -2118,12 +2114,9 @@ static int verbs_disconnect(cci_connection_t * connection)
 }
 
 static int
-verbs_set_opt(cci_opt_handle_t * handle,
-	      cci_opt_level_t level,
-	      cci_opt_name_t name, const void *val, int len)
+verbs_set_opt(void * handle, cci_opt_name_t name, cci_opt_t *val)
 {
 	int ret = CCI_ERR_NOT_IMPLEMENTED;
-	cci_endpoint_t *endpoint = NULL;
 	cci__ep_t *ep = NULL;
 	cci__dev_t *dev = NULL;
 	verbs_ep_t *vep = NULL;
@@ -2136,11 +2129,12 @@ verbs_set_opt(cci_opt_handle_t * handle,
 		return CCI_ENODEV;
 	}
 
-	endpoint = handle->endpoint;
-	ep = container_of(endpoint, cci__ep_t, endpoint);
-	vep = ep->priv;
-	dev = ep->dev;
-	vdev = dev->priv;
+	if (CCI_OPT_CONN_SEND_TIMEOUT != name) {
+		ep = container_of((cci_endpoint_t*)handle, cci__ep_t, endpoint);
+		vep = ep->priv;
+		dev = ep->dev;
+		vdev = dev->priv;
+	}
 
 	switch (name) {
 	case CCI_OPT_ENDPT_SEND_TIMEOUT:
@@ -2149,7 +2143,6 @@ verbs_set_opt(cci_opt_handle_t * handle,
 		break;
 	case CCI_OPT_ENDPT_RECV_BUF_COUNT:
 		{
-			uint32_t new_count;
 			struct ibv_device_attr dev_attr;
 			verbs_rx_pool_t *rx_pool = TAILQ_FIRST(&vep->rx_pools);
 
@@ -2171,30 +2164,25 @@ verbs_set_opt(cci_opt_handle_t * handle,
 				break;	/* ret = CCI_ERR_NOT_IMPLEMENTED */
 			}
 
-			if (len != sizeof(new_count)) {
-				ret = CCI_EINVAL;
-				break;
-			}
-			memcpy(&new_count, val, len);
-
 			/* Is new count supportable (i.e. < max_srq_wr)? */
-			if (dev_attr.max_srq_wr < new_count) {
+			if (dev_attr.max_srq_wr < val->endpt_recv_buf_count) {
 				debug(CCI_DB_EP,
 				      "%s: requested recv buffer size %u "
 				      "is larger than the max_cq_wr %u",
-				      __func__, new_count, dev_attr.max_srq_wr);
+				      __func__, val->endpt_recv_buf_count,
+				      dev_attr.max_srq_wr);
 				ret = CCI_ERANGE;
 				break;
 			}
 
 			/* Modify cq first */
-			ret = ibv_resize_cq(vep->cq, new_count);
+			ret = ibv_resize_cq(vep->cq, val->endpt_recv_buf_count);
 			if (ret) {
 				ret = errno;
 				debug(CCI_DB_EP,
 				      "%s: unable to resize completion queue",
 				      __func__);
-				if (new_count > ep->rx_buf_cnt) {
+				if (val->endpt_recv_buf_count > ep->rx_buf_cnt) {
 					/* we couldn't enlarge the cq, return error */
 					break;
 				} else {
@@ -2205,7 +2193,7 @@ verbs_set_opt(cci_opt_handle_t * handle,
 			}
 
 			/* Create new rx_pool based on new_count */
-			ret = verbs_create_rx_pool(ep, new_count);
+			ret = verbs_create_rx_pool(ep, val->endpt_recv_buf_count);
 			if (ret == CCI_SUCCESS) {
 				/* set the old rx_pool to not repost.
 				 * the old rxs will clean up as we reap them from
@@ -2218,18 +2206,10 @@ verbs_set_opt(cci_opt_handle_t * handle,
 		}
 	case CCI_OPT_ENDPT_SEND_BUF_COUNT:
 		{
-			uint32_t new_count;
-			/* get the requested value from the parameters and create a local copy */
-			if (len != sizeof(new_count)) {
-				ret = CCI_EINVAL;
-				break;
-			}
-			memcpy(&new_count, val, len);
-
 			/* Check if the new buffer count is different from
 			 * the old buffer count, if it is, continue, otherwise
 			 * break and declare success */
-			if (new_count == ep->tx_buf_cnt) {
+			if (val->endpt_tx_buf_count == ep->tx_buf_cnt) {
 				ret = CCI_SUCCESS;
 				break;
 			}
@@ -2255,7 +2235,7 @@ verbs_set_opt(cci_opt_handle_t * handle,
 			 * this is to recopy the existing tx_pool into the
 			 * old location
 			 */
-			ret = verbs_create_tx_pool(ep, new_count);
+			ret = verbs_create_tx_pool(ep, val->endpt_send_buf_count);
 
 			pthread_mutex_lock(&ep->lock);
 			vep->tx_resize_in_progress = 0;
@@ -2279,26 +2259,18 @@ verbs_set_opt(cci_opt_handle_t * handle,
 		}
 	case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
 		{
-			uint32_t new_time;
-
-			if (len != sizeof(new_time)) {
-				ret = CCI_EINVAL;
-				break;
-			}
-			memcpy(&new_time, val, len);
-
 			/* we don't do anything for keepalives.
 			 * If the connection breaks, we will generate a
 			 * keepalive timeout. When the app tries to send,
 			 * it will fail. */
-			ep->keepalive_timeout = new_time;
+			ep->keepalive_timeout = val->endpt_keepalive_timeout;
 			ret = CCI_SUCCESS;
 			break;
 		}
 	default:
 		debug(CCI_DB_INFO, "unknown option %u",
 		      (enum cci_opt_name)name);
-		ret = CCI_EINVAL;
+		ret = CCI_ERR_NOT_IMPLEMENTED;
 	}
 
 	CCI_EXIT;
@@ -2306,15 +2278,9 @@ verbs_set_opt(cci_opt_handle_t * handle,
 }
 
 static int
-verbs_get_opt(cci_opt_handle_t * handle,
-	      cci_opt_level_t level, cci_opt_name_t name, void **val, int *len)
+verbs_get_opt(void * handle, cci_opt_name_t name, cci_opt_t *val)
 {
 	int ret = CCI_ERR_NOT_IMPLEMENTED;
-	cci_endpoint_t *endpoint = NULL;
-	cci__ep_t *ep = NULL;
-	cci__dev_t *dev = NULL;
-	verbs_ep_t *vep = NULL;
-	verbs_dev_t *vdev = NULL;
 
 	CCI_ENTER;
 
@@ -2323,58 +2289,6 @@ verbs_get_opt(cci_opt_handle_t * handle,
 		return CCI_ENODEV;
 	}
 
-	endpoint = handle->endpoint;
-	ep = container_of(endpoint, cci__ep_t, endpoint);
-	vep = ep->priv;
-	dev = ep->dev;
-	vdev = dev->priv;
-
-	switch (name) {
-	case CCI_OPT_ENDPT_SEND_TIMEOUT:
-	case CCI_OPT_CONN_SEND_TIMEOUT:
-	case CCI_OPT_ENDPT_RECV_BUF_COUNT:
-		{
-			*len = sizeof(ep->rx_buf_cnt);
-			*val = malloc(*len);
-			if (!val) {
-				ret = CCI_ENOMEM;
-				goto out;
-			}
-			memcpy(*val, &ep->rx_buf_cnt, *len);
-			ret = CCI_SUCCESS;
-			break;
-		}
-	case CCI_OPT_ENDPT_SEND_BUF_COUNT:
-		{
-			*len = sizeof(ep->tx_buf_cnt);
-			*val = malloc(*len);
-			if (!val) {
-				ret = CCI_ENOMEM;
-				goto out;
-			}
-			memcpy(*val, &ep->tx_buf_cnt, *len);
-			ret = CCI_SUCCESS;
-			break;
-		}
-	case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
-		{
-			*len = sizeof(ep->keepalive_timeout);
-			*val = malloc(*len);
-			if (!val) {
-				ret = CCI_ENOMEM;
-				goto out;
-			}
-			memcpy(*val, &ep->keepalive_timeout, *len);
-
-			ret = CCI_SUCCESS;
-			break;
-		}
-	default:
-		debug(CCI_DB_INFO, "unknown option %u",
-		      (enum cci_opt_name)name);
-		ret = CCI_EINVAL;
-	}
-out:
 	CCI_EXIT;
 	return ret;
 }
