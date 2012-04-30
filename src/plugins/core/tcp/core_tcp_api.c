@@ -49,7 +49,7 @@ bool conn_established = false;
 #endif
 
 volatile int tcp_shut_down = 0;
-tcp_globals_t *sglobals = NULL;
+tcp_globals_t *tglobals = NULL;
 static int threads_running = 0;
 pthread_t progress_tid, recv_tid;
 
@@ -123,7 +123,7 @@ cci_plugin_core_t cci_core_tcp_plugin = {
 	 /* Logistics */
 	 CCI_ABI_VERSION,
 	 CCI_CORE_API_VERSION,
-	 "sock",
+	 "tcp",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
 	 30,
 
@@ -256,13 +256,13 @@ tcp_find_devices(void)
 			i++;
 		}
 	}
-	sglobals->ifa_count = i;
+	tglobals->ifa_count = i;
 
-	if (sglobals->ifa_count) {
-		int len = (sglobals->ifa_count + 1) * sizeof(*addrs);
+	if (tglobals->ifa_count) {
+		int len = (tglobals->ifa_count + 1) * sizeof(*addrs);
 
 		addrs = realloc(addrs, len);
-		sglobals->ifaddrs = addrs;
+		tglobals->ifaddrs = addrs;
 	} else {
 		ret = CCI_ENODEV;
 	}
@@ -295,17 +295,17 @@ static int tcp_init(cci_plugin_core_t *plugin,
 #endif
 
 	/* init sock globals */
-	sglobals = calloc(1, sizeof(*sglobals));
-	if (!sglobals) {
+	tglobals = calloc(1, sizeof(*tglobals));
+	if (!tglobals) {
 		CCI_EXIT;
 		return CCI_ENOMEM;
 	}
 
-	pthread_mutex_init(&sglobals->lock, NULL);
+	pthread_mutex_init(&tglobals->lock, NULL);
 
 	srandom((unsigned int)tcp_get_usecs());
 
-	devices = calloc(CCI_MAX_DEVICES, sizeof(*sglobals->devices));
+	devices = calloc(CCI_MAX_DEVICES, sizeof(*tglobals->devices));
 	if (!devices) {
 		ret = CCI_ENOMEM;
 		goto out;
@@ -319,22 +319,22 @@ static int tcp_init(cci_plugin_core_t *plugin,
 	if (!globals->configfile) {
 		int i;
 
-		for (i = 0; i < sglobals->ifa_count; i++) {
+		for (i = 0; i < tglobals->ifa_count; i++) {
 			struct cci_device *device;
-			tcp_dev_t *sdev;
+			tcp_dev_t *tdev;
 
 			dev = calloc(1, sizeof(*dev));
 			if (!dev) {
 				ret = CCI_ENOMEM;
 				goto out;
 			}
-			dev->priv = calloc(1, sizeof(*sdev));
+			dev->priv = calloc(1, sizeof(*tdev));
 			if (!dev->priv) {
 				ret = CCI_ENOMEM;
 				goto out;
 			}
-			sdev = dev->priv;
-			sdev->ifa = &sglobals->ifaddrs[i];
+			tdev = dev->priv;
+			tdev->ifa = &tglobals->ifaddrs[i];
 
 			cci__init_dev(dev);
 			dev->plugin = plugin;
@@ -342,8 +342,8 @@ static int tcp_init(cci_plugin_core_t *plugin,
 
 			device = &dev->device;
 			device->max_send_size = TCP_DEFAULT_MSS;
-			device->name = sdev->ifa->ifa_name;
-			device->up = sdev->ifa->ifa_flags & IFF_UP;
+			device->name = tdev->ifa->ifa_name;
+			device->up = tdev->ifa->ifa_flags & IFF_UP;
 
 			device->rate = 0;
 			device->pci.domain = -1;    /* per CCI spec */
@@ -351,16 +351,16 @@ static int tcp_init(cci_plugin_core_t *plugin,
 			device->pci.dev = -1;       /* per CCI spec */
 			device->pci.func = -1;      /* per CCI spec */
 
-			sdev = dev->priv;
-			//TAILQ_INIT(&sdev->queued);
-			//TAILQ_INIT(&sdev->pending);
-			//sdev->is_progressing = 0;
+			tdev = dev->priv;
+			//TAILQ_INIT(&tdev->queued);
+			//TAILQ_INIT(&tdev->pending);
+			//tdev->is_progressing = 0;
 
 			dev->driver = strdup("tcp");
 			cci__add_dev(dev);
 			devices[i] = device;
 		}
-		count = sglobals->ifa_count;
+		count = tglobals->ifa_count;
 
 	} else
 	/* find devices that we own */
@@ -368,7 +368,7 @@ static int tcp_init(cci_plugin_core_t *plugin,
 		if (0 == strcmp("tcp", dev->driver)) {
 			const char * const *arg;
 			struct cci_device *device;
-			tcp_dev_t *sdev;
+			tcp_dev_t *tdev;
 			in_addr_t dev_ip = 0;
 			uint32_t port = 0;
 
@@ -392,16 +392,16 @@ static int tcp_init(cci_plugin_core_t *plugin,
 			device->pci.dev = -1;	/* per CCI spec */
 			device->pci.func = -1;	/* per CCI spec */
 
-			dev->priv = calloc(1, sizeof(*sdev));
+			dev->priv = calloc(1, sizeof(*tdev));
 			if (!dev->priv) {
 				ret = CCI_ENOMEM;
 				goto out;
 			}
 
-			sdev = dev->priv;
-			//TAILQ_INIT(&sdev->queued);
-			//TAILQ_INIT(&sdev->pending);
-			//sdev->is_progressing = 0;
+			tdev = dev->priv;
+			//TAILQ_INIT(&tdev->queued);
+			//TAILQ_INIT(&tdev->pending);
+			//tdev->is_progressing = 0;
 
 			/* parse conf_argv */
 			for (arg = device->conf_argv; *arg != NULL; arg++) {
@@ -410,13 +410,13 @@ static int tcp_init(cci_plugin_core_t *plugin,
 					const char *ip = *arg + 3;
 
 					dev_ip = inet_addr(ip);	/* network order */
-					for (i = 0; i < sglobals->ifa_count; i++) {
-						struct ifaddrs *ifa = &sglobals->ifaddrs[i];
+					for (i = 0; i < tglobals->ifa_count; i++) {
+						struct ifaddrs *ifa = &tglobals->ifaddrs[i];
 						struct sockaddr_in *sin =
 							(struct sockaddr_in*) ifa->ifa_addr;
 
 						if (sin->sin_addr.s_addr == dev_ip) {
-							sdev->ifa = ifa;
+							tdev->ifa = ifa;
 						}
 					}
 				} else if (0 == strncmp("mtu=", *arg, 4)) {
@@ -433,14 +433,14 @@ static int tcp_init(cci_plugin_core_t *plugin,
 					int i;
 					const char *ifa_name = *arg + 10;
 
-					if (sdev->ifa)
+					if (tdev->ifa)
 						continue;
-					for (i = 0; i < sglobals->ifa_count; i++) {
-						struct ifaddrs *ifa = &sglobals->ifaddrs[i];
+					for (i = 0; i < tglobals->ifa_count; i++) {
+						struct ifaddrs *ifa = &tglobals->ifaddrs[i];
 
 						if (0 == strncmp(ifa_name, ifa->ifa_name,
 								strlen(ifa->ifa_name))) {
-							sdev->ifa = ifa;
+							tdev->ifa = ifa;
 						}
 					}
 				} else if (0 == strncmp("port=", *arg, 5)) {
@@ -448,15 +448,15 @@ static int tcp_init(cci_plugin_core_t *plugin,
 					port = strtol(port_str, NULL, 0);
 				}
 			}
-			if (sdev->ifa) {
+			if (tdev->ifa) {
 				if (port) {
 					struct sockaddr_in *sin =
-						(struct sockaddr_in*) sdev->ifa->ifa_addr;
+						(struct sockaddr_in*) tdev->ifa->ifa_addr;
 
 					sin->sin_port = htons(port);
 				}
 				TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
-				device->up = sdev->ifa->ifa_flags & IFF_UP;
+				device->up = tdev->ifa->ifa_flags & IFF_UP;
 				cci__add_dev(dev);
 				devices[count++] = device;
 			} else {
@@ -468,13 +468,13 @@ static int tcp_init(cci_plugin_core_t *plugin,
 		}
 	}
 
-	sglobals->count = count;
+	tglobals->count = count;
 
 	devices =
-	    realloc(devices, (sglobals->count + 1) * sizeof(cci_device_t *));
-	devices[sglobals->count] = NULL;
+	    realloc(devices, (tglobals->count + 1) * sizeof(cci_device_t *));
+	devices[tglobals->count] = NULL;
 
-	*((cci_device_t ***) & sglobals->devices) = devices;
+	*((cci_device_t ***) & tglobals->devices) = devices;
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -491,18 +491,18 @@ static int tcp_init(cci_plugin_core_t *plugin,
 		}
 		free(devices);
 	}
-	if (sglobals) {
+	if (tglobals) {
 		int i;
 
-		for (i = 0; i < sglobals->count; i++) {
-			struct ifaddrs *ifa = &sglobals->ifaddrs[i];
+		for (i = 0; i < tglobals->count; i++) {
+			struct ifaddrs *ifa = &tglobals->ifaddrs[i];
 			free(ifa->ifa_name);
 			free(ifa->ifa_netmask);
 			free(ifa->ifa_broadaddr);
 		}
-		free(sglobals->ifaddrs);
-		free((void *)sglobals);
-		sglobals = NULL;
+		free(tglobals->ifaddrs);
+		free((void *)tglobals);
+		tglobals = NULL;
 	}
 	CCI_EXIT;
 	return ret;
@@ -532,7 +532,7 @@ static int tcp_finalize(cci_plugin_core_t * plugin)
 
 	CCI_ENTER;
 
-	if (!sglobals) {
+	if (!tglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
@@ -544,70 +544,333 @@ static int tcp_finalize(cci_plugin_core_t * plugin)
 		if (!strcmp(dev->driver, "tcp"))
 			free(dev->priv);
 
-	for (i = 0; i < sglobals->ifa_count; i++) {
-		struct ifaddrs *ifa = &sglobals->ifaddrs[i];
+	for (i = 0; i < tglobals->ifa_count; i++) {
+		struct ifaddrs *ifa = &tglobals->ifaddrs[i];
 		free(ifa->ifa_name);
 		free(ifa->ifa_netmask);
 		free(ifa->ifa_broadaddr);
 	}
-	free(sglobals->ifaddrs);
-	free(sglobals->devices);
-	free((void *)sglobals);
-	sglobals = NULL;
+	free(tglobals->ifaddrs);
+	free(tglobals->devices);
+	free((void *)tglobals);
+	tglobals = NULL;
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
 }
 
 static inline int
-tcp_set_nonblocking(cci__ep_t *ep, cci__conn_t *conn)
+tcp_set_nonblocking(cci__ep_t *ep, cci_os_handle_t sock)
 {
 	int ret, flags;
-	tcp_ep_t *sep = ep->priv;
-	tcp_conn_t *sconn = conn->priv;
+	tcp_ep_t *tep = ep->priv;
 
-	flags = fcntl(sconn->sock, F_GETFL, 0);
+	flags = fcntl(sock, F_GETFL, 0);
 	if (-1 == flags)
 		flags = 0;
-	ret = fcntl(sconn->sock, F_SETFL, flags | O_NONBLOCK);
+	ret = fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 	if (-1 == ret)
 		return errno;
 	pthread_mutex_lock(&ep->lock);
-	FD_SET(sconn->sock, &sep->fds);
-	if (sconn->sock >= sep->nfds)
-		sep->nfds = sconn->sock + 1;
+	FD_SET(sock, &tep->fds);
+	if (sock >= tep->nfds)
+		tep->nfds = sock + 1;
 	pthread_mutex_unlock(&ep->lock);
 	return 0;
 }
 
 static inline void tcp_close_socket(cci__ep_t *ep, cci__conn_t *conn)
 {
-	tcp_ep_t *sep = ep->priv;
-	tcp_conn_t *sconn = conn->priv;
+	tcp_ep_t *tep = ep->priv;
+	tcp_conn_t *tconn = NULL;
+	cci_os_handle_t sock = 0;
+
+	if (conn) {
+		tconn = conn->priv;
+		sock = tconn->sock;
+	} else {
+		sock = tep->sock;
+	}
 
 	pthread_mutex_lock(&ep->lock);
-	FD_CLR(sconn->sock, &sep->fds);
-#if 1
-	/* TODO reverse walk tree to find highest fd */
-#else
-	if (sconn->sock == sep->nfds - 1) {
-		int i;
-		tcp_fd_idx_t *idx;
+	FD_CLR(sock, &tep->fds);
+
+	if (sock == tep->nfds - 1) {
+		int i, found = 0;
+
 		for (i = sock - 1; i >= 0; i--) {
-			idx = (tcp_fd_idx_t *) & sglobals->fd_idx[i];
-			if (idx->type != TCP_FD_UNUSED) {
-				sglobals->nfds = i + 1;
+			if (FD_ISSET(i, &tep->fds)) {
+				tep->nfds = i + 1;
 				found = 1;
 				break;
 			}
 		}
 		if (!found)
-			sglobals->nfds = 0;
+			tep->nfds = 0;
 	}
-#endif
 	pthread_mutex_unlock(&ep->lock);
-	close(sconn->sock);
+	close(sock);
 	return;
+}
+
+static int
+tcp__create_buffer_pool(uint32_t size, uint32_t count, tcp_buffer_pool_t **poolp)
+{
+	int ret = CCI_SUCCESS;
+	tcp_buffer_pool_t *pool = NULL;
+
+	pool = calloc(1, sizeof(*pool));
+	if (!pool) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	TAILQ_INIT(&pool->evts);
+	pool->buf = calloc(1, size);
+	if (!pool->buf) {
+		free(pool);
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	pool->size = size;
+	pool->repost = 1;
+	pool->count = count;
+	pool->avail = count;
+	*poolp = pool;
+out:
+	return ret;
+}
+
+static inline cci__evt_t *
+tcp__get_idle_evt_locked(tcp_buffer_pool_t *pool)
+{
+	cci__evt_t *evt = NULL;
+
+	if (unlikely(!pool->repost))
+		return NULL;
+
+	if (likely(!TAILQ_EMPTY(&pool->evts))) {
+		evt = TAILQ_FIRST(&pool->evts);
+		TAILQ_REMOVE(&pool->evts, evt, entry);
+		pool->avail--;
+	}
+	return evt;
+}
+
+static inline void
+tcp__put_idle_evt_locked(tcp_buffer_pool_t *pool, cci__evt_t *evt)
+{
+	TAILQ_INSERT_HEAD(&pool->evts, evt, entry);
+	pool->avail++;
+}
+
+static inline tcp_tx_t *
+tcp__get_tx_locked(cci__ep_t *ep)
+{
+	tcp_ep_t *tep = ep->priv;
+	tcp_buffer_pool_t *pool = NULL;
+	cci__evt_t *evt = NULL;
+	tcp_tx_t *tx = NULL;
+
+	pool = TAILQ_FIRST(&tep->tx_pools);
+	evt = tcp__get_idle_evt_locked(pool);
+	if (evt)
+		tx = container_of(evt, tcp_tx_t, evt);
+
+	return tx;
+}
+
+static inline tcp_tx_t *
+tcp__get_tx(cci__ep_t *ep)
+{
+	tcp_tx_t *tx = NULL;
+
+	pthread_mutex_lock(&ep->lock);
+	tx = tcp__get_tx_locked(ep);
+	pthread_mutex_unlock(&ep->lock);
+
+	return tx;
+}
+
+static inline void
+tcp__destroy_tx_pool(tcp_buffer_pool_t *pool)
+{
+	while (!TAILQ_EMPTY(&pool->evts)) {
+		tcp_tx_t *tx = NULL;
+		cci__evt_t *evt = TAILQ_FIRST(&pool->evts);
+		TAILQ_REMOVE(&pool->evts, evt, entry);
+		tx = container_of(evt, tcp_tx_t, evt);
+		free(tx);
+	}
+	free(pool->buf);
+	free(pool);
+	return;
+}
+
+static inline void
+tcp__put_tx(tcp_tx_t *tx)
+{
+	int destroy = 0;
+	cci__ep_t *ep = tx->evt.ep;
+	tcp_ep_t *tep = ep->priv;
+	tcp_buffer_pool_t *pool = tx->pool;
+
+	pthread_mutex_lock(&ep->lock);
+	tcp__put_idle_evt_locked(pool, &tx->evt);
+	if (unlikely(!pool->repost && (pool->count == pool->avail))) {
+		TAILQ_REMOVE(&tep->tx_pools, pool, entry);
+		destroy = 1;
+	}
+	pthread_mutex_unlock(&ep->lock);
+
+	if (unlikely(destroy))
+		tcp__destroy_tx_pool(pool);
+
+	return;
+}
+
+static inline tcp_rx_t *
+tcp__get_rx_locked(cci__ep_t *ep)
+{
+	tcp_ep_t *tep = ep->priv;
+	tcp_buffer_pool_t *pool = NULL;
+	cci__evt_t *evt = NULL;
+	tcp_rx_t *rx = NULL;
+
+	CCI_ENTER;
+
+	pool = TAILQ_FIRST(&tep->rx_pools);
+	evt = tcp__get_idle_evt_locked(pool);
+
+	if (evt)
+		rx = container_of(evt, tcp_rx_t, evt);
+
+	return rx;
+}
+
+static inline tcp_rx_t *
+tcp__get_rx(cci__ep_t *ep)
+{
+	tcp_rx_t *rx = NULL;
+
+	pthread_mutex_lock(&ep->lock);
+	rx = tcp__get_rx_locked(ep);
+	pthread_mutex_unlock(&ep->lock);
+
+	return rx;
+}
+
+static inline void
+tcp__destroy_rx_pool(tcp_buffer_pool_t *pool)
+{
+	while (!TAILQ_EMPTY(&pool->evts)) {
+		tcp_rx_t *rx = NULL;
+		cci__evt_t *evt = TAILQ_FIRST(&pool->evts);
+		TAILQ_REMOVE(&pool->evts, evt, entry);
+		rx = container_of(evt, tcp_rx_t, evt);
+		free(rx);
+	}
+	free(pool->buf);
+	free(pool);
+	return;
+}
+
+static inline void
+tcp__put_rx(tcp_rx_t *rx)
+{
+	int destroy = 0;
+	cci__ep_t *ep = rx->evt.ep;
+	tcp_ep_t *tep = ep->priv;
+	tcp_buffer_pool_t *pool = rx->pool;
+
+	pthread_mutex_lock(&ep->lock);
+	tcp__put_idle_evt_locked(pool, &rx->evt);
+	if (unlikely(!pool->repost && (pool->count == pool->avail))) {
+		destroy = 1;
+		TAILQ_REMOVE(&tep->rx_pools, pool, entry);
+	}
+	pthread_mutex_unlock(&ep->lock);
+	if (unlikely(destroy)) {
+		tcp__destroy_rx_pool(pool);
+	}
+
+	return;
+}
+
+static int
+tcp__create_tx_pool(cci__ep_t *ep)
+{
+	int ret = CCI_SUCCESS, i;
+	tcp_buffer_pool_t *pool = NULL;
+	tcp_ep_t *tep = ep->priv;
+
+	ret = tcp__create_buffer_pool(ep->tx_buf_cnt * ep->buffer_len,
+			ep->tx_buf_cnt, &pool);
+	if (ret)
+		goto out;
+
+	for (i = 0; i < ep->tx_buf_cnt; i++) {
+		tcp_tx_t *tx = calloc(1, sizeof(*tx));
+
+		if (!tx) {
+			ret = CCI_ENOMEM;
+			tcp__destroy_tx_pool(pool);
+			goto out;
+		}
+		tx->evt.event.type = CCI_EVENT_SEND;
+		tx->evt.ep = ep;
+		tx->ptr = pool->buf + (uintptr_t) (i * ep->buffer_len);
+		tx->len = ep->buffer_len;
+		tx->pool = pool;
+	}
+	pthread_mutex_lock(&ep->lock);
+	if (!TAILQ_EMPTY(&tep->tx_pools)) {
+		tcp_buffer_pool_t *old = TAILQ_FIRST(&tep->tx_pools);
+		old->repost = 0;
+	}
+	TAILQ_INSERT_HEAD(&tep->tx_pools, pool, entry);
+	pthread_mutex_unlock(&ep->lock);
+
+out:
+	return ret;
+}
+
+static int
+tcp__create_rx_pool(cci__ep_t *ep)
+{
+	int ret = CCI_SUCCESS, i;
+	tcp_buffer_pool_t *pool = NULL;
+	tcp_ep_t *tep = ep->priv;
+
+	ret = tcp__create_buffer_pool(ep->rx_buf_cnt * ep->buffer_len,
+			ep->rx_buf_cnt, &pool);
+	if (ret)
+		goto out;
+
+	for (i = 0; i < ep->rx_buf_cnt; i++) {
+		tcp_rx_t *rx = calloc(1, sizeof(*rx));
+
+		if (!rx) {
+			ret = CCI_ENOMEM;
+			tcp__destroy_rx_pool(pool);
+			goto out;
+		}
+		rx->evt.event.type = CCI_EVENT_SEND;
+		rx->evt.ep = ep;
+		rx->ptr = pool->buf + (uintptr_t) (i * ep->buffer_len);
+		rx->len = ep->buffer_len;
+		rx->pool = pool;
+	}
+	pthread_mutex_lock(&ep->lock);
+	if (!TAILQ_EMPTY(&tep->rx_pools)) {
+		tcp_buffer_pool_t *old = TAILQ_FIRST(&tep->rx_pools);
+		old->repost = 0;
+	}
+	TAILQ_INSERT_HEAD(&tep->rx_pools, pool, entry);
+	pthread_mutex_unlock(&ep->lock);
+
+out:
+	return ret;
 }
 
 static int tcp_create_endpoint(cci_device_t * device,
@@ -618,132 +881,79 @@ static int tcp_create_endpoint(cci_device_t * device,
 	int i, ret;
 	cci__dev_t *dev = NULL;
 	cci__ep_t *ep = NULL;
-	tcp_ep_t *sep = NULL;
+	tcp_ep_t *tep = NULL;
 	struct cci_endpoint *endpoint = (struct cci_endpoint *) *endpointp;
-	tcp_dev_t *sdev;
-	struct sockaddr_in sin;
-	socklen_t slen;
+	tcp_dev_t *tdev;
+	socklen_t slen = sizeof(struct sockaddr_in);
 	char name[40];
 
 	CCI_ENTER;
 
-	if (!sglobals) {
+	if (!tglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
 
 	dev = container_of(device, cci__dev_t, device);
-	if (0 != strcmp("sock", dev->driver)) {
+	if (0 != strcmp("tcp", dev->driver)) {
 		ret = CCI_EINVAL;
 		goto out;
 	}
 
 	ep = container_of(endpoint, cci__ep_t, endpoint);
-	ep->priv = calloc(1, sizeof(*sep));
+	ep->priv = calloc(1, sizeof(*tep));
 	if (!ep->priv) {
 		ret = CCI_ENOMEM;
 		goto out;
 	}
 
-	endpoint->max_recv_buffer_count = TCP_EP_RX_CNT;
 	ep->rx_buf_cnt = TCP_EP_RX_CNT;
 	ep->tx_buf_cnt = TCP_EP_TX_CNT;
-	ep->buffer_len = dev->device.max_send_size + TCP_MAX_HDRS;
+	ep->buffer_len = dev->device.max_send_size;
 	ep->tx_timeout = TCP_EP_TX_TIMEOUT_SEC * 1000000;
 
-	sep = ep->priv;
-	sep->ids = calloc(TCP_NUM_BLOCKS, sizeof(*sep->ids));
-	if (!sep->ids) {
-		ret = CCI_ENOMEM;
-		goto out;
-	}
-
-	sep->sock = socket(PF_INET, SOCK_STREAM, 0);
-	if (sep->sock == -1) {
+	tep = ep->priv;
+	tep->sock = socket(PF_INET, SOCK_STREAM, 0);
+	if (tep->sock == -1) {
 		ret = errno;
 		goto out;
 	}
 	/* bind socket to device */
-	sdev = dev->priv;
-	memset(&sin, 0, sizeof(sin));
-	sin.sin_family = AF_INET;
-	sin.sin_addr.s_addr = sdev->ip;
+	tdev = dev->priv;
+	memcpy(&tep->sin, &tdev->ifa->ifa_addr, slen);
 
-	ret = bind(sep->sock, (const struct sockaddr *)&sin, sizeof(sin));
+	ret = bind(tep->sock, (const struct sockaddr *)&tep->sin, slen);
 	if (ret) {
 		ret = errno;
 		goto out;
 	}
 
-	slen = sizeof(sep->sin);
-
-	ret = getsockname(sep->sock, (struct sockaddr *)&sep->sin, &slen);
+	ret = getsockname(tep->sock, (struct sockaddr *)&tep->sin, &slen);
 	if (ret) {
 		ret = errno;
 		goto out;
 	}
 
 	memset(name, 0, sizeof(name));
-	sprintf(name, "ip://");
-	tcp_sin_to_name(sep->sin, name + (uintptr_t) 5, sizeof(name) - 5);
-	endpoint->name = strdup(name);
+	sprintf(name, "tcp://");
+	tcp_sin_to_name(tep->sin, name + (uintptr_t) 6, sizeof(name) - 6);
+	ep->uri = strdup(name);
 
-	for (i = 0; i < TCP_EP_HASH_SIZE; i++) {
-		TAILQ_INIT(&sep->conn_hash[i]);
-		TAILQ_INIT(&sep->active_hash[i]);
-	}
+	TAILQ_INIT(&tep->active);
+	TAILQ_INIT(&tep->passive);
+	TAILQ_INIT(&tep->handles);
+	TAILQ_INIT(&tep->rma_ops);
+	TAILQ_INIT(&tep->ka_conns);
 
-	TAILQ_INIT(&sep->txs);
-	TAILQ_INIT(&sep->idle_txs);
-	TAILQ_INIT(&sep->rxs);
-	TAILQ_INIT(&sep->idle_rxs);
-	TAILQ_INIT(&sep->handles);
-	TAILQ_INIT(&sep->rma_ops);
-	TAILQ_INIT(&sep->ka_conns);
+	ret = tcp__create_tx_pool(ep);
+	if (ret)
+		goto out;
 
-	/* alloc txs */
-	for (i = 0; i < ep->tx_buf_cnt; i++) {
-		tcp_tx_t *tx;
+	ret = tcp__create_rx_pool(ep);
+	if (ret)
+		goto out;
 
-		tx = calloc(1, sizeof(*tx));
-		if (!tx) {
-			ret = CCI_ENOMEM;
-			goto out;
-		}
-		tx->evt.event.type = CCI_EVENT_SEND;
-		tx->evt.ep = ep;
-		tx->buffer = calloc(1, ep->buffer_len);
-		if (!tx->buffer) {
-			ret = CCI_ENOMEM;
-			goto out;
-		}
-		tx->len = 0;
-		TAILQ_INSERT_TAIL(&sep->txs, tx, tentry);
-		TAILQ_INSERT_TAIL(&sep->idle_txs, tx, dentry);
-	}
-
-	/* alloc rxs */
-	for (i = 0; i < ep->rx_buf_cnt; i++) {
-		tcp_rx_t *rx;
-
-		rx = calloc(1, sizeof(*rx));
-		if (!rx) {
-			ret = CCI_ENOMEM;
-			goto out;
-		}
-		rx->evt.event.type = CCI_EVENT_RECV;
-		rx->evt.ep = ep;
-		rx->buffer = calloc(1, ep->buffer_len);
-		if (!rx->buffer) {
-			ret = CCI_ENOMEM;
-			goto out;
-		}
-		rx->len = 0;
-		TAILQ_INSERT_TAIL(&sep->rxs, rx, gentry);
-		TAILQ_INSERT_TAIL(&sep->idle_rxs, rx, entry);
-	}
-
-	ret = tcp_set_nonblocking(sep->sock, TCP_FD_EP, ep);
+	ret = tcp_set_nonblocking(ep, tep->sock);
 	if (ret)
 		goto out;
 
@@ -756,30 +966,25 @@ static int tcp_create_endpoint(cci_device_t * device,
 		TAILQ_REMOVE(&dev->eps, ep, entry);
 	}
 	pthread_mutex_unlock(&dev->lock);
-	if (sep) {
-		while (!TAILQ_EMPTY(&sep->txs)) {
-			tcp_tx_t *tx;
-
-			tx = TAILQ_FIRST(&sep->txs);
-			TAILQ_REMOVE(&sep->txs, tx, tentry);
-			if (tx->buffer)
-				free(tx->buffer);
-			free(tx);
+	if (tep) {
+		while (!TAILQ_EMPTY(&tep->tx_pools)) {
+			tcp_buffer_pool_t *pool = TAILQ_FIRST(&tep->tx_pool);
+			TAILQ_REMOVE(&tep->tx_pools, pool, entry);
+			tcp__destroy_tx_pool(pool);
 		}
-		while (!TAILQ_EMPTY(&sep->rxs)) {
+
+		while (!TAILQ_EMPTY(&tep->rxs)) {
 			tcp_rx_t *rx;
 
-			rx = TAILQ_FIRST(&sep->rxs);
-			TAILQ_REMOVE(&sep->rxs, rx, gentry);
+			rx = TAILQ_FIRST(&tep->rxs);
+			TAILQ_REMOVE(&tep->rxs, rx, gentry);
 			if (rx->buffer)
 				free(rx->buffer);
 			free(rx);
 		}
-		if (sep->ids)
-			free(sep->ids);
-		if (sep->sock)
-			tcp_close_socket(sep->sock);
-		free(sep);
+		if (tep->sock)
+			tcp_close_socket(tep->sock);
+		free(tep);
 	}
 	if (ep)
 		free(ep);
@@ -792,90 +997,90 @@ static int tcp_destroy_endpoint(cci_endpoint_t * endpoint)
 {
 	cci__ep_t *ep = NULL;
 	cci__dev_t *dev = NULL;
-	tcp_ep_t *sep = NULL;
-	tcp_dev_t *sdev = NULL;
+	tcp_ep_t *tep = NULL;
+	tcp_dev_t *tdev = NULL;
 
 	CCI_ENTER;
 
-	if (!sglobals) {
+	if (!tglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
 
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 	dev = ep->dev;
-	sep = ep->priv;
-	sdev = dev->priv;
+	tep = ep->priv;
+	tdev = dev->priv;
 
 	pthread_mutex_lock(&dev->lock);
 	pthread_mutex_lock(&ep->lock);
 
 	ep->priv = NULL;
 
-	if (sep) {
+	if (tep) {
 		int i;
 		cci__conn_t *conn;
-		tcp_conn_t *sconn;
+		tcp_conn_t *tconn;
 
-		sep->closing = 1;
+		tep->closing = 1;
 
-		if (sep->sock)
-			tcp_close_socket(sep->sock);
+		if (tep->sock)
+			tcp_close_socket(tep->sock);
 
 		for (i = 0; i < TCP_EP_HASH_SIZE; i++) {
-			while (!TAILQ_EMPTY(&sep->conn_hash[i])) {
-				sconn = TAILQ_FIRST(&sep->conn_hash[i]);
-				TAILQ_REMOVE(&sep->conn_hash[i], sconn, entry);
-				conn = sconn->conn;
+			while (!TAILQ_EMPTY(&tep->conn_hash[i])) {
+				tconn = TAILQ_FIRST(&tep->conn_hash[i]);
+				TAILQ_REMOVE(&tep->conn_hash[i], tconn, entry);
+				conn = tconn->conn;
 
 				free(conn);
-				free(sconn);
+				free(tconn);
 			}
-			while (!TAILQ_EMPTY(&sep->active_hash[i])) {
-				sconn = TAILQ_FIRST(&sep->active_hash[i]);
-				TAILQ_REMOVE(&sep->active_hash[i], sconn,
+			while (!TAILQ_EMPTY(&tep->active_hash[i])) {
+				tconn = TAILQ_FIRST(&tep->active_hash[i]);
+				TAILQ_REMOVE(&tep->active_hash[i], tconn,
 					     entry);
-				conn = sconn->conn;
+				conn = tconn->conn;
 
 				free(conn);
-				free(sconn);
+				free(tconn);
 			}
 		}
-		while (!TAILQ_EMPTY(&sep->txs)) {
+		while (!TAILQ_EMPTY(&tep->txs)) {
 			tcp_tx_t *tx;
 
-			tx = TAILQ_FIRST(&sep->txs);
-			TAILQ_REMOVE(&sep->txs, tx, tentry);
+			tx = TAILQ_FIRST(&tep->txs);
+			TAILQ_REMOVE(&tep->txs, tx, entry);
 			if (tx->state == TCP_TX_QUEUED)
-				TAILQ_REMOVE(&sdev->queued, tx, dentry);
+				TAILQ_REMOVE(&tdev->queued, tx, dentry);
 			else if (tx->state == TCP_TX_PENDING)
-				TAILQ_REMOVE(&sdev->pending, tx, dentry);
+				TAILQ_REMOVE(&tdev->pending, tx, dentry);
 			if (tx->buffer)
 				free(tx->buffer);
 			free(tx);
 		}
-		while (!TAILQ_EMPTY(&sep->rxs)) {
+		while (!TAILQ_EMPTY(&tep->rxs)) {
 			tcp_rx_t *rx;
 
-			rx = TAILQ_FIRST(&sep->rxs);
-			TAILQ_REMOVE(&sep->rxs, rx, gentry);
+			rx = TAILQ_FIRST(&tep->rxs);
+			TAILQ_REMOVE(&tep->rxs, rx, gentry);
 			if (rx->buffer)
 				free(rx->buffer);
 			free(rx);
 		}
-		while (!TAILQ_EMPTY(&sep->rma_ops)) {
-			tcp_rma_op_t *rma_op = TAILQ_FIRST(&sep->rma_ops);
-			TAILQ_REMOVE(&sep->rma_ops, rma_op, entry);
+		while (!TAILQ_EMPTY(&tep->rma_ops)) {
+			tcp_rma_op_t *rma_op = TAILQ_FIRST(&tep->rma_ops);
+			TAILQ_REMOVE(&tep->rma_ops, rma_op, entry);
 			free(rma_op);
 		}
-		while (!TAILQ_EMPTY(&sep->handles)) {
-			tcp_rma_handle_t *handle = TAILQ_FIRST(&sep->handles);
-			TAILQ_REMOVE(&sep->handles, handle, entry);
+		while (!TAILQ_EMPTY(&tep->handles)) {
+			tcp_rma_handle_t *handle = TAILQ_FIRST(&tep->handles);
+			TAILQ_REMOVE(&tep->handles, handle, entry);
 			free(handle);
 		}
-		if (sep->ids)
-			free(sep->ids);
-		free(sep);
+		if (tep->ids)
+			free(tep->ids);
+		free(tep);
 		ep->priv = NULL;
 	}
 	if (endpoint->name)
@@ -952,9 +1157,9 @@ static int tcp_accept(cci_event_t *event, const void *context)
 	cci__conn_t *conn = NULL;
 	cci__evt_t *evt = NULL;
 	cci__dev_t *dev = NULL;
-	tcp_ep_t *sep = NULL;
-	tcp_conn_t *sconn = NULL;
-	tcp_dev_t *sdev = NULL;
+	tcp_ep_t *tep = NULL;
+	tcp_conn_t *tconn = NULL;
+	tcp_dev_t *tdev = NULL;
 	tcp_header_r_t *hdr_r = NULL;
 	tcp_msg_type_t type;
 	tcp_tx_t *tx = NULL;
@@ -964,7 +1169,7 @@ static int tcp_accept(cci_event_t *event, const void *context)
 
 	CCI_ENTER;
 
-	if (!sglobals) {
+	if (!tglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
@@ -973,9 +1178,9 @@ static int tcp_accept(cci_event_t *event, const void *context)
 	rx = container_of(evt, tcp_rx_t, evt);
 	ep = evt->ep;
 	endpoint = &ep->endpoint;
-	sep = ep->priv;
+	tep = ep->priv;
 	dev = ep->dev;
-	sdev = dev->priv;
+	tdev = dev->priv;
 
 	conn = calloc(1, sizeof(*conn));
 	if (!conn) {
@@ -985,7 +1190,7 @@ static int tcp_accept(cci_event_t *event, const void *context)
 	conn->plugin = ep->plugin;
 
 	conn->tx_timeout = ep->tx_timeout;
-	conn->priv = calloc(1, sizeof(*sconn));
+	conn->priv = calloc(1, sizeof(*tconn));
 	if (!conn->priv) {
 		free(conn);
 		CCI_EXIT;
@@ -994,9 +1199,9 @@ static int tcp_accept(cci_event_t *event, const void *context)
 
 	/* get a tx */
 	pthread_mutex_lock(&ep->lock);
-	if (!TAILQ_EMPTY(&sep->idle_txs)) {
-		tx = TAILQ_FIRST(&sep->idle_txs);
-		TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
+	if (!TAILQ_EMPTY(&tep->idle_txs)) {
+		tx = TAILQ_FIRST(&tep->idle_txs);
+		TAILQ_REMOVE(&tep->idle_txs, tx, dentry);
 	}
 	pthread_mutex_unlock(&ep->lock);
 
@@ -1029,31 +1234,31 @@ static int tcp_accept(cci_event_t *event, const void *context)
 	if (mss < conn->connection.max_send_size)
 		conn->connection.max_send_size = mss;
 
-	sconn = conn->priv;
-	TAILQ_INIT(&sconn->tx_seqs);
-	TAILQ_INIT(&sconn->acks);
-	TAILQ_INIT(&sconn->rmas);
-	sconn->conn = conn;
-	sconn->cwnd = TCP_INITIAL_CWND;
-	sconn->status = TCP_CONN_READY;	/* set ready since the app thinks it is */
-	*((struct sockaddr_in *)&sconn->sin) = rx->sin;
-	sconn->peer_id = id;
-	tcp_get_id(sep, &sconn->id);
-	sconn->seq = tcp_get_new_seq();	/* even for UU since this reply is reliable */
-	sconn->seq_pending = sconn->seq - 1;
+	tconn = conn->priv;
+	TAILQ_INIT(&tconn->tx_seqs);
+	TAILQ_INIT(&tconn->acks);
+	TAILQ_INIT(&tconn->rmas);
+	tconn->conn = conn;
+	tconn->cwnd = TCP_INITIAL_CWND;
+	tconn->status = TCP_CONN_READY;	/* set ready since the app thinks it is */
+	*((struct sockaddr_in *)&tconn->sin) = rx->sin;
+	tconn->peer_id = id;
+	tcp_get_id(tep, &tconn->id);
+	tconn->seq = tcp_get_new_seq();	/* even for UU since this reply is reliable */
+	tconn->seq_pending = tconn->seq - 1;
 	if (cci_conn_is_reliable(conn)) {
-		sconn->max_tx_cnt = max_recv_buffer_count < ep->tx_buf_cnt ?
+		tconn->max_tx_cnt = max_recv_buffer_count < ep->tx_buf_cnt ?
 		    max_recv_buffer_count : ep->tx_buf_cnt;
-		sconn->last_ack_seq = sconn->seq;
-		sconn->last_ack_ts = tcp_get_usecs();
-		sconn->ssthresh = sconn->max_tx_cnt;
+		tconn->last_ack_seq = tconn->seq;
+		tconn->last_ack_ts = tcp_get_usecs();
+		tconn->ssthresh = tconn->max_tx_cnt;
 	}
 
 	/* insert in sock ep's list of conns */
 
-	i = tcp_ip_hash(sconn->sin.sin_addr.s_addr, sconn->sin.sin_port);
+	i = tcp_ip_hash(tconn->sin.sin_addr.s_addr, tconn->sin.sin_port);
 	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_TAIL(&sep->conn_hash[i], sconn, entry);
+	TAILQ_INSERT_TAIL(&tep->conn_hash[i], tconn, entry);
 	pthread_mutex_unlock(&ep->lock);
 
 	debug(CCI_DB_CONN, "accepting conn with hash %d", i);
@@ -1077,24 +1282,24 @@ static int tcp_accept(cci_event_t *event, const void *context)
 
 	hdr_r = (tcp_header_r_t *) tx->buffer;
 	tcp_pack_conn_reply(&hdr_r->header, CCI_SUCCESS /* FIXME */ ,
-			     sconn->peer_id);
-	tcp_pack_seq_ts(&hdr_r->seq_ts, sconn->seq,
-			 (uint32_t) sconn->last_ack_ts);
+			     tconn->peer_id);
+	tcp_pack_seq_ts(&hdr_r->seq_ts, tconn->seq,
+			 (uint32_t) tconn->last_ack_ts);
 	hs = (tcp_handshake_t *) (tx->buffer + sizeof(*hdr_r));
-	tcp_pack_handshake(hs, sconn->id, peer_seq,
+	tcp_pack_handshake(hs, tconn->id, peer_seq,
 			    ep->endpoint.max_recv_buffer_count,
 			    conn->connection.max_send_size, 0);
 
 	tx->len = sizeof(*hdr_r) + sizeof(*hs);
-	tx->seq = sconn->seq;
+	tx->seq = tconn->seq;
 
-	debug(CCI_DB_CONN, "queuing conn_reply with seq %u ts %x", sconn->seq, sconn->ts);	// FIXME
+	debug(CCI_DB_CONN, "queuing conn_reply with seq %u ts %x", tconn->seq, tconn->ts);	// FIXME
 
 	/* insert at tail of device's queued list */
 
 	tx->state = TCP_TX_QUEUED;
 	pthread_mutex_lock(&dev->lock);
-	TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
+	TAILQ_INSERT_TAIL(&tdev->queued, tx, dentry);
 	pthread_mutex_unlock(&dev->lock);
 
 	/* try to progress txs */
@@ -1122,8 +1327,8 @@ static int tcp_reject(cci_event_t *event)
 	cci__evt_t *evt = NULL;
 	cci__dev_t *dev = NULL;
 	cci__ep_t *ep = NULL;
-	tcp_ep_t *sep = NULL;
-	tcp_dev_t *sdev = NULL;
+	tcp_ep_t *tep = NULL;
+	tcp_dev_t *tdev = NULL;
 	tcp_header_r_t *hdr_r = NULL;
 	tcp_msg_type_t type;
 	char name[32];
@@ -1132,7 +1337,7 @@ static int tcp_reject(cci_event_t *event)
 
 	CCI_ENTER;
 
-	if (!sglobals) {
+	if (!tglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
@@ -1143,14 +1348,14 @@ static int tcp_reject(cci_event_t *event)
 
 	evt = container_of(event, cci__evt_t, event);
 	ep = evt->ep;
-	sep = ep->priv;
+	tep = ep->priv;
 	rx = container_of(evt, tcp_rx_t, evt);
 
 	/* get a tx */
 	pthread_mutex_lock(&ep->lock);
-	if (!TAILQ_EMPTY(&sep->idle_txs)) {
-		tx = TAILQ_FIRST(&sep->idle_txs);
-		TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
+	if (!TAILQ_EMPTY(&tep->idle_txs)) {
+		tx = TAILQ_FIRST(&tep->idle_txs);
+		TAILQ_REMOVE(&tep->idle_txs, tx, dentry);
 	}
 	pthread_mutex_unlock(&ep->lock);
 
@@ -1184,11 +1389,11 @@ static int tcp_reject(cci_event_t *event)
 	/* insert at tail of device's queued list */
 
 	dev = ep->dev;
-	sdev = dev->priv;
+	tdev = dev->priv;
 
 	tx->state = TCP_TX_QUEUED;
 	pthread_mutex_lock(&dev->lock);
-	TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
+	TAILQ_INSERT_TAIL(&tdev->queued, tx, dentry);
 	pthread_mutex_unlock(&dev->lock);
 
 	/* try to progress txs */
@@ -1198,7 +1403,7 @@ static int tcp_reject(cci_event_t *event)
 	memset(name, 0, sizeof(name));
 	tcp_sin_to_name(rx->sin, name, sizeof(name));
 	debug((CCI_DB_MSG | CCI_DB_CONN), "ep %d sending reject to %s",
-	      sep->sock, name);
+	      tep->sock, name);
 
       out:
 	CCI_EXIT;
@@ -1253,57 +1458,57 @@ static int tcp_getaddrinfo(const char *uri, in_addr_t * in, uint16_t * port)
 	return CCI_SUCCESS;
 }
 
-static tcp_conn_t *tcp_find_open_conn(tcp_ep_t * sep, in_addr_t ip,
+static tcp_conn_t *tcp_find_open_conn(tcp_ep_t * tep, in_addr_t ip,
 					uint16_t port, uint32_t id)
 {
 	uint8_t i;
 	struct s_conns *conn_list;
-	tcp_conn_t *sconn = NULL, *sc;
+	tcp_conn_t *tconn = NULL, *sc;
 
 	CCI_ENTER;
 
 	i = tcp_ip_hash(ip, port);
-	conn_list = &sep->conn_hash[i];
+	conn_list = &tep->conn_hash[i];
 	TAILQ_FOREACH(sc, conn_list, entry) {
 		if (sc->sin.sin_addr.s_addr == ip &&
 		    sc->sin.sin_port == port && sc->id == id) {
-			sconn = sc;
+			tconn = sc;
 			break;
 		}
 	}
 
 	CCI_EXIT;
-	return sconn;
+	return tconn;
 }
 
-static tcp_conn_t *tcp_find_active_conn(tcp_ep_t * sep, in_addr_t ip,
+static tcp_conn_t *tcp_find_active_conn(tcp_ep_t * tep, in_addr_t ip,
 					  uint32_t id)
 {
 	uint8_t i;
 	struct s_active *active_list;
-	tcp_conn_t *sconn = NULL, *sc;
+	tcp_conn_t *tconn = NULL, *sc;
 
 	CCI_ENTER;
 	i = tcp_ip_hash(ip, 0);
-	active_list = &sep->active_hash[i];
+	active_list = &tep->active_hash[i];
 	TAILQ_FOREACH(sc, active_list, entry) {
 		if (sc->sin.sin_addr.s_addr == ip && sc->id == id) {
-			sconn = sc;
+			tconn = sc;
 			break;
 		}
 	}
 	CCI_EXIT;
-	return sconn;
+	return tconn;
 }
 
-static tcp_conn_t *tcp_find_conn(tcp_ep_t * sep, in_addr_t ip, uint16_t port,
+static tcp_conn_t *tcp_find_conn(tcp_ep_t * tep, in_addr_t ip, uint16_t port,
 				   uint32_t id, tcp_msg_type_t type)
 {
 	switch (type) {
 	case TCP_MSG_CONN_REPLY:
-		return tcp_find_active_conn(sep, ip, id);
+		return tcp_find_active_conn(tep, ip, id);
 	default:
-		return tcp_find_open_conn(sep, ip, port, id);
+		return tcp_find_open_conn(tep, ip, port, id);
 	}
 }
 
@@ -1317,9 +1522,9 @@ static int tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	cci__ep_t *ep = NULL;
 	cci__dev_t *dev = NULL;
 	cci__conn_t *conn = NULL;
-	tcp_ep_t *sep = NULL;
-	tcp_dev_t *sdev = NULL;
-	tcp_conn_t *sconn = NULL;
+	tcp_ep_t *tep = NULL;
+	tcp_dev_t *tdev = NULL;
+	tcp_conn_t *tconn = NULL;
 	tcp_tx_t *tx = NULL;
 	tcp_header_r_t *hdr_r = NULL;
 	cci__evt_t *evt = NULL;
@@ -1335,7 +1540,7 @@ static int tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 
 	CCI_ENTER;
 
-	if (!sglobals) {
+	if (!tglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
@@ -1347,16 +1552,16 @@ static int tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		return CCI_ENOMEM;
 	}
 
-	conn->priv = calloc(1, sizeof(*sconn));
+	conn->priv = calloc(1, sizeof(*tconn));
 	if (!conn->priv) {
 		ret = CCI_ENOMEM;
 		goto out;
 	}
-	sconn = conn->priv;
-	sconn->conn = conn;
-	TAILQ_INIT(&sconn->tx_seqs);
-	TAILQ_INIT(&sconn->acks);
-	TAILQ_INIT(&sconn->rmas);
+	tconn = conn->priv;
+	tconn->conn = conn;
+	TAILQ_INIT(&tconn->tx_seqs);
+	TAILQ_INIT(&tconn->acks);
+	TAILQ_INIT(&tconn->rmas);
 
 	/* conn->tx_timeout = 0  by default */
 
@@ -1367,9 +1572,9 @@ static int tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 
 	/* set up sock specific info */
 
-	sconn->status = TCP_CONN_ACTIVE;
-	sconn->cwnd = TCP_INITIAL_CWND;
-	sin = (struct sockaddr_in *)&sconn->sin;
+	tconn->status = TCP_CONN_ACTIVE;
+	tconn->cwnd = TCP_INITIAL_CWND;
+	sin = (struct sockaddr_in *)&tconn->sin;
 	memset(sin, 0, sizeof(*sin));
 	sin->sin_family = AF_INET;
 
@@ -1383,9 +1588,9 @@ static int tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 
 	/* get our endpoint and device */
 	ep = container_of(endpoint, cci__ep_t, endpoint);
-	sep = ep->priv;
+	tep = ep->priv;
 	dev = ep->dev;
-	sdev = dev->priv;
+	tdev = dev->priv;
 
 	connection->max_send_size = dev->device.max_send_size;
 	conn->plugin = ep->plugin;
@@ -1399,16 +1604,16 @@ static int tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	}
 
 	i = tcp_ip_hash(ip, 0);
-	active_list = &sep->active_hash[i];
+	active_list = &tep->active_hash[i];
 	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_TAIL(active_list, sconn, entry);
+	TAILQ_INSERT_TAIL(active_list, tconn, entry);
 	pthread_mutex_unlock(&ep->lock);
 
 	/* get a tx */
 	pthread_mutex_lock(&ep->lock);
-	if (!TAILQ_EMPTY(&sep->idle_txs)) {
-		tx = TAILQ_FIRST(&sep->idle_txs);
-		TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
+	if (!TAILQ_EMPTY(&tep->idle_txs)) {
+		tx = TAILQ_FIRST(&tep->idle_txs);
+		TAILQ_REMOVE(&tep->idle_txs, tx, dentry);
 	}
 	pthread_mutex_unlock(&ep->lock);
 
@@ -1432,27 +1637,27 @@ static int tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	/* pack the msg */
 
 	hdr_r = (tcp_header_r_t *) tx->buffer;
-	tcp_get_id(sep, &sconn->id);
+	tcp_get_id(tep, &tconn->id);
 	/* FIXME silence -Wall -Werror until it is used */
 	if (0)
-		tcp_put_id(sep, 0);
+		tcp_put_id(tep, 0);
 	tcp_pack_conn_request(&hdr_r->header, attribute,
 			       (uint16_t) data_len, 0);
 	tx->len = sizeof(*hdr_r);
 
 	/* add seq and ack */
 
-	sconn->seq = tcp_get_new_seq();
-	sconn->seq_pending = sconn->seq - 1;
-	sconn->last_ack_seq = sconn->seq;
-	tx->seq = sconn->seq;
+	tconn->seq = tcp_get_new_seq();
+	tconn->seq_pending = tconn->seq - 1;
+	tconn->last_ack_seq = tconn->seq;
+	tx->seq = tconn->seq;
 	tcp_pack_seq_ts(&hdr_r->seq_ts, tx->seq, ts);
 
 	/* add handshake */
 	hs = (tcp_handshake_t *) & hdr_r->data;
 	if (keepalive != 0UL)
 		conn->keepalive_timeout = keepalive;
-	tcp_pack_handshake(hs, sconn->id, 0,
+	tcp_pack_handshake(hs, tconn->id, 0,
 			    endpoint->max_recv_buffer_count,
 			    connection->max_send_size, keepalive);
 
@@ -1478,7 +1683,7 @@ static int tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 
 	tx->state = TCP_TX_QUEUED;
 	pthread_mutex_lock(&dev->lock);
-	TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
+	TAILQ_INSERT_TAIL(&tdev->queued, tx, dentry);
 	pthread_mutex_unlock(&dev->lock);
 
 	/* try to progress txs */
@@ -1505,12 +1710,12 @@ static int tcp_disconnect(cci_connection_t * connection)
 	int i = 0;
 	cci__conn_t *conn = NULL;
 	cci__ep_t *ep = NULL;
-	tcp_conn_t *sconn = NULL;
-	tcp_ep_t *sep = NULL;
+	tcp_conn_t *tconn = NULL;
+	tcp_ep_t *tep = NULL;
 
 	CCI_ENTER;
 
-	if (!sglobals) {
+	if (!tglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
@@ -1524,24 +1729,24 @@ static int tcp_disconnect(cci_connection_t * connection)
 	 */
 
 	conn = container_of(connection, cci__conn_t, connection);
-	sconn = conn->priv;
+	tconn = conn->priv;
 	ep = container_of(connection->endpoint, cci__ep_t, endpoint);
-	sep = ep->priv;
+	tep = ep->priv;
 
 	if (conn->keepalive_timeout != 0UL && cci_conn_is_reliable(conn)) {
 		/* Remove the connection is the list of connections using keepalive */
-		TAILQ_REMOVE(&sglobals->ka_conns, sconn, entry);
+		TAILQ_REMOVE(&tglobals->ka_conns, tconn, entry);
 	}
 
 	if (conn->uri)
 		free((char *)conn->uri);
 
-	i = tcp_ip_hash(sconn->sin.sin_addr.s_addr, sconn->sin.sin_port);
+	i = tcp_ip_hash(tconn->sin.sin_addr.s_addr, tconn->sin.sin_port);
 	pthread_mutex_lock(&ep->lock);
-	TAILQ_REMOVE(&sep->conn_hash[i], sconn, entry);
+	TAILQ_REMOVE(&tep->conn_hash[i], tconn, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-	free(sconn);
+	free(tconn);
 	free(conn);
 
 	CCI_EXIT;
@@ -1558,7 +1763,7 @@ static int tcp_set_opt(cci_opt_handle_t * handle,
 
 	CCI_ENTER;
 
-	if (!sglobals) {
+	if (!tglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
@@ -1605,7 +1810,7 @@ static int tcp_get_opt(cci_opt_handle_t * handle,
 {
 	CCI_ENTER;
 
-	if (!sglobals) {
+	if (!tglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
@@ -1619,7 +1824,7 @@ static int tcp_arm_os_handle(cci_endpoint_t * endpoint, int flags)
 {
 	CCI_ENTER;
 
-	if (!sglobals) {
+	if (!tglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
@@ -1637,7 +1842,7 @@ static int tcp_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
 
 	CCI_ENTER;
 
-	if (!sglobals) {
+	if (!tglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
@@ -1686,14 +1891,14 @@ static int tcp_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
 static int tcp_return_event(cci_event_t * event)
 {
 	cci__ep_t *ep;
-	tcp_ep_t *sep;
+	tcp_ep_t *tep;
 	cci__evt_t *evt;
 	tcp_tx_t *tx;
 	tcp_rx_t *rx;
 
 	CCI_ENTER;
 
-	if (!sglobals) {
+	if (!tglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
@@ -1701,7 +1906,7 @@ static int tcp_return_event(cci_event_t * event)
 	evt = container_of(event, cci__evt_t, event);
 
 	ep = evt->ep;
-	sep = ep->priv;
+	tep = ep->priv;
 
 	/* enqueue the event */
 
@@ -1710,14 +1915,14 @@ static int tcp_return_event(cci_event_t * event)
 		tx = container_of(evt, tcp_tx_t, evt);
 		pthread_mutex_lock(&ep->lock);
 		/* insert at head to keep it in cache */
-		TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
+		TAILQ_INSERT_HEAD(&tep->idle_txs, tx, dentry);
 		pthread_mutex_unlock(&ep->lock);
 		break;
 	case CCI_EVENT_RECV:
 		rx = container_of(evt, tcp_rx_t, evt);
 		pthread_mutex_lock(&ep->lock);
 		/* insert at head to keep it in cache */
-		TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
+		TAILQ_INSERT_HEAD(&tep->idle_rxs, rx, entry);
 		pthread_mutex_unlock(&ep->lock);
 		break;
 	default:
@@ -1786,14 +1991,14 @@ static void tcp_progress_pending(cci__dev_t * dev)
 	union cci_event *event;	/* generic CCI event */
 	cci_connection_t *connection;	/* generic CCI connection */
 	cci__conn_t *conn;
-	tcp_conn_t *sconn;
+	tcp_conn_t *tconn;
 	cci__ep_t *ep;
-	tcp_ep_t *sep;
-	tcp_dev_t *sdev = dev->priv;
+	tcp_ep_t *tep;
+	tcp_dev_t *tdev = dev->priv;
 
 	CCI_ENTER;
 
-	if (!sdev)
+	if (!tdev)
 		return;
 
 	TAILQ_HEAD(s_idle_txs, tcp_tx) idle_txs =
@@ -1809,16 +2014,16 @@ static void tcp_progress_pending(cci__dev_t * dev)
 	 */
 
 	pthread_mutex_lock(&dev->lock);
-	TAILQ_FOREACH_SAFE(tx, &sdev->pending, dentry, tmp) {
+	TAILQ_FOREACH_SAFE(tx, &tdev->pending, dentry, tmp) {
 
 		evt = &(tx->evt);
 		conn = evt->conn;
 		connection = &conn->connection;
-		sconn = conn->priv;
+		tconn = conn->priv;
 		event = &evt->event;
 
 		ep = container_of(connection->endpoint, cci__ep_t, endpoint);
-		sep = ep->priv;
+		tep = ep->priv;
 
 		assert(tx->last_attempt_us != 0ULL);
 
@@ -1826,12 +2031,12 @@ static void tcp_progress_pending(cci__dev_t * dev)
 		if (TCP_U64_LT(tx->timeout_us, now)) {
 			/* dequeue */
 
-			TAILQ_REMOVE(&sdev->pending, tx, dentry);
+			TAILQ_REMOVE(&tdev->pending, tx, dentry);
 
 			/* set status and add to completed events */
 
 			if (tx->msg_type == TCP_MSG_SEND)
-				sconn->pending--;
+				tconn->pending--;
 
 			switch (tx->msg_type) {
 			case TCP_MSG_SEND:
@@ -1845,7 +2050,7 @@ static void tcp_progress_pending(cci__dev_t * dev)
 					    CCI_CONN_ATTR_RO) {
 						tcp_tx_t *my_temp_tx;
 						TAILQ_FOREACH_SAFE(my_temp_tx,
-								   &sdev->
+								   &tdev->
 								   pending,
 								   dentry,
 								   tmp) {
@@ -1872,16 +2077,16 @@ static void tcp_progress_pending(cci__dev_t * dev)
 					event->connect.connection = NULL;
 					if (conn->uri)
 						free((char *)conn->uri);
-					sconn->status = TCP_CONN_CLOSING;
-					i = tcp_ip_hash(sconn->sin.
+					tconn->status = TCP_CONN_CLOSING;
+					i = tcp_ip_hash(tconn->sin.
 							 sin_addr.s_addr, 0);
-					active_list = &sep->active_hash[i];
+					active_list = &tep->active_hash[i];
 					pthread_mutex_lock(&ep->lock);
-					TAILQ_REMOVE(active_list, sconn, entry);
+					TAILQ_REMOVE(active_list, tconn, entry);
 					pthread_mutex_unlock(&ep->lock);
-					free(sconn);
+					free(tconn);
 					free(conn);
-					sconn = NULL;
+					tconn = NULL;
 					conn = NULL;
 					tx->evt.ep = ep;
 					tx->evt.conn = NULL;
@@ -1923,13 +2128,13 @@ static void tcp_progress_pending(cci__dev_t * dev)
 		if (tx->send_count == 1 && tx->msg_type == TCP_MSG_SEND && 0) {
 			debug(CCI_DB_INFO, "%s: reducing cwnd from %d to %d"
 			      "    reducing ssthresh from %d to %d",
-			      __func__, sconn->cwnd, 2, sconn->ssthresh,
-			      sconn->pending / 2 + 1);
+			      __func__, tconn->cwnd, 2, tconn->ssthresh,
+			      tconn->pending / 2 + 1);
 			/* reduce the slow start threshhold */
-			sconn->ssthresh = (sconn->pending / 2) + 1;
-			if (sconn->ssthresh < 2)
-				sconn->ssthresh = 2;
-			sconn->cwnd = 2;
+			tconn->ssthresh = (tconn->pending / 2) + 1;
+			if (tconn->ssthresh < 2)
+				tconn->ssthresh = 2;
+			tconn->cwnd = 2;
 		}
 #endif
 
@@ -1938,7 +2143,7 @@ static void tcp_progress_pending(cci__dev_t * dev)
 
 		debug(CCI_DB_MSG, "re-sending %s msg seq %u count %u",
 		      tcp_msg_type(tx->msg_type), tx->seq, tx->send_count);
-		ret = tcp_sendto(sep->sock, tx->buffer, tx->len, sconn->sin);
+		ret = tcp_sendto(tep->sock, tx->buffer, tx->len, tconn->sin);
 		if (ret != tx->len) {
 			debug((CCI_DB_MSG | CCI_DB_INFO),
 			      "sendto() failed with %s",
@@ -1953,9 +2158,9 @@ static void tcp_progress_pending(cci__dev_t * dev)
 		tx = TAILQ_FIRST(&idle_txs);
 		TAILQ_REMOVE(&idle_txs, tx, dentry);
 		ep = tx->evt.ep;
-		sep = ep->priv;
+		tep = ep->priv;
 		pthread_mutex_lock(&ep->lock);
-		TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
+		TAILQ_INSERT_HEAD(&tep->idle_txs, tx, dentry);
 		pthread_mutex_unlock(&ep->lock);
 	}
 
@@ -1983,9 +2188,9 @@ static void tcp_progress_queued(cci__dev_t * dev)
 	cci__ep_t *ep;
 	cci__evt_t *evt;
 	cci__conn_t *conn;
-	tcp_ep_t *sep;
-	tcp_conn_t *sconn;
-	tcp_dev_t *sdev = dev->priv;
+	tcp_ep_t *tep;
+	tcp_conn_t *tconn;
+	tcp_dev_t *tdev = dev->priv;
 	union cci_event *event;	/* generic CCI event */
 	cci_connection_t *connection;	/* generic CCI connection */
 	cci_endpoint_t *endpoint;	/* generic CCI endpoint */
@@ -1998,23 +2203,23 @@ static void tcp_progress_queued(cci__dev_t * dev)
 	TAILQ_INIT(&idle_txs);
 	TAILQ_INIT(&evts);
 
-	if (!sdev)
+	if (!tdev)
 		return;
 
 	now = tcp_get_usecs();
 
 	pthread_mutex_lock(&dev->lock);
-	TAILQ_FOREACH_SAFE(tx, &sdev->queued, dentry, tmp) {
+	TAILQ_FOREACH_SAFE(tx, &tdev->queued, dentry, tmp) {
 		evt = &(tx->evt);
 		event = &(evt->event);
 		conn = evt->conn;
 		connection = &conn->connection;
-		sconn = conn->priv;
+		tconn = conn->priv;
 		is_reliable = cci_conn_is_reliable(conn);
 
 		endpoint = connection->endpoint;
 		ep = container_of(endpoint, cci__ep_t, endpoint);
-		sep = ep->priv;
+		tep = ep->priv;
 
 		/* try to send it */
 
@@ -2057,7 +2262,7 @@ static void tcp_progress_queued(cci__dev_t * dev)
 				CCI_EXIT;
 				return;
 			}
-			TAILQ_REMOVE(&sdev->queued, tx, dentry);
+			TAILQ_REMOVE(&tdev->queued, tx, dentry);
 
 			/* if SILENT, put idle tx */
 			if (tx->flags & CCI_FLAG_SILENT &&
@@ -2080,7 +2285,7 @@ static void tcp_progress_queued(cci__dev_t * dev)
 			continue;
 
 #if 0
-		if (sconn->pending > sconn->cwnd &&
+		if (tconn->pending > tconn->cwnd &&
 		    tx->msg_type == TCP_MSG_SEND && 0) {
 			continue;
 		}
@@ -2093,7 +2298,7 @@ static void tcp_progress_queued(cci__dev_t * dev)
 		    !(tx->msg_type == TCP_MSG_CONN_REQUEST ||
 		      tx->msg_type == TCP_MSG_CONN_REPLY)) {
 			pthread_mutex_lock(&ep->lock);
-			TAILQ_INSERT_TAIL(&sconn->tx_seqs, tx, tx_seq);
+			TAILQ_INSERT_TAIL(&tconn->tx_seqs, tx, tx_seq);
 			pthread_mutex_unlock(&ep->lock);
 		}
 
@@ -2109,7 +2314,7 @@ static void tcp_progress_queued(cci__dev_t * dev)
 
 		debug(CCI_DB_MSG, "sending %s msg seq %u",
 		      tcp_msg_type(tx->msg_type), tx->seq);
-		ret = tcp_sendto(sep->sock, tx->buffer, tx->len, sconn->sin);
+		ret = tcp_sendto(tep->sock, tx->buffer, tx->len, tconn->sin);
 		if (ret == -1) {
 			switch (errno) {
 			default:
@@ -2124,16 +2329,16 @@ static void tcp_progress_queued(cci__dev_t * dev)
 				if (is_reliable &&
 				    !(tx->msg_type == TCP_MSG_CONN_REQUEST ||
 				      tx->msg_type == TCP_MSG_CONN_REPLY)) {
-					TAILQ_REMOVE(&sconn->tx_seqs, tx,
+					TAILQ_REMOVE(&tconn->tx_seqs, tx,
 						     tx_seq);
 				}
 				continue;
 			}
 		}
 		/* msg sent, dequeue */
-		TAILQ_REMOVE(&sdev->queued, tx, dentry);
+		TAILQ_REMOVE(&tdev->queued, tx, dentry);
 		if (tx->msg_type == TCP_MSG_SEND)
-			sconn->pending++;
+			tconn->pending++;
 
 		/* if reliable or connection, add to pending
 		 * else add to idle txs */
@@ -2143,7 +2348,7 @@ static void tcp_progress_queued(cci__dev_t * dev)
 		    tx->msg_type == TCP_MSG_CONN_REPLY) {
 
 			tx->state = TCP_TX_PENDING;
-			TAILQ_INSERT_TAIL(&sdev->pending, tx, dentry);
+			TAILQ_INSERT_TAIL(&tdev->pending, tx, dentry);
 			debug((CCI_DB_CONN | CCI_DB_MSG),
 			      "moving queued %s tx to pending",
 			      tcp_msg_type(tx->msg_type));
@@ -2159,9 +2364,9 @@ static void tcp_progress_queued(cci__dev_t * dev)
 		tx = TAILQ_FIRST(&idle_txs);
 		TAILQ_REMOVE(&idle_txs, tx, dentry);
 		ep = tx->evt.ep;
-		sep = ep->priv;
+		tep = ep->priv;
 		pthread_mutex_lock(&ep->lock);
-		TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
+		TAILQ_INSERT_HEAD(&tep->idle_txs, tx, dentry);
 		pthread_mutex_unlock(&ep->lock);
 	}
 
@@ -2213,9 +2418,9 @@ static int tcp_sendv(cci_connection_t * connection,
 	cci__ep_t *ep;
 	cci__dev_t *dev;
 	cci__conn_t *conn;
-	tcp_ep_t *sep;
-	tcp_conn_t *sconn;
-	tcp_dev_t *sdev;
+	tcp_ep_t *tep;
+	tcp_conn_t *tconn;
+	tcp_dev_t *tdev;
 	tcp_tx_t *tx = NULL;
 	tcp_header_t *hdr;
 	void *ptr;
@@ -2224,7 +2429,7 @@ static int tcp_sendv(cci_connection_t * connection,
 
 	debug(CCI_DB_FUNC, "entering %s", func);
 
-	if (!sglobals) {
+	if (!tglobals) {
 		debug(CCI_DB_FUNC, "exiting %s", func);
 		return CCI_ENODEV;
 	}
@@ -2233,19 +2438,19 @@ static int tcp_sendv(cci_connection_t * connection,
 		data_len += data[i].iov_len;
 
 	ep = container_of(endpoint, cci__ep_t, endpoint);
-	sep = ep->priv;
+	tep = ep->priv;
 	conn = container_of(connection, cci__conn_t, connection);
-	sconn = conn->priv;
+	tconn = conn->priv;
 	dev = ep->dev;
-	sdev = dev->priv;
+	tdev = dev->priv;
 
 	is_reliable = cci_conn_is_reliable(conn);
 
 	/* get a tx */
 	pthread_mutex_lock(&ep->lock);
-	if (!TAILQ_EMPTY(&sep->idle_txs)) {
-		tx = TAILQ_FIRST(&sep->idle_txs);
-		TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
+	if (!TAILQ_EMPTY(&tep->idle_txs)) {
+		tx = TAILQ_FIRST(&tep->idle_txs);
+		TAILQ_REMOVE(&tep->idle_txs, tx, dentry);
 	}
 	pthread_mutex_unlock(&ep->lock);
 
@@ -2282,7 +2487,7 @@ static int tcp_sendv(cci_connection_t * connection,
 
 	/* pack buffer */
 	hdr = (tcp_header_t *) tx->buffer;
-	tcp_pack_send(hdr, data_len, sconn->peer_id);
+	tcp_pack_send(hdr, data_len, tconn->peer_id);
 	tx->len = sizeof(*hdr);
 
 	/* if reliable, add seq and ack */
@@ -2292,7 +2497,7 @@ static int tcp_sendv(cci_connection_t * connection,
 		uint32_t ts = 0;
 
 		pthread_mutex_lock(&ep->lock);
-		tx->seq = ++(sconn->seq);
+		tx->seq = ++(tconn->seq);
 		pthread_mutex_unlock(&ep->lock);
 
 		tcp_pack_seq_ts(&hdr_r->seq_ts, tx->seq, ts);
@@ -2313,7 +2518,7 @@ static int tcp_sendv(cci_connection_t * connection,
 
 	/* if unreliable, try to send */
 	if (!is_reliable) {
-		ret = tcp_sendto(sep->sock, tx->buffer, tx->len, sconn->sin);
+		ret = tcp_sendto(tep->sock, tx->buffer, tx->len, tconn->sin);
 		if (ret == tx->len) {
 			/* queue event on enpoint's completed queue */
 			tx->state = TCP_TX_COMPLETED;
@@ -2337,7 +2542,7 @@ static int tcp_sendv(cci_connection_t * connection,
 
 	tx->state = TCP_TX_QUEUED;
 	pthread_mutex_lock(&dev->lock);
-	TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
+	TAILQ_INSERT_TAIL(&tdev->queued, tx, dentry);
 	pthread_mutex_unlock(&dev->lock);
 
 	/* try to progress txs */
@@ -2372,7 +2577,7 @@ static int tcp_sendv(cci_connection_t * connection,
 		pthread_mutex_unlock(&ep->lock);
 
 		pthread_mutex_lock(&ep->lock);
-		TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
+		TAILQ_INSERT_HEAD(&tep->idle_txs, tx, dentry);
 		pthread_mutex_unlock(&ep->lock);
 	}
 
@@ -2386,18 +2591,18 @@ static int tcp_rma_register(cci_endpoint_t * endpoint,
 {
 	/* FIXME use read/write flags? */
 	cci__ep_t *ep = NULL;
-	tcp_ep_t *sep = NULL;
+	tcp_ep_t *tep = NULL;
 	tcp_rma_handle_t *handle = NULL;
 
 	CCI_ENTER;
 
-	if (!sglobals) {
+	if (!tglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
 
 	ep = container_of(endpoint, cci__ep_t, endpoint);
-	sep = ep->priv;
+	tep = ep->priv;
 
 	handle = calloc(1, sizeof(*handle));
 	if (!handle) {
@@ -2411,7 +2616,7 @@ static int tcp_rma_register(cci_endpoint_t * endpoint,
 	handle->refcnt = 1;
 
 	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_TAIL(&sep->handles, handle, entry);
+	TAILQ_INSERT_TAIL(&tep->handles, handle, entry);
 	pthread_mutex_unlock(&ep->lock);
 
 	*rma_handle = (uint64_t) ((uintptr_t) handle);
@@ -2427,26 +2632,26 @@ static int tcp_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
 	tcp_rma_handle_t *handle =
 	    (tcp_rma_handle_t *) ((uintptr_t) rma_handle);
 	cci__ep_t *ep = NULL;
-	tcp_ep_t *sep = NULL;
+	tcp_ep_t *tep = NULL;
 	tcp_rma_handle_t *h = NULL;
 	tcp_rma_handle_t *tmp = NULL;
 
 	CCI_ENTER;
 
-	if (!sglobals) {
+	if (!tglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
 
 	ep = handle->ep;
-	sep = ep->priv;
+	tep = ep->priv;
 
 	pthread_mutex_lock(&ep->lock);
-	TAILQ_FOREACH_SAFE(h, &sep->handles, entry, tmp) {
+	TAILQ_FOREACH_SAFE(h, &tep->handles, entry, tmp) {
 		if (h == handle) {
 			handle->refcnt--;
 			if (handle->refcnt == 1)
-				TAILQ_REMOVE(&sep->handles, handle, entry);
+				TAILQ_REMOVE(&tep->handles, handle, entry);
 			break;
 		}
 	}
@@ -2478,40 +2683,40 @@ static int tcp_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
  */
 #define CONTEXTS_BLOCK_SIZE 10
 static inline void
-generate_context_id(tcp_conn_t * sconn, const void *context, uint64_t * context_id)
+generate_context_id(tcp_conn_t * tconn, const void *context, uint64_t * context_id)
 {
 	uint64_t index = 0;
 
-	if (sconn->rma_contexts == NULL) {
+	if (tconn->rma_contexts == NULL) {
 		/* We do not have the array allocated yet, so we perform the alloc */
 		/* FIXME: we never free that memory */
-		sconn->rma_contexts =
+		tconn->rma_contexts =
 		    calloc(0, CONTEXTS_BLOCK_SIZE * sizeof(void *));
-		sconn->max_rma_contexts = CONTEXTS_BLOCK_SIZE;
+		tconn->max_rma_contexts = CONTEXTS_BLOCK_SIZE;
 	}
 
 	/* We look for an empty element in the array, the index will be used as
 	   unique ID for that specific context */
-	while (sconn->rma_contexts[index] != NULL) {
+	while (tconn->rma_contexts[index] != NULL) {
 		index++;
-		if (index == sconn->max_rma_contexts) {
+		if (index == tconn->max_rma_contexts) {
 			/* We reach the end of the array and the array is full, we extend
 			   the array */
-			sconn->rma_contexts = realloc(sconn->rma_contexts,
-						      sconn->max_rma_contexts +
+			tconn->rma_contexts = realloc(tconn->rma_contexts,
+						      tconn->max_rma_contexts +
 						      CONTEXTS_BLOCK_SIZE);
-			for (index = sconn->max_rma_contexts;
+			for (index = tconn->max_rma_contexts;
 			     index <
-			     sconn->max_rma_contexts + CONTEXTS_BLOCK_SIZE;
+			     tconn->max_rma_contexts + CONTEXTS_BLOCK_SIZE;
 			     index++) {
-				sconn->rma_contexts[index] = NULL;
+				tconn->rma_contexts[index] = NULL;
 			}
-			index = sconn->max_rma_contexts;
-			sconn->max_rma_contexts += CONTEXTS_BLOCK_SIZE;
+			index = tconn->max_rma_contexts;
+			tconn->max_rma_contexts += CONTEXTS_BLOCK_SIZE;
 		}
 	}
 
-	sconn->rma_contexts[index] = context;
+	tconn->rma_contexts[index] = context;
 	*context_id = index;
 }
 
@@ -2525,9 +2730,9 @@ static int tcp_rma(cci_connection_t * connection,
 	cci__ep_t *ep = NULL;
 	cci__dev_t *dev = NULL;
 	cci__conn_t *conn = NULL;
-	tcp_ep_t *sep = NULL;
-	tcp_dev_t *sdev = NULL;
-	tcp_conn_t *sconn = NULL;
+	tcp_ep_t *tep = NULL;
+	tcp_dev_t *tdev = NULL;
+	tcp_conn_t *tconn = NULL;
 	tcp_rma_handle_t *local =
 	    (tcp_rma_handle_t *) ((uintptr_t) local_handle);
 	tcp_rma_handle_t *h = NULL;
@@ -2535,17 +2740,17 @@ static int tcp_rma(cci_connection_t * connection,
 
 	CCI_ENTER;
 
-	if (!sglobals) {
+	if (!tglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
 
 	conn = container_of(connection, cci__conn_t, connection);
-	sconn = conn->priv;
+	tconn = conn->priv;
 	ep = container_of(connection->endpoint, cci__ep_t, endpoint);
-	sep = ep->priv;
+	tep = ep->priv;
 	dev = ep->dev;
-	sdev = dev->priv;
+	tdev = dev->priv;
 
 	if (!local) {
 		debug(CCI_DB_INFO, "%s: invalid local RMA handle", __func__);
@@ -2554,7 +2759,7 @@ static int tcp_rma(cci_connection_t * connection,
 	}
 
 	pthread_mutex_lock(&ep->lock);
-	TAILQ_FOREACH(h, &sep->handles, entry) {
+	TAILQ_FOREACH(h, &tep->handles, entry) {
 		if (h == local) {
 			local->refcnt++;
 			break;
@@ -2583,7 +2788,7 @@ static int tcp_rma(cci_connection_t * connection,
 	rma_op->local_offset = local_offset;
 	rma_op->remote_handle = remote_handle;
 	rma_op->remote_offset = remote_offset;
-	rma_op->id = ++(sconn->rma_id);
+	rma_op->id = ++(tconn->rma_id);
 	rma_op->num_msgs = data_len / connection->max_send_size;
 	if (data_len % connection->max_send_size)
 		rma_op->num_msgs++;
@@ -2618,23 +2823,23 @@ static int tcp_rma(cci_connection_t * connection,
 		}
 
 		pthread_mutex_lock(&ep->lock);
-		old_seq = sconn->seq;
+		old_seq = tconn->seq;
 		for (i = 0; i < cnt; i++) {
-			if (!TAILQ_EMPTY(&sep->idle_txs)) {
-				txs[i] = TAILQ_FIRST(&sep->idle_txs);
-				TAILQ_REMOVE(&sep->idle_txs, txs[i], dentry);
-				txs[i]->seq = ++(sconn->seq);
+			if (!TAILQ_EMPTY(&tep->idle_txs)) {
+				txs[i] = TAILQ_FIRST(&tep->idle_txs);
+				TAILQ_REMOVE(&tep->idle_txs, txs[i], dentry);
+				txs[i]->seq = ++(tconn->seq);
 			} else
 				err++;
 		}
 		if (err) {
 			for (i = 0; i < cnt; i++) {
 				if (txs[i])
-					TAILQ_INSERT_HEAD(&sep->idle_txs,
+					TAILQ_INSERT_HEAD(&tep->idle_txs,
 							  txs[i], dentry);
 			}
 			local->refcnt--;
-			sconn->seq = old_seq;
+			tconn->seq = old_seq;
 		}
 		pthread_mutex_unlock(&ep->lock);
 
@@ -2676,7 +2881,7 @@ static int tcp_rma(cci_connection_t * connection,
 					    connection->max_send_size;
 			}
 
-			tcp_pack_rma_write(write, tx->len, sconn->peer_id,
+			tcp_pack_rma_write(write, tx->len, tconn->peer_id,
 					    tx->seq, 0, local_handle,
 					    local_offset + offset,
 					    remote_handle,
@@ -2688,9 +2893,9 @@ static int tcp_rma(cci_connection_t * connection,
 		pthread_mutex_lock(&dev->lock);
 		pthread_mutex_lock(&ep->lock);
 		for (i = 0; i < cnt; i++)
-			TAILQ_INSERT_TAIL(&sdev->queued, txs[i], dentry);
-		TAILQ_INSERT_TAIL(&sconn->rmas, rma_op, rmas);
-		TAILQ_INSERT_TAIL(&sep->rma_ops, rma_op, entry);
+			TAILQ_INSERT_TAIL(&tdev->queued, txs[i], dentry);
+		TAILQ_INSERT_TAIL(&tconn->rmas, rma_op, rmas);
+		TAILQ_INSERT_TAIL(&tep->rma_ops, rma_op, entry);
 		pthread_mutex_unlock(&ep->lock);
 		pthread_mutex_unlock(&dev->lock);
 
@@ -2710,24 +2915,24 @@ static int tcp_rma(cci_connection_t * connection,
 
 		/* Get a TX */
 		pthread_mutex_lock(&ep->lock);
-		if (!TAILQ_EMPTY(&sep->idle_txs)) {
-			tx = TAILQ_FIRST(&sep->idle_txs);
-			TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
+		if (!TAILQ_EMPTY(&tep->idle_txs)) {
+			tx = TAILQ_FIRST(&tep->idle_txs);
+			TAILQ_REMOVE(&tep->idle_txs, tx, dentry);
 		}
 		pthread_mutex_unlock(&ep->lock);
 
 		/* Prepare and send the msg */
 		read = tx->buffer;
-		sep = ep->priv;
+		tep = ep->priv;
 		memset(tx->buffer, 0, sizeof(tcp_rma_header_t));
-		tx->seq = ++(sconn->seq);
+		tx->seq = ++(tconn->seq);
 		tx->timeout_us = 0ULL;
 		tx->last_attempt_us = 0ULL;
-		tcp_pack_rma_read(read, data_len, sconn->peer_id, tx->seq, 0,
+		tcp_pack_rma_read(read, data_len, tconn->peer_id, tx->seq, 0,
 				   local_handle, local_offset,
 				   remote_handle, remote_offset);
 		tx->len = sizeof(tcp_rma_header_t);
-		generate_context_id(sconn, context, &context_id);
+		generate_context_id(tconn, context, &context_id);
 		memcpy(read->data, &data_len, sizeof(uint64_t));
 		//msg_ptr = (void *)(read->data + sizeof(uint64_t));
 		memcpy((void *)(((char *)read->data) + sizeof(uint64_t)),
@@ -2742,7 +2947,7 @@ static int tcp_rma(cci_connection_t * connection,
 		tx->evt.event.send.connection = connection;
 		tx->evt.conn = conn;
 		pthread_mutex_lock(&dev->lock);
-		TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
+		TAILQ_INSERT_TAIL(&tdev->queued, tx, dentry);
 		pthread_mutex_unlock(&dev->lock);
 		ret = CCI_SUCCESS;
 	}
@@ -2758,7 +2963,7 @@ static int tcp_rma(cci_connection_t * connection,
 
   If we have acked it
     ignore it
-  Walk sconn->acks:
+  Walk tconn->acks:
     if it exists in a current entry
       do nothing
     if it borders a current entry
@@ -2769,25 +2974,25 @@ static int tcp_rma(cci_connection_t * connection,
       add a new entry at the tail
 
  */
-static inline void tcp_handle_seq(tcp_conn_t * sconn, uint32_t seq)
+static inline void tcp_handle_seq(tcp_conn_t * tconn, uint32_t seq)
 {
 	int done = 0;
 	tcp_ack_t *ack = NULL;
 	tcp_ack_t *last = NULL;
 	tcp_ack_t *tmp = NULL;
-	cci__conn_t *conn = sconn->conn;
+	cci__conn_t *conn = tconn->conn;
 	cci_connection_t *connection = &conn->connection;
 	cci_endpoint_t *endpoint = connection->endpoint;
 	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
 
-	if (TCP_SEQ_LTE(seq, sconn->acked)) {
+	if (TCP_SEQ_LTE(seq, tconn->acked)) {
 		debug(CCI_DB_MSG, "%s ignoring seq %u (acked %u) ***", __func__,
-		      seq, sconn->acked);
+		      seq, tconn->acked);
 		return;
 	}
 
 	pthread_mutex_lock(&ep->lock);
-	TAILQ_FOREACH_SAFE(ack, &sconn->acks, entry, tmp) {
+	TAILQ_FOREACH_SAFE(ack, &tconn->acks, entry, tmp) {
 		if (TCP_SEQ_GTE(seq, ack->start) &&
 		    TCP_SEQ_LTE(seq, ack->end)) {
 			/* seq exists in this entry,
@@ -2819,7 +3024,7 @@ static inline void tcp_handle_seq(tcp_conn_t * sconn, uint32_t seq)
 				      __func__, ack->start, ack->end,
 				      next->start, next->end);
 				next->start = ack->start;
-				TAILQ_REMOVE(&sconn->acks, ack, entry);
+				TAILQ_REMOVE(&tconn->acks, ack, entry);
 				free(ack);
 			}
 			done = 1;
@@ -2848,7 +3053,7 @@ static inline void tcp_handle_seq(tcp_conn_t * sconn, uint32_t seq)
 		ack = calloc(1, sizeof(*ack));
 		if (ack) {
 			ack->start = ack->end = seq;
-			TAILQ_INSERT_TAIL(&sconn->acks, ack, entry);
+			TAILQ_INSERT_TAIL(&tconn->acks, ack, entry);
 			debug(CCI_DB_MSG, "%s seq %u add at tail", __func__,
 			      seq);
 		}
@@ -2859,11 +3064,11 @@ static inline void tcp_handle_seq(tcp_conn_t * sconn, uint32_t seq)
 }
 
 static void
-tcp_handle_active_message(tcp_conn_t * sconn,
+tcp_handle_active_message(tcp_conn_t * tconn,
 			   tcp_rx_t * rx, uint16_t len, uint32_t id)
 {
 	cci__evt_t *evt;
-	cci__conn_t *conn = sconn->conn;
+	cci__conn_t *conn = tconn->conn;
 	tcp_header_t *hdr;	/* wire header */
 	union cci_event *event;	/* generic CCI event */
 	cci_endpoint_t *endpoint;	/* generic CCI endpoint */
@@ -2914,13 +3119,13 @@ tcp_handle_active_message(tcp_conn_t * sconn,
 /*!
   Handle incoming RNR messages
  */
-static void tcp_handle_rnr(tcp_conn_t * sconn, uint32_t seq, uint32_t ts)
+static void tcp_handle_rnr(tcp_conn_t * tconn, uint32_t seq, uint32_t ts)
 {
 	tcp_tx_t *tx = NULL;
 	tcp_tx_t *tmp = NULL;
 
 	/* Find the corresponding SEQ/TS */
-	TAILQ_FOREACH_SAFE(tx, &sconn->tx_seqs, tx_seq, tmp) {
+	TAILQ_FOREACH_SAFE(tx, &tconn->tx_seqs, tx_seq, tmp) {
 		if (tx->seq == seq) {
 			debug(CCI_DB_MSG,
 			      "[%s,%d] Receiver not ready (seq: %u)", __func__,
@@ -2930,8 +3135,8 @@ static void tcp_handle_rnr(tcp_conn_t * sconn, uint32_t seq, uint32_t ts)
 	}
 
 	/* We also mark the conn as RNR */
-	if (sconn->rnr == 0)
-		sconn->rnr = seq;
+	if (tconn->rnr == 0)
+		tconn->rnr = seq;
 }
 
 /*!
@@ -2942,18 +3147,18 @@ static void tcp_handle_rnr(tcp_conn_t * sconn, uint32_t seq, uint32_t ts)
     if not found, ignore (it is a duplicate)
  */
 static void
-tcp_handle_ack(tcp_conn_t * sconn,
+tcp_handle_ack(tcp_conn_t * tconn,
 		tcp_msg_type_t type, tcp_rx_t * rx, int count, uint32_t id)
 {
 	int i = 0;
 	int found = 0;
-	cci__conn_t *conn = sconn->conn;
+	cci__conn_t *conn = tconn->conn;
 	cci_connection_t *connection = &conn->connection;
 	cci_endpoint_t *endpoint = connection->endpoint;
 	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
 	cci__dev_t *dev = ep->dev;
-	tcp_ep_t *sep = ep->priv;
-	tcp_dev_t *sdev = dev->priv;
+	tcp_ep_t *tep = ep->priv;
+	tcp_dev_t *tdev = dev->priv;
 	tcp_tx_t *tx = NULL;
 	tcp_tx_t *tmp = NULL;
 	tcp_header_r_t *hdr_r = rx->buffer;
@@ -2967,7 +3172,7 @@ tcp_handle_ack(tcp_conn_t * sconn,
 	TAILQ_HEAD(s_queued, tcp_tx) queued = TAILQ_HEAD_INITIALIZER(queued);
 	TAILQ_INIT(&queued);
 
-	assert(id == sconn->id);
+	assert(id == tconn->id);
 	assert(count > 0);
 
 	if (count == 1) {
@@ -2978,42 +3183,42 @@ tcp_handle_ack(tcp_conn_t * sconn,
 	tcp_parse_ack(hdr_r, type, acks, count);
 
 	if (type == TCP_MSG_ACK_ONLY) {
-		if (sconn->seq_pending == acks[0] - 1)
-			sconn->seq_pending = acks[0];
+		if (tconn->seq_pending == acks[0] - 1)
+			tconn->seq_pending = acks[0];
 	} else if (type == TCP_MSG_ACK_UP_TO) {
-		sconn->seq_pending = acks[0];
+		tconn->seq_pending = acks[0];
 	}
 
 	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
+	TAILQ_INSERT_HEAD(&tep->idle_rxs, rx, entry);
 	pthread_mutex_unlock(&ep->lock);
 
 	pthread_mutex_lock(&dev->lock);
 	pthread_mutex_lock(&ep->lock);
-	TAILQ_FOREACH_SAFE(tx, &sconn->tx_seqs, tx_seq, tmp) {
+	TAILQ_FOREACH_SAFE(tx, &tconn->tx_seqs, tx_seq, tmp) {
 		if (type == TCP_MSG_ACK_ONLY) {
 			if (tx->seq == acks[0]) {
 				if (tx->state == TCP_TX_PENDING) {
 					debug(CCI_DB_MSG,
 					      "%s acking only seq %u", __func__,
 					      acks[0]);
-					TAILQ_REMOVE(&sdev->pending, tx,
+					TAILQ_REMOVE(&tdev->pending, tx,
 						     dentry);
-					TAILQ_REMOVE(&sconn->tx_seqs, tx,
+					TAILQ_REMOVE(&tconn->tx_seqs, tx,
 						     tx_seq);
 					if (tx->msg_type == TCP_MSG_SEND) {
-						sconn->pending--;
+						tconn->pending--;
 #if 0
-						if (sconn->pending <=
-						    sconn->ssthresh) {
-							sconn->cwnd++;
+						if (tconn->pending <=
+						    tconn->ssthresh) {
+							tconn->cwnd++;
 							debug(CCI_DB_INFO,
 							      "%s increase cwnd from %d to %d",
 							      __func__,
-							      sconn->cwnd - 1,
-							      sconn->cwnd);
+							      tconn->cwnd - 1,
+							      tconn->cwnd);
 						} else {
-							sconn->cwnd++;
+							tconn->cwnd++;
 						}
 #endif
 					}
@@ -3056,23 +3261,23 @@ tcp_handle_ack(tcp_conn_t * sconn,
 					debug(CCI_DB_MSG,
 					      "%s acking tx seq %u (up to seq %u)",
 					      __func__, tx->seq, acks[0]);
-					TAILQ_REMOVE(&sdev->pending, tx,
+					TAILQ_REMOVE(&tdev->pending, tx,
 						     dentry);
-					TAILQ_REMOVE(&sconn->tx_seqs, tx,
+					TAILQ_REMOVE(&tconn->tx_seqs, tx,
 						     tx_seq);
 					if (tx->msg_type == TCP_MSG_SEND) {
-						sconn->pending--;
+						tconn->pending--;
 #if 0
-						if (sconn->pending <=
-						    sconn->ssthresh) {
-							sconn->cwnd++;
+						if (tconn->pending <=
+						    tconn->ssthresh) {
+							tconn->cwnd++;
 							debug(CCI_DB_INFO,
 							      "%s increase cwnd from %d to %d",
 							      __func__,
-							      sconn->cwnd - 1,
-							      sconn->cwnd);
+							      tconn->cwnd - 1,
+							      tconn->cwnd);
 						} else {
-							sconn->cwnd++;
+							tconn->cwnd++;
 						}
 #endif
 					}
@@ -3114,35 +3319,35 @@ tcp_handle_ack(tcp_conn_t * sconn,
 			for (i = 0; i < count; i += 2) {
 				if (TCP_SEQ_GTE(tx->seq, acks[i]) &&
 				    TCP_SEQ_LTE(tx->seq, acks[i + 1])) {
-					if (sconn->seq_pending == acks[i] - 1)
-						sconn->seq_pending =
+					if (tconn->seq_pending == acks[i] - 1)
+						tconn->seq_pending =
 						    acks[i + 1];
 					if (tx->state == TCP_TX_PENDING) {
 						debug(CCI_DB_MSG,
 						      "%s sacking seq %u",
 						      __func__, acks[0]);
 						found++;
-						TAILQ_REMOVE(&sdev->pending, tx,
+						TAILQ_REMOVE(&tdev->pending, tx,
 							     dentry);
-						TAILQ_REMOVE(&sconn->tx_seqs,
+						TAILQ_REMOVE(&tconn->tx_seqs,
 							     tx, tx_seq);
 						if (tx->msg_type ==
 						    TCP_MSG_SEND) {
-							sconn->pending--;
+							tconn->pending--;
 #if 0
-							if (sconn->pending <=
-							    sconn->ssthresh) {
-								sconn->cwnd++;
+							if (tconn->pending <=
+							    tconn->ssthresh) {
+								tconn->cwnd++;
 								debug
 								    (CCI_DB_INFO,
 								     "%s increase cwnd from %d to %d",
 								     __func__,
-								     sconn->cwnd
+								     tconn->cwnd
 								     - 1,
-								     sconn->
+								     tconn->
 								     cwnd);
 							} else {
-								sconn->cwnd++;
+								tconn->cwnd++;
 							}
 #endif
 						}
@@ -3214,8 +3419,8 @@ tcp_handle_ack(tcp_conn_t * sconn,
 				void *context = rma_op->context;
 
 				/* they acked our remote completion */
-				TAILQ_REMOVE(&sep->rma_ops, rma_op, entry);
-				TAILQ_REMOVE(&sconn->rmas, rma_op, rmas);
+				TAILQ_REMOVE(&tep->rma_ops, rma_op, entry);
+				TAILQ_REMOVE(&tconn->rmas, rma_op, rmas);
 				local->refcnt--;
 
 				free(rma_op);
@@ -3255,13 +3460,13 @@ tcp_handle_ack(tcp_conn_t * sconn,
 						    rma_op->data_len %
 						    connection->max_send_size;
 				}
-				tx->seq = ++(sconn->seq);
+				tx->seq = ++(tconn->seq);
 
 				offset = (uint64_t) i *(uint64_t)
 				 connection->max_send_size;
 
 				tcp_pack_rma_write(write, tx->len,
-						    sconn->peer_id, tx->seq, 0,
+						    tconn->peer_id, tx->seq, 0,
 						    rma_op->local_handle,
 						    rma_op->local_offset +
 						    offset,
@@ -3294,7 +3499,7 @@ tcp_handle_ack(tcp_conn_t * sconn,
 					tx->last_attempt_us = 0ULL;
 					tx->timeout_us = 0ULL;
 					tx->rma_op = rma_op;
-					tx->seq = ++(sconn->seq);
+					tx->seq = ++(tconn->seq);
 
 					tx->evt.event.type = CCI_EVENT_SEND;
 					tx->evt.event.send.connection =
@@ -3309,7 +3514,7 @@ tcp_handle_ack(tcp_conn_t * sconn,
 					    (tcp_rma_header_t *) tx->buffer;
 					context_id = (uint64_t) rma_op->context;
 					tcp_pack_rma_write_done(write,
-								 sconn->peer_id,
+								 tconn->peer_id,
 								 tx->seq, 0);
 					/* Include the context id */
 					memcpy(&hdr_r->data, &context_id,
@@ -3329,9 +3534,9 @@ tcp_handle_ack(tcp_conn_t * sconn,
 					void *context = rma_op->context;
 
 					/* complete now */
-					TAILQ_REMOVE(&sep->rma_ops, rma_op,
+					TAILQ_REMOVE(&tep->rma_ops, rma_op,
 						     entry);
-					TAILQ_REMOVE(&sconn->rmas, rma_op,
+					TAILQ_REMOVE(&tconn->rmas, rma_op,
 						     rmas);
 					local->refcnt--;
 					free(rma_op);
@@ -3350,7 +3555,7 @@ tcp_handle_ack(tcp_conn_t * sconn,
 			}
 		}
 
-		TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
+		TAILQ_INSERT_HEAD(&tep->idle_txs, tx, dentry);
 	}
 
 	/* transfer evts to the ep's list */
@@ -3368,7 +3573,7 @@ tcp_handle_ack(tcp_conn_t * sconn,
 		tcp_tx_t *my_tx;
 		my_tx = TAILQ_FIRST(&queued);
 		TAILQ_REMOVE(&queued, my_tx, dentry);
-		TAILQ_INSERT_TAIL(&sdev->queued, my_tx, dentry);
+		TAILQ_INSERT_TAIL(&tdev->queued, my_tx, dentry);
 	}
 	pthread_mutex_unlock(&ep->lock);
 	pthread_mutex_unlock(&dev->lock);
@@ -3428,7 +3633,7 @@ tcp_handle_conn_request(tcp_rx_t * rx,
  * Active conn  Yes         No          No          Yes         Yes
  * Ready conn   Error
  */
-static void tcp_handle_conn_reply(tcp_conn_t * sconn,	/* NULL if rejected */
+static void tcp_handle_conn_reply(tcp_conn_t * tconn,	/* NULL if rejected */
 				   tcp_rx_t * rx, uint8_t reply,	/* CCI_SUCCESS or CCI_ECONNREFUSED */
 				   uint16_t unused,
 				   uint32_t id,
@@ -3438,8 +3643,8 @@ static void tcp_handle_conn_reply(tcp_conn_t * sconn,	/* NULL if rejected */
 	cci__evt_t *evt = NULL;
 	cci__dev_t *dev = NULL;
 	cci__conn_t *conn = NULL;
-	tcp_ep_t *sep = NULL;
-	tcp_dev_t *sdev = NULL;
+	tcp_ep_t *tep = NULL;
+	tcp_dev_t *tdev = NULL;
 	tcp_tx_t *tx = NULL, *tmp = NULL, *t = NULL;
 	tcp_header_r_t *hdr_r;	/* wire header */
 	union cci_event *event;	/* generic CCI event */
@@ -3449,17 +3654,17 @@ static void tcp_handle_conn_reply(tcp_conn_t * sconn,	/* NULL if rejected */
 
 	CCI_ENTER;
 
-	sep = ep->priv;
+	tep = ep->priv;
 
-	if (!sconn) {
+	if (!tconn) {
 		/* either this is a dup and the conn is now ready or
 		 * the conn is closed and we simply ack the msg
 		 */
 		/* look for a conn that is ready */
-		sconn =
-		    tcp_find_conn(sep, sin.sin_addr.s_addr, sin.sin_port, id,
+		tconn =
+		    tcp_find_conn(tep, sin.sin_addr.s_addr, sin.sin_port, id,
 				   TCP_MSG_SEND);
-		if (!sconn) {
+		if (!tconn) {
 			tcp_header_r_t hdr;
 			int len = (int)sizeof(hdr);
 			char from[32];
@@ -3468,21 +3673,21 @@ static void tcp_handle_conn_reply(tcp_conn_t * sconn,	/* NULL if rejected */
 			tcp_sin_to_name(sin, from, sizeof(from));
 			debug((CCI_DB_CONN | CCI_DB_MSG),
 			      "ep %d recv'd conn_reply (%s) from %s"
-			      " with no matching conn", sep->sock,
+			      " with no matching conn", tep->sock,
 			      reply ==
 			      CCI_SUCCESS ? "success" : "rejected", from);
 			/* simply ack this msg and cleanup */
 			memset(&hdr, 0, sizeof(hdr));
-			tcp_pack_conn_ack(&hdr.header, sconn->peer_id);
-			ret = tcp_sendto(sep->sock, &hdr, len, sin);
+			tcp_pack_conn_ack(&hdr.header, tconn->peer_id);
+			ret = tcp_sendto(tep->sock, &hdr, len, sin);
 			if (ret != len) {
 				debug((CCI_DB_CONN | CCI_DB_MSG),
 				      "ep %d failed to send conn_ack with %s",
-				      sep->sock,
+				      tep->sock,
 				      cci_strerror(&ep->endpoint, (enum cci_status)ret));
 			}
 			pthread_mutex_lock(&ep->lock);
-			TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
+			TAILQ_INSERT_HEAD(&tep->idle_rxs, rx, entry);
 			pthread_mutex_unlock(&ep->lock);
 			CCI_EXIT;
 			return;
@@ -3490,9 +3695,9 @@ static void tcp_handle_conn_reply(tcp_conn_t * sconn,	/* NULL if rejected */
 		/* else we have a connection and we can ack normally */
 	}
 
-	conn = sconn->conn;
+	conn = tconn->conn;
 	dev = ep->dev;
-	sdev = dev->priv;
+	tdev = dev->priv;
 
 	/* set wire header so we can find user header */
 
@@ -3502,7 +3707,7 @@ static void tcp_handle_conn_reply(tcp_conn_t * sconn,	/* NULL if rejected */
 
 	tcp_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);	//FIXME do something with ts
 
-	if (sconn->status == TCP_CONN_ACTIVE) {
+	if (tconn->status == TCP_CONN_ACTIVE) {
 		uint32_t peer_id, ack, max_recv_buffer_count, mss, keepalive;
 		struct s_active *active_list;
 
@@ -3515,9 +3720,9 @@ static void tcp_handle_conn_reply(tcp_conn_t * sconn,	/* NULL if rejected */
 
 		/* get pending conn_req tx, create event, move conn to conn_hash */
 		pthread_mutex_lock(&dev->lock);
-		TAILQ_FOREACH_SAFE(t, &sdev->pending, dentry, tmp) {
+		TAILQ_FOREACH_SAFE(t, &tdev->pending, dentry, tmp) {
 			if (t->seq == ack) {
-				TAILQ_REMOVE(&sdev->pending, t, dentry);
+				TAILQ_REMOVE(&tdev->pending, t, dentry);
 				tx = t;
 				break;
 			}
@@ -3534,7 +3739,7 @@ static void tcp_handle_conn_reply(tcp_conn_t * sconn,	/* NULL if rejected */
 			debug(CCI_DB_WARN,
 			      "ep %d received conn_reply (%s) from %s "
 			      "with an active conn and no matching tx",
-			      sep->sock,
+			      tep->sock,
 			      reply ==
 			      CCI_SUCCESS ? "success" : "rejected", from);
 			/* we can't transition to ready since we do not have the
@@ -3547,11 +3752,11 @@ static void tcp_handle_conn_reply(tcp_conn_t * sconn,	/* NULL if rejected */
 			conn->connection.max_send_size = mss;
 
 		if (cci_conn_is_reliable(conn)) {
-			sconn->max_tx_cnt =
+			tconn->max_tx_cnt =
 			    max_recv_buffer_count <
 			    ep->
 			    tx_buf_cnt ? max_recv_buffer_count : ep->tx_buf_cnt;
-			sconn->ssthresh = sconn->max_tx_cnt;
+			tconn->ssthresh = tconn->max_tx_cnt;
 		}
 
 		/* get cci__evt_t to hang on ep->events */
@@ -3568,20 +3773,20 @@ static void tcp_handle_conn_reply(tcp_conn_t * sconn,	/* NULL if rejected */
 		event->connect.context = conn->connection.context;
 
 		i = tcp_ip_hash(sin.sin_addr.s_addr, 0);
-		active_list = &sep->active_hash[i];
+		active_list = &tep->active_hash[i];
 		pthread_mutex_lock(&ep->lock);
-		TAILQ_REMOVE(active_list, sconn, entry);
+		TAILQ_REMOVE(active_list, tconn, entry);
 		pthread_mutex_unlock(&ep->lock);
 
 		if (CCI_SUCCESS == reply) {
-			sconn->peer_id = peer_id;
-			sconn->status = TCP_CONN_READY;
-			*((struct sockaddr_in *)&sconn->sin) = sin;
-			sconn->acked = seq;
+			tconn->peer_id = peer_id;
+			tconn->status = TCP_CONN_READY;
+			*((struct sockaddr_in *)&tconn->sin) = sin;
+			tconn->acked = seq;
 
 			i = tcp_ip_hash(sin.sin_addr.s_addr, sin.sin_port);
 			pthread_mutex_lock(&ep->lock);
-			TAILQ_INSERT_TAIL(&sep->conn_hash[i], sconn, entry);
+			TAILQ_INSERT_TAIL(&tep->conn_hash[i], tconn, entry);
 			pthread_mutex_unlock(&ep->lock);
 
 			debug(CCI_DB_CONN, "conn ready on hash %d", i);
@@ -3591,7 +3796,7 @@ static void tcp_handle_conn_reply(tcp_conn_t * sconn,	/* NULL if rejected */
 			int len = (int)sizeof(hdr);
 			char name[32];
 
-			free(sconn);
+			free(tconn);
 			if (conn->uri)
 				free((char *)conn->uri);
 			free(conn);
@@ -3601,16 +3806,16 @@ static void tcp_handle_conn_reply(tcp_conn_t * sconn,	/* NULL if rejected */
 			tcp_sin_to_name(sin, name, sizeof(name));
 			debug((CCI_DB_CONN | CCI_DB_MSG),
 			      "ep %d recv'd conn_reply (rejected) from %s"
-			      " - closing conn", sep->sock, name);
+			      " - closing conn", tep->sock, name);
 
 			/* simply ack this msg and cleanup */
 			memset(&hdr, 0, sizeof(hdr));
-			tcp_pack_conn_ack(&hdr.header, sconn->peer_id);
-			ret = tcp_sendto(sep->sock, &hdr, len, sin);
+			tcp_pack_conn_ack(&hdr.header, tconn->peer_id);
+			ret = tcp_sendto(tep->sock, &hdr, len, sin);
 			if (ret != len) {
 				debug((CCI_DB_CONN | CCI_DB_MSG),
 				      "ep %d failed to send conn_ack with %s",
-				      sep->sock,
+				      tep->sock,
 				      cci_strerror(&ep->endpoint, (enum cci_status)ret));
 			}
 		}
@@ -3623,11 +3828,11 @@ static void tcp_handle_conn_reply(tcp_conn_t * sconn,	/* NULL if rejected */
 			CCI_EXIT;
 			return;
 		}
-	} else if (sconn->status == TCP_CONN_READY) {
+	} else if (tconn->status == TCP_CONN_READY) {
 		pthread_mutex_lock(&ep->lock);
-		if (!TAILQ_EMPTY(&sep->idle_txs)) {
-			tx = TAILQ_FIRST(&sep->idle_txs);
-			TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
+		if (!TAILQ_EMPTY(&tep->idle_txs)) {
+			tx = TAILQ_FIRST(&tep->idle_txs);
+			TAILQ_REMOVE(&tep->idle_txs, tx, dentry);
 		}
 		pthread_mutex_unlock(&ep->lock);
 
@@ -3640,9 +3845,9 @@ static void tcp_handle_conn_reply(tcp_conn_t * sconn,	/* NULL if rejected */
 			/* we can't ack, cleanup */
 			debug((CCI_DB_CONN | CCI_DB_MSG),
 			      "ep %d does not have any tx "
-			      "buffs to send a conn_ack to %s", sep->sock, to);
+			      "buffs to send a conn_ack to %s", tep->sock, to);
 			pthread_mutex_lock(&ep->lock);
-			TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
+			TAILQ_INSERT_HEAD(&tep->idle_rxs, rx, entry);
 			pthread_mutex_unlock(&ep->lock);
 
 			CCI_EXIT;
@@ -3652,7 +3857,7 @@ static void tcp_handle_conn_reply(tcp_conn_t * sconn,	/* NULL if rejected */
 
 	/* we have a tx for the conn_ack */
 
-	tx->seq = ++(sconn->seq);
+	tx->seq = ++(tconn->seq);
 
 	tx->flags = CCI_FLAG_SILENT;
 	tx->msg_type = TCP_MSG_CONN_ACK;
@@ -3666,8 +3871,8 @@ static void tcp_handle_conn_reply(tcp_conn_t * sconn,	/* NULL if rejected */
 	tx->rma_op = NULL;
 
 	hdr_r = tx->buffer;
-	tcp_pack_conn_ack(&hdr_r->header, sconn->peer_id);
-	sconn->last_ack_ts = tcp_get_usecs();
+	tcp_pack_conn_ack(&hdr_r->header, tconn->peer_id);
+	tconn->last_ack_ts = tcp_get_usecs();
 	/* the conn_ack acks the server's seq in the timestamp */
 	tcp_pack_seq_ts(&hdr_r->seq_ts, tx->seq, seq);
 
@@ -3676,7 +3881,7 @@ static void tcp_handle_conn_reply(tcp_conn_t * sconn,	/* NULL if rejected */
 
 	tx->state = TCP_TX_QUEUED;
 	pthread_mutex_lock(&dev->lock);
-	TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
+	TAILQ_INSERT_TAIL(&tdev->queued, tx, dentry);
 	pthread_mutex_unlock(&dev->lock);
 
 #if DEBUG_RNR
@@ -3711,16 +3916,16 @@ static void tcp_handle_conn_reply(tcp_conn_t * sconn,	/* NULL if rejected */
  *   no ID has assigned to the remote peer.
  */
 static void
-tcp_handle_conn_ack(tcp_conn_t * sconn,
+tcp_handle_conn_ack(tcp_conn_t * tconn,
 		     tcp_rx_t * rx,
 		     uint8_t unused1,
 		     uint16_t unused2, uint32_t peer_id, struct sockaddr_in sin)
 {
 	cci__ep_t *ep;
 	cci__dev_t *dev;
-	cci__conn_t *conn = sconn->conn;
-	tcp_ep_t *sep;
-	tcp_dev_t *sdev;
+	cci__conn_t *conn = tconn->conn;
+	tcp_ep_t *tep;
+	tcp_dev_t *tdev;
 	tcp_tx_t *tx = NULL, *tmp = NULL, *t = NULL;
 	tcp_header_r_t *hdr_r;	/* wire header */
 	cci_endpoint_t *endpoint;	/* generic CCI endpoint */
@@ -3731,13 +3936,13 @@ tcp_handle_conn_ack(tcp_conn_t * sconn,
 
 	endpoint = (&conn->connection)->endpoint;
 	ep = container_of(endpoint, cci__ep_t, endpoint);
-	sep = ep->priv;
+	tep = ep->priv;
 	dev = ep->dev;
-	sdev = dev->priv;
+	tdev = dev->priv;
 
 	/* we check whether the connection ack match the id associated to the
 	   connection */
-	assert(peer_id == sconn->id);
+	assert(peer_id == tconn->id);
 
 	hdr_r = rx->buffer;
 	tcp_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
@@ -3745,10 +3950,10 @@ tcp_handle_conn_ack(tcp_conn_t * sconn,
 	debug(CCI_DB_CONN, "%s: seq %u ack %u", __func__, seq, ts);
 
 	pthread_mutex_lock(&dev->lock);
-	TAILQ_FOREACH_SAFE(t, &sdev->pending, dentry, tmp) {
+	TAILQ_FOREACH_SAFE(t, &tdev->pending, dentry, tmp) {
 		/* the conn_ack stores the ack for the conn_reply in ts */
 		if (t->seq == ts) {
-			TAILQ_REMOVE(&sdev->pending, t, dentry);
+			TAILQ_REMOVE(&tdev->pending, t, dentry);
 			tx = t;
 			debug(CCI_DB_CONN, "%s: found conn_reply", __func__);
 			break;
@@ -3759,20 +3964,20 @@ tcp_handle_conn_ack(tcp_conn_t * sconn,
 	if (!tx) {
 		/* FIXME do what here? */
 		/* if no tx, then it timed out or this is a duplicate,
-		 * but we have a sconn */
+		 * but we have a tconn */
 		debug((CCI_DB_MSG | CCI_DB_CONN), "received conn_ack and no matching tx " "(seq %u ack %u)", seq, ts);	//FIXME
 	} else {
 		pthread_mutex_lock(&ep->lock);
 		if (tx->evt.event.accept.connection) {
 			TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
 		} else {
-			TAILQ_INSERT_HEAD(&sep->idle_txs, tx, dentry);
+			TAILQ_INSERT_HEAD(&tep->idle_txs, tx, dentry);
 		}
 		pthread_mutex_unlock(&ep->lock);
 	}
 
 	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
+	TAILQ_INSERT_HEAD(&tep->idle_rxs, rx, entry);
 	pthread_mutex_unlock(&ep->lock);
 
 	CCI_EXIT;
@@ -3790,16 +3995,16 @@ tcp_handle_conn_ack(tcp_conn_t * sconn,
  *    at the application level.
  */
 static void
-tcp_handle_rma_read_request(tcp_conn_t * sconn, tcp_rx_t * rx,
+tcp_handle_rma_read_request(tcp_conn_t * tconn, tcp_rx_t * rx,
 			     uint16_t data_len)
 {
 	cci__ep_t *ep = NULL;
-	cci__conn_t *conn = sconn->conn;
+	cci__conn_t *conn = tconn->conn;
 	tcp_rma_header_t *read = rx->buffer;
 	cci_connection_t *connection = NULL;
 	//tcp_rma_header_t *write = NULL;
 	//tcp_tx_t *tx = NULL;
-	tcp_ep_t *sep = NULL;
+	tcp_ep_t *tep = NULL;
 	void *context = NULL;
 	//uint32_t msg_len = 1;
 	//void *msg_ptr = (void *)"RMAREAD";
@@ -3816,7 +4021,7 @@ tcp_handle_rma_read_request(tcp_conn_t * sconn, tcp_rx_t * rx,
 	uint32_t seq, ts;
 	int rc;
 	//cci__dev_t *dev = NULL;
-	//tcp_dev_t *sdev = NULL;
+	//tcp_dev_t *tdev = NULL;
 	uint64_t context_id;
 	uint64_t toto;
 	//cci__evt_t *evt;
@@ -3827,9 +4032,9 @@ tcp_handle_rma_read_request(tcp_conn_t * sconn, tcp_rx_t * rx,
 
 	connection = &conn->connection;
 	ep = container_of(connection->endpoint, cci__ep_t, endpoint);
-	sep = ep->priv;
+	tep = ep->priv;
 	//dev = ep->dev;
-	//sdev = dev->priv;
+	//tdev = dev->priv;
 
 	hdr_r = (tcp_header_r_t *) rx->buffer;
 
@@ -3840,7 +4045,7 @@ tcp_handle_rma_read_request(tcp_conn_t * sconn, tcp_rx_t * rx,
 				     &msg_remote_handle, &msg_remote_offset);
 
 	tcp_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
-	tcp_handle_seq(sconn, seq);
+	tcp_handle_seq(tconn, seq);
 	//remote = (tcp_rma_handle_t *) (uintptr_t) remote_handle;
 	memcpy(&toto, read->data, sizeof(uint64_t));
 	memcpy(&context_id, (void *)((char *)read->data + sizeof(uint64_t)),
@@ -3864,16 +4069,16 @@ tcp_handle_rma_read_request(tcp_conn_t * sconn, tcp_rx_t * rx,
 	/* Put the RMA_READ_REQUEST into the pending queue until the msg is
 	   acked */
 	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
+	TAILQ_INSERT_HEAD(&tep->idle_rxs, rx, entry);
 	pthread_mutex_unlock(&ep->lock);
 }
 
 static void
-tcp_handle_rma_write(tcp_conn_t * sconn, tcp_rx_t * rx, uint16_t len)
+tcp_handle_rma_write(tcp_conn_t * tconn, tcp_rx_t * rx, uint16_t len)
 {
 	cci__ep_t *ep = NULL;
-	cci__conn_t *conn = sconn->conn;
-	tcp_ep_t *sep = NULL;
+	cci__conn_t *conn = tconn->conn;
+	tcp_ep_t *tep = NULL;
 	tcp_rma_header_t *write = rx->buffer;
 	uint64_t local_handle;
 	uint64_t local_offset;
@@ -3882,7 +4087,7 @@ tcp_handle_rma_write(tcp_conn_t * sconn, tcp_rx_t * rx, uint16_t len)
 	tcp_rma_handle_t *remote, *h;
 
 	ep = container_of(conn->connection.endpoint, cci__ep_t, endpoint);
-	sep = ep->priv;
+	tep = ep->priv;
 
 	tcp_parse_rma_handle_offset(&write->local, &local_handle,
 				     &local_offset);
@@ -3891,7 +4096,7 @@ tcp_handle_rma_write(tcp_conn_t * sconn, tcp_rx_t * rx, uint16_t len)
 	remote = (tcp_rma_handle_t *) (uintptr_t) remote_handle;
 
 	pthread_mutex_lock(&ep->lock);
-	TAILQ_FOREACH(h, &sep->handles, entry) {
+	TAILQ_FOREACH(h, &tep->handles, entry) {
 		if (h == remote) {
 			break;
 		}
@@ -3938,7 +4143,7 @@ tcp_handle_rma_write(tcp_conn_t * sconn, tcp_rx_t * rx, uint16_t len)
 
       out:
 	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
+	TAILQ_INSERT_HEAD(&tep->idle_rxs, rx, entry);
 	pthread_mutex_unlock(&ep->lock);
 
 	return;
@@ -3947,19 +4152,19 @@ tcp_handle_rma_write(tcp_conn_t * sconn, tcp_rx_t * rx, uint16_t len)
 /* Based on a context ID, we get the corresponding context. This is mainly
    used for RMA reads, not for RMA writes. */
 static inline void
-lookup_contextid(tcp_conn_t * sconn, uint64_t context_id, const void **context)
+lookup_contextid(tcp_conn_t * tconn, uint64_t context_id, const void **context)
 {
 	/* Remember, the unique ID is actually the index in the array we use to
 	   track the different contexts used in context of RMA read operations. */
 	const void *c;
 
-	if (sconn->rma_contexts == NULL) {
+	if (tconn->rma_contexts == NULL) {
 		*context = NULL;
 	} else {
-		if (sconn->rma_contexts[context_id] != NULL) {
-			c = sconn->rma_contexts[context_id];
+		if (tconn->rma_contexts[context_id] != NULL) {
+			c = tconn->rma_contexts[context_id];
 			*context = c;
-			sconn->rma_contexts[context_id] = NULL;
+			tconn->rma_contexts[context_id] = NULL;
 		} else {
 			*context = NULL;
 		}
@@ -3967,10 +4172,10 @@ lookup_contextid(tcp_conn_t * sconn, uint64_t context_id, const void **context)
 }
 
 static void
-tcp_handle_rma_write_done(tcp_conn_t * sconn, tcp_rx_t * rx, uint16_t len)
+tcp_handle_rma_write_done(tcp_conn_t * tconn, tcp_rx_t * rx, uint16_t len)
 {
 	cci__evt_t *evt;
-	cci__conn_t *conn = sconn->conn;
+	cci__conn_t *conn = tconn->conn;
 	union cci_event *event;	/* generic CCI event */
 	cci_endpoint_t *endpoint;	/* generic CCI endpoint */
 	cci__ep_t *ep;
@@ -3991,7 +4196,7 @@ tcp_handle_rma_write_done(tcp_conn_t * sconn, tcp_rx_t * rx, uint16_t len)
 	event = & evt->event;
 	event->type = CCI_EVENT_RECV;
 	event->recv.len = len;
-	lookup_contextid(sconn, context_id, &context);
+	lookup_contextid(tconn, context_id, &context);
 	event->recv.ptr = context;
 	event->recv.connection = &conn->connection;
 
@@ -4022,9 +4227,9 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
 	tcp_rx_t *rx = NULL;
 	struct sockaddr_in sin;
 	socklen_t sin_len = sizeof(sin);
-	tcp_conn_t *sconn = NULL;
+	tcp_conn_t *tconn = NULL;
 	cci__conn_t *conn = NULL;
-	tcp_ep_t *sep;
+	tcp_ep_t *tep;
 	tcp_msg_type_t type;
 	uint32_t seq;
 	uint32_t ts;
@@ -4033,8 +4238,8 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
 
 	/* get idle rx */
 
-	sep = ep->priv;
-	if (!sep || sep->closing)
+	tep = ep->priv;
+	if (!tep || tep->closing)
 		return 0;
 
 	pthread_mutex_lock(&ep->lock);
@@ -4043,9 +4248,9 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
 		CCI_EXIT;
 		return 0;
 	}
-	if (!TAILQ_EMPTY(&sep->idle_rxs)) {
-		rx = TAILQ_FIRST(&sep->idle_rxs);
-		TAILQ_REMOVE(&sep->idle_rxs, rx, entry);
+	if (!TAILQ_EMPTY(&tep->idle_rxs)) {
+		rx = TAILQ_FIRST(&tep->idle_rxs);
+		TAILQ_REMOVE(&tep->idle_rxs, rx, entry);
 	}
 	pthread_mutex_unlock(&ep->lock);
 
@@ -4070,11 +4275,11 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
 		tcp_header_t *hdr = NULL;
 
 		debug(CCI_DB_INFO,
-		      "no rx buffers available on endpoint %d", sep->sock);
+		      "no rx buffers available on endpoint %d", tep->sock);
 
 		/* We do the receive using a temporary buffer so we can get enough
 		   data to send a RNR NACK */
-		ret = recvfrom(sep->sock, (void *)tmp_buff, TCP_UDP_MAX,
+		ret = recvfrom(tep->sock, (void *)tmp_buff, TCP_UDP_MAX,
 			       0, (struct sockaddr *)&sin, &sin_len);
 		if (ret < (int)sizeof(tcp_header_t)) {
 			debug(CCI_DB_INFO,
@@ -4087,11 +4292,11 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
 		   context of a reliable connection */
 		hdr = (tcp_header_t *) tmp_buff;
 		tcp_parse_header(hdr, &type, &a, &b, &id);
-		sconn =
-		    tcp_find_conn(sep, sin.sin_addr.s_addr, sin.sin_port, id,
+		tconn =
+		    tcp_find_conn(tep, sin.sin_addr.s_addr, sin.sin_port, id,
 				   type);
-		conn = sconn->conn;
-		if (sconn == NULL) {
+		conn = tconn->conn;
+		if (tconn == NULL) {
 			/* If the connection is not already established, we just drop the
 			   message */
 			debug(CCI_DB_INFO,
@@ -4101,7 +4306,7 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
 		}
 
 		/* If this is a reliable connection, we issue a RNR message */
-		if (cci_conn_is_reliable(sconn->conn)) {
+		if (cci_conn_is_reliable(tconn->conn)) {
 			tcp_header_r_t *header_r = NULL;
 
 			/* We do the receive using a temporary buffer so we can get enough
@@ -4111,7 +4316,7 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
 			   the only we need to deal with RNR) and will be used later on */
 			header_r = (tcp_header_r_t *) tmp_buff;
 			tcp_parse_seq_ts(&header_r->seq_ts, &seq, &ts);
-			sconn->rnr = seq;
+			tconn->rnr = seq;
 			drop_msg = 1;
 			goto out;
 		} else {
@@ -4121,7 +4326,7 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
 		}
 	}
 
-	ret = recvfrom(sep->sock, rx->buffer, ep->buffer_len,
+	ret = recvfrom(tep->sock, rx->buffer, ep->buffer_len,
 		       0, (struct sockaddr *)&sin, &sin_len);
 	if (ret < (int)sizeof(tcp_header_t)) {
 		q_rx = 1;
@@ -4144,8 +4349,8 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
 		ka = 1;
 
 	if (!request)
-		sconn =
-		    tcp_find_conn(sep, sin.sin_addr.s_addr, sin.sin_port, id,
+		tconn =
+		    tcp_find_conn(tep, sin.sin_addr.s_addr, sin.sin_port, id,
 				   type);
 
 	{
@@ -4156,34 +4361,34 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
 			tcp_sin_to_name(sin, name, sizeof(name));
 			debug((CCI_DB_MSG),
 			      "ep %d recv'd %s msg from %s with %d bytes",
-			      sep->sock, tcp_msg_type(type), name, a + b);
+			      tep->sock, tcp_msg_type(type), name, a + b);
 		}
 	}
 
 	/* if no conn, drop msg, requeue rx */
-	if (!ka && !sconn && !reply && !request) {
+	if (!ka && !tconn && !reply && !request) {
 		debug((CCI_DB_CONN | CCI_DB_MSG),
-		      "no sconn for incoming %s msg " "from %s:%d",
+		      "no tconn for incoming %s msg " "from %s:%d",
 		      tcp_msg_type(type), inet_ntoa(sin.sin_addr),
 		      ntohs(sin.sin_port));
 		q_rx = 1;
 		goto out;
 	}
 
-	if (sconn && cci_conn_is_reliable(sconn->conn) &&
+	if (tconn && cci_conn_is_reliable(tconn->conn) &&
 	    !(type == TCP_MSG_CONN_REPLY)) {
 		tcp_header_r_t *hdr_r = rx->buffer;
 		tcp_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
-		tcp_handle_seq(sconn, seq);
+		tcp_handle_seq(tconn, seq);
 	}
 
 	/* Make sure the connection is already established */
-	if (sconn) {
+	if (tconn) {
 		/* If the connection is RNR and the seq is superior to seq for which
 		   the RNR was generated, we drop the msg */
-		conn = sconn->conn;
+		conn = tconn->conn;
 		if (conn->connection.attribute == CCI_CONN_ATTR_RO
-		    && sconn->rnr != 0 && seq > sconn->rnr) {
+		    && tconn->rnr != 0 && seq > tconn->rnr) {
 			/* We just drop the message */
 			debug(CCI_DB_MSG,
 			      "RNR connection, dropping msg (seq: %u)", seq);
@@ -4193,8 +4398,8 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
 
 		/* If we receive again the message that created the RNR status, we
 		   resume normal operation */
-		if (sconn->rnr > 0 && sconn->rnr == seq)
-			sconn->rnr = 0;
+		if (tconn->rnr > 0 && tconn->rnr == seq)
+			tconn->rnr = 0;
 	}
 
 	/* TODO handle types */
@@ -4204,21 +4409,21 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
 		tcp_handle_conn_request(rx, a, b, sin, ep);
 		break;
 	case TCP_MSG_CONN_REPLY:
-		tcp_handle_conn_reply(sconn, rx, a, b, id, sin, ep);
+		tcp_handle_conn_reply(tconn, rx, a, b, id, sin, ep);
 		break;
 	case TCP_MSG_CONN_ACK:
-		tcp_handle_conn_ack(sconn, rx, a, b, id, sin);
+		tcp_handle_conn_ack(tconn, rx, a, b, id, sin);
 		break;
 	case TCP_MSG_DISCONNECT:
 		break;
 	case TCP_MSG_SEND:
-		tcp_handle_active_message(sconn, rx, b, id);
+		tcp_handle_active_message(tconn, rx, b, id);
 		break;
 	case TCP_MSG_RNR:{
 			tcp_header_r_t *hdr_r = rx->buffer;
 
 			tcp_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
-			tcp_handle_rnr(sconn, seq, ts);
+			tcp_handle_rnr(tconn, seq, ts);
 			break;
 		}
 	case TCP_MSG_KEEPALIVE:
@@ -4227,16 +4432,16 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
 	case TCP_MSG_ACK_ONLY:
 	case TCP_MSG_ACK_UP_TO:
 	case TCP_MSG_SACK:
-		tcp_handle_ack(sconn, type, rx, (int)a, id);
+		tcp_handle_ack(tconn, type, rx, (int)a, id);
 		break;
 	case TCP_MSG_RMA_WRITE:
-		tcp_handle_rma_write(sconn, rx, b);
+		tcp_handle_rma_write(tconn, rx, b);
 		break;
 	case TCP_MSG_RMA_WRITE_DONE:
-		tcp_handle_rma_write_done(sconn, rx, b);
+		tcp_handle_rma_write_done(tconn, rx, b);
 		break;
 	case TCP_MSG_RMA_READ_REQUEST:
-		tcp_handle_rma_read_request(sconn, rx, b);
+		tcp_handle_rma_read_request(tconn, rx, b);
 		break;
 	case TCP_MSG_RMA_READ_REPLY:
 		break;
@@ -4248,12 +4453,12 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
       out:
 	if (q_rx) {
 		pthread_mutex_lock(&ep->lock);
-		TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
+		TAILQ_INSERT_HEAD(&tep->idle_rxs, rx, entry);
 		pthread_mutex_unlock(&ep->lock);
 	}
 
 	if (drop_msg) {
-		if (cci_conn_is_reliable(sconn->conn) && sconn->rnr == seq) {
+		if (cci_conn_is_reliable(tconn->conn) && tconn->rnr == seq) {
 			char buffer[TCP_MAX_HDR_SIZE];
 			int len = 0;
 			tcp_header_r_t *hdr_r = NULL;
@@ -4267,25 +4472,25 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
 			   the msg for which we were RNR so we can drop all other following 
 			   messages. */
 			if (conn->connection.attribute == CCI_CONN_ATTR_RO
-			    && sconn->rnr == 0)
-				sconn->rnr = seq;
+			    && tconn->rnr == 0)
+				tconn->rnr = seq;
 
 			/* Send a RNR NACK back to the sender */
 			memset(buffer, 0, sizeof(buffer));
 			hdr_r = (tcp_header_r_t *) buffer;
 			tcp_pack_nack(hdr_r,
 				       TCP_MSG_RNR,
-				       sconn->peer_id, seq, ts, 0);
+				       tconn->peer_id, seq, ts, 0);
 			len = sizeof(*hdr_r);
 
 			/* XXX: Should we queue the message or we send it? 
 			   I seems to me that it should be queued to maintain order as much as
 			   possible (but what about RU connections? */
-			tcp_sendto(sep->sock, buffer, len, sconn->sin);
+			tcp_sendto(tep->sock, buffer, len, tconn->sin);
 		}
 
 		/* Drop the message */
-		tcp_drop_msg(sep->sock);
+		tcp_drop_msg(tep->sock);
 	}
 
 	CCI_EXIT;
@@ -4298,27 +4503,27 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
  */
 static void tcp_keepalive(void)
 {
-	tcp_conn_t *sconn;
+	tcp_conn_t *tconn;
 	cci__conn_t *conn;
 	uint64_t now = 0ULL;
 	uint32_t ka_timeout;
 
 	CCI_ENTER;
 
-	if (TAILQ_EMPTY(&sglobals->ka_conns))
+	if (TAILQ_EMPTY(&tglobals->ka_conns))
 		return;
 
 	now = tcp_get_usecs();
 
-	TAILQ_FOREACH(sconn, &sglobals->ka_conns, entry) {
-		conn = sconn->conn;
+	TAILQ_FOREACH(tconn, &tglobals->ka_conns, entry) {
+		conn = tconn->conn;
 
 		if (conn->keepalive_timeout == 0ULL)
 			return;
 
 		/* The keepalive is assumed to expire if we did not hear anything from the
 		   peer since the last receive + keepalive timeout. */
-		ka_timeout = sconn->ts + conn->keepalive_timeout;
+		ka_timeout = tconn->ts + conn->keepalive_timeout;
 
 		if (TCP_U64_LT(now, ka_timeout)) {
 			int len;
@@ -4327,7 +4532,7 @@ static void tcp_keepalive(void)
 			cci_event_keepalive_timedout_t *event = NULL;
 			cci__evt_t *evt = NULL;
 			cci__ep_t *ep = NULL;
-			tcp_ep_t *sep = NULL;
+			tcp_ep_t *tep = NULL;
 			tcp_tx_t *tx = NULL;
 
 			/*
@@ -4353,21 +4558,21 @@ static void tcp_keepalive(void)
 
 			/* Get a TX */
 			pthread_mutex_lock(&ep->lock);
-			if (!TAILQ_EMPTY(&sep->idle_txs)) {
-				tx = TAILQ_FIRST(&sep->idle_txs);
-				TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
+			if (!TAILQ_EMPTY(&tep->idle_txs)) {
+				tx = TAILQ_FIRST(&tep->idle_txs);
+				TAILQ_REMOVE(&tep->idle_txs, tx, dentry);
 			}
 			pthread_mutex_unlock(&ep->lock);
 
 			/* Prepare and send the msg */
 			ep = container_of(conn->connection.endpoint, cci__ep_t,
 					  endpoint);
-			sep = ep->priv;
+			tep = ep->priv;
 			memset(buffer, 0, sizeof(buffer));
 			hdr = (tcp_header_t *) buffer;
-			tcp_pack_keepalive(hdr, sconn->peer_id);
+			tcp_pack_keepalive(hdr, tconn->peer_id);
 			len = sizeof(*hdr);
-			tcp_sendto(sep->sock, buffer, len, sconn->sin);
+			tcp_sendto(tep->sock, buffer, len, tconn->sin);
 		}
 	}
 
@@ -4379,9 +4584,9 @@ static void tcp_ack_conns(cci__ep_t * ep)
 {
 	int i;
 	cci__dev_t *dev = ep->dev;
-	tcp_dev_t *sdev = dev->priv;
-	tcp_ep_t *sep = ep->priv;
-	tcp_conn_t *sconn = NULL;
+	tcp_dev_t *tdev = dev->priv;
+	tcp_ep_t *tep = ep->priv;
+	tcp_conn_t *tconn = NULL;
 	tcp_tx_t *tx = NULL;
 	static uint64_t last = 0ULL;
 	uint64_t now = 0ULL;
@@ -4402,9 +4607,9 @@ static void tcp_ack_conns(cci__ep_t * ep)
 
 	pthread_mutex_lock(&ep->lock);
 	for (i = 0; i < TCP_EP_HASH_SIZE; i++) {
-		if (!TAILQ_EMPTY(&sep->conn_hash[i])) {
-			TAILQ_FOREACH(sconn, &sep->conn_hash[i], entry) {
-				if (!TAILQ_EMPTY(&sconn->acks)) {
+		if (!TAILQ_EMPTY(&tep->conn_hash[i])) {
+			TAILQ_FOREACH(tconn, &tep->conn_hash[i], entry) {
+				if (!TAILQ_EMPTY(&tconn->acks)) {
 					int count = 1;
 					tcp_header_r_t *hdr_r;
 					uint32_t acks[TCP_MAX_SACK * 2];
@@ -4416,17 +4621,17 @@ static void tcp_ack_conns(cci__ep_t * ep)
 
 					memset(buffer, 0, sizeof(buffer));
 
-					if (1 == tcp_need_sack(sconn)) {
+					if (1 == tcp_need_sack(tconn)) {
 						tcp_ack_t *tmp;
 
 						type = TCP_MSG_SACK;
 						count = 0;
 
 						TAILQ_FOREACH_SAFE(ack,
-								   &sconn->acks,
+								   &tconn->acks,
 								   entry, tmp) {
 							TAILQ_REMOVE
-							    (&sconn->acks, ack,
+							    (&tconn->acks, ack,
 							     entry);
 							acks[count++] =
 							    ack->start;
@@ -4437,15 +4642,15 @@ static void tcp_ack_conns(cci__ep_t * ep)
 							    TCP_MAX_SACK * 2)
 								break;
 						}
-						if (acks[0] == sconn->acked + 1) {
-							sconn->acked = acks[1];
+						if (acks[0] == tconn->acked + 1) {
+							tconn->acked = acks[1];
 						}
 					} else {
-						ack = TAILQ_FIRST(&sconn->acks);
-						TAILQ_REMOVE(&sconn->acks, ack,
+						ack = TAILQ_FIRST(&tconn->acks);
+						TAILQ_REMOVE(&tconn->acks, ack,
 							     entry);
-						if (ack->start == sconn->acked)
-							sconn->acked = ack->end;
+						if (ack->start == tconn->acked)
+							tconn->acked = ack->end;
 						acks[0] = ack->end;
 						if (ack->start == ack->end)
 							type =
@@ -4454,14 +4659,14 @@ static void tcp_ack_conns(cci__ep_t * ep)
 					}
 					hdr_r = (tcp_header_r_t *) buffer;
 					tcp_pack_ack(hdr_r, type,
-						      sconn->peer_id, 0, 0,
+						      tconn->peer_id, 0, 0,
 						      acks, count);
 
 					len =
 					    sizeof(*hdr_r) +
 					    (count * sizeof(acks[0]));
-					tcp_sendto(sep->sock, buffer, len,
-						    sconn->sin);
+					tcp_sendto(tep->sock, buffer, len,
+						    tconn->sin);
 				}
 			}
 		}
@@ -4472,7 +4677,7 @@ static void tcp_ack_conns(cci__ep_t * ep)
 		tx = TAILQ_FIRST(&txs);
 		TAILQ_REMOVE(&txs, tx, dentry);
 		pthread_mutex_lock(&dev->lock);
-		TAILQ_INSERT_TAIL(&sdev->queued, tx, dentry);
+		TAILQ_INSERT_TAIL(&tdev->queued, tx, dentry);
 		pthread_mutex_unlock(&dev->lock);
 	}
 
@@ -4483,15 +4688,15 @@ static void tcp_ack_conns(cci__ep_t * ep)
 static inline void tcp_progress_dev(cci__dev_t * dev)
 {
 	int have_token = 0;
-	tcp_dev_t *sdev;
+	tcp_dev_t *tdev;
 	cci__ep_t *ep;
 
 	CCI_ENTER;
 
-	sdev = dev->priv;
+	tdev = dev->priv;
 	pthread_mutex_lock(&dev->lock);
-	if (sdev->is_progressing == 0) {
-		sdev->is_progressing = 1;
+	if (tdev->is_progressing == 0) {
+		tdev->is_progressing = 1;
 		have_token = 1;
 	}
 	pthread_mutex_unlock(&dev->lock);
@@ -4509,7 +4714,7 @@ static inline void tcp_progress_dev(cci__dev_t * dev)
 	/* TODO progress lep->passive? */
 
 	pthread_mutex_lock(&dev->lock);
-	sdev->is_progressing = 0;
+	tdev->is_progressing = 0;
 	pthread_mutex_unlock(&dev->lock);
 
 	CCI_EXIT;
@@ -4521,12 +4726,12 @@ static void *tcp_progress_thread(void *arg)
 	struct timeval tv = { 0, TCP_PROG_TIME_US };
 
 	assert(!arg);
-	pthread_mutex_lock(&sglobals->lock);
+	pthread_mutex_lock(&tglobals->lock);
 	while (!tcp_shut_down) {
 		cci__dev_t *dev;
 		cci_device_t const **device;
 
-		pthread_mutex_unlock(&sglobals->lock);
+		pthread_mutex_unlock(&tglobals->lock);
 
 		/* For each connection with keepalive set. We do here since the list
 		   of such connections is independent from any device (we do not want
@@ -4534,14 +4739,14 @@ static void *tcp_progress_thread(void *arg)
 		tcp_keepalive();
 
 		/* for each device, try progressing */
-		for (device = sglobals->devices; *device != NULL; device++) {
+		for (device = tglobals->devices; *device != NULL; device++) {
 			dev = container_of(*device, cci__dev_t, device);
 			tcp_progress_dev(dev);
 		}
 		select(0, NULL, NULL, NULL, &tv);
-		pthread_mutex_lock(&sglobals->lock);
+		pthread_mutex_lock(&tglobals->lock);
 	}
-	pthread_mutex_unlock(&sglobals->lock);
+	pthread_mutex_unlock(&tglobals->lock);
 
 	pthread_exit(NULL);
 	return (NULL);		/* make pgcc happy */
@@ -4557,15 +4762,15 @@ static void *tcp_recv_thread(void *arg)
 	fd_set fds;
 
 	assert(!arg);
-	pthread_mutex_lock(&sglobals->lock);
+	pthread_mutex_lock(&tglobals->lock);
 	while (!tcp_shut_down) {
-		nfds = sglobals->nfds;
+		nfds = tglobals->nfds;
 		FD_ZERO(&fds);
 		for (i = 0; i < nfds; i++) {
-			if (sglobals->fd_idx[i].type != TCP_FD_UNUSED)
+			if (tglobals->fd_idx[i].type != TCP_FD_UNUSED)
 				FD_SET(i, &fds);
 		}
-		pthread_mutex_unlock(&sglobals->lock);
+		pthread_mutex_unlock(&tglobals->lock);
 
 		ret = select(nfds, &fds, NULL, NULL, &tv);
 		if (ret == -1) {
@@ -4589,7 +4794,7 @@ static void *tcp_recv_thread(void *arg)
 		do {
 			if (FD_ISSET(i, &fds)) {
 				tcp_fd_idx_t *idx =
-				    (tcp_fd_idx_t *) & sglobals->fd_idx[i];
+				    (tcp_fd_idx_t *) & tglobals->fd_idx[i];
 
 				if (idx->type == TCP_FD_EP)
 					tcp_recvfrom_ep(idx->ep);
@@ -4598,9 +4803,9 @@ static void *tcp_recv_thread(void *arg)
 			i = (i + 1) % nfds;
 		} while (i != start);
 	      relock:
-		pthread_mutex_lock(&sglobals->lock);
+		pthread_mutex_lock(&tglobals->lock);
 	}
-	pthread_mutex_unlock(&sglobals->lock);
+	pthread_mutex_unlock(&tglobals->lock);
 
 	pthread_exit(NULL);
 	return (NULL);		/* make pgcc happy */

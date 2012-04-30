@@ -687,6 +687,16 @@ tcp_pack_rma_read_reply(tcp_rma_read_reply_header_t * read_reply, uint64_t data_
 
 /************* TCP private structures ****************/
 
+typedef struct tcp_buffer_pool {
+	TAILQ_HEAD(s_e, cci__evt) evts;
+	void *buf;		/* memory */
+	uint32_t size;		/* 4 GB per endpoint is hopefully enough */
+	int repost;		/* 1 for yes, 0 means we are cleaning up */
+	uint32_t count;		/* number of items */
+	uint32_t avail;		/* items available for use */
+	TAILQ_ENTRY(tcp_buffer_pool) entry; /* tep->tx_pools and tep->rx_pools */
+} tcp_buffer_pool_t;
+
 typedef enum tcp_tx_state_t {
 	/*! available, held by endpoint */
 	TCP_TX_IDLE = 0,
@@ -718,16 +728,10 @@ typedef struct tcp_tx {
 	tcp_tx_state_t state;
 
 	/*! Buffer (wire header, data) */
-	void *buffer;
+	void *ptr;
 
 	/*! Buffer length */
-	uint16_t len;
-
-	/*! Entry for hanging on ep->idle_txs, dev->queued, dev->pending */
-	 TAILQ_ENTRY(tcp_tx) entry;
-
-	/*! Entry for hanging on ep->txs */
-	 TAILQ_ENTRY(tcp_tx) tentry;
+	uint32_t len;
 
 	/*! Entry for sconn->tx_seqs */
 	 TAILQ_ENTRY(tcp_tx) tx_seq;
@@ -745,6 +749,9 @@ typedef struct tcp_tx {
 
 	/*! Number of RNR nacks received */
 	uint32_t rnr;
+
+	/*! Owning buffer pool */
+	tcp_buffer_pool_t *pool;
 } tcp_tx_t;
 
 /*! Receive active message context.
@@ -755,16 +762,13 @@ typedef struct tcp_rx {
 	cci__evt_t evt;
 
 	/*! Buffer (wire header, data) */
-	void *buffer;
+	void *ptr;
 
 	/*! Buffer length */
-	uint16_t len;
+	uint32_t len;
 
-	/*! Entry for hanging on ep->idle_rxs, ep->loaned */
-	 TAILQ_ENTRY(tcp_rx) entry;
-
-	/*! Entry for hanging on ep->rxs */
-	 TAILQ_ENTRY(tcp_rx) gentry;
+	/*! Owning buffer pool */
+	tcp_buffer_pool_t *pool;
 } tcp_rx_t;
 
 typedef struct tcp_rma_handle {
@@ -845,17 +849,11 @@ typedef struct tcp_ep {
 	/*! rbtree for connections */
 	void *conns;
 
-	/*! List of all txs */
-	TAILQ_HEAD(s_txs, tcp_tx) txs;
+	/*! List of all tx buffer pools. The head is the current pool. */
+	TAILQ_HEAD(s_txp, tcp_buffer_pool) tx_pools;
 
-	/*! List of idle txs */
-	TAILQ_HEAD(s_txsi, tcp_tx) idle_txs;
-
-	/*! List of all rxs */
-	TAILQ_HEAD(s_rxs, tcp_rx) rxs;
-
-	/*! List of idle rxs */
-	TAILQ_HEAD(s_rxsi, tcp_rx) idle_rxs;
+	/*! List of all rx buffer pools. The head is the current pool. */
+	TAILQ_HEAD(s_rxp, tcp_buffer_pool) rx_pools;
 
 	/*! List of active connections awaiting replies */
 	TAILQ_HEAD(s_active, tcp_conn) active;
@@ -1028,6 +1026,14 @@ typedef struct tcp_globals {
 
 #ifndef FD_COPY
 #define FD_COPY(a,b) memcpy(a,b,sizeof(fd_set))
+#endif
+
+#ifdef __GNUC__
+#define likely(x)       __builtin_expect((x),1)
+#define unlikely(x)     __builtin_expect((x),0)
+#else
+#define likely(x)       (x)
+#define unlikely(x)     (x)
 #endif
 
 extern tcp_globals_t *sglobals;
