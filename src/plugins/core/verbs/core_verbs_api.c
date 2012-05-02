@@ -1322,8 +1322,8 @@ static int verbs_destroy_endpoint(cci_endpoint_t * endpoint)
 
 	free(vep);
 
-	if (ep->endpoint.name) {
-		free((char *)ep->endpoint.name);
+	if (ep->uri) {
+		free((char *)ep->uri);
 	}
 
 	CCI_EXIT;

@@ -1071,7 +1071,7 @@ static int gni_destroy_endpoint(cci_endpoint_t * endpoint)
 
 	free(gep->tx_buf);
 	free(gep);
-	free((char *)ep->endpoint.name);
+	free((char *)ep->uri);
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
