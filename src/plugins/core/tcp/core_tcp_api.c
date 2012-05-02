@@ -3127,10 +3127,10 @@ tcp_handle_ack(tcp_conn_t * tconn,
 
 				/* send remote completion? */
 				if (rma_op->msg_len) {
-					tcp_header_r_t *hdr_r = tx->ptr;
+					//tcp_header_r_t *hdr_r = tx->ptr;
 					tcp_rma_write_header_t *write = NULL;
 					uint64_t context_id;
-					void *msg_ptr = NULL;
+					//void *msg_ptr = NULL;
 
 					rma_op->tx = tx;
 					tx->msg_type = TCP_MSG_SEND;
@@ -3155,6 +3155,8 @@ tcp_handle_ack(tcp_conn_t * tconn,
 					write =
 					    (tcp_rma_write_header_t *) tx->ptr;
 					context_id = (uint64_t) rma_op->context;
+#if 0
+					/* FIXME */
 					tcp_pack_rma_write_done(write,
 								 tconn->peer_id,
 								 tx->seq, 0);
@@ -3170,6 +3172,7 @@ tcp_handle_ack(tcp_conn_t * tconn,
 					    sizeof(tcp_rma_write_header_t) +
 					    sizeof(uint64_t);
 					TAILQ_INSERT_TAIL(&queued, tx, dentry);
+#endif
 					continue;
 				} else {
 					int flags = rma_op->flags;
@@ -3197,7 +3200,7 @@ tcp_handle_ack(tcp_conn_t * tconn,
 			}
 		}
 
-		TAILQ_INSERT_HEAD(&tep->idle_txs, tx, dentry);
+		tcp__put_tx(tx);
 	}
 
 	/* transfer evts to the ep's list */
@@ -3209,16 +3212,13 @@ tcp_handle_ack(tcp_conn_t * tconn,
 	}
 	pthread_mutex_unlock(&ep->lock);
 
-	pthread_mutex_lock(&dev->lock);
 	pthread_mutex_lock(&ep->lock);
 	while (!TAILQ_EMPTY(&queued)) {
-		tcp_tx_t *my_tx;
-		my_tx = TAILQ_FIRST(&queued);
-		TAILQ_REMOVE(&queued, my_tx, dentry);
-		TAILQ_INSERT_TAIL(&tdev->queued, my_tx, dentry);
+		cci__evt_t *evt = TAILQ_FIRST(&queued);
+		TAILQ_REMOVE(&queued, evt, entry);
+		TAILQ_INSERT_TAIL(&tep->queued, evt, entry);
 	}
 	pthread_mutex_unlock(&ep->lock);
-	pthread_mutex_unlock(&dev->lock);
 
 	CCI_EXIT;
 	return;
@@ -3303,9 +3303,11 @@ static void tcp_handle_conn_reply(tcp_conn_t * tconn,	/* NULL if rejected */
 		 * the conn is closed and we simply ack the msg
 		 */
 		/* look for a conn that is ready */
+#if 0
 		tconn =
 		    tcp_find_conn(tep, sin.sin_addr.s_addr, sin.sin_port, id,
 				   TCP_MSG_SEND);
+#endif
 		if (!tconn) {
 			tcp_header_r_t hdr;
 			int len = (int)sizeof(hdr);
