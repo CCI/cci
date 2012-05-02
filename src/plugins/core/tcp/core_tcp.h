@@ -471,7 +471,7 @@ tcp_pack_ack(tcp_header_t * header, tcp_msg_type_t type,
 /* Caller must provide storage for (TCP_MAX_SACK * 2) acks */
 /* Count = number of acks. If sack, count each start and end */
 static inline void
-tcp_parse_ack(tcp_header_t * header, tcp_msg_type_t type,
+tcp_parse_ack(tcp_header_r_t * header, tcp_msg_type_t type,
 	       uint32_t * ack, int count)
 {
 	int i;
@@ -868,10 +868,10 @@ typedef struct tcp_ep {
 	TAILQ_HEAD(s_ops, tcp_rma_op) rma_ops;
 
 	/*! Queued sends */
-	TAILQ_HEAD(s_queued, tcp_tx) queued;
+	TAILQ_HEAD(s_queued, cci__evt) queued;
 
 	/*! Pending (in-flight) sends */
-	TAILQ_HEAD(s_pending, tcp_tx) pending;
+	TAILQ_HEAD(s_pending, cci__evt) pending;
 
 	/*! List of all connections with keepalive enabled */
 	TAILQ_HEAD(s_ka, tcp_conn) ka_conns;
@@ -938,6 +938,9 @@ typedef struct tcp_conn {
 
 	/*! Socket connected to peer */
 	int sock;
+
+	/*! Entry on tep->active or tep->passive */
+	TAILQ_ENTRY(tcp_conn) entry;
 
 	/*! Max sends in flight to this peer */
 	uint32_t max_tx_cnt;
