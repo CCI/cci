@@ -71,7 +71,7 @@ void test(cci_endpoint_t *endpoint, cci_opt_name_t name)
 		val = tx_timeout;
 		break;
 	case CCI_OPT_ENDPT_RECV_BUF_COUNT:
-		val = tx_timeout;
+		val = rx_buf_cnt;
 		break;
 	case CCI_OPT_ENDPT_SEND_BUF_COUNT:
 		val = tx_buf_cnt;
