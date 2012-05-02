@@ -227,7 +227,7 @@ int main(int argc, char *argv[])
 		test(endpoint, CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT);
 	}
 
-	if (align) {
+	if (align != -1) {
 		printf("Testing CCI_OPT_ENDPT_RMA_ALIGN\n");
 		test(endpoint, CCI_OPT_ENDPT_RMA_ALIGN);
 	}
