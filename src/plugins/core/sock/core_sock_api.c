@@ -50,9 +50,7 @@
 bool conn_established = false;
 #endif
 
-volatile int sock_shut_down = 0;
 sock_globals_t *sglobals = NULL;
-pthread_t progress_tid, recv_tid;
 
 /*
  * Local functions
@@ -451,6 +449,35 @@ static inline int load_devices(void)
 	return CCI_SUCCESS;
 }
 
+static inline int sock_create_threads (cci__ep_t *ep)
+{
+    int ret;
+    sock_ep_t *sep;
+
+    assert (ep);
+
+    sep = ep->priv;
+
+    ret = pthread_create(&sep->recv_tid, NULL, sock_recv_thread, (void*)ep);
+    if (ret)
+        goto out;
+
+    ret = pthread_create(&sep->progress_tid, NULL, sock_progress_thread, (void*)ep);
+    if (ret)
+        goto out;
+
+out:
+    return ret;
+}
+
+static inline int sock_terminate_threads (sock_ep_t *sep)
+{
+    assert (sep);
+
+    pthread_join(sep->progress_tid, NULL);
+    pthread_join(sep->recv_tid, NULL);
+}
+
 static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	int ret;
@@ -557,14 +584,6 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
 	*((cci_device_t ***) & sglobals->devices) = devices;
 
-	ret = pthread_create(&recv_tid, NULL, sock_recv_thread, NULL);
-	if (ret)
-		goto out;
-
-	ret = pthread_create(&progress_tid, NULL, sock_progress_thread, NULL);
-	if (ret)
-		goto out;
-
 	CCI_EXIT;
 	return CCI_SUCCESS;
 
@@ -625,12 +644,14 @@ static int sock_finalize(void)
 		return CCI_ENODEV;
 	}
 
+#if 0
 	/* let the progress thread know we are going away */
 	pthread_mutex_lock(&globals->lock);
 	sock_shut_down = 1;
 	pthread_mutex_unlock(&globals->lock);
 	pthread_join(progress_tid, NULL);
 	pthread_join(recv_tid, NULL);
+#endif
 
 	pthread_mutex_lock(&globals->lock);
 	TAILQ_FOREACH(dev, &globals->devs, entry)
@@ -738,6 +759,7 @@ static int sock_create_endpoint(cci_device_t * device,
 		ret = CCI_ENOMEM;
 		goto out;
 	}
+    sep->closing = 0;
 
 	sep->sock = socket(PF_INET, SOCK_DGRAM, 0);
 	if (sep->sock == -1) {
@@ -829,6 +851,10 @@ static int sock_create_endpoint(cci_device_t * device,
 	if (ret)
 		goto out;
 
+    ret = sock_create_threads (ep);
+    if (ret)
+        goto out;
+
 	CCI_EXIT;
 	return CCI_SUCCESS;
 
@@ -899,7 +925,13 @@ static int sock_destroy_endpoint(cci_endpoint_t * endpoint)
 		cci__conn_t *conn;
 		sock_conn_t *sconn;
 
-		sep->closing = 1;
+        sep->closing = 1;
+
+        pthread_mutex_unlock(&dev->lock);
+        pthread_mutex_unlock(&ep->lock);
+        sock_terminate_threads (sep);
+        pthread_mutex_lock(&dev->lock);
+        pthread_mutex_lock(&ep->lock);
 
 		if (sep->sock)
 			sock_close_socket(sep->sock);
@@ -4723,16 +4755,22 @@ static inline void sock_progress_dev(cci__dev_t * dev)
 static void *sock_progress_thread(void *arg)
 {
 	struct timeval tv = { 0, SOCK_PROG_TIME_US };
+    cci__ep_t *ep = (cci__ep_t *) arg;
+    sock_ep_t *sep;
+    cci__dev_t *dev;
 
-	assert(!arg);
+    assert (ep);
+    sep = ep->priv;
+    dev = ep->dev;
+
 	pthread_mutex_lock(&globals->lock);
-	while (!sock_shut_down) {
-		cci__dev_t *dev;
-		cci_device_t const *device;
-		int i = 0;
+	while (!sep->closing) {
 
 		pthread_mutex_unlock(&globals->lock);
 
+        /* FIXME: re-enable keepalive here */
+        sock_progress_dev(dev);
+#if 0
 		/* For each connection with keepalive set. We do here since the list
 		   of such connections is independent from any device (we do not want
 		   to go from device to connections. */
@@ -4747,6 +4785,7 @@ static void *sock_progress_thread(void *arg)
 			}
 			i++;
 		}
+#endif
 		select(0, NULL, NULL, NULL, &tv);
 		pthread_mutex_lock(&globals->lock);
 	}
@@ -4765,19 +4804,19 @@ static void *sock_recv_thread(void *arg)
 	int nfds = 0;
 	fd_set fds;
     int again;
+    cci__ep_t *ep = (cci__ep_t *)arg;
+    sock_ep_t *sep;
 
-	assert(!arg);
+    assert (ep);
+    sep = ep->priv;
 	pthread_mutex_lock(&globals->lock);
-	while (!sock_shut_down) {
+	while (!sep->closing) {
 		nfds = sglobals->nfds;
 		FD_ZERO(&fds);
-		for (i = 0; i < nfds; i++) {
-			if (sglobals->fd_idx[i].type != SOCK_FD_UNUSED)
-				FD_SET(i, &fds);
-		}
+        FD_SET (sep->sock, &fds);
 		pthread_mutex_unlock(&globals->lock);
 
-		ret = select(nfds, &fds, NULL, NULL, &tv);
+        ret = select (nfds, &fds, NULL, NULL, &tv);
 		if (ret == -1) {
 			switch (errno) {
 			case EBADF:
@@ -4792,24 +4831,16 @@ static void *sock_recv_thread(void *arg)
 			goto relock;
 		}
 
-		if (start >= nfds)
-			start = 0;
-
-		i = start;
-		do {
-			if (FD_ISSET(i, &fds)) {
-				sock_fd_idx_t *idx =
-				    (sock_fd_idx_t *) & sglobals->fd_idx[i];
-
-				if (idx->type == SOCK_FD_EP) {
-                    do {
-    					again = sock_recvfrom_ep(idx->ep);
-                    } while (again == 1);
-                }
-				start = i;
-			}
-			i = (i + 1) % nfds;
-		} while (i != start);
+        /* Some checking to make sure the data is on the correct socket,
+           we also get the pointer we need to receive the data */
+        if (FD_ISSET(sep->sock, &fds)) {
+            sock_fd_idx_t *idx = (sock_fd_idx_t *) &sglobals->fd_idx[sep->sock];
+            if (idx->type == SOCK_FD_EP) {
+                do {
+                    again = sock_recvfrom_ep (idx->ep);
+                } while (again == 1);
+            }
+        }
 relock:
 		pthread_mutex_lock(&globals->lock);
 	}

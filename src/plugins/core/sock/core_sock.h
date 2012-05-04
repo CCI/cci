@@ -906,6 +906,12 @@ typedef struct sock_rma_op {
 } sock_rma_op_t;
 
 typedef struct sock_ep {
+    /*! ID of the recv thread for the endpoint */
+    pthread_t recv_tid;
+
+    /*! ID of the progress thread for the endpoint */
+    pthread_t progress_tid;
+
 	/* Our IP and port */
 	struct sockaddr_in sin;
 
