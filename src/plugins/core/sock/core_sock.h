@@ -25,27 +25,28 @@ BEGIN_C_DECLS
 #define SOCK_UDP_MAX            (65508)	/* 64 KB - 8 B UDP - 20 B IP */
 #define SOCK_MAX_HDR_SIZE       (48)	/* max sock header size (RMA) */
 #define SOCK_MAX_HDRS           (SOCK_MAX_HDR_SIZE + 20 + 8)	/* IP + UDP */
-#define SOCK_DEFAULT_MSS        (8192)	/* 8 KB - assume jumbo frames */
+/* FIXME */
+#define SOCK_DEFAULT_MSS        (64*1024 - 256)	/* assume jumbo frames */
 #define SOCK_MIN_MSS            (1500 - SOCK_MAX_HDR_SIZE)
 #define SOCK_MAX_SACK           (4)	/* pairs of start/end acks */
 #define SOCK_ACK_DELAY          (1)	/* send an ack after every Nth send */
 #define SOCK_EP_TX_TIMEOUT_SEC  (64)	/* seconds for now */
-#define SOCK_EP_RX_CNT          (1024)	/* number of rx active messages */
-#define SOCK_EP_TX_CNT          (128)	/* number of tx active messages */
+#define SOCK_EP_RX_CNT          (16*1024)	/* number of rx active messages */
+#define SOCK_EP_TX_CNT          (16*1024)	/* number of tx active messages */
 #define SOCK_EP_HASH_SIZE       (256)	/* nice round number */
 #define SOCK_MAX_EPS            (256)	/* max sock fd value - 1 */
 #define SOCK_BLOCK_SIZE         (64)	/* use 64b blocks for id storage */
 #define SOCK_NUM_BLOCKS         (16384)	/* number of blocks */
 #define SOCK_MAX_ID             (SOCK_BLOCK_SIZE * SOCK_NUM_BLOCKS)
     /* 1048576 conns per endpoint */
-#define SOCK_PROG_TIME_US       (10000)	/* try to progress every N microseconds */
+#define SOCK_PROG_TIME_US       (100)	/* try to progress every N microseconds */
 #define SOCK_RESEND_TIME_SEC    (1)	/* time between resends in seconds */
 #define SOCK_PEEK_LEN           (32)	/* large enough for RMA header */
 #define SOCK_CONN_REQ_HDR_LEN   ((int) (sizeof(struct sock_header_r)))
     /* header + seqack */
-#define SOCK_RMA_DEPTH          (12)	/* how many in-flight msgs per RMA */
-#define ACK_TIMEOUT             (1000000) /* Timeout associated to ACK blocks */
-#define PENDING_ACK_THRESHOLD   (SOCK_RMA_DEPTH-1) /* Maximum size of a ACK block */
+#define SOCK_RMA_DEPTH          (256)	/* how many in-flight msgs per RMA */
+#define ACK_TIMEOUT             (100) /* Timeout associated to ACK blocks */
+#define PENDING_ACK_THRESHOLD   (SOCK_RMA_DEPTH/4) /* Maximum size of a ACK block */
 static inline uint64_t sock_tv_to_usecs(struct timeval tv)
 {
 	return (tv.tv_sec * 1000000) + tv.tv_usec;
@@ -776,6 +777,9 @@ typedef struct sock_tx {
 
 	/*! Buffer length */
 	uint16_t len;
+
+	void *rma_ptr;
+	uint16_t rma_len;
 
 	/*! Entry for hanging on ep->idle_txs, dev->queued, dev->pending */
 	 TAILQ_ENTRY(sock_tx) dentry;

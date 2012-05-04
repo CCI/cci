@@ -106,6 +106,7 @@ static void *sock_progress_thread(void *arg);
 static void *sock_recv_thread(void *arg);
 static inline void sock_progress_dev(cci__dev_t * dev);
 static int sock_sendto(cci_os_handle_t sock, void *buf, int len,
+			void *rma_ptr, uint16_t rma_len,
 		       const struct sockaddr_in sin);
 static void sock_ack_conns(cci__ep_t * ep);
 static inline int pack_piggyback_ack (cci__ep_t *ep,
@@ -275,7 +276,6 @@ static inline int
 lookup_device(char *ifa_name, cci_device_t ** devices, cci_device_t ** dev)
 {
 	int i = 0;
-	cci_device_t *device;
 
 	if (ifa_name == NULL)
 		return CCI_ERROR;
@@ -330,7 +330,7 @@ store_device(char *ifa_name,
 	     char *ip,
 	     core_sock_device_state_t s, cci_device_t *** list_devices)
 {
-	int rc, count;
+	int rc;
 	cci_device_t *device;
 	cci_device_t **devices;
 	size_t n;
@@ -401,8 +401,6 @@ store_device(char *ifa_name,
  */
 static inline int load_devices(void)
 {
-	struct ifconf ifc;
-	struct ifreq *ifr;
 	struct ifaddrs *ifaddr;
 	struct ifaddrs *ifa;
 	int family;
@@ -429,7 +427,6 @@ static inline int load_devices(void)
         /* We only care about the IPv4 addresses at the moment */
 		if (family == AF_INET) {
 			struct sockaddr_in *s4;
-			void *in_addr;
 			char buf[INET_ADDRSTRLEN];
 			const char *s;
 
@@ -1091,6 +1088,9 @@ static int sock_accept(union cci_event *event, void *context)
 		return CCI_ENOBUFS;
 	}
 
+	tx->rma_ptr = NULL;
+	tx->rma_len = 0;
+
 	hdr_r = rx->buffer;
 	sock_parse_header(&hdr_r->header, &type, &a, &b, &unused);
 	sock_parse_seq_ts(&hdr_r->seq_ts, &peer_seq, &peer_ts);
@@ -1243,6 +1243,9 @@ static int sock_reject(union cci_event *event)
 		ret = CCI_ENOBUFS;
 		goto out;
 	}
+
+	tx->rma_ptr = NULL;
+	tx->rma_len = 0;
 
 	/* prep the tx */
 
@@ -1501,6 +1504,9 @@ static int sock_connect(cci_endpoint_t * endpoint, char *server_uri,
 		CCI_EXIT;
 		return CCI_ENOBUFS;
 	}
+
+	tx->rma_ptr = NULL;
+	tx->rma_len = 0;
 
 	/* prep the tx */
 	tx->msg_type = SOCK_MSG_CONN_REQUEST;
@@ -1814,47 +1820,59 @@ static int sock_return_event(cci_event_t * event)
 	return CCI_SUCCESS;
 }
 
-static int sock_sendmsg(cci_os_handle_t sock, void **ptrs, uint32_t * lens,
-			uint8_t count, const struct sockaddr_in sin)
+static int sock_sendmsg(cci_os_handle_t sock, struct iovec iov[2],
+			int count, const struct sockaddr_in sin)
 {
 	int ret, i;
-	struct iovec *iov = NULL;
 	struct msghdr msg;
 	ssize_t sent = 0;
 
-	iov = calloc(count, sizeof(*iov));
-	if (!iov)
-		return CCI_ENOMEM;
+	for (i = 0; i < count; i++)
+		sent += iov[i].iov_len;
 
-	for (i = 0; i < count; i++) {
-		iov[i].iov_base = (void *)ptrs[i];
-		iov[i].iov_len = (size_t) lens[i];
-		sent += lens[i];
-	}
-
+	memset(&msg, 0, sizeof(msg));
 	msg.msg_name = (void *)&sin;
 	msg.msg_namelen = sizeof(sin);
 	msg.msg_iov = iov;
 	msg.msg_iovlen = count;
 
 	ret = sendmsg(sock, &msg, 0);
-	if (ret != -1)
-		assert(ret == sent);
+	if (ret != -1) {
+		//assert(ret == sent);
+	} else if (ret == -1) {
+		ret = errno;
+		debug(CCI_DB_MSG, "%s: sendmsg() returned %d (%s) count %d iov[0] %p:%hu iov[1] %p:%hu",
+				__func__, ret, strerror(ret), count,
+				iov[0].iov_base, (int)iov[0].iov_len,
+				iov[1].iov_base, (int)iov[1].iov_len);
+	}
 
 	return ret;
 }
 
 static int sock_sendto(cci_os_handle_t sock, void *buf, int len,
+			void *rma_ptr, uint16_t rma_len,
 		       const struct sockaddr_in sin)
 {
 	int ret;
 	const struct sockaddr *s = (const struct sockaddr *)&sin;
 	socklen_t slen = sizeof(sin);
+	int count = 0;
+	struct iovec iov[2];
 
-	if (0)
-		sock_sendmsg(sock, NULL, NULL, 0, sin);
-
-	ret = sendto(sock, buf, len, 0, s, slen);
+	memset(&iov, 0, sizeof(iov));
+	if (buf) {
+		iov[0].iov_base = buf;
+		iov[0].iov_len = len;
+		count = 1;
+		if (rma_ptr) {
+			iov[1].iov_base = rma_ptr;
+			iov[1].iov_len = rma_len;
+			count = 2;
+			len += rma_len;
+		}
+	}
+	ret = sock_sendmsg(sock, iov, count, sin);
 	if (ret != -1)
 		assert(ret == len);
 
@@ -2025,7 +2043,7 @@ static void sock_progress_pending(cci__dev_t * dev)
 		debug(CCI_DB_MSG, "re-sending %s msg seq %u count %u",
 		      sock_msg_type(tx->msg_type), tx->seq, tx->send_count);
         pack_piggyback_ack (ep, sconn, tx);
-		ret = sock_sendto(sep->sock, tx->buffer, tx->len, sconn->sin);
+		ret = sock_sendto(sep->sock, tx->buffer, tx->len, tx->rma_ptr, tx->rma_len, sconn->sin);
 		if (ret != tx->len) {
 			debug((CCI_DB_MSG | CCI_DB_INFO),
 			      "sendto() failed with %s",
@@ -2065,7 +2083,6 @@ static void sock_progress_pending(cci__dev_t * dev)
 static inline int 
 pack_piggyback_ack (cci__ep_t *ep, sock_conn_t *sconn, sock_tx_t *tx)
 {
-    int i;
     sock_ack_t *ack = NULL;
     uint64_t now = 0ULL;
 
@@ -2237,7 +2254,7 @@ static void sock_progress_queued(cci__dev_t * dev)
 		debug(CCI_DB_MSG, "sending %s msg seq %u",
 		      sock_msg_type(tx->msg_type), tx->seq);
         pack_piggyback_ack (ep, sconn, tx);
-		ret = sock_sendto(sep->sock, tx->buffer, tx->len, sconn->sin);
+		ret = sock_sendto(sep->sock, tx->buffer, tx->len, tx->rma_ptr, tx->rma_len, sconn->sin);
 		if (ret == -1) {
 			switch (errno) {
 			default:
@@ -2385,6 +2402,9 @@ static int sock_sendv(cci_connection_t * connection,
 		return CCI_ENOBUFS;
 	}
 
+	tx->rma_ptr = NULL;
+	tx->rma_len = 0;
+
 	/* tx bookkeeping */
 	tx->msg_type = SOCK_MSG_SEND;
 	tx->flags = flags;
@@ -2446,7 +2466,7 @@ static int sock_sendv(cci_connection_t * connection,
 	/* if unreliable, try to send */
 	if (!is_reliable) {
         pack_piggyback_ack (ep, sconn, tx);
-		ret = sock_sendto(sep->sock, tx->buffer, tx->len, sconn->sin);
+		ret = sock_sendto(sep->sock, tx->buffer, tx->len, tx->rma_ptr, tx->rma_len, sconn->sin);
 		if (ret == tx->len) {
 			/* queue event on enpoint's completed queue */
 			tx->state = SOCK_TX_COMPLETED;
@@ -2817,14 +2837,15 @@ static int sock_rma(cci_connection_t * connection,
 					    connection->max_send_size;
 			}
 
+			tx->rma_ptr = (void*)(uintptr_t)(local->start + offset);
+			tx->rma_len = tx->len;
+
 			sock_pack_rma_write(write, tx->len, sconn->peer_id,
 					    tx->seq, 0, local_handle,
 					    local_offset + offset,
 					    remote_handle,
 					    remote_offset + offset);
-			memcpy(write->data, local->start + offset, tx->len);
-			/* now include the header */
-			tx->len += sizeof(sock_rma_header_t);
+			tx->len = sizeof(sock_rma_header_t);
 		}
 		pthread_mutex_lock(&dev->lock);
 		pthread_mutex_lock(&ep->lock);
@@ -2856,6 +2877,9 @@ static int sock_rma(cci_connection_t * connection,
 			TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
 		}
 		pthread_mutex_unlock(&ep->lock);
+
+		tx->rma_ptr = NULL;
+		tx->rma_len = 0;
 
 		/* Prepare and send the msg */
 		read = tx->buffer;
@@ -3634,7 +3658,7 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,	/* NULL if rejected */
 			/* simply ack this msg and cleanup */
 			memset(&hdr, 0, sizeof(hdr));
 			sock_pack_conn_ack(&hdr.header, sconn->peer_id);
-			ret = sock_sendto(sep->sock, &hdr, len, sin);
+			ret = sock_sendto(sep->sock, &hdr, len, NULL, 0, sin);
 			if (ret != len) {
 				debug((CCI_DB_CONN | CCI_DB_MSG),
 				      "ep %d failed to send conn_ack with %s",
@@ -3771,7 +3795,7 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,	/* NULL if rejected */
 			/* simply ack this msg and cleanup */
 			memset(&hdr, 0, sizeof(hdr));
 			sock_pack_conn_ack(&hdr.header, sconn->peer_id);
-			ret = sock_sendto(sep->sock, &hdr, len, sin);
+			ret = sock_sendto(sep->sock, &hdr, len, NULL, 0, sin);
 			if (ret != len) {
 				debug((CCI_DB_CONN | CCI_DB_MSG),
 				      "ep %d failed to send conn_ack with %s",
@@ -3817,6 +3841,9 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,	/* NULL if rejected */
 	}
 
 	/* we have a tx for the conn_ack */
+
+	tx->rma_ptr = NULL;
+	tx->rma_len = 0;
 
 	tx->seq = ++(sconn->seq);
 
@@ -4454,7 +4481,7 @@ out:
 			/* XXX: Should we queue the message or we send it? 
 			   I seems to me that it should be queued to maintain order as much as
 			   possible (but what about RU connections? */
-			sock_sendto(sep->sock, buffer, len, sconn->sin);
+			sock_sendto(sep->sock, buffer, len, NULL, 0, sconn->sin);
 		}
 
 		/* Drop the message */
@@ -4540,7 +4567,7 @@ static void sock_keepalive(void)
 			hdr = (sock_header_t *) buffer;
 			sock_pack_keepalive(hdr, sconn->peer_id);
 			len = sizeof(*hdr);
-			sock_sendto(sep->sock, buffer, len, sconn->sin);
+			sock_sendto(sep->sock, buffer, len, NULL, 0, sconn->sin);
 		}
 	}
 
@@ -4633,7 +4660,7 @@ static void sock_ack_conns(cci__ep_t * ep)
 					len =
 					    sizeof(*hdr_r) +
 					    (count * sizeof(acks[0]));
-					sock_sendto(sep->sock, buffer, len, sconn->sin);
+					sock_sendto(sep->sock, buffer, len, NULL, 0, sconn->sin);
                     sconn->last_ack_ts = now;
 				}
 			}
