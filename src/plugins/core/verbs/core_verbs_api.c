@@ -275,7 +275,7 @@ verbs_find_rdma_devices(struct ibv_context **contexts, int count,
 		struct ibv_context *c = contexts[i];
 
 		for (tmp = ifa; tmp != NULL; tmp = tmp->ifa_next) {
-			if (tmp->ifa_addr->sa_family == AF_INET &&
+			if (tmp->ifa_addr && tmp->ifa_addr->sa_family == AF_INET &&
 			    !(tmp->ifa_flags & IFF_LOOPBACK)) {
 				int rc = 0;
 
