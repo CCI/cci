@@ -497,8 +497,6 @@ static int sock_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		return CCI_ENOMEM;
 	}
 
-	TAILQ_INIT(&sglobals->ka_conns);
-
 	srandom((unsigned int)sock_get_usecs());
 
 	devices = calloc(CCI_MAX_DEVICES, sizeof(*sglobals->devices));
@@ -1649,11 +1647,6 @@ static int sock_disconnect(cci_connection_t * connection)
 	sconn = conn->priv;
 	ep = container_of(connection->endpoint, cci__ep_t, endpoint);
 	sep = ep->priv;
-
-	if (conn->keepalive_timeout != 0UL && cci_conn_is_reliable(conn)) {
-		/* Remove the connection is the list of connections using keepalive */
-		TAILQ_REMOVE(&sglobals->ka_conns, sconn, entry);
-	}
 
 	if (conn->uri)
 		free((char *)conn->uri);
@@ -4528,23 +4521,28 @@ out:
 /*
  * Check whether a keeplive timeout expired for a given endpoint.
  */
-static void sock_keepalive(void)
+static void sock_keepalive(cci__ep_t *ep)
 {
-	sock_conn_t *sconn;
 	cci__conn_t *conn;
 	uint64_t now = 0ULL;
 	uint32_t ka_timeout;
+    uint8_t i;
+    struct s_conns *conn_list;
+    sock_conn_t *sconn = NULL, *sc;
+    sock_dev_t *sdev;
+    cci__dev_t *dev;
+    sock_ep_t *sep = NULL;
 
 	CCI_ENTER;
 
-	if (TAILQ_EMPTY(&sglobals->ka_conns))
-		return;
-
-	now = sock_get_usecs();
-
-	TAILQ_FOREACH(sconn, &sglobals->ka_conns, entry) {
-		conn = sconn->conn;
-
+    now = sock_get_usecs();
+    dev = ep->dev;
+    sdev = dev->priv;
+    sep = ep->priv;
+    i = sock_ip_hash(sdev->ip, sdev->port);
+    conn_list = &sep->conn_hash[i];
+    TAILQ_FOREACH(sconn, conn_list, entry) {
+        conn = sconn->conn;
 		if (conn->keepalive_timeout == 0ULL)
 			return;
 
@@ -4768,24 +4766,8 @@ static void *sock_progress_thread(void *arg)
 
 		pthread_mutex_unlock(&globals->lock);
 
-        /* FIXME: re-enable keepalive here */
+        sock_keepalive (ep);
         sock_progress_dev(dev);
-#if 0
-		/* For each connection with keepalive set. We do here since the list
-		   of such connections is independent from any device (we do not want
-		   to go from device to connections. */
-		sock_keepalive();
-
-		/* for each device, try progressing */
-		while (sglobals->devices[i] != NULL) {
-			if (sglobals->devices[i]->up == 1) {
-				device = sglobals->devices[i];
-				dev = container_of(device, cci__dev_t, device);
-				sock_progress_dev(dev);
-			}
-			i++;
-		}
-#endif
 		select(0, NULL, NULL, NULL, &tv);
 		pthread_mutex_lock(&globals->lock);
 	}

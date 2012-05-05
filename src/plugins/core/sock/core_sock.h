@@ -922,31 +922,31 @@ typedef struct sock_ep {
 	cci_os_handle_t sock;
 
 	/*! Array of conn lists hased over IP/port */
-	 TAILQ_HEAD(s_conns, sock_conn) conn_hash[SOCK_EP_HASH_SIZE];
+	TAILQ_HEAD(s_conns, sock_conn) conn_hash[SOCK_EP_HASH_SIZE];
 
 	/*! List of all txs */
-	 TAILQ_HEAD(s_txs, sock_tx) txs;
+	TAILQ_HEAD(s_txs, sock_tx) txs;
 
 	/*! List of idle txs */
-	 TAILQ_HEAD(s_txsi, sock_tx) idle_txs;
+	TAILQ_HEAD(s_txsi, sock_tx) idle_txs;
 
 	/*! List of all rxs */
-	 TAILQ_HEAD(s_rxs, sock_rx) rxs;
+	TAILQ_HEAD(s_rxs, sock_rx) rxs;
 
 	/*! List of idle rxs */
-	 TAILQ_HEAD(s_rxsi, sock_rx) idle_rxs;
+	TAILQ_HEAD(s_rxsi, sock_rx) idle_rxs;
 
 	/*! Connection id blocks */
 	uint64_t *ids;
 
 	/*! List of active connections awaiting replies */
-	 TAILQ_HEAD(s_active, sock_conn) active_hash[SOCK_EP_HASH_SIZE];
+	TAILQ_HEAD(s_active, sock_conn) active_hash[SOCK_EP_HASH_SIZE];
 
 	/*! List of RMA registrations */
-	 TAILQ_HEAD(s_handles, sock_rma_handle) handles;
+	TAILQ_HEAD(s_handles, sock_rma_handle) handles;
 
 	/*! List of RMA ops */
-	 TAILQ_HEAD(s_ops, sock_rma_op) rma_ops;
+	TAILQ_HEAD(s_ops, sock_rma_op) rma_ops;
 } sock_ep_t;
 
 /* Connection info */
@@ -1114,8 +1114,6 @@ typedef struct sock_globals {
 	/*! fd_set for open endpoint sock fds */
 	fd_set fds;
 
-	/*! List of all connections with keepalive enabled */
-	 TAILQ_HEAD(ka_conns, sock_conn) ka_conns;
 } sock_globals_t;
 
 /* Macro to initialize the structure of a device */
