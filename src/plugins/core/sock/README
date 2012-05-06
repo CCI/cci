@@ -1,0 +1,31 @@
+= Performance Tuning =
+
+SOCK_DEFAULT_MSS
+    The default Maximum Segment Size is the default amount of data that is sent
+    in a message. This does not include the size of the header and should not
+    big bigger than the maximum size of a UDP packet. A given communication
+    pattern may require a small or big MSS to be efficient
+
+SOCK_EP_RX_CNT
+    Number of buffers used to receive messages. Directly impact the memory
+    footprint of the CCI transport.
+
+SOCK_EP_TX_CNT
+    Number of buffers used to send messages. Directly impact the memory
+    footprint of the CCI transport.
+
+SOCK_PROG_TIME_US
+    Specify the amount of time in microseconds to make progress (the thread
+    will make up every N microseconds). A low progress timeout decrease the
+    latency but increase the CPU consumption.
+
+SOCK_RMA_DEPTH
+    Number of in-flight RMA message.
+
+ACK_TIMEOUT
+    The transport can acknowledge messages by blocks. The ACK timeout is
+    triggered when not enough ACKs are pending within a given period of
+    time.
+
+PENDING_ACK_THRESHOLD
+    Maximum number of messages waiting for acknowledgment.
