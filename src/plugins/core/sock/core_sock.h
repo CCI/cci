@@ -23,10 +23,10 @@
 
 BEGIN_C_DECLS
 #define SOCK_UDP_MAX            (65508)	/* 64 KB - 8 B UDP - 20 B IP */
-#define SOCK_MAX_HDR_SIZE       (48)	/* max sock header size (RMA) */
+#define SOCK_MAX_HDR_SIZE       (52)	/* max sock header size (RMA) */
 #define SOCK_MAX_HDRS           (SOCK_MAX_HDR_SIZE + 20 + 8)	/* IP + UDP */
 /* FIXME */
-#define SOCK_DEFAULT_MSS        (64*1024 - 256)	/* assume jumbo frames */
+#define SOCK_DEFAULT_MSS        (SOCK_UDP_MAX - SOCK_MAX_HDR_SIZE)	/* assume jumbo frames */
 #define SOCK_MIN_MSS            (1500 - SOCK_MAX_HDR_SIZE)
 #define SOCK_MAX_SACK           (4)	/* pairs of start/end acks */
 #define SOCK_ACK_DELAY          (1)	/* send an ack after every Nth send */
@@ -250,7 +250,7 @@ sock_parse_seq_ts(sock_seq_ts_t * sa, uint32_t * seq, uint32_t * ts)
 typedef struct sock_header_r {
 	sock_header_t   header;
 	sock_seq_ts_t   seq_ts;
-	uint32_t        pb_ack; /*piggybacked ACK */
+	uint32_t        pb_ack; /* piggybacked ACK */
 	char            data[0]; /* start reliable payload here */
 } sock_header_r_t;
 
