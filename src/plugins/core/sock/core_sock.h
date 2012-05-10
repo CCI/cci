@@ -20,6 +20,7 @@
 #include "cci/config.h"
 #include "cci.h"
 #include "cci_lib_types.h"
+#include "api/cci-api.h"
 
 BEGIN_C_DECLS
 #define SOCK_UDP_MAX            (65508)	/* 64 KB - 8 B UDP - 20 B IP */
@@ -939,6 +940,17 @@ typedef struct sock_ep {
 	/*! Connection id blocks */
 	uint64_t *ids;
 
+    /*! Queued sends */
+    TAILQ_HEAD(s_queued, cci__evt) queued;
+
+    /*! Pending (in-flight) sends */
+    TAILQ_HEAD(s_pending, cci__evt) pending;
+
+    /*! List of all connections with keepalive enabled */
+    /* FIXME: revisit the code to use this 
+    TAILQ_HEAD(s_ka, tcp_conn) ka_conns;
+    */
+
 	/*! List of active connections awaiting replies */
 	TAILQ_HEAD(s_active, sock_conn) active_hash[SOCK_EP_HASH_SIZE];
 
@@ -1077,15 +1089,6 @@ typedef struct sock_dev {
 
     /*! Our port in network byte order */
     in_port_t port;
-
-	/*! Queued sends */
-	 TAILQ_HEAD(s_queued, sock_tx) queued;
-
-	/*! Pending (in-flight) sends */
-	 TAILQ_HEAD(s_pending, sock_tx) pending;
-
-	/*! Being progressed? */
-	int is_progressing;
 } sock_dev_t;
 
 typedef enum sock_fd_type {
@@ -1143,9 +1146,6 @@ typedef struct sock_globals {
         device = &dev->device; \
         INIT_CCI_DEVICE_STRUCT(device); \
         sdev = dev->priv; \
-        TAILQ_INIT(&sdev->queued); \
-        TAILQ_INIT(&sdev->pending); \
-        sdev->is_progressing = 0; \
         dev->driver = strdup("sock"); \
     } while(0)
 
