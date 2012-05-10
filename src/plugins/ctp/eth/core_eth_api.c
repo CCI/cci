@@ -46,10 +46,10 @@ static int eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
 static int eth_disconnect(cci_connection_t * connection);
 static int eth_set_opt(cci_opt_handle_t * handle,
 		       cci_opt_level_t level,
-		       cci_opt_name_t name, const void *val, int len);
+		       cci_opt_name_t name, const void *val);
 static int eth_get_opt(cci_opt_handle_t * handle,
 		       cci_opt_level_t level,
-		       cci_opt_name_t name, void **val, int *len);
+		       cci_opt_name_t name, void *val);
 static int eth_arm_os_handle(cci_endpoint_t * endpoint, int flags);
 static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** event);
 static int eth_return_event(cci_event_t * event);
@@ -715,7 +715,7 @@ static int eth_disconnect(cci_connection_t * connection)
 
 static int eth_set_opt(cci_opt_handle_t * handle,
 		       cci_opt_level_t level,
-		       cci_opt_name_t name, const void *val, int len)
+		       cci_opt_name_t name, const void *val)
 {
 	printf("In eth_set_opt\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
@@ -723,7 +723,7 @@ static int eth_set_opt(cci_opt_handle_t * handle,
 
 static int eth_get_opt(cci_opt_handle_t * handle,
 		       cci_opt_level_t level,
-		       cci_opt_name_t name, void **val, int *len)
+		       cci_opt_name_t name, void *val)
 {
 	printf("In eth_get_opt\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
