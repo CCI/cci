@@ -470,15 +470,15 @@ static const char *eth_strerror(cci_endpoint_t * endpoint, enum cci_status statu
 
 #define CCIETH_URI_LENGTH (6 /* prefix */ + 17 /* mac */ + 1 /* colon */ + 8 /* id */ + 1 /* \0 */)
 
-static void ccieth_uri_sprintf(char *name, const uint8_t * addr, uint32_t id)
+static void ccieth_uri_sprintf(char *uri, const uint8_t * addr, uint32_t id)
 {
-	sprintf(name, "eth://%02x:%02x:%02x:%02x:%02x:%02x:%08x",
+	sprintf(uri, "eth://%02x:%02x:%02x:%02x:%02x:%02x:%08x",
 		addr[0], addr[1], addr[2], addr[3], addr[4], addr[5], id);
 }
 
-static int ccieth_uri_sscanf(const char *name, uint8_t * addr, uint32_t * id)
+static int ccieth_uri_sscanf(const char *uri, uint8_t * addr, uint32_t * id)
 {
-	return sscanf(name, "eth://%02x:%02x:%02x:%02x:%02x:%02x:%08x",
+	return sscanf(uri, "eth://%02x:%02x:%02x:%02x:%02x:%02x:%08x",
 		      &addr[0], &addr[1], &addr[2], &addr[3], &addr[4],
 		      &addr[5], id) == 7 ? 0 : -1;
 }
@@ -495,7 +495,7 @@ static int eth_create_endpoint(cci_device_t * device,
 	cci__ep_t *_ep;
 	eth__ep_t *eep;
 	int eid;
-	char *name;
+	char *uri;
 	int fd;
 	int ret;
 
@@ -507,8 +507,8 @@ static int eth_create_endpoint(cci_device_t * device,
 	}
 	_ep->priv = eep;
 
-	name = malloc(CCIETH_URI_LENGTH);
-	if (!name) {
+	uri = malloc(CCIETH_URI_LENGTH);
+	if (!uri) {
 		ret = CCI_ENOMEM;
 		goto out_with_eep;
 	}
@@ -516,7 +516,7 @@ static int eth_create_endpoint(cci_device_t * device,
 	fd = open("/dev/ccieth", O_RDONLY);
 	if (fd < 0) {
 		ret = errno;
-		goto out_with_name;
+		goto out_with_uri;
 	}
 
 	memcpy(&arg.addr, &edev->addr.sll_addr, 6);
@@ -529,8 +529,8 @@ static int eth_create_endpoint(cci_device_t * device,
 	CCIETH_VALGRIND_MEMORY_MAKE_READABLE(&arg.id, sizeof(arg.id));
 	eid = arg.id;
 
-	ccieth_uri_sprintf(name, (const uint8_t *)&edev->addr.sll_addr, arg.id);
-	endpoint->name = name;
+	ccieth_uri_sprintf(uri, (const uint8_t *)&edev->addr.sll_addr, arg.id);
+	_ep->uri = uri;
 
 	TAILQ_INIT(&eep->connections);
 
@@ -539,8 +539,8 @@ static int eth_create_endpoint(cci_device_t * device,
 
 out_with_fd:
 	close(fd);
-out_with_name:
-	free(name);
+out_with_uri:
+	free(uri);
 out_with_eep:
 	free(eep);
 out:
@@ -560,7 +560,7 @@ static int eth_destroy_endpoint(cci_endpoint_t * endpointp)
 	}
 
 	close(eep->fd);
-	free((void *) endpoint->name);
+	free((void *) _ep->uri);
 	free(eep);
 	return CCI_SUCCESS;
 }
