@@ -15,7 +15,7 @@
 #include <stdio.h>
 
 #include "cci.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 
 int cci_destroy_endpoint(cci_endpoint_t * endpoint)
 {
@@ -34,7 +34,7 @@ int cci_destroy_endpoint(cci_endpoint_t * endpoint)
 	TAILQ_REMOVE(&dev->eps, ep, entry);
 	pthread_mutex_unlock(&dev->lock);
 
-	/* the driver is responsible for cleaning up ep->priv,
+	/* the transport is responsible for cleaning up ep->priv,
 	 * the evts list, and any cci__conn_t that it is maintaining.
 	 */
 	ret = ep->plugin->destroy_endpoint(endpoint);

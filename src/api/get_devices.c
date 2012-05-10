@@ -16,7 +16,7 @@
 
 #include "cci.h"
 #include "plugins/base/public.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 
 int cci_get_devices(cci_device_t * const ** devicesp)
 {

@@ -15,7 +15,7 @@
 #include <stdio.h>
 
 #include "cci.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 
 int cci_send(cci_connection_t * connection,
 	     const void *msg_ptr, uint32_t msg_len, const void *context, int flags)

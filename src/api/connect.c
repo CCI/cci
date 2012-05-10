@@ -15,7 +15,7 @@
 #include <stdio.h>
 
 #include "cci.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 
 int cci_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		const void *data_ptr, uint32_t data_len,
@@ -25,7 +25,7 @@ int cci_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	if (data_len > CCI_CONN_REQ_LEN)
 		return CCI_EINVAL;
 
-	/* NOTE the driver does all of the connection management
+	/* NOTE the transport does all of the connection management
 	 * It allocates whatever it needs in addition to the cci__conn_t
 	 */
 	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);

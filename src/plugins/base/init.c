@@ -10,7 +10,7 @@
 
 #include "ltdl.h"
 #include "util/argv.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 #include "plugins/base/public.h"
 #include "plugins/base/private.h"
 

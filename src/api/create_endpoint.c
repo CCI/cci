@@ -17,7 +17,7 @@
 
 #include "cci.h"
 #include "cci_lib_types.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 
 int cci_create_endpoint(cci_device_t * device,
 			int flags,
