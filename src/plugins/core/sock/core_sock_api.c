@@ -72,10 +72,10 @@ static int sock_connect(cci_endpoint_t * endpoint, const char *server_uri,
 static int sock_disconnect(cci_connection_t * connection);
 static int sock_set_opt(cci_opt_handle_t * handle,
 			cci_opt_level_t level,
-			cci_opt_name_t name, const void *val, int len);
+			cci_opt_name_t name, const void *val);
 static int sock_get_opt(cci_opt_handle_t * handle,
 			cci_opt_level_t level,
-			cci_opt_name_t name, void **val, int *len);
+			cci_opt_name_t name, void *val);
 static int sock_arm_os_handle(cci_endpoint_t * endpoint, int flags);
 static int sock_get_event(cci_endpoint_t * endpoint,
 			  cci_event_t ** const event);
@@ -1420,7 +1420,7 @@ static int sock_disconnect(cci_connection_t * connection)
 
 static int sock_set_opt(cci_opt_handle_t * handle,
 			cci_opt_level_t level,
-			cci_opt_name_t name, const void *val, int len)
+			cci_opt_name_t name, const void *val)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
@@ -1442,8 +1442,7 @@ static int sock_set_opt(cci_opt_handle_t * handle,
 
 	switch (name) {
 	case CCI_OPT_ENDPT_SEND_TIMEOUT:
-		assert(len == sizeof(ep->tx_timeout));
-		memcpy(&ep->tx_timeout, val, len);
+		ep->tx_timeout = *((uint32_t*) val);
 		break;
 	case CCI_OPT_ENDPT_RECV_BUF_COUNT:
 		ret = CCI_ERR_NOT_IMPLEMENTED;
@@ -1452,12 +1451,10 @@ static int sock_set_opt(cci_opt_handle_t * handle,
 		ret = CCI_ERR_NOT_IMPLEMENTED;
 		break;
 	case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
-		assert(len == sizeof(ep->keepalive_timeout));
-		memcpy(&ep->keepalive_timeout, val, len);
+		ep->keepalive_timeout = *((uint32_t*) val);
 		break;
 	case CCI_OPT_CONN_SEND_TIMEOUT:
-		assert(len == sizeof(conn->tx_timeout));
-		memcpy(&conn->tx_timeout, val, len);
+		conn->tx_timeout = *((uint32_t*) val);
 		break;
 	default:
 		debug(CCI_DB_INFO, "unknown option %u", name);
@@ -1471,7 +1468,7 @@ static int sock_set_opt(cci_opt_handle_t * handle,
 
 static int sock_get_opt(cci_opt_handle_t * handle,
 			cci_opt_level_t level,
-			cci_opt_name_t name, void **val, int *len)
+			cci_opt_name_t name, void *val)
 {
 	CCI_ENTER;
 

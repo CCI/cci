@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright © 2011-2012 UT-Battelle, LLC.
+ * Copyright © 2012 Inria.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -66,10 +67,10 @@ static int gni_connect(cci_endpoint_t * endpoint, const char *server_uri,
 static int gni_disconnect(cci_connection_t * connection);
 static int gni_set_opt(cci_opt_handle_t * handle,
 			 cci_opt_level_t level,
-			 cci_opt_name_t name, const void *val, int len);
+			 cci_opt_name_t name, const void *val);
 static int gni_get_opt(cci_opt_handle_t * handle,
 			 cci_opt_level_t level,
-			 cci_opt_name_t name, void **val, int *len);
+			 cci_opt_name_t name, void *val);
 static int gni_arm_os_handle(cci_endpoint_t * endpoint, int flags);
 static int gni_get_event(cci_endpoint_t * endpoint,
 			   cci_event_t ** const event);
@@ -1702,7 +1703,7 @@ static int gni_disconnect(cci_connection_t * connection)
 static int
 gni_set_opt(cci_opt_handle_t * handle,
 	      cci_opt_level_t level,
-	      cci_opt_name_t name, const void *val, int len)
+	    cci_opt_name_t name, const void *val)
 {
 	int ret = CCI_ERR_NOT_IMPLEMENTED;
 	//cci_endpoint_t *endpoint = NULL;
@@ -1744,7 +1745,7 @@ gni_set_opt(cci_opt_handle_t * handle,
 
 static int
 gni_get_opt(cci_opt_handle_t * handle,
-	      cci_opt_level_t level, cci_opt_name_t name, void **val, int *len)
+	      cci_opt_level_t level, cci_opt_name_t name, void *val)
 {
 	CCI_ENTER;
 	CCI_EXIT;

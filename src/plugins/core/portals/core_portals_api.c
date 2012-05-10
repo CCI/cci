@@ -1,6 +1,7 @@
 /*
  *; Copyright (c) 2011 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2011 UT-Battelle, LLC.  All rights reserved.
+ * Copyright © 2012 Inria.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -131,10 +132,10 @@ static int portals_connect(cci_endpoint_t * endpoint,
 static int portals_disconnect(cci_connection_t * connection);
 static int portals_set_opt(cci_opt_handle_t * handle,
 			   cci_opt_level_t level,
-			   cci_opt_name_t name, const void *val, int len);
+			   cci_opt_name_t name, const void *val);
 static int portals_get_opt(cci_opt_handle_t * handle,
 			   cci_opt_level_t level,
-			   cci_opt_name_t name, void **val, int *len);
+			   cci_opt_name_t name, void *val);
 static int portals_arm_os_handle(cci_endpoint_t * endpoint, int flags);
 static int portals_get_event(cci_endpoint_t * endpoint,
 			     cci_event_t ** event);
@@ -1776,7 +1777,7 @@ static int portals_set_ep_rx_buf_cnt(cci__ep_t * ep, uint32_t new_count)
 
 static int portals_set_opt(cci_opt_handle_t * handle,
 			   cci_opt_level_t level,
-			   cci_opt_name_t name, const void *val, int len)
+			   cci_opt_name_t name, const void *val)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
@@ -1806,13 +1807,7 @@ static int portals_set_opt(cci_opt_handle_t * handle,
 		break;
 	case CCI_OPT_ENDPT_RECV_BUF_COUNT:
 		{
-			uint32_t new_count;
-
-			if (len != sizeof(new_count)) {
-				ret = CCI_EINVAL;
-				break;
-			}
-			memcpy(&new_count, val, len);
+			uint32_t new_count = *((uint32_t*) val);
 			pthread_mutex_lock(&ep->lock);
 			ret = portals_set_ep_rx_buf_cnt(ep, new_count);
 			pthread_mutex_unlock(&ep->lock);
@@ -1820,21 +1815,14 @@ static int portals_set_opt(cci_opt_handle_t * handle,
 		}
 	case CCI_OPT_ENDPT_SEND_BUF_COUNT:
 		{
-			uint32_t new_count;
-
-			if (len != sizeof(new_count)) {
-				ret = CCI_EINVAL;
-				break;
-			}
-			memcpy(&new_count, val, len);
+			uint32_t new_count = *((uint32_t*) val);
 			pthread_mutex_lock(&ep->lock);
 			ret = portals_set_ep_tx_buf_cnt(ep, new_count);
 			pthread_mutex_unlock(&ep->lock);
 			break;
 		}
 	case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
-		assert(len == sizeof(ep->keepalive_timeout));
-		memcpy(&ep->keepalive_timeout, val, len);
+		ep->keepalive_timeout = *((uint32_t*) val);
 		break;
 	case CCI_OPT_CONN_SEND_TIMEOUT:
 		ret = CCI_ERR_NOT_IMPLEMENTED;	/* not supported */
@@ -1852,7 +1840,7 @@ static int portals_set_opt(cci_opt_handle_t * handle,
 
 static int portals_get_opt(cci_opt_handle_t * handle,
 			   cci_opt_level_t level,
-			   cci_opt_name_t name, void **val, int *len)
+			   cci_opt_name_t name, void *val)
 {
 
 	CCI_ENTER;

@@ -11,6 +11,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 #include "cci.h"
 
@@ -54,7 +55,7 @@ int main(int argc, char *argv[])
 				 device->pci.dev, device->pci.func);
 
 		if (device->rate)
-			snprintf(rate, sizeof(rate), " %uMBit/s", device->rate / 1000000);
+			snprintf(rate, sizeof(rate), " %"PRIu64" MBit/s", device->rate / 1000000);
 
 		printf("% 2d: %s%s%s%s%s\n",
 		       i, device->name, pcibusid, rate,

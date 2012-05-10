@@ -107,19 +107,19 @@ cci_plugin_core_t cci_core_template_plugin = {
 
 static int template_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
-	printf("In template_init\n");
+	debug(CCI_DB_INFO, "In template_init\n");
 	return CCI_SUCCESS;
 }
 
 static int template_finalize(cci_plugin_core_t * plugin)
 {
-	printf("In template_free_devices\n");
+	debug(CCI_DB_INFO, "In template_free_devices\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 static const char *template_strerror(cci_endpoint_t * endpoint, enum cci_status status)
 {
-	printf("In template_sterrror\n");
+	debug(CCI_DB_INFO, "In template_sterrror\n");
 	return NULL;
 }
 

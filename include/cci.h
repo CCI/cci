@@ -1248,6 +1248,8 @@ typedef enum cci_opt_name {
 	/*! Default send timeout for all new connections.
 
 	   cci_get_opt() and cci_set_opt().
+
+	   The parameter must point to a uint32_t.
 	 */
 	CCI_OPT_ENDPT_SEND_TIMEOUT,
 
@@ -1255,6 +1257,8 @@ typedef enum cci_opt_name {
 	   number of messages the CCI layer can receive without dropping.
 
 	   cci_get_opt() and cci_set_opt().
+
+	   The parameter must point to a uint32_t.
 	 */
 	CCI_OPT_ENDPT_RECV_BUF_COUNT,
 
@@ -1263,6 +1267,8 @@ typedef enum cci_opt_name {
 	   blocking (depending on reliability mode).
 
 	   cci_get_opt() and cci_set_opt().
+
+	   The parameter must point to a uint32_t.
 	 */
 	CCI_OPT_ENDPT_SEND_BUF_COUNT,
 
@@ -1291,6 +1297,8 @@ typedef enum cci_opt_name {
 	   connection, re-arm the keepalive timeout, etc.
 
 	   cci_get_opt() and cci_set_opt().
+
+	   The parameter must point to a uint32_t.
 	 */
 	CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT,
 
@@ -1298,6 +1306,10 @@ typedef enum cci_opt_name {
 	   requests. The application should never need to parse this URI.
 
 	   cci_get_opt() only.
+
+	   The parameter must point to a char *.
+	   The application is responsible for freeing the pointer that is
+	   stored in this char *.
 	 */
 	CCI_OPT_ENDPT_URI,
 
@@ -1316,12 +1328,16 @@ typedef enum cci_opt_name {
 	   performance for these cases.
 
            cci_get_opt() only.
+
+	   The parameter must point to a cci_alignment_t.
         */
 	CCI_OPT_ENDPT_RMA_ALIGN,
 
 	/*! Reliable send timeout in microseconds.
 
 	   cci_get_opt() and cci_set_opt().
+
+	   The parameter must point to a uint32_t.
 	 */
 	CCI_OPT_CONN_SEND_TIMEOUT
 } cci_opt_name_t;
@@ -1341,11 +1357,11 @@ typedef struct cci_alignment {
   \param[in] handle Endpoint or connection handle.
   \param[in] level  Indicates type of handle.
   \param[in] name   Which option to set the value of.
-  \param[in] val    Pointer to the value.
-  \param[in] len    Length of value to be set.
+  \param[in] val    Pointer to the input value. The type of the value
+                    must match the option name.
 
   \return CCI_SUCCESS   Value successfully set.
-  \return CCI_EINVAL    Handle or val is NULL or len is 0.
+  \return CCI_EINVAL    Handle or val is NULL.
   \return CCI_EINVAL    Level/name mismatch.
   \return CCI_EINVAL    Trying to set a get-only option.
   \return CCI_ERR_NOT_IMPLEMENTED   Not supported by this driver.
@@ -1357,7 +1373,7 @@ typedef struct cci_alignment {
   \ingroup opts
 */
 CCI_DECLSPEC int cci_set_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
-			     cci_opt_name_t name, const void *val, int len);
+			     cci_opt_name_t name, const void *val);
 
 /*!
   Get an endpoint or connection option value.
@@ -1365,11 +1381,11 @@ CCI_DECLSPEC int cci_set_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
   \param[in] handle Endpoint or connection handle.
   \param[in] level  Indicates type of handle.
   \param[in] name   Which option to set the value of.
-  \param[in] val    Address of the pointer to the value.
-  \param[in] len    Address of the length of value.
+  \param[in] val    Pointer to the output value. The type of the value
+                    must match the option name.
 
   \return CCI_SUCCESS   Value successfully retrieved.
-  \return CCI_EINVAL    Handle or val is NULL or len is 0.
+  \return CCI_EINVAL    Handle or val is NULL.
   \return CCI_EINVAL    Level/name mismatch.
   \return CCI_ERR_NOT_IMPLEMENTED   Not supported by this driver.
   \return Each driver may have additional error codes.
@@ -1377,7 +1393,7 @@ CCI_DECLSPEC int cci_set_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
   \ingroup opts
 */
 CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
-			     cci_opt_name_t name, void **val, int *len);
+			     cci_opt_name_t name, void *val);
 
 /* ================================================================== */
 /*                                                                    */

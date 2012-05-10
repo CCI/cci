@@ -2,6 +2,7 @@
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright (c) 2011-2012 UT-Battelle, LLC.  All rights reserved.
  * Copyright (c) 2011-2012 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2012 Inria.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -56,10 +57,10 @@ static int verbs_connect(cci_endpoint_t * endpoint, const char *server_uri,
 static int verbs_disconnect(cci_connection_t * connection);
 static int verbs_set_opt(cci_opt_handle_t * handle,
 			 cci_opt_level_t level,
-			 cci_opt_name_t name, const void *val, int len);
+			 cci_opt_name_t name, const void *val);
 static int verbs_get_opt(cci_opt_handle_t * handle,
 			 cci_opt_level_t level,
-			 cci_opt_name_t name, void **val, int *len);
+			 cci_opt_name_t name, void *val);
 static int verbs_arm_os_handle(cci_endpoint_t * endpoint, int flags);
 static int verbs_get_event(cci_endpoint_t * endpoint,
 			   cci_event_t ** const event);
@@ -2120,7 +2121,7 @@ static int verbs_disconnect(cci_connection_t * connection)
 static int
 verbs_set_opt(cci_opt_handle_t * handle,
 	      cci_opt_level_t level,
-	      cci_opt_name_t name, const void *val, int len)
+	      cci_opt_name_t name, const void *val)
 {
 	int ret = CCI_ERR_NOT_IMPLEMENTED;
 	cci_endpoint_t *endpoint = NULL;
@@ -2149,7 +2150,7 @@ verbs_set_opt(cci_opt_handle_t * handle,
 		break;
 	case CCI_OPT_ENDPT_RECV_BUF_COUNT:
 		{
-			uint32_t new_count;
+			uint32_t new_count = *((uint32_t*) val);
 			struct ibv_device_attr dev_attr;
 			verbs_rx_pool_t *rx_pool = TAILQ_FIRST(&vep->rx_pools);
 
@@ -2170,12 +2171,6 @@ verbs_set_opt(cci_opt_handle_t * handle,
 				ret = EOPNOTSUPP;
 				break;	/* ret = CCI_ERR_NOT_IMPLEMENTED */
 			}
-
-			if (len != sizeof(new_count)) {
-				ret = CCI_EINVAL;
-				break;
-			}
-			memcpy(&new_count, val, len);
 
 			/* Is new count supportable (i.e. < max_srq_wr)? */
 			if (dev_attr.max_srq_wr < new_count) {
@@ -2218,13 +2213,7 @@ verbs_set_opt(cci_opt_handle_t * handle,
 		}
 	case CCI_OPT_ENDPT_SEND_BUF_COUNT:
 		{
-			uint32_t new_count;
-			/* get the requested value from the parameters and create a local copy */
-			if (len != sizeof(new_count)) {
-				ret = CCI_EINVAL;
-				break;
-			}
-			memcpy(&new_count, val, len);
+			uint32_t new_count = *((uint32_t*) val);
 
 			/* Check if the new buffer count is different from
 			 * the old buffer count, if it is, continue, otherwise
@@ -2279,13 +2268,7 @@ verbs_set_opt(cci_opt_handle_t * handle,
 		}
 	case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
 		{
-			uint32_t new_time;
-
-			if (len != sizeof(new_time)) {
-				ret = CCI_EINVAL;
-				break;
-			}
-			memcpy(&new_time, val, len);
+			uint32_t new_time = *((uint32_t*) val);
 
 			/* we don't do anything for keepalives.
 			 * If the connection breaks, we will generate a
@@ -2307,7 +2290,7 @@ verbs_set_opt(cci_opt_handle_t * handle,
 
 static int
 verbs_get_opt(cci_opt_handle_t * handle,
-	      cci_opt_level_t level, cci_opt_name_t name, void **val, int *len)
+	      cci_opt_level_t level, cci_opt_name_t name, void *val)
 {
 	int ret = CCI_ERR_NOT_IMPLEMENTED;
 	cci_endpoint_t *endpoint = NULL;
@@ -2334,38 +2317,22 @@ verbs_get_opt(cci_opt_handle_t * handle,
 	case CCI_OPT_CONN_SEND_TIMEOUT:
 	case CCI_OPT_ENDPT_RECV_BUF_COUNT:
 		{
-			*len = sizeof(ep->rx_buf_cnt);
-			*val = malloc(*len);
-			if (!val) {
-				ret = CCI_ENOMEM;
-				goto out;
-			}
-			memcpy(*val, &ep->rx_buf_cnt, *len);
+			uint32_t *count = val;
+			*count = ep->rx_buf_cnt;
 			ret = CCI_SUCCESS;
 			break;
 		}
 	case CCI_OPT_ENDPT_SEND_BUF_COUNT:
 		{
-			*len = sizeof(ep->tx_buf_cnt);
-			*val = malloc(*len);
-			if (!val) {
-				ret = CCI_ENOMEM;
-				goto out;
-			}
-			memcpy(*val, &ep->tx_buf_cnt, *len);
+			uint32_t *count = val;
+			*count = ep->tx_buf_cnt;
 			ret = CCI_SUCCESS;
 			break;
 		}
 	case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
 		{
-			*len = sizeof(ep->keepalive_timeout);
-			*val = malloc(*len);
-			if (!val) {
-				ret = CCI_ENOMEM;
-				goto out;
-			}
-			memcpy(*val, &ep->keepalive_timeout, *len);
-
+			uint32_t *timeout = val;
+			*timeout = ep->keepalive_timeout;
 			ret = CCI_SUCCESS;
 			break;
 		}

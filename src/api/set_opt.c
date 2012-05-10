@@ -18,14 +18,14 @@
 #include "plugins/core/core.h"
 
 int cci_set_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
-		cci_opt_name_t name, const void *val, int len)
+		cci_opt_name_t name, const void *val)
 {
 	cci_plugin_core_t *plugin;
 	int ret;
 
 	CCI_ENTER;
 
-	if (NULL == handle || NULL == val || len == 0) {
+	if (NULL == handle || NULL == val) {
 		return CCI_EINVAL;
 	}
 
@@ -43,7 +43,7 @@ int cci_set_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
 		plugin = conn->plugin;
 	}
 
-	ret = plugin->set_opt(handle, level, name, val, len);
+	ret = plugin->set_opt(handle, level, name, val);
 
 	CCI_EXIT;
 
