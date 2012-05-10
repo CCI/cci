@@ -913,6 +913,9 @@ typedef struct sock_ep {
     /*! ID of the progress thread for the endpoint */
     pthread_t progress_tid;
 
+    pthread_mutex_t progress_mutex;
+    pthread_cond_t  wait_condition;
+
 	/* Our IP and port */
 	struct sockaddr_in sin;
 

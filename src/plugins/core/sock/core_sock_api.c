@@ -473,6 +473,10 @@ static inline int sock_terminate_threads (sock_ep_t *sep)
 {
     assert (sep);
 
+    pthread_mutex_lock(&sep->progress_mutex);
+    pthread_cond_signal(&sep->wait_condition);
+    pthread_mutex_unlock(&sep->progress_mutex);
+
     pthread_join(sep->progress_tid, NULL);
     pthread_join(sep->recv_tid, NULL);
 
@@ -756,6 +760,8 @@ static int sock_create_endpoint(cci_device_t * device,
 		goto out;
 	}
     sep->closing = 0;
+    pthread_mutex_init (&sep->progress_mutex, NULL);
+    pthread_cond_init (&sep->wait_condition, NULL);
 
 	sep->sock = socket(PF_INET, SOCK_DGRAM, 0);
 	if (sep->sock == -1) {
@@ -3522,6 +3528,11 @@ sock_handle_ack(sock_conn_t * sconn,
 	pthread_mutex_unlock(&ep->lock);
 	pthread_mutex_unlock(&dev->lock);
 
+    /* We received a ACK so we wake up the send thread */
+    pthread_mutex_lock(&sep->progress_mutex);
+    pthread_cond_signal(&sep->wait_condition);
+    pthread_mutex_unlock(&sep->progress_mutex);
+
 	CCI_EXIT;
 	return;
 }
@@ -4637,7 +4648,6 @@ static void sock_ack_conns(cci__ep_t * ep)
 
 static void *sock_progress_thread(void *arg)
 {
-	struct timeval tv = { 0, SOCK_PROG_TIME_US };
     cci__ep_t *ep = (cci__ep_t *) arg;
     sock_ep_t *sep;
 
@@ -4651,7 +4661,11 @@ static void *sock_progress_thread(void *arg)
 
         sock_keepalive (ep);
         sock_progress_sends (ep);
-		select(0, NULL, NULL, NULL, &tv);
+
+        pthread_mutex_lock(&sep->progress_mutex);
+        pthread_cond_wait(&sep->wait_condition, &sep->progress_mutex);
+        pthread_mutex_unlock(&sep->progress_mutex);
+
 		pthread_mutex_lock(&ep->lock);
 	}
 	pthread_mutex_unlock(&ep->lock);
@@ -4706,6 +4720,10 @@ static void *sock_recv_thread(void *arg)
         }
 relock:
 		pthread_mutex_lock(&globals->lock);
+
+        pthread_mutex_lock(&sep->progress_mutex);
+        pthread_cond_signal(&sep->wait_condition);
+        pthread_mutex_unlock(&sep->progress_mutex);
 	}
 	pthread_mutex_unlock(&globals->lock);
 
