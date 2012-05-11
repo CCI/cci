@@ -1273,7 +1273,7 @@ static int ctp_verbs_destroy_endpoint(cci_endpoint_t * endpoint)
 
 		vconn = TAILQ_FIRST(&vep->conns);
 		conn = vconn->conn;
-		verbs_disconnect(&conn->connection);
+		ctp_verbs_disconnect(&conn->connection);
 	}
 
 	if (vep->srq) {
@@ -2341,7 +2341,7 @@ ctp_verbs_get_opt(cci_opt_handle_t * handle,
 		      (enum cci_opt_name)name);
 		ret = CCI_EINVAL;
 	}
-out:
+
 	CCI_EXIT;
 	return ret;
 }

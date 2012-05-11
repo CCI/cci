@@ -2067,7 +2067,7 @@ static int ctp_sock_send(cci_connection_t * connection,
 		iov.iov_len = msg_len;
 	}
 
-	return sock_sendv(connection, &iov, iovcnt, context, flags);
+	return ctp_sock_sendv(connection, &iov, iovcnt, context, flags);
 }
 
 static int ctp_sock_sendv(cci_connection_t * connection,
@@ -3721,7 +3721,7 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	flags |= CCI_FLAG_WRITE;
 	flags |= CCI_FLAG_SILENT;
 
-	rc = sock_rma(connection,
+	rc = ctp_sock_rma(connection,
 		      &context_id, sizeof(uint64_t),
 		      local_handle, local_offset,
 		      remote_handle, remote_offset, toto, context, flags);

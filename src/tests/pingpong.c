@@ -444,7 +444,6 @@ int main(int argc, char *argv[])
 	cci_os_handle_t ep_fd;
 	cci_opt_handle_t handle;
 	char *uri = NULL;
-	int len = 0;
 
 	name = argv[0];
 

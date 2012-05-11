@@ -1032,7 +1032,7 @@ static int ctp_gni_destroy_endpoint(cci_endpoint_t * endpoint)
 
 		gconn = TAILQ_FIRST(&gep->conns);
 		conn = gconn->conn;
-		gni_disconnect(&conn->connection);
+		ctp_gni_disconnect(&conn->connection);
 	}
 
 	if (gep->tx_cq) {
