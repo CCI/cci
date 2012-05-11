@@ -4,8 +4,8 @@
  * $COPYRIGHT$
  */
 
-#ifndef CCI_CORE_ETH_H
-#define CCI_CORE_ETH_H
+#ifndef CCI_CTP_ETH_H
+#define CCI_CTP_ETH_H
 
 #include "cci/config.h"
 #include "ccieth_io.h"
@@ -52,8 +52,8 @@ extern struct eth__globals {
 	int fd;
 } * eglobals;
 
-int cci_core_eth_post_load(cci_plugin_t * me);
-int cci_core_eth_pre_unload(cci_plugin_t * me);
+int cci_ctp_eth_post_load(cci_plugin_t * me);
+int cci_ctp_eth_pre_unload(cci_plugin_t * me);
 
 #ifdef CCIETH_VALGRIND_HOOKS
 #include <valgrind/memcheck.h>
@@ -72,4 +72,4 @@ int cci_core_eth_pre_unload(cci_plugin_t * me);
 
 END_C_DECLS
 
-#endif /* CCI_CORE_ETH_H */
+#endif /* CCI_CTP_ETH_H */

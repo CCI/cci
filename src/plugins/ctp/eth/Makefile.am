@@ -4,12 +4,12 @@
 # $COPYRIGHT$
 #
 
-pkglib_LTLIBRARIES = cci_core_eth.la
+pkglib_LTLIBRARIES = cci_ctp_eth.la
 
-cci_core_eth_la_LDFLAGS = -module -avoid-version
-cci_core_eth_la_SOURCES = \
-        core_eth.h \
-        core_eth_module.c \
-        core_eth_api.c
+cci_ctp_eth_la_LDFLAGS = -module -avoid-version
+cci_ctp_eth_la_SOURCES = \
+        ctp_eth.h \
+        ctp_eth_module.c \
+        ctp_eth_api.c
 
 AM_CPPFLAGS = -I@abs_top_srcdir@/contrib/driver/ccieth/linux

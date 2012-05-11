@@ -17,8 +17,8 @@
 #include "ccieth_io.h"
 
 #include "cci.h"
-#include "plugins/core/core.h"
-#include "core_eth.h"
+#include "plugins/ctp/ctp.h"
+#include "ctp_eth.h"
 
 #define ETH_BUILD_ASSERT(condition) ((void)sizeof(char[1 - 2*!(condition)]))
 
@@ -27,8 +27,8 @@ struct eth__globals *eglobals = NULL;
 /*
  * Local functions
  */
-static int eth_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int eth_finalize(cci_plugin_core_t *plugin);
+static int eth_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int eth_finalize(cci_plugin_ctp_t *plugin);
 static const char *eth_strerror(cci_endpoint_t * endpoint, enum cci_status status);
 static int eth_create_endpoint(cci_device_t * device,
 			       int flags,
@@ -72,7 +72,7 @@ static int eth_rma(cci_connection_t * connection,
  *
  * The name of this structure must be of the following form:
  *
- *    cci_core_<your_plugin_name>_plugin
+ *    cci_ctp_<your_plugin_name>_plugin
  *
  * This allows the symbol to be found after the plugin is dynamically
  * opened.
@@ -80,18 +80,18 @@ static int eth_rma(cci_connection_t * connection,
  * Note that your_plugin_name should match the direct name where the
  * plugin resides.
  */
-cci_plugin_core_t cci_core_eth_plugin = {
+cci_plugin_ctp_t cci_ctp_eth_plugin = {
 	{
 	 /* Logistics */
 	 CCI_ABI_VERSION,
-	 CCI_CORE_API_VERSION,
+	 CCI_CTP_API_VERSION,
 	 "eth",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
 	 40, /* higher than sock, lower than verbs */
 
 	 /* Bootstrap function pointers */
-	 cci_core_eth_post_load,
-	 cci_core_eth_pre_unload,
+	 cci_ctp_eth_post_load,
+	 cci_ctp_eth_pre_unload,
 	 },
 
 	/* API function pointers */
@@ -183,7 +183,7 @@ out:
 	return -1;
 }
 
-static int eth__get_devices(cci_plugin_core_t *plugin)
+static int eth__get_devices(cci_plugin_ctp_t *plugin)
 {
 	int ret;
 	cci__dev_t *_dev, *_ndev;
@@ -239,7 +239,7 @@ static int eth__get_devices(cci_plugin_core_t *plugin)
 			cci__init_dev(_dev);
 			_dev->plugin = plugin;
 			_dev->priority = plugin->base.priority;
-			_dev->driver = strdup("eth");
+			_dev->transport = strdup("eth");
 			if (is_loopback)
 				_dev->is_default = 1;
 
@@ -260,7 +260,7 @@ static int eth__get_devices(cci_plugin_core_t *plugin)
 	} else {
 		/* find devices that we own in the config file */
 		TAILQ_FOREACH_SAFE(_dev, &globals->configfile_devs, entry, _ndev) {
-			if (0 == strcmp("eth", _dev->driver)) {
+			if (0 == strcmp("eth", _dev->transport)) {
 				const char * const *arg;
 				int gotmac = 0;
 
@@ -352,7 +352,7 @@ out:
 	return ret;
 }
 
-static int eth_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+static int eth_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	int ret;
 
@@ -386,12 +386,12 @@ out:
 	return ret;
 }
 
-static int eth_finalize(cci_plugin_core_t *plugin)
+static int eth_finalize(cci_plugin_ctp_t *plugin)
 {
 	cci__dev_t *_dev = NULL;
 
         TAILQ_FOREACH(_dev, &globals->devs, entry)
-		if (!strcmp(_dev->driver, "eth"))
+		if (!strcmp(_dev->transport, "eth"))
 			free(_dev->priv);
 
 	close(eglobals->fd);
