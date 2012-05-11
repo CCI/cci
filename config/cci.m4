@@ -25,12 +25,12 @@ AC_DEFUN([CCI_DEFINE_ARGS],[
 # 3. What to do upon failure
 # 4. If non-empty, print the announcement banner
 #
-AC_DEFUN([CCI_SETUP_CORE],[
+AC_DEFUN([CCI_SETUP_CTP],[
     AC_REQUIRE([AC_PROG_CC])
     AC_REQUIRE([AM_PROG_CC_C_O])
 
     AS_IF([test "x$4" != "x"],
-          [cci_show_title "Configuring CCI core"])
+          [cci_show_title "Configuring CCI ctp"])
 
     # If no prefix was defined, set a good value
     m4_ifval([$1], 

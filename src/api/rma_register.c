@@ -15,7 +15,7 @@
 #include <stdio.h>
 
 #include "cci.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 
 int cci_rma_register(cci_endpoint_t * endpoint,
 		     void *start, uint64_t length,

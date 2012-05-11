@@ -15,7 +15,7 @@
 #include <stdio.h>
 
 #include "cci.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 
 int cci_disconnect(cci_connection_t * connection)
 {
@@ -25,6 +25,6 @@ int cci_disconnect(cci_connection_t * connection)
 		return CCI_EINVAL;
 	}
 
-	/* NOTE the driver does all connection cleanup */
+	/* NOTE the transport does all connection cleanup */
 	return conn->plugin->disconnect(connection);
 }

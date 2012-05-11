@@ -13,7 +13,7 @@
 #include "util/argv.h"
 #include "plugins/base/public.h"
 #include "plugins/base/private.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 
 /* Global variables */
 char **cci_plugins_filename_cache = NULL;

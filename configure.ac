@@ -138,8 +138,8 @@ CFLAGS="$CFLAGS_save"
 # Define cci's configure arguments
 CCI_DEFINE_ARGS
 
-# Setup the cci core
-CCI_SETUP_CORE([], [], [AC_MSG_ERROR([Cannot continue])], [1])
+# Setup the cci ctp
+CCI_SETUP_CTP([], [], [AC_MSG_ERROR([Cannot continue])], [1])
 
 # Default to shared library yet
 AM_ENABLE_SHARED

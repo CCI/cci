@@ -16,8 +16,8 @@
 
 #include "cci.h"
 #include "plugins/base/public.h"
-#include "plugins/core/base/public.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/base/public.h"
+#include "plugins/ctp/ctp.h"
 #include "cci-api.h"
 
 int cci_finalize(void)
@@ -59,11 +59,11 @@ int cci_finalize(void)
 		pthread_mutex_unlock(&dev->lock);
 	}
 
-	/* let the driver clean up the private device */
+	/* let the transport clean up the private device */
 	for (i = 0;
 	     cci_all_plugins[i].plugin != NULL;
 	     i++) {
-		cci_plugin_core_t *plugin = (cci_plugin_core_t *) cci_all_plugins[i].plugin;
+		cci_plugin_ctp_t *plugin = (cci_plugin_ctp_t *) cci_all_plugins[i].plugin;
 		if (CCI_SUCCESS == cci_all_plugins[i].init_status)
 			plugin->finalize(plugin);
 	}
@@ -82,7 +82,7 @@ int cci_finalize(void)
 	/* free globals */
 	free(globals);
 
-	cci_plugins_core_close();
+	cci_plugins_ctp_close();
 	cci_plugins_finalize();
 
 out:

@@ -13,7 +13,7 @@
 #include "cci/config.h"
 
 #include "cci.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 
 int cci_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
 {

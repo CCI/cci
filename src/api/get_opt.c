@@ -15,12 +15,12 @@
 #include <stdio.h>
 
 #include "cci.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 
 int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
 		cci_opt_name_t name, void *val)
 {
-	cci_plugin_core_t * plugin;
+	cci_plugin_ctp_t * plugin;
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
 	cci__conn_t *conn = NULL;

@@ -19,8 +19,8 @@
 #include "cci.h"
 #include "cci_lib_types.h"
 #include "plugins/base/public.h"
-#include "plugins/core/core.h"
-#include "plugins/core/base/public.h"
+#include "plugins/ctp/ctp.h"
+#include "plugins/ctp/base/public.h"
 #include "cci-api.h"
 
 int cci__debug = CCI_DB_DFLT;
@@ -116,8 +116,8 @@ void cci__free_dev(cci__dev_t * dev)
 
 	cci__free_args((char **)device->conf_argv);
 
-	if (dev->driver)
-		free(dev->driver);
+	if (dev->transport)
+		free(dev->transport);
 
 	/* TODO dev->priv */
 
@@ -135,8 +135,8 @@ static int cci__free_configfile_devs(const char *reason)
 		TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
 		if (reason)
 			debug(CCI_DB_DRVR,
-			      "destroying device [%s] (driver %s), %s",
-			      dev->device.name, dev->driver, reason);
+			      "destroying device [%s] (transport %s), %s",
+			      dev->device.name, dev->transport, reason);
 		cci__free_dev(dev);
 	}
 
@@ -147,7 +147,7 @@ void cci__init_dev(cci__dev_t *dev)
 {
 	struct cci_device *device = &dev->device;
 
-	dev->priority = -1; /* tell the driver it must initialize it if we didn't */
+	dev->priority = -1; /* tell the transport it must initialize it if we didn't */
 	dev->is_default = 0;
 	TAILQ_INIT(&dev->eps);
 	pthread_mutex_init(&dev->lock, NULL);
@@ -170,8 +170,8 @@ void cci__add_dev(cci__dev_t * dev)
 	assert(NULL != dev->plugin);
 
 	debug(CCI_DB_DRVR,
-	      "adding device [%s] (driver %s)",
-	      dev->device.name, dev->driver);
+	      "adding device [%s] (transport %s)",
+	      dev->device.name, dev->transport);
 
 	/* walk list and insert in order by up/default/priority */
 	TAILQ_FOREACH(dd, &globals->devs, entry) {
@@ -202,7 +202,7 @@ void cci__add_dev(cci__dev_t * dev)
 
 int cci__parse_config(const char *path)
 {
-	int ret = 0, i = 0, arg_cnt = 0, driver = 0, is_default = 0;
+	int ret = 0, i = 0, arg_cnt = 0, transport = 0, is_default = 0;
 	char buffer[CCI_BUF_LEN], *str, *default_name = NULL;
 	FILE *file;
 	struct cci_device *d = NULL;
@@ -255,16 +255,16 @@ int cci__parse_config(const char *path)
 						    sizeof(char *) * (arg_cnt +
 								      1));
 				}
-				if (driver == 1) {
+				if (transport == 1) {
 					TAILQ_INSERT_TAIL(&globals->configfile_devs, dev, entry);
 					debug(CCI_DB_DRVR,
-					      "read device [%s] (driver %s) from config file",
-					      d->name, dev->driver);
+					      "read device [%s] (transport %s) from config file",
+					      d->name, dev->transport);
 					i++;
 				} else {
-					/* device does not have a driver, free it */
+					/* device does not have a transport, free it */
 					debug(CCI_DB_WARN,
-					      "device [%s] does not have a driver. Freeing it.",
+					      "device [%s] does not have a transport. Freeing it.",
 					      d->name);
 					cci__free_dev(dev);
 				}
@@ -305,7 +305,7 @@ int cci__parse_config(const char *path)
 			}
 
 			arg_cnt = 0;
-			driver = 0;
+			transport = 0;
 			open++;
 			*close = '\0';
 			d->name = strdup(open);
@@ -348,17 +348,17 @@ int cci__parse_config(const char *path)
 					return cci__free_configfile_devs(NULL);
 				}
 				arg_cnt++;
-				if (0 == strcmp(key, "driver")) {
-					if (!driver) {
-						dev->driver = strdup(value);
-						if (!dev->driver) {
+				if (0 == strcmp(key, "transport")) {
+					if (!transport) {
+						dev->transport = strdup(value);
+						if (!dev->transport) {
 							cci__free_dev(dev);
 							return cci__free_configfile_devs(NULL);
 						}
-						driver++;
+						transport++;
 					} else {
 						debug(CCI_DB_WARN,
-						      "device [%s] has more than one driver. Freeing it.",
+						      "device [%s] has more than one transport. Freeing it.",
 						      d->name);
 						cci__free_dev(dev);
 						d = NULL;
@@ -398,16 +398,16 @@ int cci__parse_config(const char *path)
 			    realloc((char **) d->conf_argv,
 				    sizeof(char *) * (arg_cnt + 1));
 		}
-		if (driver == 1) {
+		if (transport == 1) {
 			TAILQ_INSERT_TAIL(&globals->configfile_devs, dev, entry);
 			debug(CCI_DB_DRVR,
-			      "read device [%s] (driver %s) from config file",
-			      d->name, dev->driver);
+			      "read device [%s] (transport %s) from config file",
+			      d->name, dev->transport);
 			i++;
 		} else {
-			/* device does not have a driver, free it */
+			/* device does not have a transport, free it */
 			debug(CCI_DB_WARN,
-			      "device [%s] does not have a driver. Freeing it.",
+			      "device [%s] does not have a transport. Freeing it.",
 			      d->name);
 			cci__free_dev(dev);
 		}
@@ -465,13 +465,13 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		if (CCI_SUCCESS != (ret = cci_plugins_init())) {
 			goto out_with_globals;
 		}
-		if (CCI_SUCCESS != (ret = cci_plugins_core_open())) {
+		if (CCI_SUCCESS != (ret = cci_plugins_ctp_open())) {
 			goto out_with_plugins_init;
 		}
 		if (NULL == cci_all_plugins
 		    || NULL == cci_all_plugins[0].plugin) {
 			ret = CCI_ERR_NOT_FOUND;
-			goto out_with_plugins_core_open;
+			goto out_with_plugins_ctp_open;
 		}
 
 		/* lock the device list while initializing CTPs and devices */
@@ -492,7 +492,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		for (i = 0, j = 0;
 		     cci_all_plugins[i].plugin != NULL;
 		     i++) {
-			cci_plugin_core_t *plugin = (cci_plugin_core_t *) cci_all_plugins[i].plugin;
+			cci_plugin_ctp_t *plugin = (cci_plugin_ctp_t *) cci_all_plugins[i].plugin;
 			ret = cci_all_plugins[i].init_status = plugin->init(plugin, abi_ver, flags, caps);
 			if (!ret)
 				j++;
@@ -504,9 +504,9 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			goto out_with_config_file;
 		}
 
-		/* drop devices that weren't claimed by any driver,
+		/* drop devices that weren't claimed by any transport,
 		 * they didn't move from configfile_devs to devs */
-		cci__free_configfile_devs("not claimed by any driver");
+		cci__free_configfile_devs("not claimed by any transport");
 
 		/* build devices array and list it */
 		i=0;
@@ -523,8 +523,8 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		/* list ready devices */
 		TAILQ_FOREACH(dev, &globals->devs, entry) {
 			debug(CCI_DB_DRVR,
-			      "device [%s] (driver %s, default %d, priority %d, up %d) is ready",
-			      dev->device.name, dev->driver,
+			      "device [%s] (transport %s, default %d, priority %d, up %d) is ready",
+			      dev->device.name, dev->transport,
 			      dev->is_default, dev->priority, dev->device.up);
 			globals->devices[i++] = &dev->device;
 		}
@@ -557,7 +557,7 @@ out_with_plugins:
 	for (i = 0;
              cci_all_plugins[i].plugin != NULL;
              i++) {
-		cci_plugin_core_t *plugin = (cci_plugin_core_t *) cci_all_plugins[i].plugin;
+		cci_plugin_ctp_t *plugin = (cci_plugin_ctp_t *) cci_all_plugins[i].plugin;
 		if (CCI_SUCCESS == cci_all_plugins[i].init_status)
 			plugin->finalize(plugin);
 	}
@@ -565,8 +565,8 @@ out_with_config_file:
 	/* FIXME? */
 out_with_glock:
 	pthread_mutex_unlock(&globals->lock);
-out_with_plugins_core_open:
-	cci_plugins_core_close();
+out_with_plugins_ctp_open:
+	cci_plugins_ctp_close();
 out_with_plugins_init:
 	cci_plugins_finalize();
 out_with_globals:
