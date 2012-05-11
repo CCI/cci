@@ -100,6 +100,10 @@ AC_DEFUN([CCI_SETUP_CTP],[
           [AC_MSG_WARN([-g has been added to CFLAGS (developer build)])
            CFLAGS="$CFLAGS -g"])
 
+    AC_CHECK_HEADERS([ifaddrs.h], [
+	AC_CHECK_FUNCS([getifaddrs])
+    ])
+
     #
     # Basic sanity checking; we can't install to a relative path
     #

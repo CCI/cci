@@ -15,6 +15,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#ifdef HAVE_IFADDRS_H
+#include <net/if.h>
+#include <ifaddrs.h>
+#endif
+#ifdef __linux__
+#include <linux/ethtool.h>
+#include <linux/sockios.h>
+#endif
 
 #include "cci.h"
 #include "cci_lib_types.h"
@@ -199,6 +207,94 @@ void cci__add_dev(cci__dev_t * dev)
 	}
 	return;
 }
+
+#ifdef HAVE_GETIFADDRS
+int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
+{
+	struct cci_device * device = &dev->device;
+	struct ethtool_drvinfo edi;
+	struct ethtool_cmd ecmd;
+	struct ifreq ifr;
+	int sockfd;
+
+	/* mark the MSS as unknown in case we fail later */
+	device->max_send_size = -1;
+
+	/* up flag is easy */
+	device->up = (ifaddr->ifa_flags & IFF_UP != 0);
+
+	debug(CCI_DB_INFO,
+	      "querying interface %s info with socket ioctls and ethtool...",
+	      ifaddr->ifa_name);
+
+#ifdef __linux__
+	/* identify the target interface for following socket ioctls */
+	memset(&ifr, 0, sizeof(ifr));
+	strncpy(ifr.ifr_name, ifaddr->ifa_name, IFNAMSIZ);
+
+	/* try to get the MTU, and see if the device exists */
+	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (sockfd < 0) {
+		goto out;
+	}
+	if (ioctl(sockfd, SIOCGIFMTU, &ifr) < 0) {
+		assert(errno == ENODEV);
+		goto out_with_sockfd;
+	}
+	/* set MSS = MTU for now, the caller will remove the header size */
+	device->max_send_size = ifr.ifr_mtu;
+
+	/* try to get the link rate now, kernel allows non-root since 2.6.37 only */
+	ecmd.cmd = ETHTOOL_GSET;
+	ifr.ifr_data = (void *)&ecmd;
+	if (ioctl(sockfd, SIOCETHTOOL, &ifr) < 0) {
+		if (errno == EPERM) {
+			debug(CCI_DB_INFO,
+			      " ethtool get settings returned EPERM, falling back to custom ioctl");
+			goto out_with_sockfd;
+		}
+		if (errno != ENODEV && errno != EOPNOTSUPP) {
+			perror("SIOCETHTOOL ETHTOOL_GSET");
+			goto out_with_sockfd;
+		}
+		/* we won't get link rate anyhow */
+		debug(CCI_DB_INFO,
+		      " ethtool get settings not supported, cannot retrieve link rate");
+	} else {
+		unsigned speed;
+		speed = ethtool_cmd_speed(&ecmd);	/* FIXME: not supported with old linux/ethtool.h */
+		device->rate = speed == -1 ? 0 : speed * 1000000ULL;
+	}
+
+	/* try to get the bus id now */
+	edi.cmd = ETHTOOL_GDRVINFO;
+	ifr.ifr_data = (void *)&edi;
+	if (ioctl(sockfd, SIOCETHTOOL, &ifr) < 0) {
+		if (errno != ENODEV && errno != EOPNOTSUPP) {
+			perror("SIOCETHTOOL ETHTOOL_GDRVINFO");
+			goto out_with_sockfd;
+		}
+		/* we won't get bus info anyhow */
+		debug(CCI_DB_INFO,
+		      " ethtool get drvinfo not supported, cannot retrieve pci id");
+	} else {
+		/* try to parse. if it fails, the device is not pci */
+		sscanf(edi.bus_info, "%04x:%02x:%02x.%01x",
+		       &device->pci.domain, &device->pci.bus, &device->pci.dev,
+		       &device->pci.func);
+	}
+
+	close(sockfd);
+#endif /* __linux__ */
+
+	return 0;
+
+out_with_sockfd:
+	close(sockfd);
+out:
+	return -1;
+}
+#endif
 
 int cci__parse_config(const char *path)
 {
