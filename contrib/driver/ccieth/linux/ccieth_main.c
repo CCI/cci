@@ -269,6 +269,7 @@ ccieth_miscdev_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		if (ret)
 			return -EFAULT;
 
+		/* FIXME: -1 badly casted when returned to userspace */
 		gi_arg.max_send_size = -1;
 		gi_arg.pci_domain = -1;
 		gi_arg.pci_bus = -1;

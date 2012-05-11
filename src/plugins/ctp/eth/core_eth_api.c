@@ -13,8 +13,6 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <assert.h>
-#include <linux/ethtool.h>
-#include <linux/sockios.h>
 
 #include "ccieth_io.h"
 
@@ -123,84 +121,20 @@ static int eth__get_device_info(cci__dev_t * _dev, struct ifaddrs *addr)
 	struct cci_device *device = &_dev->device;
 	struct sockaddr_ll *lladdr = (struct sockaddr_ll *)addr->ifa_addr;
 	struct ccieth_ioctl_get_info ioctl_arg;
-	struct ethtool_drvinfo edi;
-	struct ethtool_cmd ecmd;
-	struct ifreq ifr;
-	int ccifd, sockfd;
+	int err;
 
 	/* default values */
 	device->max_send_size = -1;
-
-	/* up flag is easy */
-	device->up = (addr->ifa_flags & IFF_UP != 0);
 
 	if (getenv("CCIETH_FORCE_GET_INFO_IOCTL"))
 		/* force testing of our fallback for old kernels */
 		goto fallback_ioctl;
 
-	debug(CCI_DB_INFO,
-	      "querying interface %s info with socket ioctls and ethtool...",
-	      addr->ifa_name);
-
-	/* identify the target interface for following socket ioctls */
-	memset(&ifr, 0, sizeof(ifr));
-	strncpy(ifr.ifr_name, addr->ifa_name, IFNAMSIZ);
-
-	/* try to get the MTU, and see if the device exists */
-	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-	if (sockfd < 0)
-		goto out;
-
-	if (ioctl(sockfd, SIOCGIFMTU, &ifr) < 0) {
-		assert(errno == ENODEV);
-		goto out_with_sockfd;
-	}
-	CCIETH_VALGRIND_MEMORY_MAKE_READABLE(&ifr.ifr_mtu, sizeof(ifr.ifr_mtu));
-	device->max_send_size = ccieth_max_send_size(ifr.ifr_mtu);
-
-	/* try to get the link rate now, kernel allows non-root since 2.6.37 only */
-	ecmd.cmd = ETHTOOL_GSET;
-	ifr.ifr_data = (void *)&ecmd;
-	if (ioctl(sockfd, SIOCETHTOOL, &ifr) < 0) {
-		if (errno == EPERM) {
-			debug(CCI_DB_INFO,
-			      " ethtool get settings returned EPERM, falling back to custom ioctl");
-			goto fallback_ioctl;
-		}
-		if (errno != ENODEV && errno != EOPNOTSUPP) {
-			perror("SIOCETHTOOL ETHTOOL_GSET");
-			goto out_with_sockfd;
-		}
-		/* we won't get link rate anyhow */
-		debug(CCI_DB_INFO,
-		      " ethtool get settings not supported, cannot retrieve link rate");
-	} else {
-		unsigned speed;
-		CCIETH_VALGRIND_MEMORY_MAKE_READABLE(&ecmd, sizeof(ecmd));
-		speed = ethtool_cmd_speed(&ecmd);	/* FIXME: not supported with old linux/ethtool.h */
-		device->rate = speed == -1 ? -1ULL : speed * 1000000ULL;
-	}
-
-	/* try to get the bus id now */
-	edi.cmd = ETHTOOL_GDRVINFO;
-	ifr.ifr_data = (void *)&edi;
-	if (ioctl(sockfd, SIOCETHTOOL, &ifr) < 0) {
-		if (errno != ENODEV && errno != EOPNOTSUPP) {
-			perror("SIOCETHTOOL ETHTOOL_GDRVINFO");
-			goto out_with_sockfd;
-		}
-		/* we won't get bus info anyhow */
-		debug(CCI_DB_INFO,
-		      " ethtool get drvinfo not supported, cannot retrieve pci id");
-	} else {
-		/* try to parse. if it fails, the device is not pci */
-		CCIETH_VALGRIND_MEMORY_MAKE_READABLE(&edi, sizeof(edi));
-		sscanf(edi.bus_info, "%04x:%02x:%02x.%01x",
-		       &device->pci.domain, &device->pci.bus, &device->pci.dev,
-		       &device->pci.func);
-	}
-
-	goto done;
+#ifdef HAVE_GETIFADDRS
+	err = cci__get_dev_ifaddrs_info(_dev, addr);
+	if (!err)
+		goto done;
+#endif
 
 fallback_ioctl:
 	debug(CCI_DB_INFO, "querying interface %s info with custom ioctl",
@@ -210,7 +144,7 @@ fallback_ioctl:
 	if (ioctl(eglobals->fd, CCIETH_IOCTL_GET_INFO, &ioctl_arg) < 0) {
 		if (errno != ENODEV)
 			perror("ioctl get info");
-		goto out_with_sockfd;
+		goto out;
 	}
 	CCIETH_VALGRIND_MEMORY_MAKE_READABLE(&ioctl_arg.max_send_size,
 					     sizeof(ioctl_arg.max_send_size));
@@ -232,16 +166,19 @@ fallback_ioctl:
 	device->pci.dev = ioctl_arg.pci_dev;
 	device->pci.func = ioctl_arg.pci_func;
 
+	/* up flag is easy */
+	device->up = (addr->ifa_flags & IFF_UP != 0);
+
 done:
+	/* normalize what cci__get_dev_ifaddrs_info() returned */
+	device->max_send_size = ccieth_max_send_size(device->max_send_size);
+
 	debug(CCI_DB_INFO, "max %d rate %lld pci %04x:%02x:%02x.%01x",
 	      device->max_send_size, device->rate,
 	      device->pci.domain, device->pci.bus, device->pci.dev,
 	      device->pci.func);
-	close(sockfd);
 	return 0;
 
-out_with_sockfd:
-	close(sockfd);
 out:
 	return -1;
 }
