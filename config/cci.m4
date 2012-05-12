@@ -103,6 +103,7 @@ AC_DEFUN([CCI_SETUP_CTP],[
     AC_CHECK_HEADERS([ifaddrs.h], [
 	AC_CHECK_FUNCS([getifaddrs])
     ])
+    AC_CHECK_DECLS([ethtool_cmd_speed],,,[[#include <linux/ethtool.h>]])
 
     #
     # Basic sanity checking; we can't install to a relative path

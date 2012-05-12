@@ -262,7 +262,11 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 		      " ethtool get settings not supported, cannot retrieve link rate");
 	} else {
 		unsigned speed;
-		speed = ethtool_cmd_speed(&ecmd);	/* FIXME: not supported with old linux/ethtool.h */
+#if HAVE_DECL_ETHTOOL_CMD_SPEED
+		speed = ethtool_cmd_speed(&ecmd);
+#else
+		speed = ecmd.speed;
+#endif
 		device->rate = speed == -1 ? 0 : speed * 1000000ULL;
 	}
 
