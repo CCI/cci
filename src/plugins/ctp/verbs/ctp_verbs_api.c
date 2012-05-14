@@ -492,7 +492,7 @@ static int ctp_verbs_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver, uint32_t 
 				device->max_send_size =
 					verbs_mtu_val(port_attr.max_mtu);
 				device->rate = verbs_device_rate(port_attr);
-				device->name = vdev->ifa->ifa_name;
+				device->name = strdup(vdev->ifa->ifa_name);
 				device->up = vdev->ifa->ifa_flags & IFF_UP;
 				verbs_get_pci_info(device, vdev->context);
 
