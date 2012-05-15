@@ -1170,6 +1170,7 @@ ctp_verbs_create_endpoint(cci_device_t * device,
 out:
 	/* TODO lots of clean up */
 	if (ep->priv) {
+		int rc;
 		verbs_ep_t *vep = ep->priv;
 
 		if (vep->srq)
@@ -1185,12 +1186,12 @@ out:
 				free(rx);
 			}
 			if (rx_pool->mr) {
-				ret = ibv_dereg_mr(rx_pool->mr);
-				if (ret)
+				rc = ibv_dereg_mr(rx_pool->mr);
+				if (rc)
 					debug(CCI_DB_WARN,
 					      "deregistering endpoint rx_mr "
 					      "failed with %s\n",
-					      strerror(ret));
+					      strerror(rc));
 			}
 			if (rx_pool->buf)
 				free(rx_pool->buf);
@@ -1202,17 +1203,17 @@ out:
 		}
 
 		if (vep->cq) {
-			ret = ibv_destroy_cq(vep->cq);
-			if (ret)
+			rc = ibv_destroy_cq(vep->cq);
+			if (rc)
 				debug(CCI_DB_WARN, "destroying new endpoint cq "
-				      "failed with %s\n", strerror(ret));
+				      "failed with %s\n", strerror(rc));
 		}
 
 		if (vep->pd) {
-			ret = ibv_dealloc_pd(vep->pd);
-			if (ret)
+			rc = ibv_dealloc_pd(vep->pd);
+			if (rc)
 				debug(CCI_DB_WARN, "deallocing new endpoint pd "
-				      "failed with %s\n", strerror(ret));
+				      "failed with %s\n", strerror(rc));
 		}
 
 		if (vep->id_rc)
@@ -1433,6 +1434,7 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 	int rdma_send = VERBS_MSG_SEND | (1 << 4);
 	int use_rdma = header == rdma_send ? 1 : 0;
 	uint32_t orig_len = len;
+	int pad = len & 0x7 ? 8 - (len & 0x7) : 0;
 
 	CCI_ENTER;
 
@@ -1465,7 +1467,6 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 
 			uint32_t slot = (header >> 21) & 0xFF;
 			uint32_t h2 = header;
-			uint32_t pad = len % 8 == 0 ? 0 : 8 - (len % 8);
 			uint64_t addr = vconn->raddr;
 
 			h2 |= (orig_len << 5);
@@ -1486,7 +1487,7 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 
 				wr.sg_list = list;
 				wr.num_sge = 1;
-			} else if (len < vconn->inline_size - 4) {
+			} else if (len < vconn->inline_size - 4 - pad) {
 				/* SEND_INLINE must be used */
 				debug(CCI_DB_MSG, "adding second list[1]");
 				list[0].length += pad;
@@ -1496,8 +1497,8 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 			} else {
 				/* need to copy to registered buffer */
 				debug(CCI_DB_MSG, "copying header to buffer");
-				memcpy(buffer + len, &h2, 4);
-				list[0].length = len + 4;	/* header after message */
+				memcpy(buffer + len + pad, &h2, 4);
+				list[0].length = len + pad + 4;	/* header after message */
 			}
 
 			len += pad;
@@ -1522,7 +1523,7 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 		wr.opcode = IBV_WR_SEND;
 	}
 	wr.send_flags = IBV_SEND_SIGNALED;
-	if (vconn->inline_size && (len <= vconn->inline_size - 4))
+	if (vconn->inline_size && (len <= vconn->inline_size - 4 - pad))
 		wr.send_flags |= IBV_SEND_INLINE;
 
 	ret = ibv_post_send(vconn->id->qp, &wr, &bad_wr);
@@ -3558,6 +3559,7 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 	int ret = CCI_SUCCESS;
 	int i = 0;
 	int is_reliable = 0;
+	int pad = 0;
 	uint32_t len = 0;
 	cci_endpoint_t *endpoint = connection->endpoint;
 	cci__conn_t *conn = NULL;
@@ -3623,11 +3625,12 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 			header |= (i << 21);	/* add index */
 		}
 		pthread_mutex_unlock(&ep->lock);
+		pad = len & 0x7 ? 8 - (len & 0x7) : 0;
 	}
 
 	/* always copy into tx's buffer */
 	if (len) {
-		if (len > vconn->inline_size || iovcnt != 1) {
+		if (len >= (vconn->inline_size - 4 - pad) || iovcnt != 1) {
 			uint32_t offset = 0;
 
 			ptr = tx->buffer;
