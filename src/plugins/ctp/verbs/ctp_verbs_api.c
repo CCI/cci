@@ -1523,13 +1523,15 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 		wr.opcode = IBV_WR_SEND;
 	}
 	wr.send_flags = IBV_SEND_SIGNALED;
-	if (vconn->inline_size && (len <= vconn->inline_size - 4 - pad))
+	if (vconn->inline_size && (len <= vconn->inline_size - 4)) {
+		debug(CCI_DB_MSG, "%s: setting inline flag", __func__);
 		wr.send_flags |= IBV_SEND_INLINE;
+	}
 
 	ret = ibv_post_send(vconn->id->qp, &wr, &bad_wr);
 	if (ret == -1) {
 		ret = errno;
-		debug(CCI_DB_CONN,
+		debug(CCI_DB_MSG,
 		      "unable to send id 0x%" PRIx64
 		      " buffer %p len %u header %u", id, buffer, len, header);
 	}
@@ -3630,7 +3632,7 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 
 	/* always copy into tx's buffer */
 	if (len) {
-		if (len >= (vconn->inline_size - 4 - pad) || iovcnt != 1) {
+		if (len > (vconn->inline_size - 4 - pad) || iovcnt != 1) {
 			uint32_t offset = 0;
 
 			ptr = tx->buffer;
