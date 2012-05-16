@@ -367,6 +367,7 @@ typedef struct verbs_conn {
 	uint32_t avail;		/* bitmask of available peer slots */
 	uint32_t **slots;	/* pointers to buffer headers
 				   to poll */
+	int is_polling;		/* polling RDMA MSGs */
 
 	 TAILQ_HEAD(s_rems, verbs_rma_remote) remotes;	/* LRU list of remote handles */
 	 TAILQ_HEAD(w_ops, verbs_rma_op) rma_ops;	/* rma ops waiting on remotes */

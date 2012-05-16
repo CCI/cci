@@ -1432,7 +1432,7 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 	struct ibv_sge list[2];
 	struct ibv_send_wr wr, *bad_wr;
 	int rdma_send = VERBS_MSG_SEND | (1 << 4);
-	int use_rdma = header == rdma_send ? 1 : 0;
+	int use_rdma = (header & 0x1F) == rdma_send ? 1 : 0;
 	uint32_t orig_len = len;
 	int pad = len & 0x7 ? 8 - (len & 0x7) : 0;
 
@@ -2817,14 +2817,31 @@ out:
 
 static int verbs_poll_rdma_msgs(verbs_conn_t * vconn)
 {
-	int ret = CCI_EAGAIN;
-	int i = 0;
+	int ret = CCI_EAGAIN, i, end, found = -1, have_token = 0;
+	static int last = 0;
 	cci__conn_t *conn = vconn->conn;
 	cci_endpoint_t *endpoint = conn->connection.endpoint;
 	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
 	void *ptr = NULL;
 
-	for (i = 0; i < vconn->num_slots; i++) {
+	pthread_mutex_lock(&ep->lock);
+	if (!vconn->is_polling) {
+		vconn->is_polling = 1;
+		have_token = 1;
+	}
+	pthread_mutex_unlock(&ep->lock);
+
+	if (!have_token) {
+		CCI_EXIT;
+		return EBUSY;
+	}
+
+	i = last + 1;
+	if (i == vconn->num_slots)
+		i = 0;
+	end = i;
+
+	do {
 		if (*(vconn->slots[i])) {
 			uint32_t header = ntohl(*vconn->slots[i]);
 			verbs_rx_t *rx = &vconn->rxs[i];
@@ -2834,25 +2851,33 @@ static int verbs_poll_rdma_msgs(verbs_conn_t * vconn)
 			debug(CCI_DB_MSG, "%s: recv'd 0x%x len %u slot %d conn %p qp %u",
 			      __func__, header, len, i, vconn->conn, vconn->id->qp->qp_num);
 
-			//ptr = vconn->rbuf + (uintptr_t)(((i + 1) * (vconn->mss + 4)) - 4);
 			ptr = (void *)vconn->slots[i];
 			ptr -= (len + pad);
 			*vconn->slots[i] = 0;
 
-			*((uint32_t *) & rx->evt.event.recv.len) = len;
+			found = i;
+
+			rx->evt.event.recv.len = len;
 			if (rx->evt.event.recv.len)
-				*((void **)&rx->evt.event.request.data_ptr) =
-				    ptr;
+				rx->evt.event.request.data_ptr = ptr;
 			else
-				*((void **)&rx->evt.event.request.data_ptr) =
-				    NULL;
+				rx->evt.event.request.data_ptr = NULL;
 
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
 			pthread_mutex_unlock(&ep->lock);
-			return CCI_SUCCESS;
 		}
-	}
+		i++;
+		if (i == vconn->num_slots)
+			i = 0;
+	} while (i != end);
+
+	if (found != -1)
+		last = found;
+
+	pthread_mutex_lock(&ep->lock);
+	vconn->is_polling = 0;
+	pthread_mutex_unlock(&ep->lock);
 
 	return ret;
 }
