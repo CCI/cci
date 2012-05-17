@@ -365,6 +365,7 @@ typedef struct verbs_conn {
 	uint32_t rkey;		/* peer's rkey */
 	uint32_t num_slots;	/* number of MSG slots */
 	uint32_t avail;		/* bitmask of available peer slots */
+	uint32_t last;		/* last slot used */
 	uint32_t **slots;	/* pointers to buffer headers
 				   to poll */
 	int is_polling;		/* polling RDMA MSGs */

@@ -3645,8 +3645,21 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 	if (vconn->raddr && iovcnt < 2) {
 		pthread_mutex_lock(&ep->lock);
 		if (vconn->avail) {
-			i = ffs(vconn->avail);
-			i--;	/* convert to index */
+			int old;
+
+			i = vconn->last + 1;
+			if (i == vconn->num_slots)
+				i = 0;
+			old = i;
+			do {
+				if ((1 << i) & vconn->avail) {
+					vconn->last = i;
+					break;
+				}
+				i++;
+				if (i == vconn->num_slots)
+					i = 0;
+			} while (i != old);
 			vconn->avail &= ~(1 << i);
 			header |= (1 << 4);	/* set RDMA bit */
 			header |= (i << 21);	/* add index */
