@@ -242,6 +242,7 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 		goto out_with_sockfd;
 	}
 	/* set MSS = MTU for now, the caller will remove the header size */
+	CCI_VALGRIND_MEMORY_MAKE_READABLE(&ifr.ifr_mtu, sizeof(ifr.ifr_mtu));
 	device->max_send_size = ifr.ifr_mtu;
 
 	/* try to get the link rate now, kernel allows non-root since 2.6.37 only */
@@ -262,6 +263,7 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 		      " ethtool get settings not supported, cannot retrieve link rate");
 	} else {
 		unsigned speed;
+		CCI_VALGRIND_MEMORY_MAKE_READABLE(&ecmd, sizeof(ecmd));
 #if HAVE_DECL_ETHTOOL_CMD_SPEED
 		speed = ethtool_cmd_speed(&ecmd);
 #else
@@ -283,6 +285,7 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 		      " ethtool get drvinfo not supported, cannot retrieve pci id");
 	} else {
 		/* try to parse. if it fails, the device is not pci */
+		CCI_VALGRIND_MEMORY_MAKE_READABLE(&edi, sizeof(edi));
 		sscanf(edi.bus_info, "%04x:%02x:%02x.%01x",
 		       &device->pci.domain, &device->pci.bus, &device->pci.dev,
 		       &device->pci.func);

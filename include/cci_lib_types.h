@@ -255,5 +255,20 @@ extern int cci__debug;
         debug(CCI_DB_FUNC, "exiting  %s", __func__);                            \
   } while (0);
 
+#if HAVE_DECL_VALGRIND_MAKE_MEM_NOACCESS
+#include <valgrind/memcheck.h>
+#define CCI_VALGRIND_MEMORY_MAKE_NOACCESS(p, s) VALGRIND_MAKE_MEM_NOACCESS(p, s)
+#define CCI_VALGRIND_MEMORY_MAKE_WRITABLE(p, s) VALGRIND_MAKE_MEM_UNDEFINED(p, s)
+#define CCI_VALGRIND_MEMORY_MAKE_READABLE(p, s) VALGRIND_MAKE_MEM_DEFINED(p, s)
+#define CCI_VALGRIND_CHECK_DEFINED(p, s) VALGRIND_CHECK_VALUE_IS_DEFINED(p, s)
+#define CCI_VALGRIND_CHECK_WRITABLE(p, s) VALGRIND_CHECK_VALUE_IS_WRITABLE(p, s)
+#else /* !HAVE_DECL_VALGRIND_MAKE_MEM_NOACCESS */
+#define CCI_VALGRIND_MEMORY_MAKE_NOACCESS(p, s) /* nothing */
+#define CCI_VALGRIND_MEMORY_MAKE_WRITABLE(p, s) /* nothing */
+#define CCI_VALGRIND_MEMORY_MAKE_READABLE(p, s) /* nothing */
+#define CCI_VALGRIND_CHECK_DEFINED(p, s) /* nothing */
+#define CCI_VALGRIND_CHECK_WRITABLE(p, s) /* nothing */
+#endif /* !HAVE_DECL_VALGRIND_MAKE_MEM_NOACCESS */
+
 END_C_DECLS
 #endif /* CCI_LIB_TYPES_H */
