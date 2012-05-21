@@ -1575,6 +1575,7 @@ static int ctp_verbs_accept(cci_event_t * event, const void *context)
 	tx->evt.event.accept.connection = &conn->connection;
 	tx->evt.conn = conn;
 	tx->evt.ep = ep;
+	conn->connection.context = (void *)context;
 
 	ret = verbs_vconn_set_mss(vconn);
 	if (ret) {
