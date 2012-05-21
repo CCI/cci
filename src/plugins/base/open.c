@@ -96,9 +96,21 @@ int cci_plugins_open_all(const char *framework,
 	cci_plugin_t *plugin;
 	lt_dlhandle handle;
 	char prefix[BUFSIZ];
+	char *ctpenv;
+	int ctpenv_negate;
 
 	if (CCI_SUCCESS != (i = cci_plugins_init())) {
 		return i;
+	}
+
+	ctpenv = getenv("CCI_CTP");
+	if (ctpenv && ctpenv[0] == '^') {
+		ctpenv_negate = 1;
+		ctpenv++;
+		debug(CCI_DB_INFO, "ignoring CTP list: %s", ctpenv);
+	} else {
+		ctpenv_negate = 0;
+		debug(CCI_DB_INFO, "only keeping CTP list: %s", ctpenv);
 	}
 
 	snprintf(prefix, BUFSIZ - 1, "%s%s_", plugin_prefix, framework);
@@ -126,6 +138,29 @@ int cci_plugins_open_all(const char *framework,
 			if (open_plugin
 			    (cci_plugins_filename_cache[i], &handle, &plugin,
 			     verify) == CCI_SUCCESS) {
+				if (ctpenv) {
+					/* see if the ctp name is in ctpenv */
+					int namelen = strlen(ptr + prefix_len);
+					char *ctpenv_tmp = ctpenv;
+					int found = 0;
+					while (1) {
+						if (!strncmp(ctpenv_tmp, ptr+prefix_len, namelen)
+						    && (ctpenv_tmp[namelen] == ','
+							|| ctpenv_tmp[namelen] == '\0')) {
+							found = 1;
+							break;
+						}
+						if (ctpenv_tmp[namelen] == '\0')
+							break;
+						ctpenv_tmp++;
+					}
+					/* filter */
+					if (ctpenv_negate == found) {
+						debug(CCI_DB_INFO, "ignoring CTP %s", ptr+prefix_len);
+						continue;
+					}
+				}
+
 				if (NULL != plugin->post_load &&
 				    CCI_SUCCESS !=
 				    plugin->post_load(plugin)) {
