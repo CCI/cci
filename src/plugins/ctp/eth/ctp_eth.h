@@ -55,21 +55,6 @@ extern struct eth__globals {
 int cci_ctp_eth_post_load(cci_plugin_t * me);
 int cci_ctp_eth_pre_unload(cci_plugin_t * me);
 
-#ifdef CCIETH_VALGRIND_HOOKS
-#include <valgrind/memcheck.h>
-#define CCIETH_VALGRIND_MEMORY_MAKE_NOACCESS(p, s) VALGRIND_MAKE_MEM_NOACCESS(p, s)
-#define CCIETH_VALGRIND_MEMORY_MAKE_WRITABLE(p, s) VALGRIND_MAKE_MEM_UNDEFINED(p, s)
-#define CCIETH_VALGRIND_MEMORY_MAKE_READABLE(p, s) VALGRIND_MAKE_MEM_DEFINED(p, s)
-#define CCIETH_VALGRIND_CHECK_DEFINED(p, s) VALGRIND_CHECK_VALUE_IS_DEFINED(p, s)
-#define CCIETH_VALGRIND_CHECK_WRITABLE(p, s) VALGRIND_CHECK_VALUE_IS_WRITABLE(p, s)
-#else /* !CCIETH_VALGRIND_HOOKS */
-#define CCIETH_VALGRIND_MEMORY_MAKE_NOACCESS(p, s)	/* nothing */
-#define CCIETH_VALGRIND_MEMORY_MAKE_WRITABLE(p, s)	/* nothing */
-#define CCIETH_VALGRIND_MEMORY_MAKE_READABLE(p, s)	/* nothing */
-#define CCIETH_VALGRIND_CHECK_DEFINED(p, s)	/* nothing */
-#define CCIETH_VALGRIND_CHECK_WRITABLE(p, s)	/* nothing */
-#endif /* !CCIETH_VALGRIND_HOOKS */
-
 END_C_DECLS
 
 #endif /* CCI_CTP_ETH_H */
