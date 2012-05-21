@@ -28,10 +28,13 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <sys/socket.h>
 #include <netdb.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#ifdef HAVE_IFADDRS_H
+#include <ifaddrs.h>
+#include <net/if.h>
+#endif
 
 #include "cci.h"
 #include "cci_lib_types.h"
@@ -211,6 +214,9 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 	int ret;
 	cci__dev_t *dev, *ndev;
 	cci_device_t **devices;
+#ifdef HAVE_GETIFADDRS
+	struct ifaddrs *addrs = NULL, *addr;
+#endif
 
 	CCI_ENTER;
 
@@ -230,6 +236,11 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 
 	srandom((unsigned int)sock_get_usecs());
 
+#ifdef HAVE_GETIFADDRS
+        getifaddrs(&addrs);
+	/* ignore errors, we've use defaults */
+#endif
+
 	devices = calloc(CCI_MAX_DEVICES, sizeof(*sglobals->devices));
 	if (!devices) {
 		ret = CCI_ENOMEM;
@@ -237,50 +248,78 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 	}
 
 	if (!globals->configfile) {
-#if 0
-		/* create a loopback device for now */
-		struct cci_device *device;
-		sock_dev_t *sdev;
+#ifdef HAVE_GETIFADDRS
+		if (addrs) {
+			for (addr = addrs; addr != NULL; addr = addr->ifa_next) {
+				struct cci_device *device;
+				sock_dev_t *sdev;
+				uint32_t mtu = (uint32_t) -1;
+				struct sockaddr_in *sai;
 
-		dev = calloc(1, sizeof(*dev));
-		if (!dev) {
-			ret = CCI_ENOMEM;
-			goto out;
+				if (!addr->ifa_addr)
+					continue;
+				if (addr->ifa_addr->sa_family != AF_INET)
+					continue;
+				if (addr->ifa_flags & IFF_LOOPBACK)
+                                        continue;
+
+				dev = calloc(1, sizeof(*dev));
+				if (!dev) {
+					ret = CCI_ENOMEM;
+					goto out;
+				}
+				dev->priv = calloc(1, sizeof(*sdev));
+				if (!dev->priv) {
+					free(dev);
+					ret = CCI_ENOMEM;
+					goto out;
+				}
+
+				cci__init_dev(dev);
+				dev->plugin = plugin;
+				dev->priority = plugin->base.priority;
+				dev->transport = strdup("sock");
+
+				device = &dev->device;
+				device->name = strdup(addr->ifa_name);
+
+				sdev = dev->priv;
+				TAILQ_INIT(&sdev->queued);
+				TAILQ_INIT(&sdev->pending);
+				sdev->is_progressing = 0;
+
+				sai = (struct sockaddr_in *) addr->ifa_addr;
+				memcpy(&sdev->ip, &sai->sin_addr, sizeof(sai->sin_addr));
+
+				/* default values */
+				device->up = 1;
+				device->rate = 0;
+				device->pci.domain = -1;    /* per CCI spec */
+				device->pci.bus = -1;       /* per CCI spec */
+				device->pci.dev = -1;       /* per CCI spec */
+				device->pci.func = -1;      /* per CCI spec */
+				/* try to get the actual values */
+				cci__get_dev_ifaddrs_info(dev, addr);
+
+				mtu = device->max_send_size;
+				if (mtu == (uint32_t) -1) {
+					/* if no mtu, use default */
+					device->max_send_size = SOCK_DEFAULT_MSS;
+				} else {
+					/* compute mss from mtu */
+					if (mtu > SOCK_UDP_MAX)
+						mtu = SOCK_UDP_MAX;
+					mtu -= SOCK_MAX_HDR_SIZE;
+					assert(mtu >= SOCK_MIN_MSS); /* FIXME rather ignore the device? */
+					device->max_send_size = mtu;
+				}
+
+				cci__add_dev(dev);
+				devices[sglobals->count] = device;
+				sglobals->count++;
+				threads_running = 1;
+			}
 		}
-		dev->priv = calloc(1, sizeof(*sdev));
-		if (!dev->priv) {
-			free(dev);
-			ret = CCI_ENOMEM;
-			goto out;
-		}
-
-		cci__init_dev(dev);
-		dev->plugin = plugin;
-		dev->priority = plugin->base.priority;
-
-		device = &dev->device;
-		device->max_send_size = SOCK_DEFAULT_MSS;
-		device->name = strdup("loopback");
-		device->up = 1;
-
-		device->rate = 0;
-		device->pci.domain = -1;    /* per CCI spec */
-		device->pci.bus = -1;       /* per CCI spec */
-		device->pci.dev = -1;       /* per CCI spec */
-		device->pci.func = -1;      /* per CCI spec */
-
-		sdev = dev->priv;
-		TAILQ_INIT(&sdev->queued);
-		TAILQ_INIT(&sdev->pending);
-		sdev->is_progressing = 0;
-		sdev->ip = inet_addr("127.0.0.1"); /* network order */
-
-		dev->transport = strdup("sock");
-		dev->is_default = 1;
-		cci__add_dev(dev);
-		devices[sglobals->count] = device;
-		sglobals->count++;
-		threads_running = 1;
 #endif
 
 	} else
@@ -290,13 +329,13 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 			const char * const *arg;
 			struct cci_device *device;
 			sock_dev_t *sdev;
+			uint32_t mtu = (uint32_t) -1;
 
 			dev->plugin = plugin;
 			if (dev->priority == -1)
 				dev->priority = plugin->base.priority;
 
 			device = &dev->device;
-			device->max_send_size = SOCK_DEFAULT_MSS;
 
 			/* TODO determine link rate
 			 *
@@ -304,12 +343,6 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 			 * bsd/darwin->ioctl(SIOCGIFMEDIA)->ifm_active
 			 * windows ?
 			 */
-			device->rate = 0;
-
-			device->pci.domain = -1;	/* per CCI spec */
-			device->pci.bus = -1;	/* per CCI spec */
-			device->pci.dev = -1;	/* per CCI spec */
-			device->pci.func = -1;	/* per CCI spec */
 
 			dev->priv = calloc(1, sizeof(*sdev));
 			if (!dev->priv) {
@@ -322,6 +355,14 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 			TAILQ_INIT(&sdev->pending);
 			sdev->is_progressing = 0;
 
+			/* default values */
+			device->up = 1;
+			device->rate = 0;
+			device->pci.domain = -1;	/* per CCI spec */
+			device->pci.bus = -1;	/* per CCI spec */
+			device->pci.dev = -1;	/* per CCI spec */
+			device->pci.func = -1;	/* per CCI spec */
+
 			/* parse conf_argv */
 			for (arg = device->conf_argv; *arg != NULL; arg++) {
 				if (0 == strncmp("ip=", *arg, 3)) {
@@ -329,27 +370,52 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 
 					sdev->ip = inet_addr(ip);	/* network order */
 				} else if (0 == strncmp("mtu=", *arg, 4)) {
-					const char *mss_str = *arg + 4;
-					uint32_t mss = strtol(mss_str, NULL, 0);
-					if (mss > SOCK_UDP_MAX)
-						mss = SOCK_UDP_MAX;
-
-					mss -= SOCK_MAX_HDR_SIZE;
-
-					assert(mss >= SOCK_MIN_MSS);
-					device->max_send_size = mss;
+					const char *mtu_str = *arg + 4;
+					mtu = strtol(mtu_str, NULL, 0);
 				 }
 			}
 			if (sdev->ip != 0) {
+				/* try to get the actual values now */
+#ifdef HAVE_GETIFADDRS
+				if (addrs) {
+					for (addr = addrs; addr != NULL; addr = addr->ifa_next) {
+						struct sockaddr_in *sai;
+						if (!addr->ifa_addr)
+							continue;
+						if (addr->ifa_addr->sa_family != AF_INET)
+							continue;
+						sai = (struct sockaddr_in *) addr->ifa_addr;
+						if (!memcmp(&sdev->ip, &sai->sin_addr, sizeof(sdev->ip)))
+							break;
+					}
+					if (!addr)
+						/* no such device, don't initialize it */
+						continue;
+
+					cci__get_dev_ifaddrs_info(dev, addr);
+				}
+#endif
+				if (mtu == (uint32_t) -1)
+					/* if mtu not specified, use the ifaddr one */
+					mtu = device->max_send_size;
+				if (mtu == (uint32_t) -1) {
+					/* if still no mtu, use default */
+					device->max_send_size = SOCK_DEFAULT_MSS;
+				} else {
+					/* compute mss from mtu */
+					if (mtu > SOCK_UDP_MAX)
+						mtu = SOCK_UDP_MAX;
+					mtu -= SOCK_MAX_HDR_SIZE;
+					assert(mtu >= SOCK_MIN_MSS); /* FIXME rather ignore the device? */
+					device->max_send_size = mtu;
+				}
+				/* queue to the main device list now */
 				TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
-				device->up = 1;
 				cci__add_dev(dev);
 				devices[sglobals->count] = device;
 				sglobals->count++;
 				threads_running = 1;
 			}
-
-			/* TODO determine if IP is available and up */
 		}
 	}
 
@@ -368,6 +434,10 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 		if (ret)
 			goto out;
 	}
+
+#ifdef HAVE_GETIFADDRS
+       	freeifaddrs(addrs);
+#endif
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -388,6 +458,11 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 		free((void *)sglobals);
 		sglobals = NULL;
 	}
+#ifdef HAVE_GETIFADDRS
+	if (addrs) {
+		freeifaddrs(addrs);
+	}
+#endif
 	CCI_EXIT;
 	return ret;
 }

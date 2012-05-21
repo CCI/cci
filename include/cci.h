@@ -380,7 +380,7 @@ typedef const struct cci_device {
 	uint32_t max_send_size;
 
 	/*! Data rate per specification: data bits per second (not the
-	   signaling rate). */
+	   signaling rate). 0 if unknown. */
 	uint64_t rate;
 
 	/*! The PCI ID of this device as reported by the OS/hardware.  All

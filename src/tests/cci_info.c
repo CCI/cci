@@ -57,8 +57,8 @@ int main(int argc, char *argv[])
 		if (device->rate)
 			snprintf(rate, sizeof(rate), " %"PRIu64" MBit/s", device->rate / 1000000);
 
-		printf("% 2d: %s%s%s%s%s\n",
-		       i, device->name, pcibusid, rate,
+		printf("% 2d: %s%s%s MSS=%u%s%s\n",
+		       i, device->name, pcibusid, rate, device->max_send_size,
 		       i ? "" : " (default)",
 		       device->up ? "" : " (not up)");
 	}

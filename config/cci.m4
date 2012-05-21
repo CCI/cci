@@ -100,6 +100,22 @@ AC_DEFUN([CCI_SETUP_CTP],[
           [AC_MSG_WARN([-g has been added to CFLAGS (developer build)])
            CFLAGS="$CFLAGS -g"])
 
+    # Look for valgrind
+    AC_ARG_ENABLE(valgrind,
+                  AC_HELP_STRING(--enable-valgrind, enable Valgrind hooks),
+                  enable_valgrind=yes)
+    if test x$enable_valgrind = xyes ; then
+        AC_CHECK_DECLS([VALGRIND_MAKE_MEM_NOACCESS],
+                       [AC_MSG_NOTICE(activating Valgrind hooks)],
+                       [:],
+                       [[#include <valgrind/memcheck.h>]])
+    fi
+
+    AC_CHECK_HEADERS([ifaddrs.h], [
+	AC_CHECK_FUNCS([getifaddrs])
+    ])
+    AC_CHECK_DECLS([ethtool_cmd_speed],,,[[#include <linux/ethtool.h>]])
+
     #
     # Basic sanity checking; we can't install to a relative path
     #
