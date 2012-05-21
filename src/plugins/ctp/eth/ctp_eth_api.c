@@ -239,11 +239,11 @@ static int eth__get_devices(cci_plugin_ctp_t *plugin)
 			cci__init_dev(_dev);
 			_dev->plugin = plugin;
 			_dev->priority = plugin->base.priority;
-			_dev->transport = strdup("eth");
 			if (is_loopback)
 				_dev->is_default = 1;
 
 			/* get what would have been in the config file */
+			device->transport = strdup("eth");
 			device->name = strdup(addr->ifa_name);
 			memcpy(&edev->addr.sll_addr, &lladdr->sll_addr, 6);
 
@@ -260,7 +260,7 @@ static int eth__get_devices(cci_plugin_ctp_t *plugin)
 	} else {
 		/* find devices that we own in the config file */
 		TAILQ_FOREACH_SAFE(_dev, &globals->configfile_devs, entry, _ndev) {
-			if (0 == strcmp("eth", _dev->transport)) {
+			if (0 == strcmp("eth", _dev->device.transport)) {
 				const char * const *arg;
 				int gotmac = 0;
 
@@ -391,7 +391,7 @@ static int eth_finalize(cci_plugin_ctp_t *plugin)
 	cci__dev_t *_dev = NULL;
 
         TAILQ_FOREACH(_dev, &globals->devs, entry)
-		if (!strcmp(_dev->transport, "eth"))
+		if (!strcmp(_dev->device.transport, "eth"))
 			free(_dev->priv);
 
 	close(eglobals->fd);
