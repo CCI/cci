@@ -307,7 +307,7 @@ static int ctp_portals_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t
 		portals_dev_t *pdev;
 
 /*      Reject until portals transport found in configuration. */
-		if (strcmp("portals", dev->transport))
+		if (strcmp("portals", dev->device.transport))
 			continue;
 
 		iReject = 0;	/* portals configured */
@@ -493,7 +493,7 @@ static int ctp_portals_finalize(cci_plugin_ctp_t *plugin)
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
 		portals_dev_t *pdev;
 
-		if (strcmp(dev->transport, "portals"))
+		if (strcmp(dev->device.transport, "portals"))
 			continue;
 
 		pdev = dev->priv;
@@ -859,7 +859,7 @@ static int ctp_portals_create_endpoint(cci_device_t * device,
 	}
 
 	dev = container_of(device, cci__dev_t, device);
-	if (strcmp("portals", dev->transport)) {
+	if (strcmp("portals", dev->device.transport)) {
 
 		iRC = CCI_EINVAL;
 		goto out;

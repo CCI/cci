@@ -47,9 +47,6 @@ BEGIN_C_DECLS
 	/*! Public device (name, info, argv, max_send_size, rate, pci) */
 	struct cci_device device;
 
-	/*! Transport name */
-	char *transport;
-
 	/*! Priority (0-100, default = 50) */
 	int priority;
 

@@ -364,6 +364,9 @@ typedef const struct cci_device {
 	/*! Name of the device from the config file, e.g., "bob0" */
 	const char *name;
 
+	/*! Name of the device driver, e.g., "sock" or "verbs" */
+	const char *transport;
+
 	/*! Is this device actually up and running? */
 	unsigned up;
 

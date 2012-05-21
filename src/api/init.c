@@ -124,8 +124,7 @@ void cci__free_dev(cci__dev_t * dev)
 
 	cci__free_args((char **)device->conf_argv);
 
-	if (dev->transport)
-		free(dev->transport);
+	free((char *)device->transport);
 
 	/* TODO dev->priv */
 
@@ -144,7 +143,7 @@ static int cci__free_configfile_devs(const char *reason)
 		if (reason)
 			debug(CCI_DB_DRVR,
 			      "destroying device [%s] (transport %s), %s",
-			      dev->device.name, dev->transport, reason);
+			      dev->device.name, dev->device.transport, reason);
 		cci__free_dev(dev);
 	}
 
@@ -179,7 +178,7 @@ void cci__add_dev(cci__dev_t * dev)
 
 	debug(CCI_DB_DRVR,
 	      "adding device [%s] (transport %s)",
-	      dev->device.name, dev->transport);
+	      dev->device.name, dev->device.transport);
 
 	/* walk list and insert in order by up/default/priority */
 	TAILQ_FOREACH(dd, &globals->devs, entry) {
@@ -362,7 +361,7 @@ int cci__parse_config(const char *path)
 					TAILQ_INSERT_TAIL(&globals->configfile_devs, dev, entry);
 					debug(CCI_DB_DRVR,
 					      "read device [%s] (transport %s) from config file",
-					      d->name, dev->transport);
+					      d->name, d->transport);
 					i++;
 				} else {
 					/* device does not have a transport, free it */
@@ -453,8 +452,8 @@ int cci__parse_config(const char *path)
 				arg_cnt++;
 				if (0 == strcmp(key, "transport")) {
 					if (!transport) {
-						dev->transport = strdup(value);
-						if (!dev->transport) {
+						d->transport = strdup(value);
+						if (!d->transport) {
 							cci__free_dev(dev);
 							return cci__free_configfile_devs(NULL);
 						}
@@ -505,7 +504,7 @@ int cci__parse_config(const char *path)
 			TAILQ_INSERT_TAIL(&globals->configfile_devs, dev, entry);
 			debug(CCI_DB_DRVR,
 			      "read device [%s] (transport %s) from config file",
-			      d->name, dev->transport);
+			      d->name, d->transport);
 			i++;
 		} else {
 			/* device does not have a transport, free it */
@@ -627,7 +626,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		TAILQ_FOREACH(dev, &globals->devs, entry) {
 			debug(CCI_DB_DRVR,
 			      "device [%s] (transport %s, default %d, priority %d, up %d) is ready",
-			      dev->device.name, dev->transport,
+			      dev->device.name, dev->device.transport,
 			      dev->is_default, dev->priority, dev->device.up);
 			globals->devices[i++] = &dev->device;
 		}

@@ -425,6 +425,7 @@ static int ctp_gni_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver,
 
 		device = &dev->device;
 		device->max_send_size = GNI_EP_MSS;
+		device->transport = strdup("gni");
 		device->name = strdup("ipogif0");
 
 		device->up = 1;
@@ -440,7 +441,6 @@ static int ctp_gni_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver,
 		gdev->cookie = GNI_DEFAULT_COOKIE;
 		gdev->ifa = &gglobals->ifaddrs[0];
 
-		dev->transport = strdup("gni");
 		dev->is_default = 1;
 		dev->align.rma_read_local_addr = 4;
 		dev->align.rma_read_remote_addr = 4;
@@ -452,7 +452,7 @@ static int ctp_gni_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver,
 	} else
 	/* find devices we own */
 	TAILQ_FOREACH_SAFE(dev, &globals->configfile_devs, entry, ndev) {
-		if (0 == strcmp("gni", dev->transport)) {
+		if (0 == strcmp("gni", dev->device.transport)) {
 			int i = 0;
 			const char * const *arg;
 			const char *interface = NULL;
@@ -673,7 +673,7 @@ static int ctp_gni_finalize(cci_plugin_ctp_t * plugin)
 	free(gglobals->ifaddrs);
 
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
-		if (strcmp(dev->transport, "gni"))
+		if (strcmp(dev->device.transport, "gni"))
 			continue;
 
 		if (dev->priv) {

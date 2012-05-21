@@ -278,9 +278,9 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 				cci__init_dev(dev);
 				dev->plugin = plugin;
 				dev->priority = plugin->base.priority;
-				dev->transport = strdup("sock");
 
 				device = &dev->device;
+				device->transport = strdup("sock");
 				device->name = strdup(addr->ifa_name);
 
 				sdev = dev->priv;
@@ -325,7 +325,7 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 	} else
 	/* find devices that we own */
 		TAILQ_FOREACH_SAFE(dev, &globals->configfile_devs, entry, ndev) {
-		if (0 == strcmp("sock", dev->transport)) {
+		if (0 == strcmp("sock", dev->device.transport)) {
 			const char * const *arg;
 			struct cci_device *device;
 			sock_dev_t *sdev;
@@ -499,7 +499,7 @@ static int ctp_sock_finalize(cci_plugin_ctp_t * plugin)
 	}
 
 	TAILQ_FOREACH(dev, &globals->devs, entry)
-		if (!strcmp(dev->transport, "sock"))
+		if (!strcmp(dev->device.transport, "sock"))
 			free(dev->priv);
 
 	free(sglobals->devices);
@@ -580,7 +580,7 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	}
 
 	dev = container_of(device, cci__dev_t, device);
-	if (0 != strcmp("sock", dev->transport)) {
+	if (0 != strcmp("sock", device->transport)) {
 		ret = CCI_EINVAL;
 		goto out;
 	}

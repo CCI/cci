@@ -467,7 +467,6 @@ static int ctp_verbs_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver, uint32_t 
 				cci__init_dev(dev);
 				dev->plugin = plugin;
 				dev->priority = plugin->base.priority;
-				dev->transport = strdup("verbs");
 
 				device = &dev->device;
 
@@ -489,6 +488,7 @@ static int ctp_verbs_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver, uint32_t 
 					goto out;
 				}
 
+				device->transport = strdup("verbs");
 				device->max_send_size =
 					verbs_mtu_val(port_attr.max_mtu);
 				device->rate = verbs_device_rate(port_attr);
@@ -504,7 +504,7 @@ static int ctp_verbs_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver, uint32_t 
 	} else
 	/* find devices we own */
 	TAILQ_FOREACH_SAFE(dev, &globals->configfile_devs, entry, ndev) {
-		if (0 == strcmp("verbs", dev->transport)) {
+		if (0 == strcmp("verbs", dev->device.transport)) {
 			int i = 0;
 			const char * const *arg;
 			const char *interface = NULL;
@@ -719,7 +719,7 @@ static int ctp_verbs_finalize(cci_plugin_ctp_t * plugin)
 		rdma_free_devices(vglobals->contexts);
 
 	TAILQ_FOREACH(dev, &globals->devs, entry)
-		if (!strcmp(dev->transport, "verbs"))
+		if (!strcmp(dev->device.transport, "verbs"))
 			if (dev->priv)
 				free(dev->priv);
 
