@@ -318,7 +318,18 @@ ccieth_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 	CCIETH_STAT_INC(conn, send);
 
 	spin_lock_bh(&conn->send_lock);
-	seqnum = conn->send_next_seqnum++;
+	seqnum = conn->send_next_seqnum;
+	if (conn->send_queue_first_seqnum) {
+		/* no more than 64 non-acked sends simultaneously */
+		__u32 first_pending_seqnum = CCIETH_SKB_CB(conn->send_queue_first_seqnum)->reliable_send.seqnum;
+		if (ccieth_seqnum_after(first_pending_seqnum + CCIETH_MSG_PENDING_NR, seqnum)) {
+			err = -ENOBUFS;
+			dprintk("ccieth: too many non acked sends on connection\n");
+			spin_unlock_bh(&conn->send_lock);
+			goto out_with_event;
+		}
+	}
+	conn->send_next_seqnum++;
 	hdr->msg_seqnum = htonl(seqnum);
 	scb->reliable_send.seqnum = seqnum;
 	scb->reliable_send.resend_jiffies = jiffies + CCIETH_MSG_RESEND_DELAY;
@@ -357,6 +368,8 @@ ccieth_msg_reliable(struct ccieth_endpoint *ep, struct ccieth_ioctl_msg *arg)
 
 	return err;
 
+out_with_event:
+	ccieth_putback_free_event(ep, event);
 out_with_rculock:
 	rcu_read_unlock();
 	kfree(completion);

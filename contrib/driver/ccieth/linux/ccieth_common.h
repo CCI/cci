@@ -130,6 +130,7 @@ enum ccieth_connection_status {
 #define CCIETH_MSG_RESEND_DELAY (HZ/2)	/* resend MSG every half-second until acked */
 #define CCIETH_DEFERRED_MSG_ACK_DELAY (HZ/10)	/* ack after 100ms if some msgs were not acked yet */
 #define CCIETH_IMMEDIATE_MSG_ACK_NR 8	/* ack after 8 msgs not acked yet */
+#define CCIETH_MSG_PENDING_NR 64	/* no more than 64 non-acked sends per connection */
 
 /* seqnums are __u32 with wraparound. b is considered after a once when a<b<=a+65536.
  * everything after 65536 is likely a very obsolete duplicate.
