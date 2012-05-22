@@ -32,10 +32,10 @@ static int ctp_template_connect(cci_endpoint_t * endpoint, const char *server_ur
 static int ctp_template_disconnect(cci_connection_t * connection);
 static int ctp_template_set_opt(cci_opt_handle_t * handle,
 			    cci_opt_level_t level,
-			    cci_opt_name_t name, const void *val, int len);
+			    cci_opt_name_t name, const void *val);
 static int ctp_template_get_opt(cci_opt_handle_t * handle,
 			    cci_opt_level_t level,
-			    cci_opt_name_t name, void **val, int *len);
+			    cci_opt_name_t name, void *val);
 static int ctp_template_arm_os_handle(cci_endpoint_t * endpoint, int flags);
 static int ctp_template_get_event(cci_endpoint_t * endpoint,
 			      cci_event_t ** event);
@@ -167,7 +167,7 @@ static int ctp_template_disconnect(cci_connection_t * connection)
 
 static int ctp_template_set_opt(cci_opt_handle_t * handle,
 			    cci_opt_level_t level,
-			    cci_opt_name_t name, const void *val, int len)
+			    cci_opt_name_t name, const void *val)
 {
 	printf("In template_set_opt\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
@@ -175,7 +175,7 @@ static int ctp_template_set_opt(cci_opt_handle_t * handle,
 
 static int ctp_template_get_opt(cci_opt_handle_t * handle,
 			    cci_opt_level_t level,
-			    cci_opt_name_t name, void **val, int *len)
+			    cci_opt_name_t name, void *val)
 {
 	printf("In template_get_opt\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
