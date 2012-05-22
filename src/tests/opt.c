@@ -30,7 +30,7 @@ int align = -1;
 int get_uri = -1;
 char *uri = NULL;
 
-cci_opt_handle_t handle;
+cci_opt_handle_t *handle;
 cci_opt_level_t level;
 
 void check_return(char *func, cci_endpoint_t *endpoint, int ret)
@@ -91,7 +91,7 @@ void test(cci_endpoint_t *endpoint, cci_opt_name_t name)
 		break;
 	}
 
-	ret = cci_get_opt(&handle, level, name, oldval);
+	ret = cci_get_opt(handle, level, name, oldval);
 	printf("\tcci_get_opt() returned %s\n", cci_strerror(endpoint, ret));
 
 	if (ret == CCI_SUCCESS) {
@@ -102,11 +102,11 @@ void test(cci_endpoint_t *endpoint, cci_opt_name_t name)
 			}
 			printf("\t(val = %u)\n", tmpval);
 			if (set) {
-				ret = cci_set_opt(&handle, level, name, newval);
+				ret = cci_set_opt(handle, level, name, newval);
 				printf("\tcci_set_opt() returned %s\n",
 					cci_strerror(endpoint, ret));
 				if (ret == CCI_SUCCESS) {
-					ret = cci_get_opt(&handle, level, name, oldval);
+					ret = cci_get_opt(handle, level, name, oldval);
 					printf("\tcci_get_opt() returned %s\n",
 					cci_strerror(endpoint, ret));
 					if (ret == CCI_SUCCESS)
@@ -221,7 +221,7 @@ int main(int argc, char *argv[])
 
 	/* start tests */
 
-	handle.endpoint = endpoint;
+	handle = endpoint;
 	level = CCI_OPT_LEVEL_ENDPOINT;
 
 	if (tx_timeout != (uint32_t) - 1) {

@@ -1793,11 +1793,11 @@ static int ctp_portals_set_opt(cci_opt_handle_t * handle,
 	}
 
 	if (CCI_OPT_LEVEL_ENDPOINT == level) {
-		ep = container_of(handle->endpoint, cci__ep_t, endpoint);
+		ep = container_of(handle, cci__ep_t, endpoint);
 		pep = ep->priv;
 	} else {
 		conn =
-		    container_of(handle->connection, cci__conn_t, connection);
+		    container_of(handle, cci__conn_t, connection);
 		pconn = conn->priv;
 	}
 

@@ -1764,10 +1764,9 @@ static int ctp_sock_set_opt(cci_opt_handle_t * handle,
 	}
 
 	if (CCI_OPT_LEVEL_ENDPOINT == level) {
-		ep = container_of(handle->endpoint, cci__ep_t, endpoint);
+		ep = container_of(handle, cci__ep_t, endpoint);
 	} else {
-		conn =
-		    container_of(handle->connection, cci__conn_t, connection);
+		conn = container_of(handle, cci__conn_t, connection);
 	}
 
 	switch (name) {

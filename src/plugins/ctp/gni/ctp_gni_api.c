@@ -1719,7 +1719,7 @@ ctp_gni_set_opt(cci_opt_handle_t * handle,
 		return CCI_ENODEV;
 	}
 
-	//endpoint = handle->endpoint;
+	//endpoint = handle;
 	//ep = container_of(endpoint, cci__ep_t, endpoint);
 	//gep = ep->priv;
 	//dev = ep->dev;

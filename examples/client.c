@@ -70,9 +70,7 @@ int main(int argc, char *argv[])
 	cci_os_handle_t fd;
 	cci_device_t **devices = NULL;
 	cci_endpoint_t *endpoint = NULL;
-	cci_opt_handle_t handle;
 	cci_connection_t *connection = NULL;
-	cci_opt_handle_t handle;
 	uint32_t timeout_us = 30 * 1000000;	/* microseconds */
 
 	proc_name = argv[0];
@@ -102,9 +100,8 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	handle.endpoint = endpoint;
-	ret = cci_get_opt(&handle, CCI_OPT_LEVEL_ENDPOINT,
-			CCI_OPT_ENDPT_URI, &uri);
+	ret = cci_get_opt(endpoint, CCI_OPT_LEVEL_ENDPOINT,
+			  CCI_OPT_ENDPT_URI, &uri);
 	if (ret) {
 		fprintf(stderr, "cci_get_opt() failed with %s\n", cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
@@ -112,8 +109,7 @@ int main(int argc, char *argv[])
 	printf("Opened %s\n", uri);
 
 	/* set endpoint tx timeout */
-	handle.endpoint = endpoint;
-	cci_set_opt(&handle, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_SEND_TIMEOUT,
+	cci_set_opt(endpoint, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_SEND_TIMEOUT,
 		    &timeout_us);
 	if (ret) {
 		fprintf(stderr, "cci_set_opt() returned %s\n",

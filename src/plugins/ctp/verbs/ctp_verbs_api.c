@@ -2161,7 +2161,7 @@ ctp_verbs_set_opt(cci_opt_handle_t * handle,
 		return CCI_ENODEV;
 	}
 
-	endpoint = handle->endpoint;
+	endpoint = handle;
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 	vep = ep->priv;
 	dev = ep->dev;
@@ -2330,7 +2330,7 @@ ctp_verbs_get_opt(cci_opt_handle_t * handle,
 		return CCI_ENODEV;
 	}
 
-	endpoint = handle->endpoint;
+	endpoint = handle;
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 	vep = ep->priv;
 	dev = ep->dev;

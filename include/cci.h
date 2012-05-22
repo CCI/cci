@@ -1222,18 +1222,6 @@ CCI_DECLSPEC int cci_return_event(cci_event_t * event);
 /*! \defgroup opts Endpoint / Connection Options */
 
 /*!
-  Handle defining the scope of an option
-
-  \ingroup opts
-*/
-typedef union cci_opt_handle {
-	/*! Endpoint */
-	cci_endpoint_t *endpoint;
-	/*! Connection */
-	cci_connection_t *connection;
-} cci_opt_handle_t;
-
-/*!
   Level defining the scope of an option
 
   \ingroup opts
@@ -1357,6 +1345,8 @@ typedef struct cci_alignment {
 	uint32_t rma_read_length;	/*!< READ length */
 } cci_alignment_t;
 
+typedef const void cci_opt_handle_t;
+
 /*!
   Set an endpoint or connection option value.
 
@@ -1365,6 +1355,11 @@ typedef struct cci_alignment {
   \param[in] name   Which option to set the value of.
   \param[in] val    Pointer to the input value. The type of the value
                     must match the option name.
+
+  If level is CCI_OPT_LEVEL_ENDPOINT, then handle must be
+  a cci_endpoint_t*.
+  If it is CCI_OPT_LEVEL_CONNECTION, then handle must be
+  a cci_connection_t*.
 
   \return CCI_SUCCESS   Value successfully set.
   \return CCI_EINVAL    Handle or val is NULL.
@@ -1389,6 +1384,11 @@ CCI_DECLSPEC int cci_set_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
   \param[in] name   Which option to set the value of.
   \param[in] val    Pointer to the output value. The type of the value
                     must match the option name.
+
+  If level is CCI_OPT_LEVEL_ENDPOINT, then handle must be
+  a cci_endpoint_t*.
+  If it is CCI_OPT_LEVEL_CONNECTION, then handle must be
+  a cci_connection_t*.
 
   \return CCI_SUCCESS   Value successfully retrieved.
   \return CCI_EINVAL    Handle or val is NULL.

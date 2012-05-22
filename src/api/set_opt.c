@@ -30,14 +30,14 @@ int cci_set_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
 	}
 
 	if (CCI_OPT_LEVEL_ENDPOINT == level) {
-		cci__ep_t *ep = container_of(handle->endpoint, cci__ep_t, endpoint);
-		if (handle->endpoint == NULL
+		cci__ep_t *ep = container_of(handle, cci__ep_t, endpoint);
+		if (handle == NULL
 		    || name == CCI_OPT_CONN_SEND_TIMEOUT)
 			return CCI_EINVAL;
 		plugin = ep->plugin;
 	} else {
-		cci__conn_t *conn = container_of(handle->connection, cci__conn_t, connection);
-		if (handle->connection == NULL
+		cci__conn_t *conn = container_of(handle, cci__conn_t, connection);
+		if (handle == NULL
 		    || name != CCI_OPT_CONN_SEND_TIMEOUT)
 			return CCI_EINVAL;
 		plugin = conn->plugin;
