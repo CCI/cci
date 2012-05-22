@@ -1431,8 +1431,7 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 	verbs_ep_t *vep = NULL;
 	struct ibv_sge list[2];
 	struct ibv_send_wr wr, *bad_wr;
-	int rdma_send = VERBS_MSG_SEND | (1 << 4);
-	int use_rdma = (header & 0x1F) == rdma_send ? 1 : 0;
+	int use_rdma = ((header & (VERBS_RSEND_BIT | VERBS_TYPE_MASK)) == VERBS_RSEND);
 	uint32_t orig_len = len;
 	int pad = len & 0x7 ? 8 - (len & 0x7) : 0;
 
@@ -1465,14 +1464,15 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 			 * which we will poll on.
 			 * we need to ensure the user data is 8 byte aligned. */
 
-			uint32_t slot = (header >> 21) & 0xFF;
+			verbs_tx_t *tx = (verbs_tx_t *)(uintptr_t)id;
+			uint32_t slot = tx->rdma_slot;
 			uint32_t h2 = header;
 			uint64_t addr = vconn->raddr;
 
-			h2 |= (orig_len << 5);
-			h2 |= (1 << 31);	/* set highest bit to make sure
-						   we can poll on last byte
-						   when swapped to net order */
+			h2 |= (orig_len << VERBS_RSEND_LEN_SHIFT);
+			h2 |= VERBS_RSEND_BIT; /* set highest bit to make sure
+						  we can poll on last byte
+						  when swapped to net order */
 
 			h2 = htonl(h2);
 
@@ -1845,6 +1845,7 @@ ctp_verbs_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		goto out;
 	}
 	conn->plugin = ep->plugin;
+	conn->uri = strdup(server_uri);
 
 	debug(CCI_DB_CONN, "%s: alloced conn %p", __func__, conn);
 
@@ -2846,7 +2847,7 @@ static int verbs_poll_rdma_msgs(verbs_conn_t * vconn)
 		if (*(vconn->slots[i])) {
 			uint32_t header = ntohl(*vconn->slots[i]);
 			verbs_rx_t *rx = &vconn->rxs[i];
-			uint32_t len = (header >> 5) & 0xFFFF;
+			uint32_t len = VERBS_RSEND_LEN(header);
 			uint32_t pad = len % 8 == 0 ? 0 : 8 - (len % 8);
 
 			debug(CCI_DB_MSG, "%s: recv'd 0x%x len %u slot %d conn %p qp %u",
@@ -2943,7 +2944,8 @@ static int verbs_handle_rdma_msg_ack(cci__ep_t * ep, struct ibv_wc wc)
 	}
 	vconn = conn->priv;
 
-	index = (header >> 21) & 0xFF;
+	index = (header >> VERBS_SEQNO_SHIFT) & 0xFF;
+	debug(CCI_DB_MSG, "%s: %s acked slot %d", __func__, conn->uri, index);
 	i = (1 << index);
 
 	pthread_mutex_lock(&ep->lock);
@@ -3542,7 +3544,7 @@ static int ctp_verbs_return_event(cci_event_t * event)
 				}
 			} else if (rx->evt.conn) {
 				uint32_t header = VERBS_MSG_RDMA_MSG_ACK;
-				header |= ((rx->offset) << 21);
+				header |= ((rx->offset) << VERBS_SEQNO_SHIFT);
 				verbs_post_send(rx->evt.conn, 0, NULL, 0,
 						header);
 			}
@@ -3620,6 +3622,8 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 	conn = container_of(connection, cci__conn_t, connection);
 	vconn = conn->priv;
 
+	verbs_progress_ep(ep);
+
 	is_reliable = cci_conn_is_reliable(conn);
 
 	/* get a tx */
@@ -3643,7 +3647,7 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 	tx->evt.event.send.context = (void *)context;
 	tx->evt.event.send.status = CCI_SUCCESS;	/* for now */
 
-	if (vconn->raddr && iovcnt < 2) {
+	if (vconn->raddr) {
 		pthread_mutex_lock(&ep->lock);
 		if (vconn->avail) {
 			int old;
@@ -3662,8 +3666,15 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 					i = 0;
 			} while (i != old);
 			vconn->avail &= ~(1 << i);
-			header |= (1 << 4);	/* set RDMA bit */
-			header |= (i << 21);	/* add index */
+			header |= VERBS_RSEND_BIT;	/* set RDMA bit */
+			tx->rdma_slot = i;
+			debug(CCI_DB_MSG, "%s: using RDMA slot %d", __func__, i);
+		} else {
+			pthread_mutex_unlock(&ep->lock);
+			debug(CCI_DB_MSG, "%s: no RDMA slots available for %s",
+				__func__, conn->uri);
+			verbs_return_tx(tx);
+			return CCI_ENOBUFS;
 		}
 		pthread_mutex_unlock(&ep->lock);
 		pad = len & 0x7 ? 8 - (len & 0x7) : 0;

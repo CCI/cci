@@ -30,10 +30,7 @@ BEGIN_C_DECLS
    interface = ib0		# Ethernet interface name
 				  the default is the first RDMA device found
 
-   hca_id = mlx4_0		# hca_id of device
-				  the default is the first RDMA device found
-
-   port = 12345			# listening port
+   port = 12345			# base listening port
 				  the default is a random, ephemeral port
 
    Note: if both ip and name are set and if they do not agree (i.e. name's ip
@@ -57,7 +54,7 @@ BEGIN_C_DECLS
 } verbs_msg_type_t;
 
 #define VERBS_EP_RMSG_CONNS	(16)
-#define VERBS_CONN_RMSG_DEPTH	(16)
+#define VERBS_CONN_RMSG_DEPTH	(16)	/* NOTE: limited to 31 due to vconn->avail */
 #define VERBS_INLINE_BYTES	(128)
 
 /* MSG header */
@@ -80,19 +77,34 @@ BEGIN_C_DECLS
 
 /* Send and RDMA MSG Ack
 
-    <------------ 32 bits ----------->
-    <----------- 27b ---------> 1  4b
-   +---------------------------+-+----+
-   |             C             |B|  A |
-   +---------------------------+-+----+
+    <------------- 32 bits ------------>
+    1 1 <---- 14b ---> <--- 12b -->  4b
+   +-+-+--------------+------------+----+
+   |E|D|       C      |      B     |  A |
+   +-+-+--------------+------------+----+
 
    where:
       A is VERBS_MSG_SEND or VERBS_MSG_RDMA_MSG_ACK
-      B is MSG method
+      B is seqno for SEND or ack for RDMA_MSG_ACK
+      C is length for SEND with RDMA
+      D is reserved
+      E is SEND transport method
          0 is Send/Recv
-	 1 is RDMA (must be set for VERBS_MSG_RDMA_MSG_ACK)
-      C is reserved for Send/Recv or indicates the rx slot for RDMA
+	 1 is RDMA
  */
+
+#define VERBS_SEQNO_BITS	(12)
+#define VERBS_SEQNO_MAX		((1 << VERBS_SEQNO_BITS) - 1)
+#define VERBS_SEQNO_SHIFT	(VERBS_TYPE_BITS)
+#define VERBS_SEQNO(x)		(((x) >> VERBS_SEQNO_SHIFT) & VERBS_SEQNO_MAX)
+
+#define VERBS_RSEND_BIT		(1 << 31)
+#define VERBS_RSEND		(VERBS_MSG_SEND | VERBS_RSEND_BIT)
+#define VERBS_RSEND_LEN_BITS	(14) /* large enough to hold 9000 bytes for RNIC */
+#define VERBS_RSEND_LEN_MAX	((1 << VERBS_RSEND_LEN_BITS) - 1)
+#define VERBS_RSEND_LEN_SHIFT	(VERBS_TYPE_BITS + VERBS_SEQNO_BITS)
+#define VERBS_RSEND_LEN(x)	(((x) >> VERBS_RSEND_LEN_SHIFT) & VERBS_RSEND_LEN_MAX)
+
 
 /* Conn Request
 
@@ -217,6 +229,7 @@ typedef struct verbs_tx {
 	int flags;		/* (CCI_FLAG_[BLOCKING|SILENT|NO_COPY]) */
 	void *buffer;		/* registered send buffer */
 	uint16_t len;		/* length of buffer */
+	uint32_t rdma_slot;	/* slot when using RDMA */
 	 TAILQ_ENTRY(verbs_tx) entry;	/* hang on vep->idle_txs, vdev->queued,
 					   vdev->pending */
 	struct verbs_rma_op *rma_op;	/* owning RMA if remote completion msg */
