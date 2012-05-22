@@ -15,11 +15,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#include <unistd.h>
 #ifdef HAVE_IFADDRS_H
 #include <net/if.h>
 #include <ifaddrs.h>
 #endif
 #ifdef __linux__
+#include <sys/ioctl.h>
+#include <asm/types.h>
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
 #endif
@@ -220,7 +223,7 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 	device->max_send_size = -1;
 
 	/* up flag is easy */
-	device->up = (ifaddr->ifa_flags & IFF_UP != 0);
+	device->up = ((ifaddr->ifa_flags & IFF_UP) != 0);
 
 	debug(CCI_DB_INFO,
 	      "querying interface %s info with socket ioctls and ethtool...",
