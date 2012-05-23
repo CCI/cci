@@ -650,6 +650,18 @@ static int ctp_verbs_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver, uint32_t 
 
 	vglobals->devices = devices;
 
+	{
+		struct timeval tv;
+		int seed = 0;
+
+		seed = getpid();
+		seed = (seed << 16);
+
+		gettimeofday(&tv, NULL);
+		seed |= (int) tv.tv_usec; /* mix the pid into the upper bits */
+		srandom(seed);
+	}
+
 	/* TODO  start progress thread */
 
 	CCI_EXIT;
@@ -1551,6 +1563,7 @@ static int ctp_verbs_accept(cci_event_t * event, const void *context)
 	void *ptr = NULL;
 	int len = 0;
 	verbs_tx_t *tx = NULL;
+	verbs_rdma_attrs_t *attrs;
 
 	CCI_ENTER;
 
@@ -1603,8 +1616,8 @@ static int ctp_verbs_accept(cci_event_t * event, const void *context)
 	if (vconn->num_slots) {
 		int i;
 		verbs_rx_t *rx;
-		uint64_t addr;
-		uint32_t rkey;
+
+		attrs = tx->buffer;
 
 		len = vconn->num_slots * (vconn->mss + sizeof(uint32_t));
 		ret = posix_memalign((void **)&vconn->rbuf, getpagesize(), len);
@@ -1618,6 +1631,10 @@ static int ctp_verbs_accept(cci_event_t * event, const void *context)
 		vconn->slots = calloc(vconn->num_slots, sizeof(*vconn->slots));
 		if (!vconn->slots)
 			goto out;
+		vconn->slot_seqs = calloc(vconn->num_slots, sizeof(*vconn->slot_seqs));
+		if (!vconn->slot_seqs)
+			goto out;
+		vconn->seqno = (uint16_t) random();
 		for (i = 0; i < vconn->num_slots; i++) {
 			rx = &vconn->rxs[i];
 			rx->evt.ep = ep;
@@ -1637,12 +1654,10 @@ static int ctp_verbs_accept(cci_event_t * event, const void *context)
 
 		vconn->avail = (1 << vconn->num_slots) - 1;
 
-		len = 12;	/* magic number => uint64_t + uint32_t */
-		addr = verbs_htonll((uintptr_t) vconn->rmr->addr);
-		memcpy(tx->buffer, &addr, sizeof(addr));
-		rkey = htonl(vconn->rmr->rkey);
-		memcpy(tx->buffer + (uintptr_t) sizeof(addr), &rkey,
-		       sizeof(rkey));
+		len = sizeof(*attrs);
+		attrs->addr = verbs_htonll((uintptr_t) vconn->rmr->addr);
+		attrs->rkey = htonl(vconn->rmr->rkey);
+		attrs->seqno = htons(vconn->seqno);
 		ptr = tx->buffer;
 	}
 
@@ -2503,8 +2518,7 @@ static int verbs_conn_est_active(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 	if (need_rdma) {
 		int i;
 		verbs_rx_t *rx;
-		uint64_t addr;
-		uint32_t rkey;
+		verbs_rdma_attrs_t *attrs = (verbs_rdma_attrs_t *)tx->buffer;
 
 		vconn->num_slots = VERBS_CONN_RMSG_DEPTH;
 		len = vconn->num_slots * (vconn->mss + sizeof(uint32_t));
@@ -2518,6 +2532,10 @@ static int verbs_conn_est_active(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 		vconn->slots = calloc(vconn->num_slots, sizeof(*vconn->slots));
 		if (!vconn->slots)
 			goto out;
+		vconn->slot_seqs = calloc(vconn->num_slots, sizeof(*vconn->slot_seqs));
+		if (!vconn->slot_seqs)
+			goto out;
+		vconn->seqno = (uint16_t) random();
 		for (i = 0; i < vconn->num_slots; i++) {
 			rx = &vconn->rxs[i];
 			rx->evt.ep = ep;
@@ -2539,12 +2557,10 @@ static int verbs_conn_est_active(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 
 		vconn->avail = (1 << vconn->num_slots) - 1;
 
-		len = 12;	/* magic number => uint64_t + uint32_t */
-		addr = verbs_htonll((uintptr_t) vconn->rmr->addr);
-		memcpy(tx->buffer, &addr, sizeof(addr));
-		rkey = htonl(vconn->rmr->rkey);
-		memcpy(tx->buffer + (uintptr_t) sizeof(addr), &rkey,
-		       sizeof(rkey));
+		len = sizeof(*attrs);
+		attrs->addr = verbs_htonll((uintptr_t) vconn->rmr->addr);
+		attrs->rkey = htonl(vconn->rmr->rkey);
+		attrs->seqno = htons(vconn->seqno);
 	}
 
 	/* if application has a conn request payload, send it */
@@ -2675,6 +2691,7 @@ static int verbs_handle_conn_payload(cci__ep_t * ep, struct ibv_wc wc)
 	verbs_rx_t *rx = NULL;
 	int need_rdma = 0;
 	void *ptr = NULL;
+	verbs_rdma_attrs_t *attrs = NULL;
 
 	CCI_ENTER;
 
@@ -2703,7 +2720,7 @@ static int verbs_handle_conn_payload(cci__ep_t * ep, struct ibv_wc wc)
 	need_rdma = (header >> 8) & 0x1;
 	len = (header >> 9) & 0xFFF;
 	if (((len != wc.byte_len) && !need_rdma) ||
-	    (need_rdma && (len != (wc.byte_len - 12))))
+	    (need_rdma && (len != (wc.byte_len - sizeof(*attrs)))))
 		debug(CCI_DB_WARN, "%s: len %u != wc.byte_len %u",
 		      __func__, len, wc.byte_len);
 
@@ -2713,20 +2730,20 @@ static int verbs_handle_conn_payload(cci__ep_t * ep, struct ibv_wc wc)
 	rx->evt.event.request.attribute = conn->connection.attribute;
 	ptr = rx->rx_pool->buf + rx->offset;
 	if (need_rdma) {
-		ptr = ptr + (uintptr_t) 12;
+		attrs = ptr;
+
+		vconn->raddr = verbs_ntohll(attrs->addr);
+		vconn->rkey = ntohl(attrs->rkey);
+		vconn->acked = ntohs(attrs->seqno);
 		vconn->num_slots = VERBS_CONN_RMSG_DEPTH;	/* indicate peer wants RDMA */
 
-		vconn->raddr = *((uint64_t *) (rx->rx_pool->buf + rx->offset));
-		vconn->raddr = verbs_ntohll(vconn->raddr);
-		vconn->rkey =
-		    *((uint32_t *) (rx->rx_pool->buf + rx->offset + 8));
-		vconn->rkey = ntohl(vconn->rkey);
+		ptr = ptr + (uintptr_t) sizeof(*attrs);
 	}
-	*((uint32_t *) & rx->evt.event.request.data_len) = len;
+	rx->evt.event.request.data_len = len;
 	if (len)
-		*((void **)&rx->evt.event.request.data_ptr) = ptr;
+		rx->evt.event.request.data_ptr = ptr;
 	else
-		*((void **)&rx->evt.event.request.data_ptr) = NULL;
+		rx->evt.event.request.data_ptr = NULL;
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
@@ -2745,6 +2762,7 @@ static int verbs_handle_conn_reply(cci__ep_t * ep, struct ibv_wc wc)
 	verbs_conn_t *vc = NULL;
 	verbs_ep_t *vep = ep->priv;
 	verbs_rx_t *rx = NULL;
+	verbs_rdma_attrs_t *attrs;
 
 	CCI_ENTER;
 
@@ -2784,14 +2802,10 @@ static int verbs_handle_conn_reply(cci__ep_t * ep, struct ibv_wc wc)
 		rx->evt.event.connect.connection = &conn->connection;
 		if (vconn->num_slots) {
 			if (use_rdma) {
-				vconn->raddr =
-				    *((uint64_t *) (rx->rx_pool->buf +
-						    rx->offset));
-				vconn->raddr = verbs_ntohll(vconn->raddr);
-				vconn->rkey =
-				    *((uint32_t *) (rx->rx_pool->buf +
-						    rx->offset + 8));
-				vconn->rkey = ntohl(vconn->rkey);
+				attrs = rx->rx_pool->buf + rx->offset;
+				vconn->raddr = verbs_ntohll(attrs->addr);
+				vconn->rkey = ntohl(attrs->rkey);
+				vconn->acked = ntohs(attrs->seqno);
 			} else {
 				/* TODO clean up and use Send/Recv path for sends */
 			}
@@ -3279,7 +3293,7 @@ static int verbs_handle_send_completion(cci__ep_t * ep, struct ibv_wc wc)
 		}
 		break;
 	case VERBS_MSG_SEND:
-		debug(CCI_DB_CONN, "%s: send completed", __func__);
+		debug(CCI_DB_MSG, "%s: send completed", __func__);
 		ret = verbs_complete_send(ep, wc);
 		if (!ret)
 			queue_tx = 0;
@@ -3649,6 +3663,10 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 
 	if (vconn->raddr) {
 		pthread_mutex_lock(&ep->lock);
+		vconn->seqno++;
+		if (vconn->seqno > VERBS_SEQNO_MAX)
+			vconn->seqno = 0;
+		header |= vconn->seqno << VERBS_SEQNO_SHIFT;
 		if (vconn->avail) {
 			int old;
 

@@ -119,6 +119,13 @@ BEGIN_C_DECLS
       B is reserved
  */
 
+typedef struct verbs_rdma_attrs {
+	uint64_t addr;
+	uint32_t rkey;
+	uint16_t seqno;
+	uint16_t pad;
+} verbs_rdma_attrs_t;
+
 /* Conn Payload
 
     <------------- 32 bits ------------>
@@ -133,7 +140,7 @@ BEGIN_C_DECLS
       C is MSG method
            0 for Send/Recv and no addr/rkey in payload
            1 for RDMA MSGs and addr/rkey before payload
-      D is the payload length (the payload is the message including optional addr/rkey)
+      D is the payload length (the payload is the message including optional rdma_attrs)
       E is reserved
  */
 
@@ -371,17 +378,22 @@ typedef struct verbs_conn {
 	uint32_t num_remotes;	/* number of cached remotes */
 	uint32_t inline_size;	/* largest inline msg */
 
+	/* for RDMA SEND enabled connections */
 	void *rbuf;		/* buffer for recving RDMA MSGs */
 	verbs_rx_t *rxs;	/* rx events for rbuf */
 	struct ibv_mr *rmr;	/* memory registration for rbuf */
 	uint64_t raddr;		/* peer's remote_addr */
 	uint32_t rkey;		/* peer's rkey */
 	uint32_t num_slots;	/* number of MSG slots */
+	uint32_t next;		/* next slot to use */
+	uint16_t seqno;		/* last seqno sent w/ or w/o RDMA */
+	uint16_t *slot_seqs;	/* seqno of sent RDMA MSGs */
 	uint32_t avail;		/* bitmask of available peer slots */
 	uint32_t last;		/* last slot used */
 	uint32_t **slots;	/* pointers to buffer headers
 				   to poll */
 	int is_polling;		/* polling RDMA MSGs */
+	uint16_t acked;		/* last seqno we acked */
 
 	 TAILQ_HEAD(s_rems, verbs_rma_remote) remotes;	/* LRU list of remote handles */
 	 TAILQ_HEAD(w_ops, verbs_rma_op) rma_ops;	/* rma ops waiting on remotes */
