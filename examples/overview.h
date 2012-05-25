@@ -330,15 +330,11 @@ provides remote memory access (RMA). RMA transfers are only allowed on
 reliable connections.
 
 Before using RMA, the process needs to explicitly register the memory.
-CCI provides cci_rma_register() which takes pointers to the endpoint, the
-connection, and the start of the region to be registered as well as the
-length of the region and it returns a RMA handle. If the connection
-pointer is set and the underlying device supports this feature, RMA
-operations on that handle will be limited to that one connection. If it
-does not, it will return CCI_ENOTSUP. If the connection is NULL, then
-RMA operations on that handle will be limited to any connection on that
-endpoint. When a process no longer needs to RMA in to or out of the
-region, it passes the handle to cci_rma_deregister().
+CCI provides cci_rma_register() which takes a pointer to the endpoint,
+the start of the region to be registered, the length of the region, and
+flags indicating if CCI should READ or WRITE or both access. The
+function returns a RMA handle. When a process no longer needs to RMA in
+to or out of the region, it passes the handle to cci_rma_deregister().
 
 For a RMA transfer to take place, both processes must register their
 local memory and they need to pass the handle of the target process to

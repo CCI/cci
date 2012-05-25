@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2010-2011 UT-Battelle, LLC.  All rights reserved.
  * Copyright (c) 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -18,6 +19,7 @@
 #include <pthread.h>
 #include <stddef.h>
 #include "bsd/queue.h"
+#include "plugins/ctp/ctp.h"
 
 BEGIN_C_DECLS
 #define CCI_MAX_DEVICES     32
@@ -39,20 +41,17 @@ BEGIN_C_DECLS
  */
 /*! CCI private device */
     typedef struct cci__dev {
-	/*! Public device (name, info, argv, max_send_size, rate, pci) */
-	cci_device_t device;
+	/*! Pointer to the plugin structure */
+	struct cci_plugin_ctp *plugin; /* set by the plugin init() */
 
-	/*! Driver name */
-	char *driver;
+	/*! Public device (name, info, argv, max_send_size, rate, pci) */
+	struct cci_device device;
 
 	/*! Priority (0-100, default = 50) */
 	int priority;
 
 	/*! Default device? */
 	int is_default;
-
-	/*! Is the device up? */
-	int is_up;
 
 	/*! entry to hang this dev on the globals->devs */
 	 TAILQ_ENTRY(cci__dev) entry;
@@ -65,26 +64,35 @@ BEGIN_C_DECLS
 
 	/*! Pointer to device specific struct */
 	void *priv;
+
+	/*! Device RMA alignment requirements. Used for CCI_OPT_ENDPT_RMA_ALIGN. */
+	cci_alignment_t align;
 } cci__dev_t;
+
+/* export for transports as needed */
+void cci__init_dev(cci__dev_t *dev);
 
 /*! CCI private endpoint */
 typedef struct cci__ep {
-	/*! Public endpoint (max_recv_buffer_count) */
-	cci_endpoint_t endpoint;
+	/*! Pointer to the plugin structure */
+	struct cci_plugin_ctp *plugin; /* set by the ctp before passing the newly allocated endpoint to the plugin create_endpoint() */
 
-	/*! Number of rx buffers */
+	/*! Public endpoint (max_recv_buffer_count) */
+	struct cci_endpoint endpoint;
+
+	/*! Number of rx buffers. Used for CCI_OPT_ENDPT_RECV_BUF_COUNT. */
 	uint32_t rx_buf_cnt;
 
-	/*! Number of tx buffers */
+	/*! Number of tx buffers. Used for CCI_OPT_ENDPT_SEND_BUF_COUNT. */
 	uint32_t tx_buf_cnt;
 
-	/*! Size of rx/tx buffers */
+	/*! Size of rx/tx buffers. Sets initial connection->max_send_size. */
 	uint32_t buffer_len;
 
-	/*! Send timeout in microseconds */
+	/*! Send timeout in microseconds. Used for CCI_OPT_ENDPT_SEND_TIMEOUT. */
 	uint32_t tx_timeout;
 
-	/*! Keepalive timeout in microseconds */
+	/*! Keepalive timeout in microseconds. Used for CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT. */
 	uint32_t keepalive_timeout;
 
 	/*! Events ready for process */
@@ -104,12 +112,20 @@ typedef struct cci__ep {
 
 	/*! Pointer to device specific struct */
 	void *priv;
+
+	/*! Endpoint URI. Used for CCI_OPT_ENDPT_URI. This endpoint's
+	    listening address that client's can pass to cci_connect().
+	    The application should never need to parse this URI. */
+	char *uri;
 } cci__ep_t;
 
 /*! CCI private connection */
 typedef struct cci__conn {
+	/*! Pointer to the plugin structure */
+	struct cci_plugin_ctp *plugin; /* set by the plugin before returning the connection in connect/accept events */
+
 	/*! Public connection (max_send_size, endpoint, attribute) */
-	cci_connection_t connection;
+	struct cci_connection connection;
 
 	/*! URI we connected to if we called connect */
 	const char *uri;
@@ -133,7 +149,7 @@ static inline int cci_conn_is_reliable(cci__conn_t * conn)
 /*! CCI private event */
 typedef struct cci__evt {
 	/*! Public event (type, union of send/recv/other) */
-	cci_event_t event;
+	union cci_event event;
 
 	/*! Owning endpoint */
 	cci__ep_t *ep;
@@ -153,15 +169,24 @@ typedef struct cci__globals {
 	/*! List of all known devices */
 	TAILQ_HEAD(s_devs, cci__dev) devs;
 
+	/*! Temporary list of devices read from the config file */
+	struct s_devs configfile_devs;
+
 	/*! Array of user devices */
-	cci_device_t **devices;
+	struct cci_device **devices;
 
 	/*! Lock to protect svcs */
 	pthread_mutex_t lock;
+
+	/*! Set if a configfile was specified and read */
+	int configfile;
+
+	/*! Flags given to cci_init() */
+	uint32_t flags;
 } cci__globals_t;
 
-extern int initialized;
-extern int configfile;
+extern pthread_mutex_t init_lock; /*! Protects initialized and globals during cci_init() and cci_finalize() */
+extern int initialized; /*! How many times cci_init() was called minus how many times cci_finalize() was called */
 extern cci__globals_t *globals;
 
 /*! Obtain the private struct from the public struct
@@ -199,7 +224,7 @@ extern int cci__debug;
 #define CCI_DB_FUNC   (1 << 5)	/* enterling/leaving functions */
 #define CCI_DB_INFO   (1 << 6)	/* just informational */
 #define CCI_DB_WARN   (1 << 7)	/* non-fatal error */
-#define CCI_DB_DRVR   (1 << 8)	/* driver function returned error */
+#define CCI_DB_DRVR   (1 << 8)	/* transport function returned error */
 #define CCI_DB_EP     (1 << 9)	/* endpoint handling */
 
 #define CCI_DB_ALL    (~0)	/* print everything */
@@ -226,6 +251,21 @@ extern int cci__debug;
   do {                                                                          \
         debug(CCI_DB_FUNC, "exiting  %s", __func__);                            \
   } while (0);
+
+#if HAVE_DECL_VALGRIND_MAKE_MEM_NOACCESS
+#include <valgrind/memcheck.h>
+#define CCI_VALGRIND_MEMORY_MAKE_NOACCESS(p, s) VALGRIND_MAKE_MEM_NOACCESS(p, s)
+#define CCI_VALGRIND_MEMORY_MAKE_WRITABLE(p, s) VALGRIND_MAKE_MEM_UNDEFINED(p, s)
+#define CCI_VALGRIND_MEMORY_MAKE_READABLE(p, s) VALGRIND_MAKE_MEM_DEFINED(p, s)
+#define CCI_VALGRIND_CHECK_DEFINED(p, s) VALGRIND_CHECK_VALUE_IS_DEFINED(p, s)
+#define CCI_VALGRIND_CHECK_WRITABLE(p, s) VALGRIND_CHECK_VALUE_IS_WRITABLE(p, s)
+#else /* !HAVE_DECL_VALGRIND_MAKE_MEM_NOACCESS */
+#define CCI_VALGRIND_MEMORY_MAKE_NOACCESS(p, s) /* nothing */
+#define CCI_VALGRIND_MEMORY_MAKE_WRITABLE(p, s) /* nothing */
+#define CCI_VALGRIND_MEMORY_MAKE_READABLE(p, s) /* nothing */
+#define CCI_VALGRIND_CHECK_DEFINED(p, s) /* nothing */
+#define CCI_VALGRIND_CHECK_WRITABLE(p, s) /* nothing */
+#endif /* !HAVE_DECL_VALGRIND_MAKE_MEM_NOACCESS */
 
 END_C_DECLS
 #endif /* CCI_LIB_TYPES_H */

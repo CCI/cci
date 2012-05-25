@@ -1,9 +1,10 @@
 /*
- * Copyright (c) 2011 UT-Battelle, LLC.  All rights reserved.
- * Copyright (c) 2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright (c) 2011-2012 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2011-2012 Oak Ridge National Labs.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
+ * Copyright © 2012 Inria.  All rights reserved.
  * $COPYRIGHT$
  *
  */
@@ -107,7 +108,7 @@ int main(int argc, char *argv[])
 	/* set conn tx timeout */
 	handle.endpoint = endpoint;
 	cci_set_opt(&handle, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_SEND_TIMEOUT,
-		    (void *)&timeout, (int)sizeof(timeout));
+		    &timeout);
 	if (ret) {
 		fprintf(stderr, "cci_set_opt() failed with %s\n",
 			cci_strerror(endpoint, ret));

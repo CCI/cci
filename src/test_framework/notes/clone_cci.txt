@@ -1,0 +1,7 @@
+cd test
+git clone https://github.com/CCI/cci
+ username:
+ password:
+
+# Now we have a cci directory with the cci code
+

@@ -1,9 +1,10 @@
 /*
- * Copyright (c) 2011 UT-Battelle, LLC.  All rights reserved.
- * Copyright (c) 2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright (c) 2011-2012 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2011-2012 Oak Ridge National Labs.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
+ * Copyright © 2012 Inria.  All rights reserved.
  * $COPYRIGHT$
  *
  */
@@ -17,10 +18,12 @@
 
 int main(int argc, char *argv[])
 {
-	int ret, done = 0;
+	int ret, done = 0, len = 0;
 	uint32_t caps = 0;
+	char *uri = NULL;
 	cci_device_t **devices = NULL;
 	cci_endpoint_t *endpoint = NULL;
+	cci_opt_handle_t handle;
 	cci_os_handle_t ep_fd;
 	cci_connection_t *connection = NULL;
 
@@ -38,7 +41,15 @@ int main(int argc, char *argv[])
 			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
-	printf("opened %s\n", endpoint->name);
+
+	handle.endpoint = endpoint;
+	ret = cci_get_opt(&handle, CCI_OPT_LEVEL_ENDPOINT,
+			  CCI_OPT_ENDPT_URI, &uri);
+	if (ret) {
+		fprintf(stderr, "cci_get_opt() failed with %s\n", cci_strerror(NULL, ret));
+		exit(EXIT_FAILURE);
+	}
+	printf("Opened %s\n", uri);
 
 	while (!done) {
 		int accept = 1;
@@ -102,6 +113,7 @@ int main(int argc, char *argv[])
 	/* clean up */
 	cci_destroy_endpoint(endpoint);
 	cci_finalize();
+	free(uri);
 
 	return 0;
 }

@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2011 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2011 Oak Ridge National Labs.  All rights reserved.
+ *
+ * See COPYING in top-level directory
+ *
+ * $COPYRIGHT$
+ *
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -43,7 +53,7 @@ int main(int argc, char *argv[])
 	uint32_t pagesize = 0, offset = 0;
 	uint64_t regsize = REGSIZE, totalsize = TOTALSIZE, count, i;
 	uint32_t caps;
-	cci_device_t **devices;
+	cci_device_t * const *devices;
 	cci_endpoint_t *endpoint;
 	void *base, *ptr;
 	uint64_t length;
@@ -109,7 +119,7 @@ int main(int argc, char *argv[])
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
 	check_return(NULL, "cci_init", ret);
 
-	ret = cci_get_devices((cci_device_t const ***const)&devices);
+	ret = cci_get_devices(&devices);
 	check_return(NULL, "cci_get_devices", ret);
 
 	ret = cci_create_endpoint(NULL, 0, &endpoint, &fd);
@@ -122,7 +132,7 @@ int main(int argc, char *argv[])
 	for (i = 0; i < count; i++) {
 		void *p = ptr + (uintptr_t) i;
 
-		ret = cci_rma_register(endpoint, NULL, p, length, &handles[i]);
+		ret = cci_rma_register(endpoint, p, length, CCI_FLAG_READ|CCI_FLAG_WRITE, &handles[i]);
 		check_return(endpoint, "cci_rma_register", ret);
 	}
 
@@ -134,7 +144,7 @@ int main(int argc, char *argv[])
 		gettimeofday(&start, NULL);
 
 	for (i = 0; i < count; i++) {
-		ret = cci_rma_deregister(handles[i]);
+		ret = cci_rma_deregister(endpoint, handles[i]);
 		check_return(endpoint, "cci_rma_register", ret);
 	}
 

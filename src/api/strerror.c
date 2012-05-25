@@ -1,7 +1,8 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
- * Copyright © 2010-2011 UT-Battelle, LLC. All rights reserved.
- * Copyright © 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2010-2012 UT-Battelle, LLC. All rights reserved.
+ * Copyright © 2010-2012 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -14,10 +15,15 @@
 #include <stdio.h>
 
 #include "cci.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 
 const char *cci_strerror(cci_endpoint_t *endpoint, enum cci_status status)
 {
+	cci__ep_t *ep = NULL;
+
+	if (endpoint)
+		ep = container_of(endpoint, cci__ep_t, endpoint);
+
 	switch (status) {
 	case CCI_SUCCESS:
 		return "CCI_SUCCESS";
@@ -58,6 +64,9 @@ const char *cci_strerror(cci_endpoint_t *endpoint, enum cci_status status)
 	case CCI_ENODEV:
 		return "CCI_ENODEV";
 
+	case CCI_ENETDOWN:
+		return "CCI_ENETDOWN";
+
 	case CCI_EBUSY:
 		return "CCI_EBUSY";
 
@@ -80,6 +89,9 @@ const char *cci_strerror(cci_endpoint_t *endpoint, enum cci_status status)
 		return "CCI_EADDRNOTAVAIL";
 
 	default:
-		return cci_core->strerror(endpoint, status);
+		if (ep)
+			return ep->plugin->strerror(endpoint, status);
+		else
+			return "unknown error";
 	}
 }

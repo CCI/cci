@@ -98,6 +98,17 @@ AC_ARG_ENABLE([cci-debug],
                    AC_SUBST([DEBUG_FLAGS],["-O0 -g"]),
                    [])
 
+# Check for Cray GNI (Gemini) headers and libs
+CPPFLAGS_save="$CPPFLAGS"
+AS_IF([test "$CRAY_GNI_HEADERS_INCLUDE_OPTS"],
+      [cppflags="$CRAY_GNI_HEADERS_INCLUDE_OPTS $CPPFLAGS_save"]
+      AC_SUBST([CPPFLAGS],["$cppflags"]))
+
+LDFLAGS_save="$LDFLAGS"
+AS_IF([test "$CRAY_UGNI_POST_LINK_OPTS"],
+      [ldflags="$CRAY_UGNI_POST_LINK_OPTS -lugni $LDFLAGS_save"]
+      AC_SUBST([LDFLAGS],["$ldflags"]))
+
 # Extract compiler from Cray Programming Environment
 AS_IF([test "$PE_ENV" = "PGI"],
       AC_SUBST([CC],["pgcc"])
@@ -127,29 +138,8 @@ CFLAGS="$CFLAGS_save"
 # Define cci's configure arguments
 CCI_DEFINE_ARGS
 
-# Setup the cci core
-CCI_SETUP_CORE([], [], [AC_MSG_ERROR([Cannot continue])], [1])
-
-# Check if PMI is needed (for Cray builds)
-AC_ARG_WITH([pmi],
-    AS_HELP_STRING([--with-pmi=DIR],
-                   [Build w/support for Cray Process Manager Interface]),
-    [], [with_pmi=no])
-AS_IF([test "x$with_pmi" != xno],
-      [AC_SUBST([pmi_CPPFLAGS], ["-I$with_pmi/include -DUSE_PMI"])
-       AC_SUBST([pmi_LDFLAGS], ["-L$with_pmi/lib64"])
-       AC_SUBST([pmi_LIBS], ["-lpmi"])
-       AC_DEFINE([HAVE_PMI], [1], [Define if you have PMI])])
-
-# Check if ALPS is needed (for Cray builds)
-AC_ARG_WITH([alps],
-    AS_HELP_STRING([--with-alps],
-                   [Install support for ALPS]),
-    [], [with_alps=no])
-AS_IF([test "x$with_alps" != xno],
-      [AC_SUBST([alps_LDFLAGS], ["-L/usr/lib/alps"])
-       AC_SUBST([alps_LIBS], ["-lalpslli -lalpsutil"])
-       AC_DEFINE([HAVE_ALPS], [1], [Define if you have ALPS])])
+# Setup the cci ctp
+CCI_SETUP_CTP([], [], [AC_MSG_ERROR([Cannot continue])], [1])
 
 # Default to shared library yet
 AM_ENABLE_SHARED

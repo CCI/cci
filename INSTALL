@@ -21,12 +21,12 @@ file specifies the network interface to use, as well as CCI parameters.
 The configuration file, based on a INI format, follows the following pattern:
 
 [<config_name>]
-driver = <cci_driver>
+transport = <cci_transport>
 ip = <ip_to_use>
 default = <0 or 1>
 
 Where:
-- <cci_driver> is the driver to use. The available drivers are: sock.
+- <cci_transport> is the transport to use. The available transport are: sock.
 - <ip> is the IP associated to the network interface to use.
 - default specifies if the configuration is the default one (1) or not (0).
 
@@ -34,7 +34,7 @@ For instance, the configuration file when using CCI over UDP and the loopback
 interface will look like the following:
 
 [lo]
-driver = sock
+transport = sock
 ip = 127.0.0.1
 default = 1
 

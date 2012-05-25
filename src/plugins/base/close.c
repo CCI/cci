@@ -23,6 +23,7 @@ int cci_plugins_finalize(void)
 			cci_plugins_filename_cache = NULL;
 		}
 	}
+	lt_dlexit();
 	cci_plugins_initialized = 0;
 
 	return CCI_SUCCESS;
