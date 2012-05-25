@@ -660,7 +660,7 @@ static int verbs_post_rx(cci__ep_t * ep, verbs_rx_t * rx)
 			if (rc)
 				debug(CCI_DB_EP, "%s: verbs_destroy_rx_pool() "
 				      "returned %s", __func__,
-				      cci_strerror(rc));
+				      cci_strerror(&ep->endpoint, rc));
 		}
 		pthread_mutex_unlock(&ep->lock);
 		/* return SUCCESS so that the caller does not continue

@@ -5,7 +5,7 @@
 
 AM_LDFLAGS = $(top_builddir)/src/libcci.la
 
-TESTS = \
+check_PROGRAMS = \
         init	\
 	server	\
 	client	\
@@ -13,4 +13,4 @@ TESTS = \
 	stream	\
 	register
 
-check_PROGRAMS = $(TESTS)
+TESTS =
