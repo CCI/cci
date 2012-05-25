@@ -1110,16 +1110,6 @@ typedef struct sock_globals {
 
 	/*! Array of sock devices */
 	cci_device_t const **const devices;
-
-	/*! Array of devices indexed by sock fd */
-	sock_fd_idx_t fd_idx[SOCK_MAX_EPS];
-
-	/*! Highest open endpoint sock fd + 1 for select */
-	int nfds;
-
-	/*! fd_set for open endpoint sock fds */
-	fd_set fds;
-
 } sock_globals_t;
 
 /* Macro to initialize the structure of a device */

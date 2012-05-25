@@ -644,15 +644,6 @@ static int sock_finalize(void)
 		return CCI_ENODEV;
 	}
 
-#if 0
-	/* let the progress thread know we are going away */
-	pthread_mutex_lock(&globals->lock);
-	sock_shut_down = 1;
-	pthread_mutex_unlock(&globals->lock);
-	pthread_join(progress_tid, NULL);
-	pthread_join(recv_tid, NULL);
-#endif
-
 	pthread_mutex_lock(&globals->lock);
 	TAILQ_FOREACH(dev, &globals->devs, entry)
 	    free(dev->priv);
@@ -676,14 +667,7 @@ sock_set_nonblocking(cci_os_handle_t sock, sock_fd_type_t type, void *p)
 	ret = fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 	if (-1 == ret)
 		return errno;
-	pthread_mutex_lock(&globals->lock);
-	FD_SET(sock, &sglobals->fds);
-	if (sock >= sglobals->nfds)
-		sglobals->nfds = sock + 1;
-	sglobals->fd_idx[sock].type = type;
-	if (type == SOCK_FD_EP)
-		sglobals->fd_idx[sock].ep = p;
-	pthread_mutex_unlock(&globals->lock);
+
 	return 0;
 }
 
@@ -691,25 +675,8 @@ static inline void sock_close_socket(cci_os_handle_t sock)
 {
 	int found = 0;
 
-	pthread_mutex_lock(&globals->lock);
-	FD_CLR(sock, &sglobals->fds);
-	sglobals->fd_idx[sock].type = SOCK_FD_UNUSED;
-	if (sock == sglobals->nfds - 1) {
-		int i;
-		sock_fd_idx_t *idx;
-		for (i = sock - 1; i >= 0; i--) {
-			idx = (sock_fd_idx_t *) & sglobals->fd_idx[i];
-			if (idx->type != SOCK_FD_UNUSED) {
-				sglobals->nfds = i + 1;
-				found = 1;
-				break;
-			}
-		}
-		if (!found)
-			sglobals->nfds = 0;
-	}
-	pthread_mutex_unlock(&globals->lock);
 	close(sock);
+
 	return;
 }
 
@@ -4125,7 +4092,6 @@ sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 	cci_endpoint_t *endpoint;	/* generic CCI endpoint */
 	cci__ep_t *ep;
 	uint64_t context_id = 0;
-	//sock_rma_header_t *rma_hdr = rx->buffer;
 	void *context;
 	sock_header_r_t *hdr_r = rx->buffer;
 
@@ -4173,7 +4139,6 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 	uint8_t a;
 	uint16_t b;
 	uint32_t id;
-	//uint32_t keepalive;
 	sock_rx_t *rx = NULL;
 	struct sockaddr_in sin;
 	socklen_t sin_len = sizeof(sin);
@@ -4678,7 +4643,6 @@ static void *sock_recv_thread(void *arg)
 {
 	int ret = 0;
 	struct timeval tv = { 0, SOCK_PROG_TIME_US };
-	int nfds = 0;
 	fd_set fds;
     int again;
     cci__ep_t *ep = (cci__ep_t *)arg;
@@ -4688,12 +4652,11 @@ static void *sock_recv_thread(void *arg)
     sep = ep->priv;
 	pthread_mutex_lock(&globals->lock);
 	while (!sep->closing) {
-		nfds = sglobals->nfds;
 		FD_ZERO(&fds);
         FD_SET (sep->sock, &fds);
 		pthread_mutex_unlock(&globals->lock);
 
-        ret = select (nfds, &fds, NULL, NULL, &tv);
+        ret = select (sep->sock + 1, &fds, NULL, NULL, &tv);
 		if (ret == -1) {
 			switch (errno) {
 			case EBADF:
@@ -4708,16 +4671,9 @@ static void *sock_recv_thread(void *arg)
 			goto relock;
 		}
 
-        /* Some checking to make sure the data is on the correct socket,
-           we also get the pointer we need to receive the data */
-        if (FD_ISSET(sep->sock, &fds)) {
-            sock_fd_idx_t *idx = (sock_fd_idx_t *) &sglobals->fd_idx[sep->sock];
-            if (idx->type == SOCK_FD_EP) {
-                do {
-                    again = sock_recvfrom_ep (idx->ep);
-                } while (again == 1);
-            }
-        }
+        do {
+            again = sock_recvfrom_ep (ep);
+        } while (again == 1);
 relock:
 		pthread_mutex_lock(&globals->lock);
 
