@@ -75,36 +75,64 @@ BEGIN_C_DECLS
 #define VERBS_TYPE_MASK		((1 << VERBS_TYPE_BITS) - 1)
 #define VERBS_TYPE(x)		((x) & VERBS_TYPE_MASK)
 
-/* Send and RDMA MSG Ack
+/* Send via SendRecv
 
-    <------------- 32 bits ------------>
-    1 1 <---- 14b ---> <--- 12b -->  4b
-   +-+-+--------------+------------+----+
-   |E|D|       C      |      B     |  A |
-   +-+-+--------------+------------+----+
+    <------------ 32 bits ----------->
+    <--- 12b --> <----- 16b ---->  4b
+   +------------+----------------+----+
+   |      C     |        B       |  A |
+   +------------+----------------+----+
 
    where:
-      A is VERBS_MSG_SEND or VERBS_MSG_RDMA_MSG_ACK
-      B is seqno for SEND or ack for RDMA_MSG_ACK
-      C is length for SEND with RDMA
-      D is reserved
-      E is SEND transport method
-         0 is Send/Recv
-	 1 is RDMA
+      A is VERBS_MSG_SEND
+      B is seqno for SEND
+      C is reserved
  */
 
-#define VERBS_SEQNO_BITS	(12)
+#define VERBS_SEQNO_BITS	(16)
 #define VERBS_SEQNO_MAX		((1 << VERBS_SEQNO_BITS) - 1)
 #define VERBS_SEQNO_SHIFT	(VERBS_TYPE_BITS)
 #define VERBS_SEQNO(x)		(((x) >> VERBS_SEQNO_SHIFT) & VERBS_SEQNO_MAX)
 
-#define VERBS_RSEND_BIT		(1 << 31)
-#define VERBS_RSEND		(VERBS_MSG_SEND | VERBS_RSEND_BIT)
-#define VERBS_RSEND_LEN_BITS	(14) /* large enough to hold 9000 bytes for RNIC */
-#define VERBS_RSEND_LEN_MAX	((1 << VERBS_RSEND_LEN_BITS) - 1)
-#define VERBS_RSEND_LEN_SHIFT	(VERBS_TYPE_BITS + VERBS_SEQNO_BITS)
-#define VERBS_RSEND_LEN(x)	(((x) >> VERBS_RSEND_LEN_SHIFT) & VERBS_RSEND_LEN_MAX)
+/* Send via RDMA
 
+    <----------- 32 bits ----------->
+    <----- 16b ---->  3b <--- 13b --->
+   +----------------+---+-------------+
+   |       C        | B |      A      |
+   +----------------+---+-------------+
+
+   where:
+      A is length + 1
+      B is unused
+      C is seqno
+ */
+
+#define VERBS_RSEND_LEN_BITS	(13) /* large enough to hold 4KB */
+#define VERBS_RSEND_LEN_MAX	((1 << VERBS_RSEND_LEN_BITS) - 1)
+#define VERBS_RSEND_LEN(x)	(((x) & VERBS_RSEND_LEN_MAX) - 1)
+
+#define VERBS_RSEND_SEQNO_SHIFT	(32 - VERBS_SEQNO_BITS)
+#define VERBS_RSEND_SEQNO(x)	(((x) >> VERBS_RSEND_SEQNO_SHIFT) & VERBS_SEQNO_MAX)
+
+/* Ack Send via RDMA slot
+
+    <------------ 32 bits ----------->
+    <--- 12b --> <----- 16b ---->  4b
+   +------------+----------------+----+
+   |      C     |        B       |  A |
+   +------------+----------------+----+
+
+   where:
+      A is VERBS_MSG_RDMA_MSG_ACK
+      B is available slot for SEND
+      C is reserved
+ */
+
+#define VERBS_SLOT_BITS		(16)
+#define VERBS_SLOT_MAX		((1 << VERBS_SLOT_BITS) - 1)
+#define VERBS_SLOT_SHIFT	(VERBS_TYPE_BITS)
+#define VERBS_SLOT(x)		(((x) >> VERBS_SLOT_SHIFT) & VERBS_SLOT_MAX)
 
 /* Conn Request
 
@@ -211,9 +239,10 @@ typedef struct verbs_rma_addr_rkey {
  */
 
 /* Set some transport defaults */
-#define VERBS_EP_RX_CNT		(1024)	/* default SRQ size */
-#define VERBS_EP_TX_CNT		(128)	/* default send count */
-#define VERBS_EP_CQ_CNT		(2048)	/* default CQ count */
+#define VERBS_EP_RX_CNT		(4096)	/* default SRQ size */
+#define VERBS_EP_TX_CNT		(4096)	/* default send count */
+				/* default CQ count */
+#define VERBS_EP_CQ_CNT		(2 * (VERBS_EP_RX_CNT + VERBS_EP_TX_CNT))
 #define VERBS_PROG_TIME_US	(50000)	/* try to progress every N microseconds */
 
 /* RMA Remote Cache
@@ -236,7 +265,7 @@ typedef struct verbs_tx {
 	int flags;		/* (CCI_FLAG_[BLOCKING|SILENT|NO_COPY]) */
 	void *buffer;		/* registered send buffer */
 	uint16_t len;		/* length of buffer */
-	uint32_t rdma_slot;	/* slot when using RDMA */
+	int32_t rdma_slot;	/* slot when using RDMA or -1 */
 	 TAILQ_ENTRY(verbs_tx) entry;	/* hang on vep->idle_txs, vdev->queued,
 					   vdev->pending */
 	struct verbs_rma_op *rma_op;	/* owning RMA if remote completion msg */
@@ -247,6 +276,7 @@ typedef struct verbs_rx {
 	cci__evt_t evt;		/* associated event */
 	uint32_t offset;	/* offset in vep->buffer */
 	 TAILQ_ENTRY(verbs_rx) entry;	/* hangs on rx_pool->rxs */
+	 uint32_t seqno;	/* seqno for RO SendRecv MSGs */
 	struct verbs_rx_pool *rx_pool;	/* owning rx pool */
 } verbs_rx_t;
 
@@ -386,14 +416,16 @@ typedef struct verbs_conn {
 	uint32_t rkey;		/* peer's rkey */
 	uint32_t num_slots;	/* number of MSG slots */
 	uint32_t next;		/* next slot to use */
-	uint16_t seqno;		/* last seqno sent w/ or w/o RDMA */
-	uint16_t *slot_seqs;	/* seqno of sent RDMA MSGs */
 	uint32_t avail;		/* bitmask of available peer slots */
 	uint32_t last;		/* last slot used */
 	uint32_t **slots;	/* pointers to buffer headers
 				   to poll */
 	int is_polling;		/* polling RDMA MSGs */
-	uint16_t acked;		/* last seqno we acked */
+
+	/* for RO connections when using both SendRecv and RDMA */
+	uint16_t seqno;		/* last seqno sent */
+	uint16_t expected;	/* next seqno we expect to receive */
+	TAILQ_HEAD(prxs, cci__evt) early; /* early SendRecv MSG rxs */
 
 	 TAILQ_HEAD(s_rems, verbs_rma_remote) remotes;	/* LRU list of remote handles */
 	 TAILQ_HEAD(w_ops, verbs_rma_op) rma_ops;	/* rma ops waiting on remotes */
