@@ -209,240 +209,6 @@ static inline const char *sock_msg_type(sock_msg_type_t type)
 	return NULL;
 }
 
-static const char *sock_strerror(cci_endpoint_t * endpoint,
-				 enum cci_status status)
-{
-	CCI_ENTER;
-
-	CCI_EXIT;
-	return NULL;
-}
-
-/**
- * Display a NULL terminated array of devices
- * @param[in]	devices	NULL terminated array of devices to display
- */
-static inline void prettyprint_devices(cci_device_t ** devices)
-{
-	int i = 0;
-	cci_device_t *device;
-
-	if (devices == 0)
-		return;
-
-	while (devices[i] != NULL) {
-		device = devices[i];
-		printf("Index: %d\n", i);
-		printf("\t%s", device->name);
-		if (device->up == 1) {
-			/* All the device info is _not_ storing in the cci_device_t
-			   structure so we need to lookup the other structure in order to
-			   get all the data and display it */
-			sock_dev_t *sdev;
-			cci__dev_t *dev;
-			struct in_addr addr;
-			char *ip_str;
-
-			dev = container_of(device, cci__dev_t, device);
-			sdev = dev->priv;
-
-			addr.s_addr = sdev->ip;
-			ip_str = inet_ntoa(addr);
-			printf(" is up (%s)", ip_str);
-		} else {
-			printf(" is down");
-		}
-		printf("\n");
-		i++;
-	}
-}
-
-/**
- * Lookup a device from an array of devices based on its name.
- * @param[in]	ifa_name	Name of the device to add
- * @param[in]	devices		NULL terminated array of devices
- * @param[out]	dev			Pointer to the device structure when the device is
- *							found in the array
- * @return CCI_SUCCESS	Upon success
- * @return CCI_ERROR	Upon error
- */
-static inline int
-lookup_device(char *ifa_name, struct cci_device ** devices, struct cci_device ** dev)
-{
-	int i = 0;
-
-	if (ifa_name == NULL)
-		return CCI_ERROR;
-
-	if (devices == NULL) {
-		*dev = NULL;
-		return CCI_SUCCESS;
-	}
-
-	while (devices[i] != NULL && strcmp(ifa_name, devices[i]->name) != 0)
-		i++;
-
-	if (devices[i] == NULL)
-		*dev = NULL;
-	else
-		*dev = devices[i];
-
-	return CCI_SUCCESS;
-}
-
-/**
- * Return the size of a NULL terminated array.
- * @param[in]	array	NULL terminated array from which we want the size
- * @return	-1	Fatal error
- * @return	>=0	Size of the array
- */
-static inline size_t get_array_size(struct cci_device ** array)
-{
-	size_t i = 0;
-
-	if (array == NULL)
-		return 0;
-
-	while (array[i] != NULL)
-		i++;
-
-	return i;
-}
-
-/**
- * Store device data into the a of devices.
- * @param[in]	ifa_name	Name of the device
- * @param[in]	ip			IP address of the device (can be NULL)
- * @param[in]	s			State of the device (i.e., up or down)
- * @param[in,out]	list_devices	List of devices where to add the new device,
- *									the list is NULL terminated.
- * @return	CCI_SUCCESS Upon success
- * @return	CCI_ERROR	Error occured
- */
-static inline int
-store_device(char *ifa_name,
-	     char *ip,
-	     core_sock_device_state_t s, struct cci_device *** list_devices)
-{
-	int rc;
-	struct cci_device *device;
-	struct cci_device **devices;
-	size_t n;
-
-	devices = *list_devices;
-
-	rc = lookup_device(ifa_name, devices, &device);
-	if (rc != CCI_SUCCESS)
-		return CCI_ERROR;
-
-	if (device == NULL) {
-		cci__dev_t *dev;
-
-		/*
-		 * The device is not yet in the list, we add it and make sure the
-		 * list that is NULL terminated remain coherent
-		 */
-
-		INIT_CCI__DEV_STRUCT(dev, rc);
-		device = &dev->device;
-		device->name = strdup(ifa_name);
-		if (s == IFACE_IS_UP) {
-			/* We store in two different places the state (up or not) of the
-			   iface */
-			device->up = 1;
-		}
-		TAILQ_INSERT_TAIL(&globals->devs, dev, entry);
-
-		/* The list is NULL terminated so we need to extend it in a coherent
-		   manner */
-		n = get_array_size(devices);
-		devices = realloc(devices, (n + 2) * sizeof(cci_device_t *));
-		devices[n + 1] = NULL;
-		devices[n] = device;
-	} else {
-		/* 
-		 * The device is already in the list, we simply update the data if we
-		 * have to 
-		 */
-		if (ip != NULL) {
-			sock_dev_t *sdev;
-			cci__dev_t *dev;
-
-			/*
-			 * If the IP is specified, we save it and specify the iface as up.
-			 */
-			dev = container_of(device, cci__dev_t, device);
-			sdev = dev->priv;
-			if (sdev == NULL)
-				return CCI_ERROR;
-			/* We store in two different places the state (up or not) of the
-			   iface */
-			device->up = 1;
-			sdev->ip = inet_addr(ip);
-		}
-	}
-
-	*list_devices = devices;
-
-	return CCI_SUCCESS;
-}
-
-/*
- * Generic function that loads the available network interfaces and store then
- * in the appropriate data structure such as sglobals and globals
- */
-static inline int load_devices(void)
-{
-	struct ifaddrs *ifaddr;
-	struct ifaddrs *ifa;
-	int family;
-	int rc;
-	struct cci_device **list_devices = NULL;
-
-	if (getifaddrs(&ifaddr) == -1)
-		return CCI_ERROR;
-
-	list_devices = (struct cci_device **) sglobals->devices;
-
-	for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
-		/* Do we already have data about this device? */
-		if (ifa->ifa_addr == NULL)
-			continue;
-
-		rc = store_device(ifa->ifa_name,
-						  NULL, IFACE_IS_DOWN, &list_devices);
-		if (rc != CCI_SUCCESS)
-			return CCI_ERROR;
-
-		family = ifa->ifa_addr->sa_family;
-
-        /* We only care about the IPv4 addresses at the moment */
-		if (family == AF_INET) {
-			struct sockaddr_in *s4;
-			char buf[INET_ADDRSTRLEN];
-			const char *s;
-
-			/* If we can get an IP, we update the data of that device */
-			s4 = (struct sockaddr_in *)ifa->ifa_addr;
-			s = inet_ntop(ifa->ifa_addr->sa_family,
-				      &s4->sin_addr, buf, sizeof(buf));
-			if (s != NULL) {
-				rc = store_device(ifa->ifa_name,
-						  (char *)buf,
-						  IFACE_IS_UP, &list_devices);
-				if (rc != CCI_SUCCESS)
-					return CCI_ERROR;
-			}
-		}
-	}
-
-	sglobals->count = get_array_size(list_devices);
-
-	freeifaddrs(ifaddr);
-
-	return CCI_SUCCESS;
-}
-
 static inline int sock_create_threads (cci__ep_t *ep)
 {
 	int ret;
@@ -722,26 +488,6 @@ out:
 	return ret;
 }
 
-static int sock_get_devices(cci_device_t const ***devices)
-{
-	CCI_ENTER;
-
-	if (!sglobals) {
-		CCI_EXIT;
-		return CCI_ENODEV;
-	}
-
-	if (!globals->configfile) {
-		load_devices();
-	}
-
-	*devices = sglobals->devices;
-
-	CCI_EXIT;
-
-	return CCI_SUCCESS;
-}
-
 static const char *ctp_sock_strerror(cci_endpoint_t * endpoint,
 				 enum cci_status status)
 {
@@ -794,10 +540,7 @@ sock_set_nonblocking(cci_os_handle_t sock, sock_fd_type_t type, void *p)
 
 static inline void sock_close_socket(cci_os_handle_t sock)
 {
-	int found = 0;
-
 	close(sock);
-
 	return;
 }
 
@@ -1988,7 +1731,6 @@ static void sock_progress_pending(cci__ep_t * ep)
 	sock_tx_t *tx;
 	cci__evt_t *evt, *tmp, *my_temp_evt;
 	union cci_event *event;	/* generic CCI event */
-	cci_connection_t *connection; /* generic CCI connection */
 	cci__conn_t *conn;
 	sock_conn_t *sconn;
 	sock_ep_t *sep = ep->priv;
@@ -2012,7 +1754,6 @@ static void sock_progress_pending(cci__ep_t * ep)
         sock_tx_t *tx = container_of (evt, sock_tx_t, evt);
 
 		conn = evt->conn;
-		connection = &conn->connection;
 		sconn = conn->priv;
 		event = &evt->event;
 
