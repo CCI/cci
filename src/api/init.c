@@ -79,6 +79,8 @@ static inline void cci__get_debug_env(void)
 			mask |= CCI_DB_WARN;
 		} else if (0 == strncmp(debug, "drvr", 4)) {
 			mask |= CCI_DB_DRVR;
+		} else if (0 == strncmp(debug, "ep", 4)) {
+			mask |= CCI_DB_EP;
 		} else if (0 == strncmp(debug, "all", 3)) {
 			mask |= CCI_DB_ALL;
 		} else {
