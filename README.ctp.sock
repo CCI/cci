@@ -1,4 +1,50 @@
-= Performance Tuning =
+= Configuration ================================================================
+
+  The sock CTP is enabled by default.
+
+= Endpoint naming ==============================================================
+
+  Sock endpoint URIs are host and port where host is a hostname or IPv4 address:
+
+    ip://foo.com:5555
+    ip://1.2.3.4:5555
+
+= Config file options ==========================================================
+
+  Sock devices _must_ have these two items in the config file:
+
+    transport = sock
+    ip = 1.2.3.4
+
+  where 1.2.3.4 is the valid IPv4 address of the device to bind to.
+
+  Sock devices may have the following items in the config file:
+
+    mtu = 9000
+
+  The sock transport will then set the endpoint->max_send_size to this size
+  less what it needs for headers.
+
+= Run-time notes ===============================================================
+
+  1. Most devices that support transports other than sock will also provide an
+  Ethernet interface. Generally, you will want to use the native transport and
+  not sock for these devices.
+
+  2. If you do not use a config file, the sock driver will start progress
+  threads even if you do not open a sock endpoint. We will fix this, but in the
+  meantime, use a config file and do not sepcify a sock device unless you want
+  one.
+
+= Known limitations ============================================================
+
+Not implemented:
+
+  Fence
+  RO connections may not be ordered (i.e. RU)
+
+
+= Performance Tuning ===========================================================
 
 SOCK_DEFAULT_MSS
     The default Maximum Segment Size is the default amount of data that is sent
