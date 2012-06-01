@@ -1505,6 +1505,8 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 				/* SEND_INLINE must be used */
 				debug(CCI_DB_MSG, "adding second list[1]");
 				list[0].length += pad;
+				CCI_VALGRIND_MEMORY_MAKE_READABLE(list[0].addr,
+								list[0].length);
 				list[1].addr = (uintptr_t) & h2;
 				list[1].length = 4;	/* we will fix below */
 				wr.num_sge = 2;
