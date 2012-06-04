@@ -27,7 +27,6 @@ BEGIN_C_DECLS
 #define SOCK_UDP_MAX            (65508)	/* 64 KB - 8 B UDP - 20 B IP */
 #define SOCK_MAX_HDR_SIZE       (52)	/* max sock header size (RMA) */
 #define SOCK_MAX_HDRS           (SOCK_MAX_HDR_SIZE + 20 + 8)	/* IP + UDP */
-/* FIXME */
 #define SOCK_DEFAULT_MSS        (SOCK_UDP_MAX - SOCK_MAX_HDR_SIZE)	/* assume jumbo frames */
 #define SOCK_MIN_MSS            (1500 - SOCK_MAX_HDR_SIZE)
 #define SOCK_MAX_SACK           (4)	/* pairs of start/end acks */
