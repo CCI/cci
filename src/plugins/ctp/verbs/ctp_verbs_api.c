@@ -200,9 +200,16 @@ static cci_status_t verbs_wc_to_cci_status(enum ibv_wc_status wc_status)
 	case IBV_WC_RNR_RETRY_EXC_ERR:
 		ret = CCI_ERR_RNR;
 		break;
+	case IBV_WC_WR_FLUSH_ERR:
+		ret = CCI_ERR_DISCONNECTED;
+		break;
 	default:
 		ret = EIO;
 	}
+
+	if (wc_status)
+		debug(CCI_DB_INFO, "%s: wc_status %d cci status %d (%s)",
+			__func__, wc_status, ret, cci_strerror(NULL, ret));
 
 	return ret;
 }
@@ -820,28 +827,21 @@ static int verbs_destroy_tx_pool(verbs_tx_pool_t * tx_pool)
 	posted = tx_pool->posted;
 	pthread_mutex_unlock(&tx_pool->lock);
 
-	if (posted == 0) {
-		if (tx_pool->mr) {
-			int rc = CCI_SUCCESS;
-			rc = ibv_dereg_mr(tx_pool->mr);
-			if (rc) {
-				debug(CCI_DB_WARN,
-				      "deregistering new endpoint tx_mr "
-				      "failed with %s\n", strerror(ret));
-			}
+	if (tx_pool->mr) {
+		int rc = CCI_SUCCESS;
+		rc = ibv_dereg_mr(tx_pool->mr);
+		if (rc) {
+			debug(CCI_DB_WARN,
+			      "deregistering endpoint tx_mr "
+			      "failed with %s\n", strerror(ret));
 		}
-		if (tx_pool->buf)
-			free(tx_pool->buf);
-
-		pthread_mutex_destroy(&tx_pool->lock);
-
-		free(tx_pool);
-	} else {
-		debug(CCI_DB_INFO,
-		      "tx_pool could not be destroyed to do "
-		      "%d outstanding messages\n", tx_pool->posted);
-		ret = CCI_EAGAIN;
 	}
+	if (tx_pool->buf)
+		free(tx_pool->buf);
+
+	pthread_mutex_destroy(&tx_pool->lock);
+
+	free(tx_pool);
 
 out:
 	CCI_EXIT;
@@ -1505,6 +1505,8 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 				/* SEND_INLINE must be used */
 				debug(CCI_DB_MSG, "adding second list[1]");
 				list[0].length += pad;
+				CCI_VALGRIND_MEMORY_MAKE_READABLE(list[0].addr,
+								list[0].length);
 				list[1].addr = (uintptr_t) & h2;
 				list[1].length = 4;	/* we will fix below */
 				wr.num_sge = 2;
@@ -2634,6 +2636,36 @@ verbs_handle_conn_established(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 	return ret;
 }
 
+static int
+verbs_handle_disconnected(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
+{
+	int ret = CCI_SUCCESS;
+	cci__conn_t *conn = NULL;
+	verbs_conn_t *vconn = NULL;
+
+	CCI_ENTER;
+
+	conn = cm_evt->id->context;
+	assert(conn);
+	vconn = conn->priv;
+	assert(vconn);
+
+	switch (vconn->state) {
+	case VERBS_CONN_ESTABLISHED:
+		vconn->state = VERBS_CONN_CLOSED;
+		debug(CCI_DB_CONN, "%s: marking vconn %p closed (%s)",
+			__func__, vconn, conn->uri);
+		break;
+	default:
+		debug(CCI_DB_INFO, "%s: incorrect conn state %s", __func__,
+		      verbs_conn_state_str(vconn->state));
+		break;
+	}
+
+	CCI_EXIT;
+	return ret;
+}
+
 static int verbs_get_cm_event(cci__ep_t * ep)
 {
 	int ret = CCI_EAGAIN;
@@ -2659,13 +2691,19 @@ static int verbs_get_cm_event(cci__ep_t * ep)
 	case RDMA_CM_EVENT_CONNECT_REQUEST:
 		ret = verbs_handle_conn_request(ep, cm_evt);
 		if (ret)
-			debug(CCI_DB_INFO, "%s: verbs_handle_conn_request()"
+			debug(CCI_DB_CONN, "%s: verbs_handle_conn_request()"
 			      "returned %s", __func__, strerror(ret));
 		break;
 	case RDMA_CM_EVENT_ESTABLISHED:
 		ret = verbs_handle_conn_established(ep, cm_evt);
 		if (ret)
-			debug(CCI_DB_INFO, "%s: verbs_handle_conn_established()"
+			debug(CCI_DB_CONN, "%s: verbs_handle_conn_established()"
+			      "returned %s", __func__, strerror(ret));
+		break;
+	case RDMA_CM_EVENT_DISCONNECTED:
+		ret = verbs_handle_disconnected(ep, cm_evt);
+		if (ret)
+			debug(CCI_DB_CONN, "%s: verbs_handle_disconnected()"
 			      "returned %s", __func__, strerror(ret));
 		break;
 	default:
@@ -3676,7 +3714,10 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 	conn = container_of(connection, cci__conn_t, connection);
 	vconn = conn->priv;
 
-	verbs_progress_ep(ep);
+	if (vconn->state == VERBS_CONN_CLOSED)
+		return CCI_ERR_DISCONNECTED;
+
+	//verbs_progress_ep(ep);
 
 	is_reliable = cci_conn_is_reliable(conn);
 
