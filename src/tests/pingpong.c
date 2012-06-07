@@ -17,6 +17,7 @@
 #include <inttypes.h>
 #include <assert.h>
 #include <sys/time.h>
+#include <sys/select.h>
 
 #include "cci.h"
 
@@ -44,6 +45,10 @@ uint64_t local_rma_handle = 0ULL;
 int remote_completion = 0;
 void *rmt_comp_msg = NULL;
 uint32_t rmt_comp_len = 0;
+cci_os_handle_t fd;
+int blocking = 0;
+int nfds = 0;
+fd_set rfds;
 
 typedef struct options {
 	uint64_t server_rma_handle;
@@ -75,7 +80,8 @@ void print_usage()
 	fprintf(stderr, "\t-w\tUse RMA WRITE instead of MSGs\n");
 	fprintf(stderr, "\t-r\tUse RMA READ instead of MSGs\n");
 	fprintf(stderr, "\t-m\tTest RMA messages up to max_rma_size\n");
-	fprintf(stderr, "\t-C\tSend RMA remote completion message\n\n");
+	fprintf(stderr, "\t-C\tSend RMA remote completion message\n");
+	fprintf(stderr, "\t-b\tBlock using the OS handle instead of polling\n\n");
 	fprintf(stderr, "Example:\n");
 	fprintf(stderr, "server$ %s -h ip://foo -p 2211 -s\n", name);
 	fprintf(stderr, "client$ %s -h ip://foo -p 2211\n", name);
@@ -96,6 +102,15 @@ static void poll_events(void)
 {
 	int ret;
 	cci_event_t *event;
+
+	if (blocking) {
+		FD_ZERO(&rfds);
+		FD_SET(fd, &rfds);
+
+		ret = select(nfds, &rfds, NULL, NULL, NULL);
+		if (!ret)
+			return;
+	}
 
 	ret = cci_get_event(endpoint, &event);
 	if (ret == CCI_SUCCESS) {
@@ -158,10 +173,13 @@ static void poll_events(void)
 					break;
 				} else if (opts.method == MSGS) {
 					if (is_server) {
+						count++;
 						if (event->recv.len >
-						    current_size)
+						    current_size) {
 							current_size =
 							    event->recv.len;
+							count = 1;
+						}
 					} else {
 						if (event->recv.len ==
 						    current_size)
@@ -358,6 +376,15 @@ void do_server()
 	while (!ready) {
 		cci_event_t *event;
 
+		if (blocking) {
+			FD_ZERO(&rfds);
+			FD_SET(fd, &rfds);
+
+			ret = select(nfds, &rfds, NULL, NULL, NULL);
+			if (!ret)
+				return;
+		}
+
 		ret = cci_get_event(endpoint, &event);
 		if (ret == CCI_SUCCESS) {
 			switch (event->type) {
@@ -441,13 +468,13 @@ int main(int argc, char *argv[])
 {
 	int ret, c;
 	uint32_t caps = 0;
-	cci_os_handle_t ep_fd;
+	cci_os_handle_t *os_handle = NULL;
 	cci_opt_handle_t handle;
 	char *uri = NULL;
 
 	name = argv[0];
 
-	while ((c = getopt(argc, argv, "h:sRc:nwrm:Ci:W:")) != -1) {
+	while ((c = getopt(argc, argv, "h:sRc:nwrm:Ci:W:b")) != -1) {
 		switch (c) {
 		case 'h':
 			server_uri = strdup(optarg);
@@ -492,6 +519,10 @@ int main(int argc, char *argv[])
 		case 'C':
 			remote_completion = 1;
 			break;
+		case 'b':
+			blocking = 1;
+			os_handle = &fd;
+			break;
 		default:
 			print_usage();
 		}
@@ -532,7 +563,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* create an endpoint */
-	ret = cci_create_endpoint(NULL, 0, &endpoint, &ep_fd);
+	ret = cci_create_endpoint(NULL, 0, &endpoint, os_handle);
 	if (ret) {
 		fprintf(stderr, "cci_create_endpoint() failed with %s\n",
 			cci_strerror(NULL, ret));
@@ -547,6 +578,12 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	printf("Opened %s\n", uri);
+
+	if (blocking) {
+		nfds = fd + 1;
+		FD_ZERO(&rfds);
+		FD_SET(fd, &rfds);
+	}
 
 	if (is_server)
 		do_server();
