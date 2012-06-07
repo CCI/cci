@@ -54,10 +54,11 @@ BEGIN_C_DECLS
 	VERBS_MSG_TYPE_MAX,
 } verbs_msg_type_t;
 
-#define VERBS_EP_RMSG_CONNS	(16)
+#define VERBS_EP_RMSG_CONNS	(0)
 #define VERBS_CONN_RMSG_DEPTH	(16)	/* NOTE: limited to 31 due to vconn->avail */
 #define VERBS_INLINE_BYTES	(128)
 
+#define VERBS_ACK_CNT		(512)
 #define VERBS_PROGRESS_TIMEOUT	(10000) /* microseconds */
 
 /* MSG header */
@@ -389,7 +390,8 @@ typedef struct verbs_ep {
 	uint32_t rdma_msg_used;	/* number of connections using
 				   RDMA MSGs */
 
-	struct epoll_event ev;	/* for managing the ibv and rdma fds */
+	int fd;			/* epoll() fd */
+	int acks;		/* accumulated acks from ibv_get_cq_event() */
 	pthread_t tid;		/* progress thread */
 	int is_progressing;	/* being progressed? */
 

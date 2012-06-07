@@ -1250,6 +1250,56 @@ ctp_verbs_create_endpoint(cci_device_t * device,
 	if (fd) {
 		int i;
 
+#if 1
+		struct epoll_event ev;
+
+		ret = epoll_create(2);
+		if (ret == -1) {
+			ret = errno;
+			debug(CCI_DB_EP, "%s: epoll() returned %s", __func__,
+					strerror(ret));
+			goto out;
+		}
+		vep->fd = ret;
+
+		fflags = fcntl(vep->fd, F_GETFL, 0);
+		if (fflags == -1) {
+			ret = errno;
+			goto out;
+		}
+
+		ret = fcntl(vep->fd, F_SETFL, fflags | O_NONBLOCK);
+		if (ret == -1) {
+			ret = errno;
+			goto out;
+		}
+
+		ev.data.ptr = (void *) verbs_get_cm_event;
+		ev.events = EPOLLIN;
+
+		ret = epoll_ctl(vep->fd, EPOLL_CTL_ADD, vep->rdma_channel->fd, &ev);
+		if (ret == -1) {
+			ret = errno;
+			debug(CCI_DB_EP, "%s: epoll_ctl() returned %s", __func__,
+					strerror(ret));
+			goto out;
+		}
+
+		ev.data.ptr = (void *) verbs_get_cq_event;
+		ev.events = EPOLLIN;
+
+		ret = epoll_ctl(vep->fd, EPOLL_CTL_ADD, vep->ib_channel->fd, &ev);
+		if (ret == -1) {
+			ret = errno;
+			debug(CCI_DB_EP, "%s: epoll_ctl() returned %s", __func__,
+					strerror(ret));
+			goto out;
+		}
+
+		ibv_req_notify_cq(vep->cq, 0);
+
+		*fd = vep->fd;
+#else
 		/* app wants to block, create OS handle and progress thread */
 		ret = pipe(ep->fd);
 		if (ret == -1) {
@@ -1273,7 +1323,6 @@ ctp_verbs_create_endpoint(cci_device_t * device,
 			}
 		}
 
-
 		*fd = ep->fd[0];
 
 		ret = pthread_create(&vep->tid, NULL, verbs_progress_thread, ep);
@@ -1284,6 +1333,7 @@ ctp_verbs_create_endpoint(cci_device_t * device,
 				goto out;
 			}
 		}
+#endif
 	}
 
 	CCI_EXIT;
@@ -1410,6 +1460,9 @@ static int ctp_verbs_destroy_endpoint(cci_endpoint_t * endpoint)
 		close(ep->fd[1]);
 		ep->fd[1] = 0;
 	}
+
+	if (vep->acks)
+		ibv_ack_cq_events(vep->cq, vep->acks);
 
 	while (!TAILQ_EMPTY(&vep->conns)) {
 		cci__conn_t *conn = NULL;
@@ -3567,11 +3620,28 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 		verbs_conn_t *vconn = NULL;
 
 		TAILQ_FOREACH(vconn, &vep->conns, entry) {
-			if (vconn->raddr) {
-				ret = verbs_poll_rdma_msgs(vconn);
-				if (ret == CCI_SUCCESS)
-					return ret;
+			if (vconn->raddr)
+				verbs_poll_rdma_msgs(vconn);
+		}
+	}
+
+	if (vep->fd) {
+		struct ibv_cq *cq;
+		void *cq_ctx;
+
+		debug(CCI_DB_MSG, "%s: checking for CQ event", __func__);
+		ret = ibv_get_cq_event(vep->ib_channel, &cq, &cq_ctx);
+		if (!ret) {
+			vep->acks++;
+			if (vep->acks == VERBS_ACK_CNT) {
+				ibv_ack_cq_events(vep->cq, VERBS_ACK_CNT);
+				vep->acks = 0;
 			}
+			ibv_req_notify_cq(vep->cq, 0);
+		} else {
+			ret = errno;
+			debug(CCI_DB_ALL, "%s: ibv_get_cq_event() returned %s (%d)",
+				__func__, strerror(ret), ret);
 		}
 	}
 
@@ -3636,6 +3706,8 @@ out:
 #define VERBS_CQ_EVT	1
 #define VERBS_RMSG_EVT	2
 
+#define VERBS_EP_NUM_EVTS	(8)
+
 static int verbs_progress_ep(cci__ep_t * ep)
 {
 	int ret = CCI_EAGAIN;
@@ -3658,24 +3730,53 @@ static int verbs_progress_ep(cci__ep_t * ep)
 		return CCI_EAGAIN;
 	}
 
+	if (vep->fd) {
+		struct epoll_event events[VERBS_EP_NUM_EVTS];
+
+		ret = epoll_wait(vep->fd, events, VERBS_EP_NUM_EVTS, 0);
+		if (ret > 0) {
+			int count = ret, i, ret2;
+
+			debug(CCI_DB_EP, "%s: epoll_wait() found %d events",
+				__func__, count);
+			for (i = 0; i < count; i++) {
+				int (*func)(cci__ep_t*) = events[i].data.ptr;
+				if (!(events[i].events & EPOLLIN)) {
+					debug(CCI_DB_EP, "%s: epoll error on %s"
+						" fd", __func__,
+						events[i].data.fd ==
+						vep->rdma_channel->fd ?
+						"rdma" : "ib");
+				} else {
+					ret2 = (*func)(ep);
+					if (ret2 == CCI_SUCCESS)
+						ret = CCI_SUCCESS;
+				}
+			}
+		} else if (ret == -1) {
+			debug(CCI_DB_EP, "%s: epoll_wait() returned %s",
+				__func__, strerror(errno));
+		}
+	} else {
 again:
-	try++;
-	switch (which) {
-	case VERBS_CM_EVT:
-		ret = verbs_get_cm_event(ep);
-		break;
-	case VERBS_CQ_EVT:
-		ret = verbs_get_cq_event(ep);
-		break;
-	case VERBS_RMSG_EVT:
-		ret = verbs_get_rdma_msg_event(ep);
-		break;
+		try++;
+		switch (which) {
+		case VERBS_CM_EVT:
+			ret = verbs_get_cm_event(ep);
+			break;
+		case VERBS_CQ_EVT:
+			ret = verbs_get_cq_event(ep);
+			break;
+		case VERBS_RMSG_EVT:
+			ret = verbs_get_rdma_msg_event(ep);
+			break;
+		}
+		which++;
+		if (which > VERBS_RMSG_EVT)
+			which = VERBS_CM_EVT;
+		if (ret == CCI_EAGAIN && try < 3)
+			goto again;
 	}
-	which++;
-	if (which > VERBS_RMSG_EVT)
-		which = VERBS_CM_EVT;
-	if (ret == CCI_EAGAIN && try < 3)
-		goto again;
 
 	pthread_mutex_lock(&ep->lock);
 	vep->is_progressing = 0;
@@ -3696,7 +3797,7 @@ ctp_verbs_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
 	CCI_ENTER;
 
 	ep = container_of(endpoint, cci__ep_t, endpoint);
-	if (!ep->fd[1])
+	if (1 && !ep->fd[1])
 		verbs_progress_ep(ep);
 
 	pthread_mutex_lock(&ep->lock);
@@ -3720,11 +3821,14 @@ ctp_verbs_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
 
 	if (ev) {
 		TAILQ_REMOVE(&ep->evts, ev, entry);
+#if 1
+#else
 		if (ep->fd[0]) {
 			char buf = 0;
 			debug(CCI_DB_MSG, "%s: draining pipe", __func__);
 			read(ep->fd[0], &buf, sizeof(buf));
 		}
+#endif
 	} else {
 		ret = CCI_EAGAIN;
 	}
