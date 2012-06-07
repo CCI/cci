@@ -104,6 +104,9 @@ typedef struct cci__ep {
 	/*! Is closing down? */
 	int closing;
 
+	/*! OS handle given to application */
+	cci_os_handle_t fd[2];
+
 	/*! Owning dev */
 	cci__dev_t *dev;
 
