@@ -209,15 +209,6 @@ static inline const char *sock_msg_type(sock_msg_type_t type)
 	return NULL;
 }
 
-static const char *sock_strerror(cci_endpoint_t * endpoint,
-				 enum cci_status status)
-{
-	CCI_ENTER;
-
-	CCI_EXIT;
-	return NULL;
-}
-
 /**
  * Display a NULL terminated array of devices
  * @param[in]	devices	NULL terminated array of devices to display
@@ -722,6 +713,7 @@ out:
 	return ret;
 }
 
+#if 0
 static int sock_get_devices(cci_device_t const ***devices)
 {
 	CCI_ENTER;
@@ -741,6 +733,7 @@ static int sock_get_devices(cci_device_t const ***devices)
 
 	return CCI_SUCCESS;
 }
+#endif
 
 static const char *ctp_sock_strerror(cci_endpoint_t * endpoint,
 				 enum cci_status status)
@@ -794,8 +787,6 @@ sock_set_nonblocking(cci_os_handle_t sock, sock_fd_type_t type, void *p)
 
 static inline void sock_close_socket(cci_os_handle_t sock)
 {
-	int found = 0;
-
 	close(sock);
 
 	return;
