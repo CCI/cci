@@ -401,7 +401,12 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 				} else if (0 == strncmp("mtu=", *arg, 4)) {
 					const char *mtu_str = *arg + 4;
 					mtu = strtol(mtu_str, NULL, 0);
-				 }
+				} else if (0 == strncmp("port=", *arg, 5)) {
+					const char *s_port = *arg + 5;
+					uint16_t    port;
+					port = atoi (s_port);
+					sdev->port = htons(port);
+				}
 			}
 			if (sdev->ip != 0) {
 				/* try to get the actual values now */
