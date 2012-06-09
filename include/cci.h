@@ -1222,18 +1222,6 @@ CCI_DECLSPEC int cci_return_event(cci_event_t * event);
 /*! \defgroup opts Endpoint / Connection Options */
 
 /*!
-  Level defining the scope of an option
-
-  \ingroup opts
-*/
-typedef enum cci_opt_level {
-	/*! Flag indicating that the union is an endpoint */
-	CCI_OPT_LEVEL_ENDPOINT,
-	/*! Flag indicating that the union is a connection */
-	CCI_OPT_LEVEL_CONNECTION
-} cci_opt_level_t;
-
-/*!
   Name of options
 
   \ingroup opts
@@ -1351,19 +1339,15 @@ typedef const void cci_opt_handle_t;
   Set an endpoint or connection option value.
 
   \param[in] handle Endpoint or connection handle.
-  \param[in] level  Indicates type of handle.
   \param[in] name   Which option to set the value of.
   \param[in] val    Pointer to the input value. The type of the value
                     must match the option name.
 
-  If level is CCI_OPT_LEVEL_ENDPOINT, then handle must be
-  a cci_endpoint_t*.
-  If it is CCI_OPT_LEVEL_CONNECTION, then handle must be
-  a cci_connection_t*.
+  Depending on the value of name, handle must be a cci_endpoint_t*
+  or a cci_connection_t*.
 
   \return CCI_SUCCESS   Value successfully set.
   \return CCI_EINVAL    Handle or val is NULL.
-  \return CCI_EINVAL    Level/name mismatch.
   \return CCI_EINVAL    Trying to set a get-only option.
   \return CCI_ERR_NOT_IMPLEMENTED   Not supported by this transport.
   \return Each transport may have additional error codes.
@@ -1373,32 +1357,28 @@ typedef const void cci_opt_handle_t;
 
   \ingroup opts
 */
-CCI_DECLSPEC int cci_set_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
+CCI_DECLSPEC int cci_set_opt(cci_opt_handle_t * handle,
 			     cci_opt_name_t name, const void *val);
 
 /*!
   Get an endpoint or connection option value.
 
   \param[in] handle Endpoint or connection handle.
-  \param[in] level  Indicates type of handle.
   \param[in] name   Which option to set the value of.
   \param[in] val    Pointer to the output value. The type of the value
                     must match the option name.
 
-  If level is CCI_OPT_LEVEL_ENDPOINT, then handle must be
-  a cci_endpoint_t*.
-  If it is CCI_OPT_LEVEL_CONNECTION, then handle must be
-  a cci_connection_t*.
+  Depending on the value of name, handle must be a cci_endpoint_t*
+  or a cci_connection_t*.
 
   \return CCI_SUCCESS   Value successfully retrieved.
   \return CCI_EINVAL    Handle or val is NULL.
-  \return CCI_EINVAL    Level/name mismatch.
   \return CCI_ERR_NOT_IMPLEMENTED   Not supported by this transport.
   \return Each transport may have additional error codes.
 
   \ingroup opts
 */
-CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
+CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t * handle,
 			     cci_opt_name_t name, void *val);
 
 /* ================================================================== */

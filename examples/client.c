@@ -100,7 +100,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	ret = cci_get_opt(endpoint, CCI_OPT_LEVEL_ENDPOINT,
+	ret = cci_get_opt(endpoint,
 			  CCI_OPT_ENDPT_URI, &uri);
 	if (ret) {
 		fprintf(stderr, "cci_get_opt() failed with %s\n", cci_strerror(NULL, ret));
@@ -109,7 +109,7 @@ int main(int argc, char *argv[])
 	printf("Opened %s\n", uri);
 
 	/* set endpoint tx timeout */
-	cci_set_opt(endpoint, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_SEND_TIMEOUT,
+	cci_set_opt(endpoint, CCI_OPT_ENDPT_SEND_TIMEOUT,
 		    &timeout_us);
 	if (ret) {
 		fprintf(stderr, "cci_set_opt() returned %s\n",

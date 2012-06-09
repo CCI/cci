@@ -105,7 +105,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* set conn tx timeout */
-	cci_set_opt(endpoint, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_SEND_TIMEOUT,
+	cci_set_opt(endpoint, CCI_OPT_ENDPT_SEND_TIMEOUT,
 		    &timeout);
 	if (ret) {
 		fprintf(stderr, "cci_set_opt() failed with %s\n",

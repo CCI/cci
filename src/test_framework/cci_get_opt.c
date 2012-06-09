@@ -3,7 +3,7 @@
  *
  * test implementation of cci_get_opt() to ensure that it rejects invalid input.
  *
- * int cci get opt(cci_opt_handle_t *handle, cci_opt_level_t level, cci_opt_name_t name, void val, int len);
+ * int cci get opt(cci_opt_handle_t *handle, cci_opt_name_t name, void val, int len);
  *
  * CCI_OPT_ENDPT_SEND_TIMEOUT
  * CCI_OPT_ENDPT_RECV_BUF_COUNT
@@ -58,7 +58,7 @@ START_TEST (get_opt_correct) {
   /* get an endpoint option */
   optHandle = endpointP;
 
-  status = cci_get_opt(optHandle, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_SEND_TIMEOUT,
+  status = cci_get_opt(optHandle, CCI_OPT_ENDPT_SEND_TIMEOUT,
                                   (void*) &optionP, &optionSize);
   fail_unless(status == CCI_SUCCESS, "cci_get_opt failed with status %s\n", cci_strerror(NULL, status));
   fail_unless(*optionP == DEFAULT_ENDPOINT_SEND_TIMEOUT, "cci_get_opt(CCI_OPT_ENDPT_SEND_TIMEOUT) returned %d instead of %d\n", *optionP,
@@ -66,11 +66,11 @@ START_TEST (get_opt_correct) {
   
   setOption = (*optionP +2) * 2;
   
-  status = cci_set_opt(optHandle, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_SEND_TIMEOUT,
+  status = cci_set_opt(optHandle, CCI_OPT_ENDPT_SEND_TIMEOUT,
                     (void *) &setOption, (int) sizeof(setOption));
   fail_unless(status == CCI_SUCCESS, "cci_set_opt(CCI_OPT_ENDPT_SEND_TIMEOUT) failed with status %s\n", cci_strerror(NULL, status));
 
-  status = cci_get_opt(optHandle, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_SEND_TIMEOUT,
+  status = cci_get_opt(optHandle, CCI_OPT_ENDPT_SEND_TIMEOUT,
                                   (void*) &optionP, &optionSize);
   fail_unless(status == CCI_SUCCESS, "cci_get_opt(CCI_OPT_ENDPT_SEND_TIMEOUT) failed with status %s\n", cci_strerror(NULL, status));
   fail_unless(*optionP == setOption, "cci_get_opt(CCI_OPT_ENDPT_SEND_TIMEOUT) returned %d instead of %d\n", *optionP,
@@ -102,7 +102,7 @@ START_TEST (get_opt_null_handle) {
 	status = cci_create_endpoint((cci_device_t*) *devices, deviceFlags, &endpointP, &fd);
   fail_unless(status == CCI_SUCCESS, "cci_create_endpoint() failed with status %s", cci_strerror(NULL, status));
 
-  status = cci_get_opt(optHandle, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_SEND_TIMEOUT,
+  status = cci_get_opt(optHandle, CCI_OPT_ENDPT_SEND_TIMEOUT,
                                   (void*) &optionP, &optionSize);
   fail_unless(status == CCI_EINVAL, "cci_get_opt failed with status %s\n", cci_strerror(NULL, status));
 }
@@ -134,7 +134,7 @@ START_TEST (get_opt_invalid_option) {
   /* get an endpoint option */
   optHandle = endpointP;
 
-  status = cci_get_opt(optHandle, CCI_OPT_LEVEL_ENDPOINT, 100, (void*) &optionP, &optionSize);
+  status = cci_get_opt(optHandle, 100, (void*) &optionP, &optionSize);
   fail_unless(status == CCI_EINVAL, "cci_get_opt failed with status %s\n", cci_strerror(NULL, status));
 }
 END_TEST
@@ -167,7 +167,7 @@ START_TEST (get_opt_rbc) {
 /* get an endpoint option */
   optHandle = endpointP;
 
-  status = cci_get_opt(optHandle, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_RECV_BUF_COUNT,
+  status = cci_get_opt(optHandle, CCI_OPT_ENDPT_RECV_BUF_COUNT,
                                   (void*) &optionP, &optionSize);
   fail_unless(status == CCI_SUCCESS, "cci_get_opt failed with status %s\n", cci_strerror(NULL, status));
   fail_unless(*optionP == DEFAULT_ENDPOINT_RECV_BUF_COUNT, "cci_get_opt(CCI_OPT_ENDPT_RECV_BUF_COUNT) returned %d instead of %d\n", *optionP,
@@ -175,14 +175,14 @@ START_TEST (get_opt_rbc) {
   
   setOption = (*optionP +2) * 2;
   
-  status = cci_set_opt(optHandle, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_RECV_BUF_COUNT,
+  status = cci_set_opt(optHandle, CCI_OPT_ENDPT_RECV_BUF_COUNT,
                     (void *) &setOption, (int) sizeof(setOption));
   fail_unless((status == CCI_SUCCESS) || (status == CCI_ERR_NOT_IMPLEMENTED),
 									"cci_set_opt(CCI_OPT_ENDPT_RECV_BUF_COUNT) failed with status %s\n", cci_strerror(NULL, status));
 	
 	/* assuming that cci_get_opt() is implemented for this option, see if it actually worked */
 	if(status == CCI_SUCCESS) {
-		status = cci_get_opt(optHandle, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_RECV_BUF_COUNT,
+		status = cci_get_opt(optHandle, CCI_OPT_ENDPT_RECV_BUF_COUNT,
 																		(void*) &optionP, &optionSize);
 		
 		fail_unless(status == CCI_SUCCESS, "cci_get_opt(CCI_OPT_ENDPT_RECV_BUF_COUNT) failed with status %s\n", cci_strerror(NULL, status));
@@ -220,7 +220,7 @@ START_TEST (get_opt_sbc) {
 	/* get an endpoint option */
   optHandle = endpointP;
 
-  status = cci_get_opt(optHandle, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_SEND_BUF_COUNT,
+  status = cci_get_opt(optHandle, CCI_OPT_ENDPT_SEND_BUF_COUNT,
                                   (void*) &optionP, &optionSize);
   fail_unless(status == CCI_SUCCESS, "cci_get_opt failed with status %s\n", cci_strerror(NULL, status));
   fail_unless(*optionP == DEFAULT_ENDPOINT_SEND_BUF_COUNT, "cci_get_opt(CCI_OPT_ENDPT_SEND_BUF_COUNT) returned %d instead of %d\n", *optionP,
@@ -228,14 +228,14 @@ START_TEST (get_opt_sbc) {
   
   setOption = (*optionP +2) * 2;
   
-  status = cci_set_opt(optHandle, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_SEND_BUF_COUNT,
+  status = cci_set_opt(optHandle, CCI_OPT_ENDPT_SEND_BUF_COUNT,
                     (void *) &setOption, (int) sizeof(setOption));
   fail_unless((status == CCI_SUCCESS) || (status == CCI_ERR_NOT_IMPLEMENTED), "cci_set_opt(CCI_OPT_ENDPT_SEND_BUF_COUNT) failed with status %s\n",
 									cci_strerror(NULL, status));
 
 	/* assuming that cci_get_opt() is implemented for this option, see if it actually worked */
 	if(status == CCI_SUCCESS) {
-		status = cci_get_opt(optHandle, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_SEND_BUF_COUNT,
+		status = cci_get_opt(optHandle, CCI_OPT_ENDPT_SEND_BUF_COUNT,
 																		(void*) &optionP, &optionSize);
 		fail_unless(status == CCI_SUCCESS, "cci_get_opt(CCI_OPT_ENDPT_SEND_BUF_COUNT) failed with status %s\n", cci_strerror(NULL, status));
 		fail_unless(*optionP == setOption, "cci_get_opt(CCI_OPT_ENDPT_SEND_BUF_COUNT) returned %d instead of %d\n", *optionP, setOption);
@@ -271,7 +271,7 @@ START_TEST (get_opt_kt) {
   /* get an endpoint option */
   optHandle = endpointP;
 
-  status = cci_get_opt(optHandle, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT,
+  status = cci_get_opt(optHandle, CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT,
                                   (void*) &optionP, &optionSize);
   fail_unless(status == CCI_SUCCESS, "cci_get_opt failed with status %s\n", cci_strerror(NULL, status));
   fail_unless(*optionP == DEFAULT_ENDPOINT_KEEPALIVE_TIMEOUT, "cci_get_opt(CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT) returned %d instead of %d\n", *optionP,
@@ -279,14 +279,14 @@ START_TEST (get_opt_kt) {
   
   setOption = (*optionP +2) * 2;
   
-  status = cci_set_opt(optHandle, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT,
+  status = cci_set_opt(optHandle, CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT,
                     (void *) &setOption, (int) sizeof(setOption));
   fail_unless((status == CCI_SUCCESS) || (status == CCI_ERR_NOT_IMPLEMENTED), "cci_set_opt(CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT) failed with status %s\n",
 										cci_strerror(NULL, status));
 
 	/* assuming that cci_get_opt() is implemented for this option, see if it actually worked */
 	if(status == CCI_SUCCESS) {
-		status = cci_get_opt(optHandle, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT,
+		status = cci_get_opt(optHandle, CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT,
 																		(void*) &optionP, &optionSize);
 		fail_unless(status == CCI_SUCCESS, "cci_get_opt(CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT) failed with status %s\n", cci_strerror(NULL, status));
 		fail_unless(*optionP == setOption, "cci_get_opt(CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT) returned %d instead of %d\n", *optionP,
