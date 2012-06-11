@@ -17,7 +17,7 @@
 #include "cci.h"
 #include "plugins/ctp/ctp.h"
 
-int cci_set_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
+int cci_set_opt(cci_opt_handle_t * handle,
 		cci_opt_name_t name, const void *val)
 {
 	cci_plugin_ctp_t *plugin;
@@ -29,21 +29,25 @@ int cci_set_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
 		return CCI_EINVAL;
 	}
 
-	if (CCI_OPT_LEVEL_ENDPOINT == level) {
-		cci__ep_t *ep = container_of(handle->endpoint, cci__ep_t, endpoint);
-		if (handle->endpoint == NULL
-		    || name == CCI_OPT_CONN_SEND_TIMEOUT)
-			return CCI_EINVAL;
+	switch (name) {
+	case CCI_OPT_ENDPT_SEND_TIMEOUT:
+	case CCI_OPT_ENDPT_RECV_BUF_COUNT:
+	case CCI_OPT_ENDPT_SEND_BUF_COUNT:
+	case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
+	case CCI_OPT_ENDPT_URI:
+	case CCI_OPT_ENDPT_RMA_ALIGN: {
+		cci__ep_t *ep = container_of(handle, cci__ep_t, endpoint);
 		plugin = ep->plugin;
-	} else {
-		cci__conn_t *conn = container_of(handle->connection, cci__conn_t, connection);
-		if (handle->connection == NULL
-		    || name != CCI_OPT_CONN_SEND_TIMEOUT)
-			return CCI_EINVAL;
+		break;
+	}
+	case CCI_OPT_CONN_SEND_TIMEOUT: {
+		cci__conn_t *conn = container_of(handle, cci__conn_t, connection);
 		plugin = conn->plugin;
+		break;
+	}
 	}
 
-	ret = plugin->set_opt(handle, level, name, val);
+	ret = plugin->set_opt(handle, name, val);
 
 	CCI_EXIT;
 

@@ -442,7 +442,6 @@ int main(int argc, char *argv[])
 	int ret, c;
 	uint32_t caps = 0;
 	cci_os_handle_t ep_fd;
-	cci_opt_handle_t handle;
 	char *uri = NULL;
 
 	name = argv[0];
@@ -539,8 +538,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	handle.endpoint = endpoint;
-	ret = cci_get_opt(&handle, CCI_OPT_LEVEL_ENDPOINT,
+	ret = cci_get_opt(endpoint,
 			  CCI_OPT_ENDPT_URI, &uri);
 	if (ret) {
 		fprintf(stderr, "cci_get_opt() failed with %s\n", cci_strerror(NULL, ret));
