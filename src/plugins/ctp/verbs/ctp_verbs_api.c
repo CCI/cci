@@ -4036,10 +4036,6 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 	pthread_mutex_lock(&ep->lock);
 	if (connection->attribute == CCI_CONN_ATTR_RO) {
 		vconn->seqno++;
-#if 0
-		if (vconn->seqno > VERBS_SEQNO_MAX)
-			vconn->seqno = 0;
-#endif
 		header |= vconn->seqno << VERBS_SEQNO_SHIFT;
 	}
 
