@@ -131,10 +131,8 @@ static int ctp_portals_connect(cci_endpoint_t * endpoint,
 			   const void *context, int flags, const struct timeval *timeout);
 static int ctp_portals_disconnect(cci_connection_t * connection);
 static int ctp_portals_set_opt(cci_opt_handle_t * handle,
-			   cci_opt_level_t level,
 			   cci_opt_name_t name, const void *val);
 static int ctp_portals_get_opt(cci_opt_handle_t * handle,
-			   cci_opt_level_t level,
 			   cci_opt_name_t name, void *val);
 static int ctp_portals_arm_os_handle(cci_endpoint_t * endpoint, int flags);
 static int ctp_portals_get_event(cci_endpoint_t * endpoint,
@@ -1776,29 +1774,16 @@ static int portals_set_ep_rx_buf_cnt(cci__ep_t * ep, uint32_t new_count)
 }
 
 static int ctp_portals_set_opt(cci_opt_handle_t * handle,
-			   cci_opt_level_t level,
 			   cci_opt_name_t name, const void *val)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
-	cci__conn_t *conn = NULL;
-	portals_ep_t *pep = NULL;
-	portals_conn_t *pconn = NULL;
 
 	CCI_ENTER;
 
 	if (!pglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
-	}
-
-	if (CCI_OPT_LEVEL_ENDPOINT == level) {
-		ep = container_of(handle->endpoint, cci__ep_t, endpoint);
-		pep = ep->priv;
-	} else {
-		conn =
-		    container_of(handle->connection, cci__conn_t, connection);
-		pconn = conn->priv;
 	}
 
 	switch (name) {
@@ -1808,6 +1793,7 @@ static int ctp_portals_set_opt(cci_opt_handle_t * handle,
 	case CCI_OPT_ENDPT_RECV_BUF_COUNT:
 		{
 			uint32_t new_count = *((uint32_t*) val);
+			ep = container_of(handle, cci__ep_t, endpoint);
 			pthread_mutex_lock(&ep->lock);
 			ret = portals_set_ep_rx_buf_cnt(ep, new_count);
 			pthread_mutex_unlock(&ep->lock);
@@ -1816,12 +1802,14 @@ static int ctp_portals_set_opt(cci_opt_handle_t * handle,
 	case CCI_OPT_ENDPT_SEND_BUF_COUNT:
 		{
 			uint32_t new_count = *((uint32_t*) val);
+			ep = container_of(handle, cci__ep_t, endpoint);
 			pthread_mutex_lock(&ep->lock);
 			ret = portals_set_ep_tx_buf_cnt(ep, new_count);
 			pthread_mutex_unlock(&ep->lock);
 			break;
 		}
 	case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
+		ep = container_of(handle, cci__ep_t, endpoint);
 		ep->keepalive_timeout = *((uint32_t*) val);
 		break;
 	case CCI_OPT_CONN_SEND_TIMEOUT:
@@ -1839,7 +1827,6 @@ static int ctp_portals_set_opt(cci_opt_handle_t * handle,
 }
 
 static int ctp_portals_get_opt(cci_opt_handle_t * handle,
-			   cci_opt_level_t level,
 			   cci_opt_name_t name, void *val)
 {
 

@@ -71,7 +71,6 @@ int main(int argc, char *argv[])
 	cci_device_t **devices = NULL;
 	cci_endpoint_t *endpoint = NULL;
 	cci_connection_t *connection = NULL;
-	cci_opt_handle_t handle;
 	uint32_t timeout = 30 * 1000000;
 
 	while ((c = getopt(argc, argv, "h:")) != -1) {
@@ -106,8 +105,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* set conn tx timeout */
-	handle.endpoint = endpoint;
-	cci_set_opt(&handle, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_SEND_TIMEOUT,
+	cci_set_opt(endpoint, CCI_OPT_ENDPT_SEND_TIMEOUT,
 		    &timeout);
 	if (ret) {
 		fprintf(stderr, "cci_set_opt() failed with %s\n",

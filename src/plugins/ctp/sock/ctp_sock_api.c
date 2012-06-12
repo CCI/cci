@@ -72,10 +72,8 @@ static int ctp_sock_connect(cci_endpoint_t * endpoint, const char *server_uri,
 			const void *context, int flags, const struct timeval *timeout);
 static int ctp_sock_disconnect(cci_connection_t * connection);
 static int ctp_sock_set_opt(cci_opt_handle_t * handle,
-			cci_opt_level_t level,
 			cci_opt_name_t name, const void *val);
 static int ctp_sock_get_opt(cci_opt_handle_t * handle,
-			cci_opt_level_t level,
 			cci_opt_name_t name, void *val);
 static int ctp_sock_arm_os_handle(cci_endpoint_t * endpoint, int flags);
 static int ctp_sock_get_event(cci_endpoint_t * endpoint,
@@ -1740,7 +1738,6 @@ static int ctp_sock_disconnect(cci_connection_t * connection)
 }
 
 static int ctp_sock_set_opt(cci_opt_handle_t * handle,
-			cci_opt_level_t level,
 			cci_opt_name_t name, const void *val)
 {
 	int ret = CCI_SUCCESS;
@@ -1754,15 +1751,9 @@ static int ctp_sock_set_opt(cci_opt_handle_t * handle,
 		return CCI_ENODEV;
 	}
 
-	if (CCI_OPT_LEVEL_ENDPOINT == level) {
-		ep = container_of(handle->endpoint, cci__ep_t, endpoint);
-	} else {
-		conn =
-		    container_of(handle->connection, cci__conn_t, connection);
-	}
-
 	switch (name) {
 	case CCI_OPT_ENDPT_SEND_TIMEOUT:
+		ep = container_of(handle, cci__ep_t, endpoint);
 		ep->tx_timeout = *((uint32_t*) val);
 		break;
 	case CCI_OPT_ENDPT_RECV_BUF_COUNT:
@@ -1772,9 +1763,11 @@ static int ctp_sock_set_opt(cci_opt_handle_t * handle,
 		ret = CCI_ERR_NOT_IMPLEMENTED;
 		break;
 	case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
+		ep = container_of(handle, cci__ep_t, endpoint);
 		ep->keepalive_timeout = *((uint32_t*) val);
 		break;
 	case CCI_OPT_CONN_SEND_TIMEOUT:
+		conn = container_of(handle, cci__conn_t, connection);
 		conn->tx_timeout = *((uint32_t*) val);
 		break;
 	default:
@@ -1788,7 +1781,6 @@ static int ctp_sock_set_opt(cci_opt_handle_t * handle,
 }
 
 static int ctp_sock_get_opt(cci_opt_handle_t * handle,
-			cci_opt_level_t level,
 			cci_opt_name_t name, void *val)
 {
 	CCI_ENTER;

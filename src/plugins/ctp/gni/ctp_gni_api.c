@@ -66,10 +66,8 @@ static int ctp_gni_connect(cci_endpoint_t * endpoint, const char *server_uri,
 			 const void *context, int flags, const struct timeval *timeout);
 static int ctp_gni_disconnect(cci_connection_t * connection);
 static int ctp_gni_set_opt(cci_opt_handle_t * handle,
-			 cci_opt_level_t level,
 			 cci_opt_name_t name, const void *val);
 static int ctp_gni_get_opt(cci_opt_handle_t * handle,
-			 cci_opt_level_t level,
 			 cci_opt_name_t name, void *val);
 static int ctp_gni_arm_os_handle(cci_endpoint_t * endpoint, int flags);
 static int ctp_gni_get_event(cci_endpoint_t * endpoint,
@@ -1702,8 +1700,7 @@ static int ctp_gni_disconnect(cci_connection_t * connection)
 
 static int
 ctp_gni_set_opt(cci_opt_handle_t * handle,
-	      cci_opt_level_t level,
-	    cci_opt_name_t name, const void *val)
+		cci_opt_name_t name, const void *val)
 {
 	int ret = CCI_ERR_NOT_IMPLEMENTED;
 	//cci_endpoint_t *endpoint = NULL;
@@ -1719,7 +1716,7 @@ ctp_gni_set_opt(cci_opt_handle_t * handle,
 		return CCI_ENODEV;
 	}
 
-	//endpoint = handle->endpoint;
+	//endpoint = handle;
 	//ep = container_of(endpoint, cci__ep_t, endpoint);
 	//gep = ep->priv;
 	//dev = ep->dev;
@@ -1745,7 +1742,7 @@ ctp_gni_set_opt(cci_opt_handle_t * handle,
 
 static int
 ctp_gni_get_opt(cci_opt_handle_t * handle,
-	      cci_opt_level_t level, cci_opt_name_t name, void *val)
+		cci_opt_name_t name, void *val)
 {
 	CCI_ENTER;
 	CCI_EXIT;

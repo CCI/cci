@@ -54,10 +54,8 @@ typedef int (*cci_connect_fn_t) (cci_endpoint_t * endpoint, const char *server_u
 				 const struct timeval * timeout);
 typedef int (*cci_disconnect_fn_t) (cci_connection_t * connection);
 typedef int (*cci_set_opt_fn_t) (cci_opt_handle_t * handle,
-				 cci_opt_level_t level,
 				 cci_opt_name_t name, const void *val);
 typedef int (*cci_get_opt_fn_t) (cci_opt_handle_t * handle,
-				 cci_opt_level_t level,
 				 cci_opt_name_t name, void *val);
 typedef int (*cci_arm_os_handle_fn_t) (cci_endpoint_t * endpoint, int flags);
 typedef int (*cci_get_event_fn_t) (cci_endpoint_t * endpoint,

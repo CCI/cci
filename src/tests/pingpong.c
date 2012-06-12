@@ -45,7 +45,7 @@ uint64_t local_rma_handle = 0ULL;
 int remote_completion = 0;
 void *rmt_comp_msg = NULL;
 uint32_t rmt_comp_len = 0;
-cci_os_handle_t fd;
+cci_os_handle_t fd = 0;
 int blocking = 0;
 int nfds = 0;
 fd_set rfds;
@@ -469,7 +469,6 @@ int main(int argc, char *argv[])
 	int ret, c;
 	uint32_t caps = 0;
 	cci_os_handle_t *os_handle = NULL;
-	cci_opt_handle_t handle;
 	char *uri = NULL;
 
 	name = argv[0];
@@ -570,8 +569,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	handle.endpoint = endpoint;
-	ret = cci_get_opt(&handle, CCI_OPT_LEVEL_ENDPOINT,
+	ret = cci_get_opt(endpoint,
 			  CCI_OPT_ENDPT_URI, &uri);
 	if (ret) {
 		fprintf(stderr, "cci_get_opt() failed with %s\n", cci_strerror(NULL, ret));
