@@ -642,8 +642,8 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	TAILQ_INIT(&sep->idle_rxs);
 	TAILQ_INIT(&sep->handles);
 	TAILQ_INIT(&sep->rma_ops);
-    TAILQ_INIT(&sep->queued);
-    TAILQ_INIT(&sep->pending);
+	TAILQ_INIT(&sep->queued);
+	TAILQ_INIT(&sep->pending);
 
 	/* alloc txs */
 	for (i = 0; i < ep->tx_buf_cnt; i++) {
@@ -691,9 +691,9 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	if (ret)
 		goto out;
 
-    ret = sock_create_threads (ep);
-    if (ret)
-        goto out;
+	ret = sock_create_threads (ep);
+	if (ret)
+		goto out;
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -756,20 +756,18 @@ static int ctp_sock_destroy_endpoint(cci_endpoint_t * endpoint)
 	pthread_mutex_lock(&dev->lock);
 	pthread_mutex_lock(&ep->lock);
 
-	ep->priv = NULL;
-
 	if (sep) {
 		int i;
 		cci__conn_t *conn;
 		sock_conn_t *sconn;
 
-        sep->closing = 1;
+	sep->closing = 1;
 
-        pthread_mutex_unlock(&dev->lock);
-        pthread_mutex_unlock(&ep->lock);
-        sock_terminate_threads (sep);
-        pthread_mutex_lock(&dev->lock);
-        pthread_mutex_lock(&ep->lock);
+	pthread_mutex_unlock(&dev->lock);
+	pthread_mutex_unlock(&ep->lock);
+	sock_terminate_threads (sep);
+	pthread_mutex_lock(&dev->lock);
+	pthread_mutex_lock(&ep->lock);
 
 		if (sep->sock)
 			sock_close_socket(sep->sock);
@@ -830,6 +828,7 @@ static int ctp_sock_destroy_endpoint(cci_endpoint_t * endpoint)
 		free(sep);
 		ep->priv = NULL;
 	}
+	ep->priv = NULL;
 	if (ep->uri)
 		free((char *)ep->uri);
 	pthread_mutex_unlock(&ep->lock);
