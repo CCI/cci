@@ -2646,7 +2646,7 @@ static int verbs_conn_est_active(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 	conn->connection.max_send_size = vconn->mss;
 
 	pthread_mutex_lock(&ep->lock);
-	if (vep->rdma_msg_used < vep->rdma_msg_total) {
+	if (vep->rdma_msg_used < vep->rdma_msg_total && !vep->fd) {
 		vep->rdma_msg_used++;
 		need_rdma = 1;
 	}

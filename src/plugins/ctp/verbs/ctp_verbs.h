@@ -54,7 +54,7 @@ BEGIN_C_DECLS
 	VERBS_MSG_TYPE_MAX,
 } verbs_msg_type_t;
 
-#define VERBS_EP_RMSG_CONNS	(0)
+#define VERBS_EP_RMSG_CONNS	(16)
 #define VERBS_CONN_RMSG_DEPTH	(16)	/* NOTE: limited to 31 due to vconn->avail */
 #define VERBS_INLINE_BYTES	(128)
 
