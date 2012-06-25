@@ -2915,10 +2915,13 @@ static int verbs_handle_conn_payload(cci__ep_t * ep, struct ibv_wc wc)
 	if (need_rdma) {
 		attrs = ptr;
 
-		vconn->raddr = verbs_ntohll(attrs->addr);
-		vconn->rkey = ntohl(attrs->rkey);
-		vconn->expected = ntohs(attrs->seqno) + 1;
-		vconn->num_slots = VERBS_CONN_RMSG_DEPTH;	/* indicate peer wants RDMA */
+		if (!vep->fd) {
+			vconn->raddr = verbs_ntohll(attrs->addr);
+			vconn->rkey = ntohl(attrs->rkey);
+			vconn->expected = ntohs(attrs->seqno) + 1;
+			/* indicate peer wants RDMA */
+			vconn->num_slots = VERBS_CONN_RMSG_DEPTH;
+		}
 
 		ptr = ptr + (uintptr_t) sizeof(*attrs);
 	}
