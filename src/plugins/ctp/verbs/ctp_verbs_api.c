@@ -149,9 +149,26 @@ static uint32_t verbs_mtu_val(enum ibv_mtu mtu)
 
 static uint64_t verbs_device_rate(struct ibv_port_attr attr)
 {
-	uint64_t rate = 2000000000ULL;	/* 2.5 Gbps signal, 2 Gbps data rate */
+	uint64_t rate;
 
-	rate *= attr.active_speed;
+	switch (attr.active_speed) {
+	case 1:
+	case 2:
+	case 4:
+		rate = 2000000000ULL * attr.active_speed;	/* SDR/DDR/QDR: 2.5 Gbps signal, 2 Gbps data rate, per lane */
+		break;
+	case 8:
+		rate = 10000000000ULL;	/* FDR-10 */
+		break;
+	case 16:
+		rate = 13636363636ULL;	/* FDR: 14.0625 Gbps signal, 64/66 encoding */
+		break;
+	case 32:
+		rate = 25000000000ULL;	/* EDR: 25.78125 Gbps signal, 64/66 encoding */
+		break;
+	default:
+		rate = 0;
+	}
 
 	switch (attr.active_width) {
 	case 1:
