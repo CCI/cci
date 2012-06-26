@@ -1048,8 +1048,6 @@ out:
 #if HAVE_RDMA_ADDRINFO
 void rdma_destroy_ep(struct rdma_cm_id *id)
 {
-	//struct cma_id_private *id_priv;
-
 	if (id->qp)
 		rdma_destroy_qp(id);
 
@@ -1067,60 +1065,11 @@ verbs_progress_thread(void *arg)
 {
 	cci__ep_t *ep = (cci__ep_t *) arg;
 	verbs_ep_t *vep = ep->priv;
-	int nfds = 0, ret;
-	fd_set rfds;
-	struct timeval tv = { 0, VERBS_PROGRESS_TIMEOUT };
-	static int acks = 0;
-
-	if (vep->ib_channel->fd > vep->rdma_channel->fd)
-		nfds = vep->ib_channel->fd + 1;
-	else
-		nfds = vep->rdma_channel->fd + 1;
 
 	ibv_req_notify_cq(vep->cq, 0);
 
-	while (!ep->closing) {
-#if 1
+	while (!ep->closing)
 		verbs_progress_ep(ep);
-#else
-		tv.tv_usec = VERBS_PROGRESS_TIMEOUT;
-
-		FD_ZERO(&rfds);
-		FD_SET(vep->rdma_channel->fd, &rfds);
-		FD_SET(vep->ib_channel->fd, &rfds);
-
-		ret = select(nfds, &rfds, NULL, NULL, &tv);
-		if (ret && FD_ISSET(vep->ib_channel->fd, &rfds)) {
-			struct ibv_cq *cq;
-			void *cq_ctx;
-
-			debug(CCI_DB_MSG, "%s: checking for CQ event", __func__);
-			ret = ibv_get_cq_event(vep->ib_channel, &cq, &cq_ctx);
-			if (!ret) {
-				acks++;
-#define VERBS_ACK_CNT 512
-				if (acks == VERBS_ACK_CNT) {
-					ibv_ack_cq_events(vep->cq, VERBS_ACK_CNT);
-					acks = 0;
-				}
-				ibv_req_notify_cq(vep->cq, 0);
-			} else {
-				ret = errno;
-				debug(CCI_DB_ALL, "%s: ibv_get_cq_event() returned %s (%d)",
-					__func__, strerror(ret), ret);
-			}
-			do {
-				ret = verbs_get_cq_event(ep);
-			} while (!ret);
-		}
-		if (ret && FD_ISSET(vep->rdma_channel->fd, &rfds)) {
-			debug(CCI_DB_MSG, "%s: checking for CM event", __func__);
-			ret = verbs_get_cm_event(ep);
-		}
-		ret = verbs_get_rdma_msg_event(ep);
-#endif
-	}
-	ibv_ack_cq_events(vep->cq, acks);
 
 	pthread_exit(NULL);
 }
@@ -1263,7 +1212,6 @@ ctp_verbs_create_endpoint(cci_device_t * device,
 		goto out;
 
 	if (fd) {
-		int i;
 		struct epoll_event ev;
 
 		ret = epoll_create(2);

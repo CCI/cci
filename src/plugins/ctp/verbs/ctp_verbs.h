@@ -354,17 +354,6 @@ typedef struct verbs_tx_pool {
 	pthread_mutex_t lock;	/* lock, for buf changes */
 } verbs_tx_pool_t;
 
-#define VERBS_QUEUE_EVT(ep, evt)					\
-do {									\
-	debug(CCI_DB_INFO, "%s: queueing event", __func__);		\
-	TAILQ_INSERT_TAIL(&(ep)->evts, (evt), entry);			\
-	if ((ep)->fd[1]) {						\
-		char buf = '1';						\
-		debug(CCI_DB_INFO, "%s: filling pipe", __func__);	\
-		write((ep)->fd[1], &buf, sizeof(buf));			\
-	}								\
-} while (0)
-
 typedef struct verbs_ep {
 	struct ibv_comp_channel *ib_channel;
 	struct rdma_event_channel *rdma_channel;	/* for connection requests */
