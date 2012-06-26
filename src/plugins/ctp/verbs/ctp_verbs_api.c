@@ -425,6 +425,7 @@ static int verbs_get_pci_info(struct cci_device * device, struct ibv_context *co
 
 static int ctp_verbs_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
+	char *rmsg_conns = NULL;
 	int count = 0;
 	int index = 0;
 	int used[CCI_MAX_DEVICES];
@@ -443,6 +444,11 @@ static int ctp_verbs_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver, uint32_t 
 		ret = CCI_ENOMEM;
 		goto out;
 	}
+
+	vglobals->ep_rmsg_conns = VERBS_EP_RMSG_CONNS;
+	rmsg_conns = getenv("CCI_CTP_VERBS_RMSG_CONNS");
+	if (rmsg_conns && rmsg_conns[0] != '\0')
+		vglobals->ep_rmsg_conns = strtol(rmsg_conns, NULL, 0);
 
 	devices = calloc(CCI_MAX_DEVICES, sizeof(*vglobals->devices));
 	if (!devices) {
@@ -1206,7 +1212,7 @@ ctp_verbs_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 
-	vep->rdma_msg_total = VERBS_EP_RMSG_CONNS;
+	vep->rdma_msg_total = vglobals->ep_rmsg_conns;
 	ret = verbs_create_rx_pool(ep, ep->rx_buf_cnt);
 	if (ret)
 		goto out;
@@ -2863,7 +2869,7 @@ static int verbs_handle_conn_payload(cci__ep_t * ep, struct ibv_wc wc)
 	if (need_rdma) {
 		attrs = ptr;
 
-		if (!vep->fd) {
+		if (!vep->fd && vglobals->ep_rmsg_conns) {
 			vconn->raddr = verbs_ntohll(attrs->addr);
 			vconn->rkey = ntohl(attrs->rkey);
 			vconn->expected = ntohs(attrs->seqno) + 1;

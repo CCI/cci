@@ -295,6 +295,7 @@ typedef struct verbs_globals {
 	struct cci_device **devices;	/* array of devices */
 	struct ibv_context **contexts;	/* open devices */
 	struct ifaddrs *ifaddrs;	/* array indexed to contexts */
+	int ep_rmsg_conns;	/* number of RDMA MSG connections per endpoint */
 } verbs_globals_t;
 
 extern volatile verbs_globals_t *vglobals;
