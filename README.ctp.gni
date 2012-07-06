@@ -1,0 +1,113 @@
+= Configuration ================================================================
+
+  The GNI CTP is disabled by default. To enable it, add one of these option to
+  configure:
+
+    --with-gni		# use the system default uGNI headers and libs
+    --with-gni=${GNI}	# use this installation of uGNI where ${GNI}
+                          is the path to the installation
+
+  The first option is preferable. The configure script will parse your
+  environment to look for the appropriate locations for the GNI header files and
+  libraries.
+
+  You can override the library path with:
+
+    --with-gni-libdir=DIR
+
+= Endpoint naming ==============================================================
+
+  GNI endpoint URIs are host and port where host is a hostname or IPv4 address:
+
+    gni://foo.com:5555
+    gni://1.2.3.4:5555
+
+  where the hostname or IPv4 address are for the ipogif0 interface on the host.
+
+= Config file options ==========================================================
+
+  GNI devices _must_ have this item in the config file:
+
+    transport = gni
+
+  GNI devices may have the following items in the config file:
+
+    ip = 1.2.3.4
+
+  where 1.2.3.4 is the IPv4 address of the GNI device to bind to.
+
+    interface = ipogif0
+
+  This tells the transport to find the IPv4 address for this interface and to
+  use it.
+
+  If both ip and interface are set, it will use the ip and ignore the interface.
+
+    port = 5555
+
+  Do not use the port option if you intend to use more than one endpoint per
+  host. This is mostly useful for running tests with a single endpoint per host.
+
+= Run-time notes ===============================================================
+
+  1. The ipogif0 device must be configured and up. We use a scoket to exchange
+  the SMSG information to bring up of the connection.  Once the connection is
+  established, all traffic then uses the native uGNI APIs and does not use any
+  sockets.
+
+  2. The sock driver can use the ipogif0 devices. You probably don't want to do
+  this for performance reasons.
+
+  3. The GNI transport relies on "system dedicated protection domain
+  identifiers" being enabled on the system. By default uGNI does not allow
+  communication between separate jobs or between jobs and processes running on
+  I/O nodes. The GNI transport requires this to be enabled and the ptag and
+  cookie must be set in ctp_gni.h:
+
+    #define GNI_DEFAULT_PTAG        (208)
+    #define GNI_DEFAULT_COOKIE      (0x73e70000)
+
+  are the default values.
+
+= Known limitations ============================================================
+
+  1. Not implemented:
+
+     Blocking via the OS handle
+
+     Keepalive messages
+
+     Adjusting send timeouts via set_opt
+
+  2. Error handling of connections
+
+     We do not catch all connection events so a connection may die and we think it
+     is still up.
+
+= Performance Tuning ===========================================================
+
+  There are no-runtime tuning parameters currently. A few items may be tweaked
+  in the header file that will determine how the GNI transport behaves.
+
+  The uGNI API does not provide a per-process shared receive queue. Therefore
+  the GNI transport has to use per-connection mailboxes which greatly reduces
+  scalability. To minimize the impact, we limit the size of MSGs and we limit
+  the number of messages in-flight per connection.
+
+  GNI_EP_MSS sets the max_send_size. It is 128 bytes by default.
+
+  GNI_CONN_CREDIT sets the number of messages in-flight. It is 8 by default.
+
+  The combination above requires about 800 bytes per connection. Given a machine
+  can have 300,000+ peer processes, it adds up quickly.
+  
+  In order to post an RDMA, the uGNI API requires more data than we can pack
+  into the cci_rma_handle_t. Therefore, we must request the information from the
+  peer before posting the RDMA. This extra round-trip adds latency to each RDMA
+  which is noticeable on small RMAs but not on larger RMAs. By default we will
+  cache the most recently RDMA information for each connection. It is controlled
+  by:
+
+  GNI_RMA_REMOTE_SIZE which sets the limit of cached RDMA data per connection.
+  Setting it to 0 will disable caching and force a rendezvous for each RDMA.
+

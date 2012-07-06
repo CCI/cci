@@ -16,6 +16,7 @@
 #include <string.h>
 #include <assert.h>
 #include <unistd.h>
+#include <pthread.h>
 #ifdef HAVE_IFADDRS_H
 #include <net/if.h>
 #include <ifaddrs.h>
@@ -37,7 +38,9 @@
 int cci__debug = CCI_DB_DFLT;
 cci__globals_t *globals = NULL;
 int initialized = 0;
-pthread_mutex_t init_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_once_t once = PTHREAD_ONCE_INIT;
+pthread_mutex_t init_lock;
+
 
 static inline void cci__get_debug_env(void)
 {
@@ -79,7 +82,7 @@ static inline void cci__get_debug_env(void)
 			mask |= CCI_DB_WARN;
 		} else if (0 == strncmp(debug, "drvr", 4)) {
 			mask |= CCI_DB_DRVR;
-		} else if (0 == strncmp(debug, "ep", 4)) {
+		} else if (0 == strncmp(debug, "ep", 2)) {
 			mask |= CCI_DB_EP;
 		} else if (0 == strncmp(debug, "all", 3)) {
 			mask |= CCI_DB_ALL;
@@ -527,6 +530,12 @@ int cci__parse_config(const char *path)
 	return 0;
 }
 
+static void cci_lock_init(void)
+{
+	pthread_mutex_init(&init_lock, NULL);
+	return;
+}
+
 int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	int ret;
@@ -543,6 +552,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	if (!caps)
 		return CCI_EINVAL;
 
+	pthread_once(&once, cci_lock_init);
 	pthread_mutex_lock(&init_lock);
 
 	if (0 == initialized) {

@@ -16,7 +16,7 @@ release=0
 # requirement is that it must be entirely printable ASCII characters
 # and have no white space.
 
-greek=a1
+greek=b1
 
 # If want_repo_rev=1, then the repository version number will be
 # included in the overall CCI version number in some form.  
@@ -52,7 +52,7 @@ date="Unreleased developer copy"
 # chapter from the GNU Libtool documentation.  Notes:
 
 # 1. Since version numbers are associated with *releases*, the version
-# number maintained on the CCI SVN trunk (and developer branches) is
+# number maintained on the CCI git HEAD (and developer branches) is
 # always 0:0:0.
 
 # 2. Version numbers are described in the Libtool current:revision:age

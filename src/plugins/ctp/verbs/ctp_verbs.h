@@ -9,6 +9,7 @@
 #define CCI_CTP_VERBS_H
 
 #include "cci/config.h"
+#include <sys/epoll.h>
 
 #include <assert.h>
 #include <rdma/rdma_cma.h>
@@ -56,6 +57,9 @@ BEGIN_C_DECLS
 #define VERBS_EP_RMSG_CONNS	(16)
 #define VERBS_CONN_RMSG_DEPTH	(16)	/* NOTE: limited to 31 due to vconn->avail */
 #define VERBS_INLINE_BYTES	(128)
+
+#define VERBS_ACK_CNT		(512)
+#define VERBS_PROGRESS_TIMEOUT	(10000) /* microseconds */
 
 /* MSG header */
 
@@ -284,7 +288,6 @@ typedef struct verbs_dev {
 	struct ibv_context *context;	/* device info and ops */
 	struct ifaddrs *ifa;	/* device's interface addr */
 	int count;		/* number of ifaddrs */
-	int is_progressing;	/* being progressed? */
 } verbs_dev_t;
 
 typedef struct verbs_globals {
@@ -292,6 +295,7 @@ typedef struct verbs_globals {
 	struct cci_device **devices;	/* array of devices */
 	struct ibv_context **contexts;	/* open devices */
 	struct ifaddrs *ifaddrs;	/* array indexed to contexts */
+	int ep_rmsg_conns;	/* number of RDMA MSG connections per endpoint */
 } verbs_globals_t;
 
 extern volatile verbs_globals_t *vglobals;
@@ -352,7 +356,8 @@ typedef struct verbs_tx_pool {
 } verbs_tx_pool_t;
 
 typedef struct verbs_ep {
-	struct rdma_event_channel *channel;	/* for connection requests */
+	struct ibv_comp_channel *ib_channel;
+	struct rdma_event_channel *rdma_channel;	/* for connection requests */
 	struct rdma_cm_id *id_rc;	/* reliable ID */
 	struct rdma_cm_id *id_ud;	/* unreliable ID */
 	struct ibv_pd *pd;	/* protection domain */
@@ -374,6 +379,11 @@ typedef struct verbs_ep {
 					   to use RDMA MSGs */
 	uint32_t rdma_msg_used;	/* number of connections using
 				   RDMA MSGs */
+
+	int fd;			/* epoll() fd */
+	int acks;		/* accumulated acks from ibv_get_cq_event() */
+	pthread_t tid;		/* progress thread */
+	int is_progressing;	/* being progressed? */
 
 	 TAILQ_HEAD(v_conns, verbs_conn) conns;	/* all conns */
 	 TAILQ_HEAD(v_active, verbs_conn) active;	/* active conns */

@@ -3,7 +3,7 @@
  *
  * test implementation of cci_set_opt() to ensure that it rejects invalid input.
  *
- * int cci set opt(cci_opt_handle_t handle, cci_opt_level_t level, cci_opt_name_t name, void val, int len);
+ * int cci set opt(cci_opt_handle_t *handle, cci_opt_name_t name, void val, int len);
  *
  * Author: Lawrence MacIntyre
  * 
@@ -39,7 +39,7 @@ START_TEST (set_opt_null_handle) {
 	status = cci_create_endpoint((cci_device_t*) *devices, deviceFlags, &endpointP, &fd);
   fail_unless(status == CCI_SUCCESS, "cci_create_endpoint() failed with status %s", cci_strerror(NULL, status));
  
-  status = cci_set_opt(optHandle, CCI_OPT_LEVEL_ENDPOINT, CCI_OPT_ENDPT_SEND_TIMEOUT,
+  status = cci_set_opt(optHandle, CCI_OPT_ENDPT_SEND_TIMEOUT,
                                   (void*) &option, sizeof(option));
   fail_unless(status == CCI_EINVAL, "cci_set_opt failed with status %s\n", cci_strerror(NULL, status));
 }
@@ -53,7 +53,7 @@ START_TEST (set_opt_invalid_option) {
 	cci_endpoint_t* endpointP = NULL;											/* pointer to endpoint structure */
 	int32_t deviceFlags = 0;																				/* not yet implemented */
 	cci_os_handle_t fd;																								/* endpoint handle */
-  cci_opt_handle_t optHandle;
+  cci_opt_handle_t *optHandle;
   int32_t* option;
 
   /* Initialize cci library */
@@ -67,12 +67,10 @@ START_TEST (set_opt_invalid_option) {
 	status = cci_create_endpoint((cci_device_t*) *devices, deviceFlags, &endpointP, &fd);
   fail_unless(status == CCI_SUCCESS, "cci_create_endpoint() failed with status %s", cci_strerror(NULL, status));
  
- 	memset(&optHandle, 0, sizeof(union cci_opt_handle));
-
   /* get an endpoint option */
- optHandle.endpoint = endpointP;
+  optHandle = endpointP;
 
-  status = cci_set_opt(&optHandle, CCI_OPT_LEVEL_ENDPOINT, 100, (void*) &option, sizeof(option));
+  status = cci_set_opt(optHandle, 100, (void*) &option, sizeof(option));
   fail_unless(status == CCI_EINVAL, "cci_set_opt failed with status %s\n", cci_strerror(NULL, status));
  }
 END_TEST
