@@ -1531,6 +1531,17 @@ static uint64_t verbs_htonll(uint64_t val)
 	return net.ull;
 }
 
+static inline uint32_t
+verbs_len_to_pad(uint32_t len)
+{
+	uint32_t pad = 0, len2 = len & 0x3;
+
+	if (len2)
+		pad = 4 - len2;
+
+	return pad;
+}
+
 static int
 verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 		uint32_t header)
@@ -1544,7 +1555,6 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 	verbs_tx_t *tx = NULL;
 	int use_rdma = 0;
 	uint32_t orig_len = len;
-	int pad = len & 0x7 ? 8 - (len & 0x7) : 0;
 
 	CCI_ENTER;
 
@@ -1585,7 +1595,9 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 			/* add 1 to length so the header will always have a bit set */
 			uint32_t h2 = (orig_len + 1) | (seqno << VERBS_RSEND_SEQNO_SHIFT);
 			uint64_t addr = vconn->raddr;
+			uint32_t pad;
 
+			pad = verbs_len_to_pad(len);
 			h2 = htonl(h2);
 
 			/* move to the end of the slot, then back up 4 bytes */
@@ -2980,6 +2992,9 @@ static int verbs_poll_rdma_msgs(verbs_conn_t * vconn)
 	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
 	void *ptr = NULL;
 
+	if (!vconn->rbuf)
+		return ret;
+
 	pthread_mutex_lock(&ep->lock);
 	if (!vconn->is_polling) {
 		vconn->is_polling = 1;
@@ -3002,9 +3017,11 @@ static int verbs_poll_rdma_msgs(verbs_conn_t * vconn)
 			uint32_t header = ntohl(*vconn->slots[i]);
 			verbs_rx_t *rx = &vconn->rxs[i];
 			uint32_t len = VERBS_RSEND_LEN(header);
-			uint32_t pad = len % 8 == 0 ? 0 : 8 - (len % 8);
+			uint32_t pad = 0;
 			uint16_t seqno = 0;
 			int ignore_seqno = 1;
+
+			pad = verbs_len_to_pad(len);
 
 			if (conn->connection.attribute == CCI_CONN_ATTR_RO) {
 				 seqno = VERBS_RSEND_SEQNO(header);
@@ -3052,9 +3069,9 @@ static int verbs_poll_rdma_msgs(verbs_conn_t * vconn)
 	if (found != -1)
 		last = found;
 
-	pthread_mutex_lock(&ep->lock);
+	//pthread_mutex_lock(&ep->lock);
 	vconn->is_polling = 0;
-	pthread_mutex_unlock(&ep->lock);
+	//pthread_mutex_unlock(&ep->lock);
 
 	return ret;
 }
@@ -3081,14 +3098,17 @@ static int verbs_handle_msg(cci__ep_t * ep, struct ibv_wc wc)
 	}
 	vconn = conn->priv;
 
-	if (conn->connection.attribute == CCI_CONN_ATTR_RO) {
+	if (vconn->raddr && conn->connection.attribute == CCI_CONN_ATTR_RO) {
 		seqno = VERBS_SEQNO(ntohl(wc.imm_data));
 
 		/* record incoming seqno */
-		if (seqno != vconn->expected)
+		if (seqno != vconn->expected) {
 			queue = 1;
-		else
+			debug(CCI_DB_MSG, "%s: expected %u recceived %u",
+				__func__, vconn->expected, seqno);
+		} else {
 			vconn->expected++;
+		}
 	}
 
 	rx = (verbs_rx_t *) (uintptr_t) wc.wr_id;
@@ -3525,14 +3545,19 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 
 	CCI_ENTER;
 
+#if 1
 	{
 		verbs_conn_t *vconn = NULL;
 
 		TAILQ_FOREACH(vconn, &vep->conns, entry) {
-			if (vconn->raddr)
-				verbs_poll_rdma_msgs(vconn);
+			if (vconn->raddr) {
+				ret = verbs_poll_rdma_msgs(vconn);
+				if (ret == CCI_SUCCESS)
+					return ret;
+			}
 		}
 	}
+#endif
 
 	if (vep->fd) {
 		struct ibv_cq *cq;
@@ -3667,11 +3692,17 @@ static int verbs_progress_ep(cci__ep_t * ep)
 				__func__, strerror(errno));
 		}
 	} else {
+		uint32_t dont_skip = 0;
+		static uint32_t count = 0;
+		count++;
+		if (count & 0x2000)
+			dont_skip = 1;
 again:
 		try++;
 		switch (which) {
 		case VERBS_CM_EVT:
-			ret = verbs_get_cm_event(ep);
+			if (dont_skip)
+				ret = verbs_get_cm_event(ep);
 			break;
 		case VERBS_CQ_EVT:
 			ret = verbs_get_cq_event(ep);
@@ -3687,9 +3718,9 @@ again:
 			goto again;
 	}
 
-	pthread_mutex_lock(&ep->lock);
+	//pthread_mutex_lock(&ep->lock);
 	vep->is_progressing = 0;
-	pthread_mutex_unlock(&ep->lock);
+	//pthread_mutex_unlock(&ep->lock);
 
 	CCI_EXIT;
 	return ret;
@@ -3827,11 +3858,13 @@ static int ctp_verbs_return_event(cci_event_t * event)
 					      "%s: post_rx() returned %s",
 					      __func__, strerror(ret));
 				}
+#if 0
 			} else if (rx->evt.conn) {
 				uint32_t header = VERBS_MSG_RDMA_MSG_ACK;
 				header |= ((rx->offset) << VERBS_SEQNO_SHIFT);
 				verbs_post_send(rx->evt.conn, 0, NULL, 0,
 						header);
+#endif
 			}
 		}
 		break;
@@ -3874,7 +3907,7 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 	int ret = CCI_SUCCESS;
 	int i = 0;
 	int is_reliable = 0;
-	int pad = 0;
+	uint32_t pad = 0;
 	uint32_t len = 0;
 	cci_endpoint_t *endpoint = connection->endpoint;
 	cci__conn_t *conn = NULL;
@@ -3959,10 +3992,10 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 				if (i == vconn->num_slots)
 					i = 0;
 			} while (i != old);
-			vconn->avail &= ~(1 << i);
+			//vconn->avail &= ~(1 << i);
 			tx->rdma_slot = i;
 			debug(CCI_DB_MSG, "%s: using RDMA slot %d", __func__, i);
-			pad = len & 0x7 ? 8 - (len & 0x7) : 0;
+			pad = verbs_len_to_pad(len);
 		}
 	}
 	pthread_mutex_unlock(&ep->lock);
