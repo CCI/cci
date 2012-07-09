@@ -49,13 +49,10 @@ BEGIN_C_DECLS
 	VERBS_MSG_RMA_REMOTE_REQUEST,
 	VERBS_MSG_RMA_REMOTE_REPLY,
 	VERBS_MSG_KEEPALIVE,
-	VERBS_MSG_RDMA_MSG_ACK,
 	VERBS_MSG_RMA,
 	VERBS_MSG_TYPE_MAX,
 } verbs_msg_type_t;
 
-#define VERBS_EP_RMSG_CONNS	(16)
-#define VERBS_CONN_RMSG_DEPTH	(16)	/* NOTE: limited to 31 due to vconn->avail */
 #define VERBS_INLINE_BYTES	(128)
 
 #define VERBS_ACK_CNT		(512)
@@ -98,46 +95,6 @@ BEGIN_C_DECLS
 #define VERBS_SEQNO_SHIFT	(VERBS_TYPE_BITS)
 #define VERBS_SEQNO(x)		(((x) >> VERBS_SEQNO_SHIFT) & VERBS_SEQNO_MAX)
 
-/* Send via RDMA
-
-    <----------- 32 bits ----------->
-    <----- 16b ---->  3b <--- 13b --->
-   +----------------+---+-------------+
-   |       C        | B |      A      |
-   +----------------+---+-------------+
-
-   where:
-      A is length + 1
-      B is unused
-      C is seqno
- */
-
-#define VERBS_RSEND_LEN_BITS	(13) /* large enough to hold 4KB */
-#define VERBS_RSEND_LEN_MAX	((1 << VERBS_RSEND_LEN_BITS) - 1)
-#define VERBS_RSEND_LEN(x)	(((x) & VERBS_RSEND_LEN_MAX) - 1)
-
-#define VERBS_RSEND_SEQNO_SHIFT	(32 - VERBS_SEQNO_BITS)
-#define VERBS_RSEND_SEQNO(x)	(((x) >> VERBS_RSEND_SEQNO_SHIFT) & VERBS_SEQNO_MAX)
-
-/* Ack Send via RDMA slot
-
-    <------------ 32 bits ----------->
-    <--- 12b --> <----- 16b ---->  4b
-   +------------+----------------+----+
-   |      C     |        B       |  A |
-   +------------+----------------+----+
-
-   where:
-      A is VERBS_MSG_RDMA_MSG_ACK
-      B is available slot for SEND
-      C is reserved
- */
-
-#define VERBS_SLOT_BITS		(16)
-#define VERBS_SLOT_MAX		((1 << VERBS_SLOT_BITS) - 1)
-#define VERBS_SLOT_SHIFT	(VERBS_TYPE_BITS)
-#define VERBS_SLOT(x)		(((x) >> VERBS_SLOT_SHIFT) & VERBS_SLOT_MAX)
-
 /* Conn Request
 
     <----------- 32 bits ----------->
@@ -151,13 +108,6 @@ BEGIN_C_DECLS
       B is reserved
  */
 
-typedef struct verbs_rdma_attrs {
-	uint64_t addr;
-	uint32_t rkey;
-	uint16_t seqno;
-	uint16_t pad;
-} verbs_rdma_attrs_t;
-
 /* Conn Payload
 
     <------------- 32 bits ------------>
@@ -169,10 +119,8 @@ typedef struct verbs_rdma_attrs {
    where:
       A is VERBS_MSG_CONN_PAYLOAD
       B is the connection attribute (UU, RU, RO)
-      C is MSG method
-           0 for Send/Recv and no addr/rkey in payload
-           1 for RDMA MSGs and addr/rkey before payload
-      D is the payload length (the payload is the message including optional rdma_attrs)
+      C is reserved
+      D is the payload length
       E is reserved
  */
 
@@ -187,9 +135,7 @@ typedef struct verbs_rdma_attrs {
    where:
       A is VERBS_MSG_CONN_REPLY
       B is CCI_EVENT_CONNECT_ACCEPTED or CCI_EVENT_CONNECT_REJECTED
-      C is MSG method
-           0 for Send/Recv and no payload
-           1 for RDMA MSGs and addr/rkey in payload
+      C is reserved
       D is reserved
  */
 
@@ -269,7 +215,6 @@ typedef struct verbs_tx {
 	int flags;		/* (CCI_FLAG_[BLOCKING|SILENT|NO_COPY]) */
 	void *buffer;		/* registered send buffer */
 	uint16_t len;		/* length of buffer */
-	int32_t rdma_slot;	/* slot when using RDMA or -1 */
 	 TAILQ_ENTRY(verbs_tx) entry;	/* hang on vep->idle_txs, vdev->queued,
 					   vdev->pending */
 	struct verbs_rma_op *rma_op;	/* owning RMA if remote completion msg */
@@ -295,7 +240,6 @@ typedef struct verbs_globals {
 	struct cci_device **devices;	/* array of devices */
 	struct ibv_context **contexts;	/* open devices */
 	struct ifaddrs *ifaddrs;	/* array indexed to contexts */
-	int ep_rmsg_conns;	/* number of RDMA MSG connections per endpoint */
 } verbs_globals_t;
 
 extern volatile verbs_globals_t *vglobals;
@@ -375,10 +319,6 @@ typedef struct verbs_ep {
 	int tx_resize_in_progress;
 
 	 TAILQ_HEAD(v_rx_pools, verbs_rx_pool) rx_pools;	/* list of rx pools - usually one */
-	uint32_t rdma_msg_total;	/* total number of connections allowed
-					   to use RDMA MSGs */
-	uint32_t rdma_msg_used;	/* number of connections using
-				   RDMA MSGs */
 
 	int fd;			/* epoll() fd */
 	int acks;		/* accumulated acks from ibv_get_cq_event() */
@@ -417,25 +357,6 @@ typedef struct verbs_conn {
 	uint32_t max_tx_cnt;	/* max sends in flight */
 	uint32_t num_remotes;	/* number of cached remotes */
 	uint32_t inline_size;	/* largest inline msg */
-
-	/* for RDMA SEND enabled connections */
-	void *rbuf;		/* buffer for recving RDMA MSGs */
-	verbs_rx_t *rxs;	/* rx events for rbuf */
-	struct ibv_mr *rmr;	/* memory registration for rbuf */
-	uint64_t raddr;		/* peer's remote_addr */
-	uint32_t rkey;		/* peer's rkey */
-	uint32_t num_slots;	/* number of MSG slots */
-	uint32_t next;		/* next slot to use */
-	uint32_t avail;		/* bitmask of available peer slots */
-	uint32_t last;		/* last slot used */
-	uint32_t **slots;	/* pointers to buffer headers
-				   to poll */
-	int is_polling;		/* polling RDMA MSGs */
-
-	/* for RO connections when using both SendRecv and RDMA */
-	uint16_t seqno;		/* last seqno sent */
-	uint16_t expected;	/* next seqno we expect to receive */
-	TAILQ_HEAD(prxs, cci__evt) early; /* early SendRecv MSG rxs */
 
 	 TAILQ_HEAD(s_rems, verbs_rma_remote) remotes;	/* LRU list of remote handles */
 	 TAILQ_HEAD(w_ops, verbs_rma_op) rma_ops;	/* rma ops waiting on remotes */
