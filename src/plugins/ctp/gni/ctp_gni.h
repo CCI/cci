@@ -39,8 +39,16 @@ BEGIN_C_DECLS
  */
 #define GNI_URI			"gni://"
 
+#ifndef GNI_PTAG
 #define GNI_DEFAULT_PTAG	(208)
+#else
+#define GNI_DEFAULT_PTAG	GNI_PTAG
+#endif
+#ifndef GNI_COOKIE
 #define GNI_DEFAULT_COOKIE	(0x73e70000)
+#else
+#define GNI_DEFAULT_COOKIE	GNI_COOKIE
+#endif
 
 /* Wire Header Specification */
     typedef enum gni_msg_type {
