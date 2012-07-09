@@ -454,6 +454,8 @@ static int ctp_gni_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver,
 			int i = 0;
 			const char * const *arg;
 			const char *interface = NULL;
+			char *ptag = NULL;
+			char *cookie = NULL;
 			struct in_addr in;
 			uint16_t port = 0;
 			struct cci_device *device = NULL;
@@ -497,6 +499,12 @@ static int ctp_gni_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver,
 							       0);
 				} else if (0 == strncmp("interface=", *arg, 10)) {
 					interface = *arg + 10;
+				} else if (0 == strncmp("ptag=", *arg, 10)) {
+					ptag = *arg + 5;
+					gdev->ptag = strtoul(ptag, NULL, 0);
+				} else if (0 == strncmp("cookie=", *arg, 10)) {
+					cookie = *arg + 7;
+					gdev->cookie = strtoul(cookie, NULL, 0);
 				} else if (0 == strncmp("transport=", *arg, 7)) {
 					/* do nothing */
 				} else {

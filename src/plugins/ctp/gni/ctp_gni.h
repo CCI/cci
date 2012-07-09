@@ -31,6 +31,11 @@ BEGIN_C_DECLS
 
    port = 12345			# base listening port
 				  the default is a random, ephemeral port
+
+   ptag = 208			# CCI system-wide PTAG
+
+   cookie = 0x73e70000		# CCI system-wide cookie
+
  */
 #define GNI_URI			"gni://"
 
