@@ -3513,7 +3513,6 @@ ctp_gni_rma(cci_connection_t * connection,
 	gni_rma_handle_t *local =
 	    (gni_rma_handle_t *) (uintptr_t) local_handle;
 	gni_rma_op_t *rma_op = NULL;
-	int is_ordered = connection->attribute & CCI_CONN_ATTR_RO;
 
 	CCI_ENTER;
 
@@ -3559,13 +3558,18 @@ ctp_gni_rma(cci_connection_t * connection,
 	rma_op->pd.type = flags & CCI_FLAG_WRITE ? GNI_POST_RDMA_PUT :
 				GNI_POST_RDMA_GET;
 	rma_op->pd.cq_mode = GNI_CQMODE_GLOBAL_EVENT;
-	rma_op->pd.dlvr_mode = is_ordered ? GNI_DLVMODE_IN_ORDER :
-				GNI_DLVMODE_PERFORMANCE;
+	/* NOTE: always use GNI_DLVMODE_PERFORMANCE. This round-robins over
+	 *       the three available DMA channels. GNI_DLVMODE_IN_ORDER
+	 *       restricts the RDMA to one channel and is meant to try to
+	 *       emulate IB's last byte delivered last. It has no effect on
+	 *       separate RDMAs so it does not help with RO connections. */
+	rma_op->pd.dlvr_mode = GNI_DLVMODE_PERFORMANCE;
 	rma_op->pd.local_addr = (uintptr_t) local->addr + local_offset;
 	rma_op->pd.local_mem_hndl = local->mh;
 	rma_op->pd.length = data_len;
 	if (flags & CCI_FLAG_FENCE)
 		rma_op->pd.rdma_mode = GNI_RDMAMODE_FENCE;
+
 	/* still need remote_addr and remote_mem_hndl */
 
 	pthread_mutex_lock(&ep->lock);
