@@ -1245,7 +1245,8 @@ static int ctp_gni_accept(cci_event_t *event, const void *context)
 	local.msg_buffer = gconn->msg_buffer;
 
 	grc = GNI_MemRegister(gep->nic, (uintptr_t) gconn->msg_buffer,
-			gconn->buff_size, gep->rx_cq, GNI_MEM_READWRITE,
+			gconn->buff_size, gep->rx_cq,
+			GNI_MEM_RELAXED_PI_ORDERING | GNI_MEM_READWRITE,
 			-1, &gconn->mem_hndl);
 	if (grc) {
 		ret = gni_to_cci_status(grc);
@@ -1564,7 +1565,8 @@ ctp_gni_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	new->cr.attr.msg_buffer = gconn->msg_buffer;
 
 	grc = GNI_MemRegister(gep->nic, (uintptr_t) gconn->msg_buffer,
-			gconn->buff_size, gep->rx_cq, GNI_MEM_READWRITE,
+			gconn->buff_size, gep->rx_cq,
+			GNI_MEM_RELAXED_PI_ORDERING | GNI_MEM_READWRITE,
 			-1, &gconn->mem_hndl);
 	if (grc) {
 		ret = gni_to_cci_status(grc);
