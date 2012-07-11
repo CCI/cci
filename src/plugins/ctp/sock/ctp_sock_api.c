@@ -1971,7 +1971,6 @@ static void sock_progress_pending(cci__ep_t * ep)
 	sock_tx_t *tx;
 	cci__evt_t *evt, *tmp, *my_temp_evt;
 	union cci_event *event;	/* generic CCI event */
-	cci_connection_t *connection; /* generic CCI connection */
 	cci__conn_t *conn;
 	sock_conn_t *sconn;
 	sock_ep_t *sep = ep->priv;
@@ -1995,7 +1994,6 @@ static void sock_progress_pending(cci__ep_t * ep)
         sock_tx_t *tx = container_of (evt, sock_tx_t, evt);
 
 		conn = evt->conn;
-		connection = &conn->connection;
 		sconn = conn->priv;
 		event = &evt->event;
 
