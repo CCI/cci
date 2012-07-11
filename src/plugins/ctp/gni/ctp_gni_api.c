@@ -3254,7 +3254,7 @@ ctp_gni_rma_register(cci_endpoint_t * endpoint,
 	gni_ep_t *gep = ep->priv;
 	gni_rma_handle_t *handle = NULL;
 	gni_return_t grc = GNI_RC_SUCCESS;
-	uint32_t gflags = 0;
+	uint32_t gflags = GNI_MEM_RELAXED_PI_ORDERING;
 
 	CCI_ENTER;
 
@@ -3274,9 +3274,9 @@ ctp_gni_rma_register(cci_endpoint_t * endpoint,
 	handle->ep = ep;
 
 	if (!(flags & CCI_FLAG_WRITE))
-		gflags = GNI_MEM_READ_ONLY;
+		gflags |= GNI_MEM_READ_ONLY;
 	else
-		gflags = GNI_MEM_READWRITE;
+		gflags |= GNI_MEM_READWRITE;
 
 	grc = GNI_MemRegister(gep->nic, (uint64_t)(uintptr_t)start,
 		length, NULL, gflags, -1, &handle->mh);
@@ -3464,7 +3464,7 @@ static int gni_post_rma(gni_rma_op_t * rma_op)
 		}
 		rma_op->pd.length = new_len;
 		grc = GNI_MemRegister(gep->nic, (uintptr_t) rma_op->buf,
-			new_len, NULL, GNI_MEM_READWRITE,
+			new_len, NULL, GNI_MEM_RELAXED_PI_ORDERING| GNI_MEM_READWRITE,
 			-1, &rma_op->pd.local_mem_hndl);
 		if (grc) {
 			debug(CCI_DB_MSG, "%s: unable to register bounce buffer (%s - %u)",
