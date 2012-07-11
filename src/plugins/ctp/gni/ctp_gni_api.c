@@ -498,12 +498,12 @@ static int ctp_gni_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver,
 					    (uint16_t) strtoul(port_str, NULL,
 							       0);
 				} else if (0 == strncmp("interface=", *arg, 10)) {
-					interface = *arg + 10;
+					interface = (void *) *arg + 10;
 				} else if (0 == strncmp("ptag=", *arg, 10)) {
-					ptag = *arg + 5;
+					ptag = (void *) *arg + 5;
 					gdev->ptag = strtoul(ptag, NULL, 0);
 				} else if (0 == strncmp("cookie=", *arg, 10)) {
-					cookie = *arg + 7;
+					cookie = (void *) *arg + 7;
 					gdev->cookie = strtoul(cookie, NULL, 0);
 				} else if (0 == strncmp("transport=", *arg, 7)) {
 					/* do nothing */
@@ -2813,16 +2813,25 @@ gni_rma_send_completion(cci__ep_t *ep, gni_cq_entry_t gevt)
 	rma_op->status = GNI_CQ_GET_STATUS(gevt);
 	rma_op->status = gni_to_cci_status(rma_op->status);
 
-	if (rma_op->status == CCI_SUCCESS && rma_op->buf) {
-		/* TODO copy the data to the user buffer
-		 *      unregister and free buf */
-		void *src = NULL, *dest = NULL;
-		gni_rma_handle_t *local =
-			(gni_rma_handle_t *) (uintptr_t) rma_op->local_handle;
+	if (rma_op->buf) {
+		if (rma_op->status == CCI_SUCCESS) {
+			void *src = NULL, *dest = NULL;
+			gni_rma_handle_t *local =
+				(gni_rma_handle_t *) (uintptr_t) rma_op->local_handle;
 
-		dest = (void *) (local->addr + rma_op->local_offset);
-		src = rma_op->buf + (((uintptr_t) rma_op->remote_addr) & 0xC);
-		memcpy(dest, src, rma_op->data_len);
+			dest = (void *) (local->addr + rma_op->local_offset);
+			src = rma_op->buf + (((uintptr_t) rma_op->remote_addr) & 0xC);
+			memcpy(dest, src, rma_op->data_len);
+		}
+		grc = GNI_MemDeregister(gep->nic, &rma_op->pd.local_mem_hndl);
+		if (grc) {
+			debug(CCI_DB_MSG, "%s: unable to deregister bounce "
+				"buffer (%s - %u)", __func__,
+				cci_strerror(&ep->endpoint,
+				gni_to_cci_status(grc)), grc);
+		}
+		free(rma_op->buf);
+		rma_op->buf = NULL;
 	}
 
 	if (!rma_op->msg_ptr || rma_op->status != CCI_SUCCESS) {
@@ -3065,21 +3074,6 @@ static int ctp_gni_return_event(cci_event_t * event)
 				pthread_mutex_lock(&ep->lock);
 				TAILQ_REMOVE(&gep->rma_ops, rma_op, entry);
 				pthread_mutex_unlock(&ep->lock);
-				if (rma_op->buf) {
-					gni_return_t grc;
-
-					grc = GNI_MemDeregister(gep->nic,
-							&rma_op->pd.local_mem_hndl);
-					if (grc) {
-						debug(CCI_DB_MSG, "%s: unable to "
-							"deregister bounce buffer (%s - %u)",
-							__func__,
-							cci_strerror(&ep->endpoint,
-								gni_to_cci_status(grc)),
-							grc);
-					}
-					free(rma_op->buf);
-				}
 				free(rma_op);
 			} else {
 				tx = container_of(evt, gni_tx_t, evt);
