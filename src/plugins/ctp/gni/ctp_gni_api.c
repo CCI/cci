@@ -3410,15 +3410,15 @@ static int gni_post_rma(gni_rma_op_t * rma_op)
 {
 	int ret = CCI_SUCCESS;
 	gni_return_t grc = GNI_RC_SUCCESS;
+	cci__ep_t *ep = rma_op->evt.ep;
 	cci__conn_t *conn = rma_op->evt.conn;
+	gni_ep_t *gep = ep->priv;
 	gni_conn_t *gconn = conn->priv;
 
 	CCI_ENTER;
 
 	if (unlikely(rma_op->remote_addr == 0 &&
 		0 == memcmp(&rma_op->remote_mem_hndl, &NULL_HNDL, sizeof(NULL_HNDL)))) {
-		cci__ep_t *ep = rma_op->evt.ep;
-
 		/* invalid remote handle, complete now */
 		rma_op->status = CCI_ERR_RMA_HANDLE;
 		pthread_mutex_lock(&ep->lock);
@@ -3443,8 +3443,6 @@ static int gni_post_rma(gni_rma_op_t * rma_op)
 		int remote_addr_pad = rma_op->pd.remote_addr & 0x3;
 		int length_pad = rma_op->pd.length & 0x3;
 		uint32_t new_len = rma_op->pd.length;
-		cci__ep_t *ep = rma_op->evt.ep;
-		gni_ep_t *gep = ep->priv;
 
 		if (remote_addr_pad)
 			new_len += remote_addr_pad;
@@ -3462,6 +3460,7 @@ static int gni_post_rma(gni_rma_op_t * rma_op)
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_INSERT_TAIL(&ep->evts, &rma_op->evt, entry);
 			pthread_mutex_unlock(&ep->lock);
+			goto out;
 		}
 		rma_op->pd.length = new_len;
 		grc = GNI_MemRegister(gep->nic, (uintptr_t) rma_op->buf,
@@ -3490,8 +3489,6 @@ static int gni_post_rma(gni_rma_op_t * rma_op)
 
 	grc = GNI_PostRdma(gconn->peer, &rma_op->pd);
 	if (grc) {
-		cci__ep_t *ep = rma_op->evt.ep;
-
 		ret = gni_to_cci_status(grc);
 		debug(CCI_DB_MSG, "%s: PostRdma() failed with %s (%d) len %"PRIu64,
 			__func__, cci_strerror(&ep->endpoint, grc), grc, rma_op->pd.length);
