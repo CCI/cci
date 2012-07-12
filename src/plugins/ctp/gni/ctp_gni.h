@@ -284,6 +284,13 @@ typedef struct gni_rma_remote {
 	gni_rma_addr_mhndl_t info;	/* handle, addr, and mem_hndl */
 } gni_rma_remote_t;
 
+typedef enum gni_rma_queue {
+	GNI_RMA_QUEUE_NONE,
+	GNI_RMA_QUEUE_EP,		/* gep->rma_ops */
+	GNI_RMA_QUEUE_CONN,		/* gconn->rma_ops */
+	GNI_RMA_QUEUE_CONN_FENCED	/* gconn->fenced */
+} gni_rma_queue_t;
+
 typedef struct gni_rma_op {
 	cci__evt_t evt;			/* completion event */
 	gni_post_descriptor_t pd;	/* GNI post descriptor */
@@ -307,6 +314,7 @@ typedef struct gni_rma_op {
 	gni_tx_t *tx;
 	uint32_t msg_len;
 	char *msg_ptr;
+	gni_rma_queue_t queue;		/* hanging on which queue */
 } gni_rma_op_t;
 
 /* This is the endpoint recv buffer container. It does not need to be
@@ -389,6 +397,7 @@ typedef struct gni_conn {
 
 	TAILQ_HEAD(s_rems, gni_rma_remote) remotes;	/* LRU list of remote handles */
 	TAILQ_HEAD(w_ops, gni_rma_op) rma_ops;	/* rma ops waiting on remotes */
+	TAILQ_HEAD(v_ops, gni_rma_op) fenced;	/* fenced rma ops */
 	TAILQ_ENTRY(gni_conn) entry;	/* hangs on gep->conns */
 	TAILQ_ENTRY(gni_conn) temp;	/* hangs on gep->active|passive */
 	gni_new_conn_t *new;		/* application conn req info */
