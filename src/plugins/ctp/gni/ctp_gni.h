@@ -385,6 +385,7 @@ typedef struct gni_conn {
 	gni_mem_handle_t mem_hndl;	/* memory handle */
 
 	uint32_t num_remotes;
+	uint32_t rma_op_cnt;		/* track posted RMAs in case we need to fence */
 
 	TAILQ_HEAD(s_rems, gni_rma_remote) remotes;	/* LRU list of remote handles */
 	TAILQ_HEAD(w_ops, gni_rma_op) rma_ops;	/* rma ops waiting on remotes */

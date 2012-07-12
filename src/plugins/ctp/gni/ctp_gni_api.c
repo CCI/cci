@@ -2859,6 +2859,7 @@ gni_rma_send_completion(cci__ep_t *ep, gni_cq_entry_t gevt)
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_REMOVE(&gep->rma_ops, rma_op, entry);
 		gep->rma_op_cnt--;
+		gconn->rma_op_cnt--;
 		pthread_mutex_unlock(&ep->lock);
 		free(rma_op);
 	}
@@ -3073,11 +3074,14 @@ static int ctp_gni_return_event(cci_event_t * event)
 			gni_tx_t *tx = NULL;
 
 			if (evt->priv) {
+				cci__conn_t *conn = evt->conn;
+				gni_conn_t *gconn = conn->priv;
 				gni_rma_op_t *rma_op = evt->priv;
 
 				pthread_mutex_lock(&ep->lock);
 				TAILQ_REMOVE(&gep->rma_ops, rma_op, entry);
 				gep->rma_op_cnt--;
+				gconn->rma_op_cnt--;
 				pthread_mutex_unlock(&ep->lock);
 				free(rma_op);
 			} else {
@@ -3515,6 +3519,7 @@ ctp_gni_rma(cci_connection_t * connection,
 	cci__ep_t *ep = NULL;
 	cci__conn_t *conn = NULL;
 	gni_ep_t *gep = NULL;
+	gni_conn_t *gconn = NULL;
 	gni_rma_handle_t *local =
 	    (gni_rma_handle_t *) (uintptr_t) local_handle;
 	gni_rma_op_t *rma_op = NULL;
@@ -3527,6 +3532,7 @@ ctp_gni_rma(cci_connection_t * connection,
 	}
 
 	conn = container_of(connection, cci__conn_t, connection);
+	gconn = conn->priv;
 	ep = container_of(connection->endpoint, cci__ep_t, endpoint);
 	gep = ep->priv;
 
@@ -3538,6 +3544,7 @@ ctp_gni_rma(cci_connection_t * connection,
 	pthread_mutex_lock(&ep->lock);
 	if (gep->rma_op_cnt < GNI_EP_TX_CNT) {
 		gep->rma_op_cnt++;
+		gconn->rma_op_cnt++;
 	} else {
 		pthread_mutex_unlock(&ep->lock);
 		return CCI_ENOBUFS;
@@ -3604,6 +3611,7 @@ ctp_gni_rma(cci_connection_t * connection,
 
 		pthread_mutex_lock(&ep->lock);
 		gep->rma_op_cnt--;
+		gconn->rma_op_cnt--;
 		pthread_mutex_unlock(&ep->lock);
 	}
 
