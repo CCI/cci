@@ -905,7 +905,8 @@ ctp_gni_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 
-	grc = GNI_CqCreate(gep->nic, GNI_EP_TX_CNT, 0, GNI_CQ_NOBLOCK,
+	/* dimension the tx CQ for MSGs and RMAs */
+	grc = GNI_CqCreate(gep->nic, GNI_EP_TX_CNT * 2, 0, GNI_CQ_NOBLOCK,
 			NULL, NULL, &gep->tx_cq);
 	if (grc) {
 		ret = gni_to_cci_status(grc);
@@ -2857,6 +2858,7 @@ gni_rma_send_completion(cci__ep_t *ep, gni_cq_entry_t gevt)
 		 * free the rma_op now */
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_REMOVE(&gep->rma_ops, rma_op, entry);
+		gep->rma_op_cnt--;
 		pthread_mutex_unlock(&ep->lock);
 		free(rma_op);
 	}
@@ -3075,6 +3077,7 @@ static int ctp_gni_return_event(cci_event_t * event)
 
 				pthread_mutex_lock(&ep->lock);
 				TAILQ_REMOVE(&gep->rma_ops, rma_op, entry);
+				gep->rma_op_cnt--;
 				pthread_mutex_unlock(&ep->lock);
 				free(rma_op);
 			} else {
@@ -3532,6 +3535,15 @@ ctp_gni_rma(cci_connection_t * connection,
 		return CCI_EINVAL;
 	}
 
+	pthread_mutex_lock(&ep->lock);
+	if (gep->rma_op_cnt < GNI_EP_TX_CNT) {
+		gep->rma_op_cnt++;
+	} else {
+		pthread_mutex_unlock(&ep->lock);
+		return CCI_ENOBUFS;
+	}
+	pthread_mutex_unlock(&ep->lock);
+
 	rma_op = calloc(1, sizeof(*rma_op));
 	if (!rma_op) {
 		CCI_EXIT;
@@ -3587,6 +3599,12 @@ ctp_gni_rma(cci_connection_t * connection,
 		ret = gni_conn_request_rma_remote(rma_op, remote_handle);
 	if (ret) {
 		/* FIXME clean up? */
+
+		free(rma_op);
+
+		pthread_mutex_lock(&ep->lock);
+		gep->rma_op_cnt--;
+		pthread_mutex_unlock(&ep->lock);
 	}
 
 	CCI_EXIT;

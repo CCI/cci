@@ -212,7 +212,6 @@ typedef struct gni_rma_addr_mhndl {
 #define GNI_EP_MSS_MAX		((1 << 12) -1)	/* largest MSS allowed */
 #define GNI_EP_RX_CNT		(32 * 1024)	/* default recv buffer count */
 #define GNI_EP_TX_CNT		(16 * 1024)	/* default send buffer count */
-#define GNI_EP_CQ_CNT		(GNI_EP_RX_CNT + GNI_EP_TX_CNT)	/* default CQ count */
 #define GNI_PROG_TIME_US	(100000)	/* try to progress every N microseconds */
 #define GNI_CONN_CREDIT		(8)		/* mbox max msgs */
 
@@ -338,6 +337,7 @@ typedef struct gni_ep {
 	void *tx_buf;			/* send buffer */
 	gni_tx_t *txs;			/* array of txs */
 	TAILQ_HEAD(g_txsi, gni_tx) idle_txs;	/* idle txs */
+	uint32_t rma_op_cnt;		/* number of active RMAs */
 
 	TAILQ_HEAD(g_rx_pools, gni_rx_pool) rx_pools;	/* list of rx pools - usually one */
 
