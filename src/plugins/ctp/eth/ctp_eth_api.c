@@ -125,7 +125,7 @@ static int eth__get_device_info(cci__dev_t * _dev, struct ifaddrs *addr)
 	/* default values */
 	device->max_send_size = -1;
 
-	if (getenv("CCIETH_FORCE_GET_INFO_IOCTL"))
+	if (getenv("CCI_CTP_ETH_FORCE_GET_INFO_IOCTL"))
 		/* force testing of our fallback for old kernels */
 		goto fallback_ioctl;
 
@@ -201,7 +201,7 @@ static int eth__get_devices(cci_plugin_ctp_t *plugin)
 	}
 
 	if (!globals->configfile) {
-		int loopback_ok = (getenv("CCIETH_ALLOW_LOOPBACK") != NULL);
+		int loopback_ok = (getenv("CCI_CTP_ETH_ALLOW_LOOPBACK") != NULL);
 		/* get all ethernet devices from the system */
 		for (addr = addrs; addr != NULL; addr = addr->ifa_next) {
 			int is_loopback = 0;
