@@ -352,6 +352,13 @@ typedef struct gni_ep {
 	void *conn_tree;		/* tree of peer conn ids */
 	pthread_rwlock_t conn_tree_lock;	/* rw lock */
 
+	int fd;				/* for event fd when blocking */
+	uint32_t fd_used;		/* if fd has data (non-zero) */
+	pthread_t tid;			/* progress thread id */
+	int ready;			/* let app thread know that progress thread
+					   is ready */
+	uint32_t port;			/* cache for progress thread */
+
 	TAILQ_HEAD(g_conns, gni_conn) conns;	/* all conns */
 	TAILQ_HEAD(g_active, gni_conn) active;	/* active conns waiting on connect */
 	TAILQ_HEAD(g_active2, gni_conn) active2;	/* active conns waiting on reply */
