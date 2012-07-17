@@ -1114,6 +1114,22 @@ static int ctp_gni_destroy_endpoint(cci_endpoint_t * endpoint)
 
 	CCI_ENTER;
 
+	if (gep->tid) {
+		debug(CCI_DB_EP, "%s: waiting on progress thread", __func__);
+		pthread_join(gep->tid, NULL);
+	}
+
+	while (!TAILQ_EMPTY(&gep->handles)) {
+		int ret;
+
+		gni_rma_handle_t *handle = TAILQ_FIRST(&gep->handles);
+
+		ret = ctp_gni_rma_deregister(endpoint, (uintptr_t) handle);
+		if (ret)
+			debug(CCI_DB_EP, "%s: rma_deregister failed with %s",
+				__func__, cci_strerror(endpoint, ret));
+	}
+
 	while (!TAILQ_EMPTY(&gep->conns)) {
 		cci__conn_t *conn = NULL;
 		gni_conn_t *gconn = NULL;
