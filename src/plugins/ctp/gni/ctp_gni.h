@@ -31,11 +31,24 @@ BEGIN_C_DECLS
 
    port = 12345			# base listening port
 				  the default is a random, ephemeral port
+
+   ptag = 208			# CCI system-wide PTAG
+
+   cookie = 0x73e70000		# CCI system-wide cookie
+
  */
 #define GNI_URI			"gni://"
 
+#ifndef GNI_PTAG
 #define GNI_DEFAULT_PTAG	(208)
+#else
+#define GNI_DEFAULT_PTAG	GNI_PTAG
+#endif
+#ifndef GNI_COOKIE
 #define GNI_DEFAULT_COOKIE	(0x73e70000)
+#else
+#define GNI_DEFAULT_COOKIE	GNI_COOKIE
+#endif
 
 /* Wire Header Specification */
     typedef enum gni_msg_type {
@@ -199,7 +212,6 @@ typedef struct gni_rma_addr_mhndl {
 #define GNI_EP_MSS_MAX		((1 << 12) -1)	/* largest MSS allowed */
 #define GNI_EP_RX_CNT		(32 * 1024)	/* default recv buffer count */
 #define GNI_EP_TX_CNT		(16 * 1024)	/* default send buffer count */
-#define GNI_EP_CQ_CNT		(GNI_EP_RX_CNT + GNI_EP_TX_CNT)	/* default CQ count */
 #define GNI_PROG_TIME_US	(100000)	/* try to progress every N microseconds */
 #define GNI_CONN_CREDIT		(8)		/* mbox max msgs */
 
@@ -272,6 +284,13 @@ typedef struct gni_rma_remote {
 	gni_rma_addr_mhndl_t info;	/* handle, addr, and mem_hndl */
 } gni_rma_remote_t;
 
+typedef enum gni_rma_queue {
+	GNI_RMA_QUEUE_NONE,
+	GNI_RMA_QUEUE_EP,		/* gep->rma_ops */
+	GNI_RMA_QUEUE_CONN,		/* gconn->rma_ops */
+	GNI_RMA_QUEUE_CONN_FENCED	/* gconn->fenced */
+} gni_rma_queue_t;
+
 typedef struct gni_rma_op {
 	cci__evt_t evt;			/* completion event */
 	gni_post_descriptor_t pd;	/* GNI post descriptor */
@@ -295,6 +314,7 @@ typedef struct gni_rma_op {
 	gni_tx_t *tx;
 	uint32_t msg_len;
 	char *msg_ptr;
+	gni_rma_queue_t queue;		/* hanging on which queue */
 } gni_rma_op_t;
 
 /* This is the endpoint recv buffer container. It does not need to be
@@ -325,11 +345,19 @@ typedef struct gni_ep {
 	void *tx_buf;			/* send buffer */
 	gni_tx_t *txs;			/* array of txs */
 	TAILQ_HEAD(g_txsi, gni_tx) idle_txs;	/* idle txs */
+	uint32_t rma_op_cnt;		/* number of active RMAs */
 
 	TAILQ_HEAD(g_rx_pools, gni_rx_pool) rx_pools;	/* list of rx pools - usually one */
 
 	void *conn_tree;		/* tree of peer conn ids */
 	pthread_rwlock_t conn_tree_lock;	/* rw lock */
+
+	int fd;				/* for event fd when blocking */
+	uint32_t fd_used;		/* if fd has data (non-zero) */
+	pthread_t tid;			/* progress thread id */
+	int ready;			/* let app thread know that progress thread
+					   is ready */
+	uint32_t port;			/* cache for progress thread */
 
 	TAILQ_HEAD(g_conns, gni_conn) conns;	/* all conns */
 	TAILQ_HEAD(g_active, gni_conn) active;	/* active conns waiting on connect */
@@ -372,9 +400,11 @@ typedef struct gni_conn {
 	gni_mem_handle_t mem_hndl;	/* memory handle */
 
 	uint32_t num_remotes;
+	uint32_t rma_op_cnt;		/* track posted RMAs in case we need to fence */
 
 	TAILQ_HEAD(s_rems, gni_rma_remote) remotes;	/* LRU list of remote handles */
 	TAILQ_HEAD(w_ops, gni_rma_op) rma_ops;	/* rma ops waiting on remotes */
+	TAILQ_HEAD(v_ops, gni_rma_op) fenced;	/* fenced rma ops */
 	TAILQ_ENTRY(gni_conn) entry;	/* hangs on gep->conns */
 	TAILQ_ENTRY(gni_conn) temp;	/* hangs on gep->active|passive */
 	gni_new_conn_t *new;		/* application conn req info */

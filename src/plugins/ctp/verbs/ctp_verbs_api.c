@@ -1378,6 +1378,15 @@ static int ctp_verbs_destroy_endpoint(cci_endpoint_t * endpoint)
 	if (vep->acks)
 		ibv_ack_cq_events(vep->cq, vep->acks);
 
+	while (!TAILQ_EMPTY(&vep->handles)) {
+		verbs_rma_handle_t *handle = TAILQ_FIRST(&vep->handles);
+
+		ret = ctp_verbs_rma_deregister(endpoint, (uintptr_t)handle);
+		if (ret)
+			debug(CCI_DB_EP, "%s: rma_deregister failed with %s",
+				__func__, cci_strerror(endpoint, ret));
+	}
+
 	while (!TAILQ_EMPTY(&vep->conns)) {
 		cci__conn_t *conn = NULL;
 		verbs_conn_t *vconn = NULL;
