@@ -4,6 +4,7 @@
  *
  * See COPYING in top-level directory
  *
+ * Copyright © 2012 Inria.  All rights reserved.
  * $COPYRIGHT$
  *
  */
@@ -22,7 +23,6 @@ int main(int argc, char *argv[])
 	char *uri = NULL;
 	cci_device_t **devices = NULL;
 	cci_endpoint_t *endpoint = NULL;
-	cci_opt_handle_t handle;
 	cci_os_handle_t ep_fd;
 	cci_connection_t *connection = NULL;
 
@@ -41,9 +41,8 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	handle.endpoint = endpoint;
-	ret = cci_get_opt(&handle, CCI_OPT_LEVEL_ENDPOINT,
-			CCI_OPT_ENDPT_URI, (void*) &uri, &len);
+	ret = cci_get_opt(endpoint,
+			  CCI_OPT_ENDPT_URI, &uri);
 	if (ret) {
 		fprintf(stderr, "cci_get_opt() failed with %s\n", cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
@@ -112,6 +111,7 @@ int main(int argc, char *argv[])
 	/* clean up */
 	cci_destroy_endpoint(endpoint);
 	cci_finalize();
+	free(uri);
 
 	return 0;
 }

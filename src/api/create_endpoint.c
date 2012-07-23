@@ -17,7 +17,7 @@
 
 #include "cci.h"
 #include "cci_lib_types.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 
 int cci_create_endpoint(cci_device_t * device,
 			int flags,
@@ -64,6 +64,7 @@ int cci_create_endpoint(cci_device_t * device,
 	TAILQ_INIT(&ep->evts);
 	pthread_mutex_init(&ep->lock, NULL);
 	ep->dev = dev;
+	ep->endpoint.device = &dev->device;
 	*endpoint = &ep->endpoint;
 
 	ret = dev->plugin->create_endpoint(device, flags, endpoint, fd);

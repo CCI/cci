@@ -4,11 +4,11 @@
  *
  * See COPYING in top-level directory
  *
+ * Copyright © 2012 Inria.  All rights reserved.
  * $COPYRIGHT$
  *
  */
 
-#define _GNU_SOURCE
 #include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,10 +25,12 @@ uint32_t tx_timeout = -1;
 uint32_t rx_buf_cnt = -1;
 uint32_t tx_buf_cnt = -1;
 uint32_t keepalive = -1;
+cci_alignment_t alignment;
 int align = -1;
+int get_uri = -1;
+char *uri = NULL;
 
-cci_opt_handle_t handle;
-cci_opt_level_t level;
+cci_opt_handle_t *handle;
 
 void check_return(char *func, cci_endpoint_t *endpoint, int ret)
 {
@@ -44,79 +46,81 @@ void usage(void)
 	printf("usage: %s [-G | -S] [-t[<usecs>]] [-r[<count>]] [-s[<count>]] "
 	       "[-k[<usecs>]] [-a]\n", proc_name);
 	printf("where:\n");
-	printf("\t-G\tGet value. If no other options set, get all options.\n");
-	printf
-	    ("\t-S\tSet value. Requires at least one option and its value.\n");
+	printf("\t--get,-G\tGet value. If no other options set, get all options.\n");
+	printf("\t--set,-S\tSet value. Requires at least one option and its value.\n");
 	printf("\t  \t           This will call get_opt() before and after\n");
 	printf("\t  \t           set_opt() to show the impact if any.\n");
-	printf("\t-t\tSend timeout value in microseconds (us).\n");
-	printf("\t-r\tReceive buffer count.\n");
-	printf("\t-s\tSend buffer count.\n");
-	printf("\t-k\tKeepalive timeout in microsconds (us).\n");
-	printf("\t-a\tRMA Alignment values.\n");
-	printf
-	    ("Note: There are no spaces between option flags and optional values.\n");
-	printf("If no options are given, enter interactive mode.\n");
+	printf("\t--tx_timeout,-t\tSend timeout value in microseconds (us).\n");
+	printf("\t--rx_buf_cnt,-r\tReceive buffer count.\n");
+	printf("\t--tx_buf_cnt,-s\tSend buffer count.\n");
+	printf("\t--keepalive,-k\tKeepalive timeout in microsconds (us).\n");
+	printf("\t--align,-a\tRMA Alignment values.\n");
+	printf("\t--uri,-u\tEndpoint's URI.\n");
+	printf ("Note: There are no spaces between option flags and optional values.\n");
 	exit(EXIT_FAILURE);
 }
 
 void test(cci_endpoint_t *endpoint, cci_opt_name_t name)
 {
-	int ret, len;
-	uint32_t val;
-	void *ptr;
+	int ret;
+	uint32_t tmpval;
+	void *oldval, *newval;
 
 	switch (name) {
 	case CCI_OPT_ENDPT_SEND_TIMEOUT:
-		val = tx_timeout;
+		oldval = &tmpval; newval = &tx_timeout;
 		break;
 	case CCI_OPT_ENDPT_RECV_BUF_COUNT:
-		val = tx_timeout;
+		oldval = &tmpval; newval = &rx_buf_cnt;
 		break;
 	case CCI_OPT_ENDPT_SEND_BUF_COUNT:
-		val = tx_buf_cnt;
+		oldval = &tmpval; newval = &tx_buf_cnt;
 		break;
 	case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
-		val = keepalive;
+		oldval = &tmpval; newval = &keepalive;
 		break;
 	case CCI_OPT_ENDPT_RMA_ALIGN:
+		oldval = &alignment; /* no newval yet */
+		break;
+	case CCI_OPT_ENDPT_URI:
+		oldval = &uri; /* no newval */
 		break;
 	default:
 		printf("unknown option\n");
 		break;
 	}
 
-	ret = cci_get_opt(&handle, level, name, &ptr, &len);
-	printf("cci_get_opt() returned %s\n", cci_strerror(endpoint, ret));
+	ret = cci_get_opt(handle, name, oldval);
+	printf("\tcci_get_opt() returned %s\n", cci_strerror(endpoint, ret));
 
 	if (ret == CCI_SUCCESS) {
 		if (CCI_OPT_ENDPT_RMA_ALIGN != name) {
-			printf(" (val = %u)\n", *((uint32_t *) ptr));
+			if (CCI_OPT_ENDPT_URI == name) {
+				printf("\t(uri = %s)\n\n", uri);
+				return;
+			}
+			printf("\t(val = %u)\n", tmpval);
 			if (set) {
-				ret = cci_set_opt(&handle, level, name,
-							&val, (int)sizeof(val));
-				printf("cci_set_opt() returned %s\n",
+				ret = cci_set_opt(handle, name, newval);
+				printf("\tcci_set_opt() returned %s\n",
 					cci_strerror(endpoint, ret));
 				if (ret == CCI_SUCCESS) {
-					ret = cci_get_opt(&handle, level, name,
-								&ptr, &len);
-					printf("cci_get_opt() returned %s\n",
+					ret = cci_get_opt(handle, name, oldval);
+					printf("\tcci_get_opt() returned %s\n",
 					cci_strerror(endpoint, ret));
 					if (ret == CCI_SUCCESS)
-						printf(" (val = %u)\n",
-							*((uint32_t *) ptr));
+						printf("\t(val = %u)\n", tmpval);
 					else
 						printf("\n");
 				}
 			}
 		} else {
-			cci_alignment_t *align = (cci_alignment_t *)ptr;
-			printf("rma_write_local_addr = %u\n", align->rma_write_local_addr);
-			printf("rma_write_remote_addr = %u\n", align->rma_write_remote_addr);
-			printf("rma_write_length = %u\n", align->rma_write_length);
-			printf("rma_read_local_addr = %u\n", align->rma_read_local_addr);
-			printf("rma_read_remote_addr = %u\n", align->rma_read_remote_addr);
-			printf("rma_read_length = %u\n", align->rma_read_length);
+			printf("\trma_write_local_addr = %u\n", alignment.rma_write_local_addr);
+			printf("\trma_write_remote_addr = %u\n", alignment.rma_write_remote_addr);
+			printf("\trma_write_length = %u\n", alignment.rma_write_length);
+			printf("\trma_read_local_addr = %u\n", alignment.rma_read_local_addr);
+			printf("\trma_read_remote_addr = %u\n", alignment.rma_read_remote_addr);
+			printf("\trma_read_length = %u\n", alignment.rma_read_length);
 		}
 	} else {
 		printf("\n");
@@ -130,10 +134,24 @@ int main(int argc, char *argv[])
 	uint32_t caps = 0;
 	cci_endpoint_t *endpoint;
 
+	static struct option opts[] = {
+		{ "get",	no_argument,		NULL,		'G' },
+		{ "set",	no_argument,		NULL,		'S' },
+		{ "tx_timeout",	optional_argument,	NULL,		't' },
+		{ "rx_buf_cnt",	optional_argument,	NULL,		'r' },
+		{ "tx_buf_cnt",	optional_argument,	NULL,		's' },
+		{ "keepalive",	optional_argument,	NULL,		'k' },
+		{ "align",	no_argument,		&align,		 1  },
+		{ "uri",	no_argument,		&get_uri,	 1  },
+		{ NULL,		0,			NULL,		 0  }
+	};
+
 	proc_name = argv[0];
 
-	while ((c = getopt(argc, argv, "GSt::r::s::k::a")) != -1) {
+	while ((c = getopt_long_only(argc, argv, "GStrsk", opts, NULL)) != -1) {
 		switch (c) {
+		case 0:
+			continue;
 		case 'G':
 			if (set)
 				usage();
@@ -168,9 +186,6 @@ int main(int argc, char *argv[])
 			else
 				keepalive = 0;
 			break;
-		case 'a':
-			align = 1;
-			break;
 		default:
 			usage();
 			break;
@@ -186,10 +201,11 @@ int main(int argc, char *argv[])
 	    (rx_buf_cnt == (uint32_t) - 1) &&
 	    (tx_buf_cnt == (uint32_t) - 1) &&
 	    (keepalive == (uint32_t) - 1) &&
-	    (align == -1)) {
+	    (align == -1 &&
+	     get_uri == -1)) {
 		if (get) {
 			tx_timeout = rx_buf_cnt = tx_buf_cnt = keepalive = 0;
-			align = 1;
+			align = get_uri = 1;
 		} else {
 			printf("Set requires an option and value to set");
 			usage();
@@ -204,8 +220,7 @@ int main(int argc, char *argv[])
 
 	/* start tests */
 
-	handle.endpoint = endpoint;
-	level = CCI_OPT_LEVEL_ENDPOINT;
+	handle = endpoint;
 
 	if (tx_timeout != (uint32_t) - 1) {
 		printf("Testing CCI_OPT_ENDPT_SEND_TIMEOUT\n");
@@ -227,9 +242,14 @@ int main(int argc, char *argv[])
 		test(endpoint, CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT);
 	}
 
-	if (align) {
+	if (align != -1) {
 		printf("Testing CCI_OPT_ENDPT_RMA_ALIGN\n");
 		test(endpoint, CCI_OPT_ENDPT_RMA_ALIGN);
+	}
+
+	if (get_uri != -1) {
+		printf("Testing CCI_OPT_ENDPT_URI\n");
+		test(endpoint, CCI_OPT_ENDPT_URI);
 	}
 
 	ret = cci_destroy_endpoint(endpoint);

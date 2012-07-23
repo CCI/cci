@@ -15,18 +15,32 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#include <unistd.h>
+#include <pthread.h>
+#ifdef HAVE_IFADDRS_H
+#include <net/if.h>
+#include <ifaddrs.h>
+#endif
+#ifdef __linux__
+#include <sys/ioctl.h>
+#include <asm/types.h>
+#include <linux/ethtool.h>
+#include <linux/sockios.h>
+#endif
 
 #include "cci.h"
 #include "cci_lib_types.h"
 #include "plugins/base/public.h"
-#include "plugins/core/core.h"
-#include "plugins/core/base/public.h"
+#include "plugins/ctp/ctp.h"
+#include "plugins/ctp/base/public.h"
 #include "cci-api.h"
 
 int cci__debug = CCI_DB_DFLT;
 cci__globals_t *globals = NULL;
 int initialized = 0;
-pthread_mutex_t init_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_once_t once = PTHREAD_ONCE_INIT;
+pthread_mutex_t init_lock;
+
 
 static inline void cci__get_debug_env(void)
 {
@@ -68,6 +82,8 @@ static inline void cci__get_debug_env(void)
 			mask |= CCI_DB_WARN;
 		} else if (0 == strncmp(debug, "drvr", 4)) {
 			mask |= CCI_DB_DRVR;
+		} else if (0 == strncmp(debug, "ep", 2)) {
+			mask |= CCI_DB_EP;
 		} else if (0 == strncmp(debug, "all", 3)) {
 			mask |= CCI_DB_ALL;
 		} else {
@@ -116,8 +132,7 @@ void cci__free_dev(cci__dev_t * dev)
 
 	cci__free_args((char **)device->conf_argv);
 
-	if (dev->driver)
-		free(dev->driver);
+	free((char *)device->transport);
 
 	/* TODO dev->priv */
 
@@ -135,8 +150,8 @@ static int cci__free_configfile_devs(const char *reason)
 		TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
 		if (reason)
 			debug(CCI_DB_DRVR,
-			      "destroying device [%s] (driver %s), %s",
-			      dev->device.name, dev->driver, reason);
+			      "destroying device [%s] (transport %s), %s",
+			      dev->device.name, dev->device.transport, reason);
 		cci__free_dev(dev);
 	}
 
@@ -147,7 +162,7 @@ void cci__init_dev(cci__dev_t *dev)
 {
 	struct cci_device *device = &dev->device;
 
-	dev->priority = -1; /* tell the driver it must initialize it if we didn't */
+	dev->priority = -1; /* tell the transport it must initialize it if we didn't */
 	dev->is_default = 0;
 	TAILQ_INIT(&dev->eps);
 	pthread_mutex_init(&dev->lock, NULL);
@@ -170,8 +185,8 @@ void cci__add_dev(cci__dev_t * dev)
 	assert(NULL != dev->plugin);
 
 	debug(CCI_DB_DRVR,
-	      "adding device [%s] (driver %s)",
-	      dev->device.name, dev->driver);
+	      "adding device [%s] (transport %s)",
+	      dev->device.name, dev->device.transport);
 
 	/* walk list and insert in order by up/default/priority */
 	TAILQ_FOREACH(dd, &globals->devs, entry) {
@@ -200,9 +215,104 @@ void cci__add_dev(cci__dev_t * dev)
 	return;
 }
 
+#ifdef HAVE_GETIFADDRS
+int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
+{
+	struct cci_device * device = &dev->device;
+	struct ethtool_drvinfo edi;
+	struct ethtool_cmd ecmd;
+	struct ifreq ifr;
+	int sockfd;
+
+	/* mark the MSS as unknown in case we fail later */
+	device->max_send_size = -1;
+
+	/* up flag is easy */
+	device->up = ((ifaddr->ifa_flags & IFF_UP) != 0);
+
+	debug(CCI_DB_INFO,
+	      "querying interface %s info with socket ioctls and ethtool...",
+	      ifaddr->ifa_name);
+
+#ifdef __linux__
+	/* identify the target interface for following socket ioctls */
+	memset(&ifr, 0, sizeof(ifr));
+	strncpy(ifr.ifr_name, ifaddr->ifa_name, IFNAMSIZ);
+
+	/* try to get the MTU, and see if the device exists */
+	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (sockfd < 0) {
+		goto out;
+	}
+	if (ioctl(sockfd, SIOCGIFMTU, &ifr) < 0) {
+		assert(errno == ENODEV);
+		goto out_with_sockfd;
+	}
+	/* set MSS = MTU for now, the caller will remove the header size */
+	CCI_VALGRIND_MEMORY_MAKE_READABLE(&ifr.ifr_mtu, sizeof(ifr.ifr_mtu));
+	device->max_send_size = ifr.ifr_mtu;
+
+	/* try to get the link rate now, kernel allows non-root since 2.6.37 only */
+	ecmd.cmd = ETHTOOL_GSET;
+	ifr.ifr_data = (void *)&ecmd;
+	if (ioctl(sockfd, SIOCETHTOOL, &ifr) < 0) {
+		if (errno == EPERM) {
+			debug(CCI_DB_INFO,
+			      " ethtool get settings returned EPERM, falling back to custom ioctl");
+			goto out_with_sockfd;
+		}
+		if (errno != ENODEV && errno != EOPNOTSUPP) {
+			perror("SIOCETHTOOL ETHTOOL_GSET");
+			goto out_with_sockfd;
+		}
+		/* we won't get link rate anyhow */
+		debug(CCI_DB_INFO,
+		      " ethtool get settings not supported, cannot retrieve link rate");
+	} else {
+		unsigned speed;
+		CCI_VALGRIND_MEMORY_MAKE_READABLE(&ecmd, sizeof(ecmd));
+#if HAVE_DECL_ETHTOOL_CMD_SPEED
+		speed = ethtool_cmd_speed(&ecmd);
+#else
+		speed = ecmd.speed;
+#endif
+		device->rate = speed == -1 ? 0 : speed * 1000000ULL;
+	}
+
+	/* try to get the bus id now */
+	edi.cmd = ETHTOOL_GDRVINFO;
+	ifr.ifr_data = (void *)&edi;
+	if (ioctl(sockfd, SIOCETHTOOL, &ifr) < 0) {
+		if (errno != ENODEV && errno != EOPNOTSUPP) {
+			perror("SIOCETHTOOL ETHTOOL_GDRVINFO");
+			goto out_with_sockfd;
+		}
+		/* we won't get bus info anyhow */
+		debug(CCI_DB_INFO,
+		      " ethtool get drvinfo not supported, cannot retrieve pci id");
+	} else {
+		/* try to parse. if it fails, the device is not pci */
+		CCI_VALGRIND_MEMORY_MAKE_READABLE(&edi, sizeof(edi));
+		sscanf(edi.bus_info, "%04x:%02x:%02x.%01x",
+		       &device->pci.domain, &device->pci.bus, &device->pci.dev,
+		       &device->pci.func);
+	}
+
+	close(sockfd);
+#endif /* __linux__ */
+
+	return 0;
+
+out_with_sockfd:
+	close(sockfd);
+out:
+	return -1;
+}
+#endif
+
 int cci__parse_config(const char *path)
 {
-	int ret = 0, i = 0, arg_cnt = 0, driver = 0, is_default = 0;
+	int ret = 0, i = 0, arg_cnt = 0, transport = 0, is_default = 0;
 	char buffer[CCI_BUF_LEN], *str, *default_name = NULL;
 	FILE *file;
 	struct cci_device *d = NULL;
@@ -255,16 +365,16 @@ int cci__parse_config(const char *path)
 						    sizeof(char *) * (arg_cnt +
 								      1));
 				}
-				if (driver == 1) {
+				if (transport == 1) {
 					TAILQ_INSERT_TAIL(&globals->configfile_devs, dev, entry);
 					debug(CCI_DB_DRVR,
-					      "read device [%s] (driver %s) from config file",
-					      d->name, dev->driver);
+					      "read device [%s] (transport %s) from config file",
+					      d->name, d->transport);
 					i++;
 				} else {
-					/* device does not have a driver, free it */
+					/* device does not have a transport, free it */
 					debug(CCI_DB_WARN,
-					      "device [%s] does not have a driver. Freeing it.",
+					      "device [%s] does not have a transport. Freeing it.",
 					      d->name);
 					cci__free_dev(dev);
 				}
@@ -305,7 +415,7 @@ int cci__parse_config(const char *path)
 			}
 
 			arg_cnt = 0;
-			driver = 0;
+			transport = 0;
 			open++;
 			*close = '\0';
 			d->name = strdup(open);
@@ -348,17 +458,17 @@ int cci__parse_config(const char *path)
 					return cci__free_configfile_devs(NULL);
 				}
 				arg_cnt++;
-				if (0 == strcmp(key, "driver")) {
-					if (!driver) {
-						dev->driver = strdup(value);
-						if (!dev->driver) {
+				if (0 == strcmp(key, "transport")) {
+					if (!transport) {
+						d->transport = strdup(value);
+						if (!d->transport) {
 							cci__free_dev(dev);
 							return cci__free_configfile_devs(NULL);
 						}
-						driver++;
+						transport++;
 					} else {
 						debug(CCI_DB_WARN,
-						      "device [%s] has more than one driver. Freeing it.",
+						      "device [%s] has more than one transport. Freeing it.",
 						      d->name);
 						cci__free_dev(dev);
 						d = NULL;
@@ -398,16 +508,16 @@ int cci__parse_config(const char *path)
 			    realloc((char **) d->conf_argv,
 				    sizeof(char *) * (arg_cnt + 1));
 		}
-		if (driver == 1) {
+		if (transport == 1) {
 			TAILQ_INSERT_TAIL(&globals->configfile_devs, dev, entry);
 			debug(CCI_DB_DRVR,
-			      "read device [%s] (driver %s) from config file",
-			      d->name, dev->driver);
+			      "read device [%s] (transport %s) from config file",
+			      d->name, d->transport);
 			i++;
 		} else {
-			/* device does not have a driver, free it */
+			/* device does not have a transport, free it */
 			debug(CCI_DB_WARN,
-			      "device [%s] does not have a driver. Freeing it.",
+			      "device [%s] does not have a transport. Freeing it.",
 			      d->name);
 			cci__free_dev(dev);
 		}
@@ -418,6 +528,12 @@ int cci__parse_config(const char *path)
 	fclose(file);
 
 	return 0;
+}
+
+static void cci_lock_init(void)
+{
+	pthread_mutex_init(&init_lock, NULL);
+	return;
 }
 
 int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
@@ -436,6 +552,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	if (!caps)
 		return CCI_EINVAL;
 
+	pthread_once(&once, cci_lock_init);
 	pthread_mutex_lock(&init_lock);
 
 	if (0 == initialized) {
@@ -465,13 +582,13 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		if (CCI_SUCCESS != (ret = cci_plugins_init())) {
 			goto out_with_globals;
 		}
-		if (CCI_SUCCESS != (ret = cci_plugins_core_open())) {
+		if (CCI_SUCCESS != (ret = cci_plugins_ctp_open())) {
 			goto out_with_plugins_init;
 		}
 		if (NULL == cci_all_plugins
 		    || NULL == cci_all_plugins[0].plugin) {
 			ret = CCI_ERR_NOT_FOUND;
-			goto out_with_plugins_core_open;
+			goto out_with_plugins_ctp_open;
 		}
 
 		/* lock the device list while initializing CTPs and devices */
@@ -492,7 +609,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		for (i = 0, j = 0;
 		     cci_all_plugins[i].plugin != NULL;
 		     i++) {
-			cci_plugin_core_t *plugin = (cci_plugin_core_t *) cci_all_plugins[i].plugin;
+			cci_plugin_ctp_t *plugin = (cci_plugin_ctp_t *) cci_all_plugins[i].plugin;
 			ret = cci_all_plugins[i].init_status = plugin->init(plugin, abi_ver, flags, caps);
 			if (!ret)
 				j++;
@@ -504,9 +621,9 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			goto out_with_config_file;
 		}
 
-		/* drop devices that weren't claimed by any driver,
+		/* drop devices that weren't claimed by any transport,
 		 * they didn't move from configfile_devs to devs */
-		cci__free_configfile_devs("not claimed by any driver");
+		cci__free_configfile_devs("not claimed by any transport");
 
 		/* build devices array and list it */
 		i=0;
@@ -523,8 +640,8 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		/* list ready devices */
 		TAILQ_FOREACH(dev, &globals->devs, entry) {
 			debug(CCI_DB_DRVR,
-			      "device [%s] (driver %s, default %d, priority %d, up %d) is ready",
-			      dev->device.name, dev->driver,
+			      "device [%s] (transport %s, default %d, priority %d, up %d) is ready",
+			      dev->device.name, dev->device.transport,
 			      dev->is_default, dev->priority, dev->device.up);
 			globals->devices[i++] = &dev->device;
 		}
@@ -557,7 +674,7 @@ out_with_plugins:
 	for (i = 0;
              cci_all_plugins[i].plugin != NULL;
              i++) {
-		cci_plugin_core_t *plugin = (cci_plugin_core_t *) cci_all_plugins[i].plugin;
+		cci_plugin_ctp_t *plugin = (cci_plugin_ctp_t *) cci_all_plugins[i].plugin;
 		if (CCI_SUCCESS == cci_all_plugins[i].init_status)
 			plugin->finalize(plugin);
 	}
@@ -565,8 +682,8 @@ out_with_config_file:
 	/* FIXME? */
 out_with_glock:
 	pthread_mutex_unlock(&globals->lock);
-out_with_plugins_core_open:
-	cci_plugins_core_close();
+out_with_plugins_ctp_open:
+	cci_plugins_ctp_close();
 out_with_plugins_init:
 	cci_plugins_finalize();
 out_with_globals:

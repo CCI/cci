@@ -1,32 +1,34 @@
-= Common Communication Infrastructure Installation Guide =
+= Common Communication Interface Installation Guide ============================
 
-== From a tarball (.tar.gz) ==
+From a tarball (.tar.gz)
 
 To install CCI from a tarball, simply execute the following commands, where
 <version> is the CCI version you want to install:
-- untar the file by running "tar xzf cci-<version>.tar.gz"
-- execute "cd cci-<version>"
-- execute "./autogen.pl"
-- execute "./configure", for the list of available options, please executei
-  "./configure --help"
-- execute "make && make install"
 
-From here CCI is installed on your system
+	tar xzf cci-<version>.tar.gz
+	cd cci-<version>
+	./configure
+	make && make install
 
-== Configuration & Testing ==
+For a full list of configure options, run:
 
-The current version of CCI requires a configuration file. The configuration
-file specifies the network interface to use, as well as CCI parameters.
+	./configure --help
+
+== Optional config file ========================================================
+
+CCI supports the use of an optional configuration file to set defaults for the
+various transports. The configuration file specifies the network interface to
+use as well as CCI parameters.
 
 The configuration file, based on a INI format, follows the following pattern:
 
 [<config_name>]
-driver = <cci_driver>
+transport = <cci_transport>
 ip = <ip_to_use>
 default = <0 or 1>
 
 Where:
-- <cci_driver> is the driver to use. The available drivers are: sock.
+- <cci_transport> is the transport to use. The available transport are: sock.
 - <ip> is the IP associated to the network interface to use.
 - default specifies if the configuration is the default one (1) or not (0).
 
@@ -34,25 +36,52 @@ For instance, the configuration file when using CCI over UDP and the loopback
 interface will look like the following:
 
 [lo]
-driver = sock
+transport = sock
 ip = 127.0.0.1
 default = 1
 
 Once the configuration file in place, the environment must be updated to
 specify its path:
+
 export CCI_CONFIG=<path_to_my_cci_config_file>
+or
+setenv CCI_CONFIG <path_to_my_cci_config_file>
 
-It is then possible to run a simple pingpong to test the installation:
-- execute "cd src/test"
-- execute "make pingpong"
-- launch the server side of the pingpong "./pingpong -s", the server will
-  it URI (e.g., "ip://127.0.0.1:60160"), which is need to start the client
-- launch the client side of the pingpong with a reliable ordered connection and
-  no parameters for performance evaluation:
-    "./pingpong -h <server_uri> -i 1 -W 1 -c ro"
-  The client should give you an output similar to:
+depending on your shell.
 
-Using RO connection
+= Determine available devices ==================================================
+
+CCI includes the cci_info tool. When run, it queries for all available devices
+and outputs each.
+
+$ cci_info               
+Found 1 CCI devices:
+ 0: bob (default)
+
+= Running a test program =======================================================
+
+It is possible to run a simple pingpong to test the installation:
+
+	cd src/test
+	make pingpong
+
+Launch the server side of the pingpong:
+
+	./pingpong -s
+
+The server will print its URI (e.g., "ip://127.0.0.1:60160"), which is need to
+start the client:
+
+	./pingpong -h <server_uri>
+
+For example, to launch the client with a reliable-unordered connection that will
+send and receive 100 messages, run:
+
+	./pingpong -h ip://127.0.0.1:60160 -W 1 -i 99 -c ru
+
+The client output something similar to:
+
+Using RU connection
 Opened ip://127.0.0.1:65381
 Bytes   Latency (one-way)   Throughput
        0       39.50 us         0.00 MB/s
@@ -71,3 +100,11 @@ Bytes   Latency (one-way)   Throughput
     4096       36.50 us       112.22 MB/s
     8192       42.00 us       195.05 MB/s
 client done
+
+CCI ships with these test programs:
+
+	pingpong  # run a pingpong (request-response) between two hosts
+	stream    # stream uni-directional traffic from client to server
+	opt       # test the set and get option routines
+
+

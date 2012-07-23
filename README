@@ -1,14 +1,52 @@
-README file for CCI prototype.
+Copyright © 2010-2011 Cisco Systems, Inc.  All rights reserved.
+Copyright © 2010-2012 Myricom, Inc.  All rights reserved.
+Copyright © 2010-2012 UT-Battelle, LLC.  All rights reserved.
+Copyright © 2010-2011 Qlogic Corporation.  All rights reserved.
+Copyright © 2010-2012 Oak Ridge National Labs.  All rights reserved.
 
-= Current Limitations =
+$COPYRIGHT$
 
-The current CCI prototype has the following limiations:
-- the following transports are supported (more coming soon): UDP.
-- a CCI configuration file is required (but will become optional).
-- The OS handle for blocking is not yet functional
-- UU sends should complete immediately (no send event) with the return
-  value set as the status
+Additional copyrights may follow
 
-== UDP Transport ==
+$HEADER$
 
-- Missing features: fence
+
+= Requesting help ==============================================================
+
+To request help using CCI, please subscribe to the users list at:
+
+	http://lists.cci-forum.com/listinfo.cgi/cci-users-cci-forum.com
+
+Once subscribed, you will be able to send email to:
+
+	cci-users@lists.cci-forum.com.
+
+Please include a detailed description of the issue as well as your
+test environment. This is a useful guide for preparing help requests:
+
+	http://www.chiark.greenend.org.uk/~sgtatham/bugs.html
+
+Thank you for using CCI.
+
+
+= Supported Transports =========================================================
+
+The following transports are supported (more coming soon):
+
+  Sockets (UDP)
+  OFA Verbs (InfiniBand and RoCE)
+  Cray GNI (Gemini)
+  Cray Portals (SeaStar)
+
+
+= Current Limitations ==========================================================
+
+The current CCI prototype has the following limitations:
+
+  The OS handle for blocking is not yet functional
+
+  Multicast connections are not implemented
+
+  See README.<transport> for additional notes and limitations for that
+  transport.
+

@@ -15,7 +15,7 @@
 #include <stdio.h>
 
 #include "cci.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 
 int cci_sendv(cci_connection_t * connection,
 	      const struct iovec *data, uint32_t iovcnt, const void *context, int flags)

@@ -15,7 +15,7 @@
 #include <stdio.h>
 
 #include "cci.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 
 int cci_rma(cci_connection_t * connection,
 	    const void *header_ptr, uint32_t header_len,

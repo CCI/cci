@@ -15,7 +15,7 @@
 #include <stdio.h>
 
 #include "cci.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 
 int cci_return_event(cci_event_t * event)
 {

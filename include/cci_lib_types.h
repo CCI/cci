@@ -19,7 +19,7 @@
 #include <pthread.h>
 #include <stddef.h>
 #include "bsd/queue.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 
 BEGIN_C_DECLS
 #define CCI_MAX_DEVICES     32
@@ -42,13 +42,10 @@ BEGIN_C_DECLS
 /*! CCI private device */
     typedef struct cci__dev {
 	/*! Pointer to the plugin structure */
-	struct cci_plugin_core *plugin; /* set by the plugin init() */
+	struct cci_plugin_ctp *plugin; /* set by the plugin init() */
 
 	/*! Public device (name, info, argv, max_send_size, rate, pci) */
 	struct cci_device device;
-
-	/*! Driver name */
-	char *driver;
 
 	/*! Priority (0-100, default = 50) */
 	int priority;
@@ -78,7 +75,7 @@ void cci__init_dev(cci__dev_t *dev);
 /*! CCI private endpoint */
 typedef struct cci__ep {
 	/*! Pointer to the plugin structure */
-	struct cci_plugin_core *plugin; /* set by the core before passing the newly allocated endpoint to the plugin create_endpoint() */
+	struct cci_plugin_ctp *plugin; /* set by the ctp before passing the newly allocated endpoint to the plugin create_endpoint() */
 
 	/*! Public endpoint (max_recv_buffer_count) */
 	struct cci_endpoint endpoint;
@@ -125,7 +122,7 @@ typedef struct cci__ep {
 /*! CCI private connection */
 typedef struct cci__conn {
 	/*! Pointer to the plugin structure */
-	struct cci_plugin_core *plugin; /* set by the plugin before returning the connection in connect/accept events */
+	struct cci_plugin_ctp *plugin; /* set by the plugin before returning the connection in connect/accept events */
 
 	/*! Public connection (max_send_size, endpoint, attribute) */
 	struct cci_connection connection;
@@ -227,7 +224,7 @@ extern int cci__debug;
 #define CCI_DB_FUNC   (1 << 5)	/* enterling/leaving functions */
 #define CCI_DB_INFO   (1 << 6)	/* just informational */
 #define CCI_DB_WARN   (1 << 7)	/* non-fatal error */
-#define CCI_DB_DRVR   (1 << 8)	/* driver function returned error */
+#define CCI_DB_DRVR   (1 << 8)	/* transport function returned error */
 #define CCI_DB_EP     (1 << 9)	/* endpoint handling */
 
 #define CCI_DB_ALL    (~0)	/* print everything */
@@ -254,6 +251,21 @@ extern int cci__debug;
   do {                                                                          \
         debug(CCI_DB_FUNC, "exiting  %s", __func__);                            \
   } while (0);
+
+#if HAVE_DECL_VALGRIND_MAKE_MEM_NOACCESS
+#include <valgrind/memcheck.h>
+#define CCI_VALGRIND_MEMORY_MAKE_NOACCESS(p, s) VALGRIND_MAKE_MEM_NOACCESS(p, s)
+#define CCI_VALGRIND_MEMORY_MAKE_WRITABLE(p, s) VALGRIND_MAKE_MEM_UNDEFINED(p, s)
+#define CCI_VALGRIND_MEMORY_MAKE_READABLE(p, s) VALGRIND_MAKE_MEM_DEFINED(p, s)
+#define CCI_VALGRIND_CHECK_DEFINED(p, s) VALGRIND_CHECK_VALUE_IS_DEFINED(p, s)
+#define CCI_VALGRIND_CHECK_WRITABLE(p, s) VALGRIND_CHECK_VALUE_IS_WRITABLE(p, s)
+#else /* !HAVE_DECL_VALGRIND_MAKE_MEM_NOACCESS */
+#define CCI_VALGRIND_MEMORY_MAKE_NOACCESS(p, s) /* nothing */
+#define CCI_VALGRIND_MEMORY_MAKE_WRITABLE(p, s) /* nothing */
+#define CCI_VALGRIND_MEMORY_MAKE_READABLE(p, s) /* nothing */
+#define CCI_VALGRIND_CHECK_DEFINED(p, s) /* nothing */
+#define CCI_VALGRIND_CHECK_WRITABLE(p, s) /* nothing */
+#endif /* !HAVE_DECL_VALGRIND_MAKE_MEM_NOACCESS */
 
 END_C_DECLS
 #endif /* CCI_LIB_TYPES_H */

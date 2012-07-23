@@ -51,7 +51,7 @@ AC_DEFUN([CCI_PLUGINS],[
     AC_ARG_ENABLE([plugins-no-build],
         [AC_HELP_STRING([--enable-plugins-no-build=LIST],
                         [Comma-separated list of <framework>-<plugin> pairs 
-                         that will not be built.  Example: "--enable-plugins-no-build=maffinity,btl-portals" will disable building all maffinity plugins and the "portals" btl plugins.])])
+                         that will not be built.  Example: "--enable-plugins-no-build=ctp-sock,ctp-gni" will disable building the "sock" and "gni" ctp plugins.])])
 
     AC_MSG_CHECKING([which plugins should be disabled])
     if test "$enable_plugins_no_build" = "yes"; then

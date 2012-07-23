@@ -25,12 +25,12 @@ AC_DEFUN([CCI_DEFINE_ARGS],[
 # 3. What to do upon failure
 # 4. If non-empty, print the announcement banner
 #
-AC_DEFUN([CCI_SETUP_CORE],[
+AC_DEFUN([CCI_SETUP_CTP],[
     AC_REQUIRE([AC_PROG_CC])
     AC_REQUIRE([AM_PROG_CC_C_O])
 
     AS_IF([test "x$4" != "x"],
-          [cci_show_title "Configuring CCI core"])
+          [cci_show_title "Configuring CCI ctp"])
 
     # If no prefix was defined, set a good value
     m4_ifval([$1], 
@@ -99,6 +99,22 @@ AC_DEFUN([CCI_SETUP_CORE],[
     AS_IF([test "$CCI_DEVEL_BUILD" = "yes"],
           [AC_MSG_WARN([-g has been added to CFLAGS (developer build)])
            CFLAGS="$CFLAGS -g"])
+
+    # Look for valgrind
+    AC_ARG_ENABLE(valgrind,
+                  AC_HELP_STRING(--enable-valgrind, enable Valgrind hooks),
+                  enable_valgrind=yes)
+    if test x$enable_valgrind = xyes ; then
+        AC_CHECK_DECLS([VALGRIND_MAKE_MEM_NOACCESS],
+                       [AC_MSG_NOTICE(activating Valgrind hooks)],
+                       [:],
+                       [[#include <valgrind/memcheck.h>]])
+    fi
+
+    AC_CHECK_HEADERS([ifaddrs.h], [
+	AC_CHECK_FUNCS([getifaddrs])
+    ])
+    AC_CHECK_DECLS([ethtool_cmd_speed],,,[[#include <linux/ethtool.h>]])
 
     #
     # Basic sanity checking; we can't install to a relative path

@@ -15,7 +15,7 @@
 #include <stdio.h>
 
 #include "cci.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 
 const char *cci_strerror(cci_endpoint_t *endpoint, enum cci_status status)
 {

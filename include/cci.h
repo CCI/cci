@@ -91,10 +91,10 @@
    \return CCI_SUCCESS  CCI is available for use.
    \return CCI_EINVAL   Caps is NULL or incorrect ABI version.
    \return CCI_ENOMEM   Not enough memory to complete.
-   \return CCI_ERR_NOT_FOUND    No driver or CCI_CONFIG.
+   \return CCI_ERR_NOT_FOUND    No transports or CCI_CONFIG.
    \return CCI_ERROR    Unable to parse CCI_CONFIG.
    \return Errno if fopen() fails.
-   \return Each driver may have additional error codes.
+   \return Each transport may have additional error codes.
 
    If cci_init() completes successfully, then CCI is loaded and
    available to be used in this application.  The application must
@@ -294,9 +294,9 @@ typedef enum cci_status {
 # denotes a single CCI device.
 
 [bob0]
-# The only mandated field in each section is "driver".  It indicates
-# which CCI driver should be applied to this device.
-driver = psm
+# The only mandated field in each section is "transport".  It indicates
+# which CCI transport should be applied to this device.
+transport = psm
 
 # The priority field determines the ordering of devices returned by
 # cci_get_devices().  100 is the highest priority; 0 is the lowest priority.
@@ -314,15 +314,15 @@ priority = 10
 default = 1
 
 # All other fields are uninterpreted by the CCI core; they're just
-# passed to the driver.  The driver can do whatever it wants with
+# passed to the transport.  The transport can do whatever it wants with
 # these values (e.g., system admins can set values to configure the
-# driver).  Driver documentation should specify what parameters are
+# transport).  transport documentation should specify what parameters are
 # available, what each parameter is/does, and what its legal values
 # are.
 
 # This example shows a bonded PSM device that uses both the ipath0 and
 # ipath1 devices.  Some other parameters are also passed to the PSM
-# driver; it assumedly knows how to handle them.
+# transport; it assumedly knows how to handle them.
 
 device = ipath0,ipath1
 capabilities = bonded,failover,age_of_captain:52
@@ -330,22 +330,22 @@ qos_stuff = fast
 
 # bob2 is another PSM device, but it only uses the ipath0 device.
 [bob2]
-driver = psm
+transport = psm
 device = ipath0
 
 # bob3 is another PSM device, but it only uses the ipath1 device.
 [bob3]
-driver = psm
+transport = psm
 device = ipath1
 sl = 3 # IB service level (if applicable)
 
-# storage is a device that uses the UDP driver.  Note that this driver
+# storage is a device that uses the UDP transport.  Note that this transport
 # allows specifying which device to use by specifying its IP address
 # and MAC address -- assumedly it's an error if there is no single
 # device that matches both the specified IP address and MAC
 # (vs. specifying a specific device name).
 [storage]
-driver = udp
+transport = udp
 priority = 5
 ip = 172.31.194.1
 mac = 01:12:23:34:45
@@ -364,6 +364,9 @@ typedef const struct cci_device {
 	/*! Name of the device from the config file, e.g., "bob0" */
 	const char *name;
 
+	/*! Name of the device driver, e.g., "sock" or "verbs" */
+	const char *transport;
+
 	/*! Is this device actually up and running? */
 	unsigned up;
 
@@ -380,7 +383,7 @@ typedef const struct cci_device {
 	uint32_t max_send_size;
 
 	/*! Data rate per specification: data bits per second (not the
-	   signaling rate). */
+	   signaling rate). 0 if unknown. */
 	uint64_t rate;
 
 	/*! The PCI ID of this device as reported by the OS/hardware.  All
@@ -405,7 +408,7 @@ typedef const struct cci_device {
 
   \return CCI_SUCCESS   The array of devices is available.
   \return CCI_EINVAL    Devices is NULL.
-  \return Each driver may have additional error codes.
+  \return Each transport may have additional error codes.
 
   If cci_get_devices() succeeds, the entire returned set of data (to
   include the data pointed to by the individual cci_device
@@ -478,6 +481,9 @@ typedef enum cci_endpoint_flags {
   \ingroup endpoints
 */
 typedef const struct cci_endpoint {
+	/*! Device that runs this endpoint. */
+	cci_device_t *device;
+
 	/*! Application-provided, private context. */
 	void *context;
 } cci_endpoint_t;
@@ -509,7 +515,7 @@ typedef int cci_os_handle_t;
   \return CCI_EINVAL    Endpoint or fd is NULL.
   \return CCI_ENODEV    Device is not "up".
   \return CCI_ENOMEM    Unable to allocate enough memory.
-  \return Each driver may have additional error codes.
+  \return Each transport may have additional error codes.
 
   This function creates a CCI endpoint.  A CCI endpoint represents a
   collection of local resources (such as buffers and a completion
@@ -552,7 +558,7 @@ CCI_DECLSPEC int cci_create_endpoint(cci_device_t * device,
 
    \return CCI_SUCCESS  The endpoint's resources have been released.
    \return CCI_EINVAL   Endpoint is NULL.
-   \return Each driver may have additional error codes.
+   \return Each transport may have additional error codes.
 
    Successful completion of this function makes all data structures
    and state associated with the endpoint (including the OS handle)
@@ -670,7 +676,7 @@ typedef const union cci_event cci_event_t;
   \return CCI_SUCCESS   CCI has started completing the connection handshake.
   \return CCI_EINVAL    The event is not a connection request or it has
                         already been accepted or rejected.
-  \return Each driver may have additional error codes.
+  \return Each transport may have additional error codes.
 
   Upon success, CCI will attempt to complete the connection handshake.
   Once completed, CCI will return a CCI_EVENT_ACCEPT event. If successful,
@@ -692,7 +698,7 @@ CCI_DECLSPEC int cci_accept(cci_event_t *conn_req, const void *context);
   \return CCI_SUCCESS	Connection request has been rejected.
   \return CCI_EINVAL    The event is not a connection request or it has
                         already been accepted or rejected.
-  \return Each driver may have additional error codes.
+  \return Each transport may have additional error codes.
 
    Rejects an incoming connection request.  The connection request
    event must still be returned to CCI via cci_return_event().
@@ -750,7 +756,7 @@ CCI_DECLSPEC int cci_reject(cci_event_t *conn_req);
   \return CCI_SUCCESS   The request is buffered and ready to be sent or
                         has been sent.
   \return CCI_EINVAL    data_len is strictly larger than CCI_CONN_REQ_LEN.
-  \return Each driver may have additional error codes.
+  \return Each transport may have additional error codes.
 
   \ingroup connection
 */
@@ -777,7 +783,7 @@ CCI_DECLSPEC int cci_connect(cci_endpoint_t * endpoint, const char *server_uri,
 
   \return CCI_SUCCESS   The connection's resources have been released.
   \return CCI_EINVAL    Connection is NULL.
-  \return Each driver may have additional error codes.
+  \return Each transport may have additional error codes.
 
   \ingroup connection
  */
@@ -931,7 +937,7 @@ typedef struct cci_event_recv {
   CCI_ETIMEDOUT    The connection could not be established before
                    the timeout expired.
 
-  Some drivers may also return specific return codes.
+  Some transports may also return specific return codes.
 
   The connection field is only valid for use if status is
   CCI_SUCCESS. It is set to NULL in any other case.
@@ -1007,7 +1013,7 @@ typedef struct cci_event_connect_request {
 		The corresponding connection structure is available
 		in the event connection field.
 
-  Some drivers may also return specific return codes.
+  Some transports may also return specific return codes.
 
   The connection field is only valid for use if status is
   CCI_SUCCESS. It is set to NULL in any other case.
@@ -1162,7 +1168,7 @@ CCI_DECLSPEC int cci_arm_os_handle(cci_endpoint_t * endpoint, int flags);
   \return CCI_ENOBUFS	No event is available and there are no available
                         receive buffers. The application must return events
 			before any more messages can be received.
-  \return Each driver may have additional error codes.
+  \return Each transport may have additional error codes.
 
    To discuss:
 
@@ -1197,7 +1203,7 @@ CCI_DECLSPEC int cci_get_event(cci_endpoint_t * endpoint,
   \return CCI_SUCCESS  The event was returned to CCI.
   \return CCI_EINVAL   The event is a connection request and it has
                        not been passed to cci_accept() or cci_reject().
-  \return Each driver may have additional error codes.
+  \return Each transport may have additional error codes.
 
   \todo What to do about hardware that cannot return buffers out of
      order?  Is the overhead of software queued returns (to effect
@@ -1216,30 +1222,6 @@ CCI_DECLSPEC int cci_return_event(cci_event_t * event);
 /*! \defgroup opts Endpoint / Connection Options */
 
 /*!
-  Handle defining the scope of an option
-
-  \ingroup opts
-*/
-typedef union cci_opt_handle {
-	/*! Endpoint */
-	cci_endpoint_t *endpoint;
-	/*! Connection */
-	cci_connection_t *connection;
-} cci_opt_handle_t;
-
-/*!
-  Level defining the scope of an option
-
-  \ingroup opts
-*/
-typedef enum cci_opt_level {
-	/*! Flag indicating that the union is an endpoint */
-	CCI_OPT_LEVEL_ENDPOINT,
-	/*! Flag indicating that the union is a connection */
-	CCI_OPT_LEVEL_CONNECTION
-} cci_opt_level_t;
-
-/*!
   Name of options
 
   \ingroup opts
@@ -1248,6 +1230,8 @@ typedef enum cci_opt_name {
 	/*! Default send timeout for all new connections.
 
 	   cci_get_opt() and cci_set_opt().
+
+	   The parameter must point to a uint32_t.
 	 */
 	CCI_OPT_ENDPT_SEND_TIMEOUT,
 
@@ -1255,6 +1239,8 @@ typedef enum cci_opt_name {
 	   number of messages the CCI layer can receive without dropping.
 
 	   cci_get_opt() and cci_set_opt().
+
+	   The parameter must point to a uint32_t.
 	 */
 	CCI_OPT_ENDPT_RECV_BUF_COUNT,
 
@@ -1263,6 +1249,8 @@ typedef enum cci_opt_name {
 	   blocking (depending on reliability mode).
 
 	   cci_get_opt() and cci_set_opt().
+
+	   The parameter must point to a uint32_t.
 	 */
 	CCI_OPT_ENDPT_SEND_BUF_COUNT,
 
@@ -1291,6 +1279,8 @@ typedef enum cci_opt_name {
 	   connection, re-arm the keepalive timeout, etc.
 
 	   cci_get_opt() and cci_set_opt().
+
+	   The parameter must point to a uint32_t.
 	 */
 	CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT,
 
@@ -1298,6 +1288,10 @@ typedef enum cci_opt_name {
 	   requests. The application should never need to parse this URI.
 
 	   cci_get_opt() only.
+
+	   The parameter must point to a char *.
+	   The application is responsible for freeing the pointer that is
+	   stored in this char *.
 	 */
 	CCI_OPT_ENDPT_URI,
 
@@ -1316,12 +1310,16 @@ typedef enum cci_opt_name {
 	   performance for these cases.
 
            cci_get_opt() only.
+
+	   The parameter must point to a cci_alignment_t.
         */
 	CCI_OPT_ENDPT_RMA_ALIGN,
 
 	/*! Reliable send timeout in microseconds.
 
 	   cci_get_opt() and cci_set_opt().
+
+	   The parameter must point to a uint32_t.
 	 */
 	CCI_OPT_CONN_SEND_TIMEOUT
 } cci_opt_name_t;
@@ -1335,49 +1333,53 @@ typedef struct cci_alignment {
 	uint32_t rma_read_length;	/*!< READ length */
 } cci_alignment_t;
 
+typedef const void cci_opt_handle_t;
+
 /*!
   Set an endpoint or connection option value.
 
   \param[in] handle Endpoint or connection handle.
-  \param[in] level  Indicates type of handle.
   \param[in] name   Which option to set the value of.
-  \param[in] val    Pointer to the value.
-  \param[in] len    Length of value to be set.
+  \param[in] val    Pointer to the input value. The type of the value
+                    must match the option name.
+
+  Depending on the value of name, handle must be a cci_endpoint_t*
+  or a cci_connection_t*.
 
   \return CCI_SUCCESS   Value successfully set.
-  \return CCI_EINVAL    Handle or val is NULL or len is 0.
-  \return CCI_EINVAL    Level/name mismatch.
+  \return CCI_EINVAL    Handle or val is NULL.
   \return CCI_EINVAL    Trying to set a get-only option.
-  \return CCI_ERR_NOT_IMPLEMENTED   Not supported by this driver.
-  \return Each driver may have additional error codes.
+  \return CCI_ERR_NOT_IMPLEMENTED   Not supported by this transport.
+  \return Each transport may have additional error codes.
 
   Note that the set may fail if the CCI implementation cannot
   actually set the value.
 
   \ingroup opts
 */
-CCI_DECLSPEC int cci_set_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
-			     cci_opt_name_t name, const void *val, int len);
+CCI_DECLSPEC int cci_set_opt(cci_opt_handle_t * handle,
+			     cci_opt_name_t name, const void *val);
 
 /*!
   Get an endpoint or connection option value.
 
   \param[in] handle Endpoint or connection handle.
-  \param[in] level  Indicates type of handle.
   \param[in] name   Which option to set the value of.
-  \param[in] val    Address of the pointer to the value.
-  \param[in] len    Address of the length of value.
+  \param[in] val    Pointer to the output value. The type of the value
+                    must match the option name.
+
+  Depending on the value of name, handle must be a cci_endpoint_t*
+  or a cci_connection_t*.
 
   \return CCI_SUCCESS   Value successfully retrieved.
-  \return CCI_EINVAL    Handle or val is NULL or len is 0.
-  \return CCI_EINVAL    Level/name mismatch.
-  \return CCI_ERR_NOT_IMPLEMENTED   Not supported by this driver.
-  \return Each driver may have additional error codes.
+  \return CCI_EINVAL    Handle or val is NULL.
+  \return CCI_ERR_NOT_IMPLEMENTED   Not supported by this transport.
+  \return Each transport may have additional error codes.
 
   \ingroup opts
 */
-CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
-			     cci_opt_name_t name, void **val, int *len);
+CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t * handle,
+			     cci_opt_name_t name, void *val);
 
 /* ================================================================== */
 /*                                                                    */
@@ -1411,7 +1413,7 @@ CCI_DECLSPEC int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
 
   \return CCI_SUCCESS   The message has been queued to send.
   \return CCI_EINVAL    Connection is NULL.
-  \return Each driver may have additional error codes.
+  \return Each transport may have additional error codes.
 
   \todo When someone implements: it would be nice to have a way for an
   MPI implementation to have a progress thread for long messages.
@@ -1493,7 +1495,7 @@ CCI_DECLSPEC int cci_send(cci_connection_t * connection,
 
   \return CCI_SUCCESS   The message has been queued to send.
   \return CCI_EINVAL    Connection is NULL.
-  \return Each driver may have additional error codes.
+  \return Each transport may have additional error codes.
 
   \ingroup communications
 
@@ -1528,7 +1530,7 @@ CCI_DECLSPEC int cci_sendv(cci_connection_t * connection,
   \return CCI_SUCCESS   The memory is ready for RMA.
   \return CCI_EINVAL    endpoint, start, or rma_handle is NULL.
   \return CCI_EINVAL    length is 0.
-  \return Each driver may have additional error codes.
+  \return Each transport may have additional error codes.
 
   \ingroup communications
 */
@@ -1549,7 +1551,7 @@ CCI_DECLSPEC int cci_rma_register(cci_endpoint_t * endpoint,
   \param[in] rma_handle Handle for use with cci_rma().
 
   \return CCI_SUCCESS   The memory is deregistered.
-  \return Each driver may have additional error codes.
+  \return Each transport may have additional error codes.
 
   \ingroup communications
  */
@@ -1602,7 +1604,7 @@ CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
   \return CCI_EINVAL    data_len is 0.
   \return CCI_EINVAL    Both READ and WRITE flags are set.
   \return CCI_EINVAL    Neither the READ or WRITE flag is set.
-  \return Each driver may have additional error codes.
+  \return Each transport may have additional error codes.
 
   \note CCI_FLAG_FENCE only applies to RMA operations for this connection. It does
   not apply to sends on this connection.
