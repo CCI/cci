@@ -1212,7 +1212,10 @@ ctp_verbs_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 
-	vep->rdma_msg_total = vglobals->ep_rmsg_conns;
+	/* only enable the RMDA MSGs for SDR/DDR */
+	if (dev->device.rate <= 16000000000)
+		vep->rdma_msg_total = vglobals->ep_rmsg_conns;
+
 	ret = verbs_create_rx_pool(ep, ep->rx_buf_cnt);
 	if (ret)
 		goto out;

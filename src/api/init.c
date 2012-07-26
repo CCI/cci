@@ -18,6 +18,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #ifdef HAVE_IFADDRS_H
+#include <net/if_arp.h>
 #include <net/if.h>
 #include <ifaddrs.h>
 #endif
@@ -219,8 +220,10 @@ void cci__add_dev(cci__dev_t * dev)
 int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 {
 	struct cci_device * device = &dev->device;
+#if __linux__
 	struct ethtool_drvinfo edi;
 	struct ethtool_cmd ecmd;
+#endif /* __linux__ */
 	struct ifreq ifr;
 	int sockfd;
 
