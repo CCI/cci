@@ -26,3 +26,5 @@ libcci_api_la_SOURCES = \
         sendv.c \
         set_opt.c \
         strerror.c
+
+libcci_api_la_LIBADD = -lpthread

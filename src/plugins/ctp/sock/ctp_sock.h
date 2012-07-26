@@ -48,6 +48,8 @@ BEGIN_C_DECLS
 #define SOCK_RMA_DEPTH          (256)	/* how many in-flight msgs per RMA */
 #define ACK_TIMEOUT             (100) /* Timeout associated to ACK blocks */
 #define PENDING_ACK_THRESHOLD   (SOCK_RMA_DEPTH/4) /* Maximum size of a ACK block */
+#define SOCK_EP_NUM_EVTS        (64)
+
 static inline uint64_t sock_tv_to_usecs(struct timeval tv)
 {
 	return (tv.tv_sec * 1000000) + tv.tv_usec;
@@ -904,14 +906,17 @@ typedef struct sock_rma_op {
 } sock_rma_op_t;
 
 typedef struct sock_ep {
-    /*! ID of the recv thread for the endpoint */
-    pthread_t recv_tid;
+	int event_fd;
+	int fd[2];
 
-    /*! ID of the progress thread for the endpoint */
-    pthread_t progress_tid;
+	/*! ID of the recv thread for the endpoint */
+	pthread_t recv_tid;
 
-    pthread_mutex_t progress_mutex;
-    pthread_cond_t  wait_condition;
+	/*! ID of the progress thread for the endpoint */
+	pthread_t progress_tid;
+
+	pthread_mutex_t progress_mutex;
+	pthread_cond_t  wait_condition;
 
 	/* Our IP and port */
 	struct sockaddr_in sin;

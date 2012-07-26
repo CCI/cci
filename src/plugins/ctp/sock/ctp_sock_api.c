@@ -36,6 +36,11 @@
 #include <net/if.h>
 #endif
 
+
+#ifdef HAVE_SYS_EPOLL_H
+#include <sys/epoll.h>
+#endif /* HAVE_SYS_EPOLL_H */
+
 #include "cci.h"
 #include "cci_lib_types.h"
 #include "cci-api.h"
@@ -72,10 +77,8 @@ static int ctp_sock_connect(cci_endpoint_t * endpoint, const char *server_uri,
 			const void *context, int flags, const struct timeval *timeout);
 static int ctp_sock_disconnect(cci_connection_t * connection);
 static int ctp_sock_set_opt(cci_opt_handle_t * handle,
-			cci_opt_level_t level,
 			cci_opt_name_t name, const void *val);
 static int ctp_sock_get_opt(cci_opt_handle_t * handle,
-			cci_opt_level_t level,
 			cci_opt_name_t name, void *val);
 static int ctp_sock_arm_os_handle(cci_endpoint_t * endpoint, int flags);
 static int ctp_sock_get_event(cci_endpoint_t * endpoint,
@@ -106,6 +109,7 @@ static int sock_sendto(cci_os_handle_t sock, void *buf, int len,
 static void sock_ack_conns(cci__ep_t * ep);
 static inline int pack_piggyback_ack (cci__ep_t *ep,
             sock_conn_t *sconn, sock_tx_t *tx);
+static int sock_recvfrom_ep(cci__ep_t * ep);
 
 /*
  * Public plugin structure.
@@ -207,240 +211,6 @@ static inline const char *sock_msg_type(sock_msg_type_t type)
 		return "type_max";
 	}
 	return NULL;
-}
-
-static const char *sock_strerror(cci_endpoint_t * endpoint,
-				 enum cci_status status)
-{
-	CCI_ENTER;
-
-	CCI_EXIT;
-	return NULL;
-}
-
-/**
- * Display a NULL terminated array of devices
- * @param[in]	devices	NULL terminated array of devices to display
- */
-static inline void prettyprint_devices(cci_device_t ** devices)
-{
-	int i = 0;
-	cci_device_t *device;
-
-	if (devices == 0)
-		return;
-
-	while (devices[i] != NULL) {
-		device = devices[i];
-		printf("Index: %d\n", i);
-		printf("\t%s", device->name);
-		if (device->up == 1) {
-			/* All the device info is _not_ storing in the cci_device_t
-			   structure so we need to lookup the other structure in order to
-			   get all the data and display it */
-			sock_dev_t *sdev;
-			cci__dev_t *dev;
-			struct in_addr addr;
-			char *ip_str;
-
-			dev = container_of(device, cci__dev_t, device);
-			sdev = dev->priv;
-
-			addr.s_addr = sdev->ip;
-			ip_str = inet_ntoa(addr);
-			printf(" is up (%s)", ip_str);
-		} else {
-			printf(" is down");
-		}
-		printf("\n");
-		i++;
-	}
-}
-
-/**
- * Lookup a device from an array of devices based on its name.
- * @param[in]	ifa_name	Name of the device to add
- * @param[in]	devices		NULL terminated array of devices
- * @param[out]	dev			Pointer to the device structure when the device is
- *							found in the array
- * @return CCI_SUCCESS	Upon success
- * @return CCI_ERROR	Upon error
- */
-static inline int
-lookup_device(char *ifa_name, struct cci_device ** devices, struct cci_device ** dev)
-{
-	int i = 0;
-
-	if (ifa_name == NULL)
-		return CCI_ERROR;
-
-	if (devices == NULL) {
-		*dev = NULL;
-		return CCI_SUCCESS;
-	}
-
-	while (devices[i] != NULL && strcmp(ifa_name, devices[i]->name) != 0)
-		i++;
-
-	if (devices[i] == NULL)
-		*dev = NULL;
-	else
-		*dev = devices[i];
-
-	return CCI_SUCCESS;
-}
-
-/**
- * Return the size of a NULL terminated array.
- * @param[in]	array	NULL terminated array from which we want the size
- * @return	-1	Fatal error
- * @return	>=0	Size of the array
- */
-static inline size_t get_array_size(struct cci_device ** array)
-{
-	size_t i = 0;
-
-	if (array == NULL)
-		return 0;
-
-	while (array[i] != NULL)
-		i++;
-
-	return i;
-}
-
-/**
- * Store device data into the a of devices.
- * @param[in]	ifa_name	Name of the device
- * @param[in]	ip			IP address of the device (can be NULL)
- * @param[in]	s			State of the device (i.e., up or down)
- * @param[in,out]	list_devices	List of devices where to add the new device,
- *									the list is NULL terminated.
- * @return	CCI_SUCCESS Upon success
- * @return	CCI_ERROR	Error occured
- */
-static inline int
-store_device(char *ifa_name,
-	     char *ip,
-	     core_sock_device_state_t s, struct cci_device *** list_devices)
-{
-	int rc;
-	struct cci_device *device;
-	struct cci_device **devices;
-	size_t n;
-
-	devices = *list_devices;
-
-	rc = lookup_device(ifa_name, devices, &device);
-	if (rc != CCI_SUCCESS)
-		return CCI_ERROR;
-
-	if (device == NULL) {
-		cci__dev_t *dev;
-
-		/*
-		 * The device is not yet in the list, we add it and make sure the
-		 * list that is NULL terminated remain coherent
-		 */
-
-		INIT_CCI__DEV_STRUCT(dev, rc);
-		device = &dev->device;
-		device->name = strdup(ifa_name);
-		if (s == IFACE_IS_UP) {
-			/* We store in two different places the state (up or not) of the
-			   iface */
-			device->up = 1;
-		}
-		TAILQ_INSERT_TAIL(&globals->devs, dev, entry);
-
-		/* The list is NULL terminated so we need to extend it in a coherent
-		   manner */
-		n = get_array_size(devices);
-		devices = realloc(devices, (n + 2) * sizeof(cci_device_t *));
-		devices[n + 1] = NULL;
-		devices[n] = device;
-	} else {
-		/* 
-		 * The device is already in the list, we simply update the data if we
-		 * have to 
-		 */
-		if (ip != NULL) {
-			sock_dev_t *sdev;
-			cci__dev_t *dev;
-
-			/*
-			 * If the IP is specified, we save it and specify the iface as up.
-			 */
-			dev = container_of(device, cci__dev_t, device);
-			sdev = dev->priv;
-			if (sdev == NULL)
-				return CCI_ERROR;
-			/* We store in two different places the state (up or not) of the
-			   iface */
-			device->up = 1;
-			sdev->ip = inet_addr(ip);
-		}
-	}
-
-	*list_devices = devices;
-
-	return CCI_SUCCESS;
-}
-
-/*
- * Generic function that loads the available network interfaces and store then
- * in the appropriate data structure such as sglobals and globals
- */
-static inline int load_devices(void)
-{
-	struct ifaddrs *ifaddr;
-	struct ifaddrs *ifa;
-	int family;
-	int rc;
-	struct cci_device **list_devices = NULL;
-
-	if (getifaddrs(&ifaddr) == -1)
-		return CCI_ERROR;
-
-	list_devices = (struct cci_device **) sglobals->devices;
-
-	for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
-		/* Do we already have data about this device? */
-		if (ifa->ifa_addr == NULL)
-			continue;
-
-		rc = store_device(ifa->ifa_name,
-						  NULL, IFACE_IS_DOWN, &list_devices);
-		if (rc != CCI_SUCCESS)
-			return CCI_ERROR;
-
-		family = ifa->ifa_addr->sa_family;
-
-        /* We only care about the IPv4 addresses at the moment */
-		if (family == AF_INET) {
-			struct sockaddr_in *s4;
-			char buf[INET_ADDRSTRLEN];
-			const char *s;
-
-			/* If we can get an IP, we update the data of that device */
-			s4 = (struct sockaddr_in *)ifa->ifa_addr;
-			s = inet_ntop(ifa->ifa_addr->sa_family,
-				      &s4->sin_addr, buf, sizeof(buf));
-			if (s != NULL) {
-				rc = store_device(ifa->ifa_name,
-						  (char *)buf,
-						  IFACE_IS_UP, &list_devices);
-				if (rc != CCI_SUCCESS)
-					return CCI_ERROR;
-			}
-		}
-	}
-
-	sglobals->count = get_array_size(list_devices);
-
-	freeifaddrs(ifaddr);
-
-	return CCI_SUCCESS;
 }
 
 static inline int sock_create_threads (cci__ep_t *ep)
@@ -635,7 +405,12 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 				} else if (0 == strncmp("mtu=", *arg, 4)) {
 					const char *mtu_str = *arg + 4;
 					mtu = strtol(mtu_str, NULL, 0);
-				 }
+				} else if (0 == strncmp("port=", *arg, 5)) {
+					const char *s_port = *arg + 5;
+					uint16_t    port;
+					port = atoi (s_port);
+					sdev->port = htons(port);
+				}
 			}
 			if (sdev->ip != 0) {
 				/* try to get the actual values now */
@@ -722,26 +497,6 @@ out:
 	return ret;
 }
 
-static int sock_get_devices(cci_device_t const ***devices)
-{
-	CCI_ENTER;
-
-	if (!sglobals) {
-		CCI_EXIT;
-		return CCI_ENODEV;
-	}
-
-	if (!globals->configfile) {
-		load_devices();
-	}
-
-	*devices = sglobals->devices;
-
-	CCI_EXIT;
-
-	return CCI_SUCCESS;
-}
-
 static const char *ctp_sock_strerror(cci_endpoint_t * endpoint,
 				 enum cci_status status)
 {
@@ -794,10 +549,7 @@ sock_set_nonblocking(cci_os_handle_t sock, sock_fd_type_t type, void *p)
 
 static inline void sock_close_socket(cci_os_handle_t sock)
 {
-	int found = 0;
-
 	close(sock);
-
 	return;
 }
 
@@ -894,8 +646,8 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	TAILQ_INIT(&sep->idle_rxs);
 	TAILQ_INIT(&sep->handles);
 	TAILQ_INIT(&sep->rma_ops);
-    TAILQ_INIT(&sep->queued);
-    TAILQ_INIT(&sep->pending);
+	TAILQ_INIT(&sep->queued);
+	TAILQ_INIT(&sep->pending);
 
 	/* alloc txs */
 	for (i = 0; i < ep->tx_buf_cnt; i++) {
@@ -943,9 +695,47 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	if (ret)
 		goto out;
 
-    ret = sock_create_threads (ep);
-    if (ret)
-        goto out;
+	sep->event_fd = 0;
+#ifdef HAVE_SYS_EPOLL_H
+	if (fd) {
+		int fflags = 0;
+		struct epoll_event ev;
+
+		ret = epoll_create (2);
+		if (ret == -1) {
+			ret = errno;
+			goto out;
+		}
+		sep->event_fd = ret;
+
+		fflags = fcntl(sep->event_fd, F_GETFL, 0);
+        if (fflags == -1) {
+            ret = errno;
+            goto out;
+        }
+
+        ret = fcntl(sep->event_fd, F_SETFL, fflags | O_NONBLOCK);
+        if (ret == -1) {
+            ret = errno;
+            goto out;
+        }
+
+		ev.data.ptr = (void*)sock_recvfrom_ep;
+		ev.events = EPOLLIN;
+		ret = epoll_ctl (sep->event_fd, EPOLL_CTL_ADD, sep->sock, &ev);
+		if (ret == -1) {
+			ret = errno;
+			goto out;
+		}
+
+		pipe (sep->fd);
+		*fd = sep->fd[0];
+	}
+#endif /* HAVE_SYS_EPOLL_H */
+
+	ret = sock_create_threads (ep);
+	if (ret)
+		goto out;
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -1008,20 +798,18 @@ static int ctp_sock_destroy_endpoint(cci_endpoint_t * endpoint)
 	pthread_mutex_lock(&dev->lock);
 	pthread_mutex_lock(&ep->lock);
 
-	ep->priv = NULL;
-
 	if (sep) {
 		int i;
 		cci__conn_t *conn;
 		sock_conn_t *sconn;
 
-        sep->closing = 1;
+	sep->closing = 1;
 
-        pthread_mutex_unlock(&dev->lock);
-        pthread_mutex_unlock(&ep->lock);
-        sock_terminate_threads (sep);
-        pthread_mutex_lock(&dev->lock);
-        pthread_mutex_lock(&ep->lock);
+	pthread_mutex_unlock(&dev->lock);
+	pthread_mutex_unlock(&ep->lock);
+	sock_terminate_threads (sep);
+	pthread_mutex_lock(&dev->lock);
+	pthread_mutex_lock(&ep->lock);
 
 		if (sep->sock)
 			sock_close_socket(sep->sock);
@@ -1082,6 +870,7 @@ static int ctp_sock_destroy_endpoint(cci_endpoint_t * endpoint)
 		free(sep);
 		ep->priv = NULL;
 	}
+	ep->priv = NULL;
 	if (ep->uri)
 		free((char *)ep->uri);
 	pthread_mutex_unlock(&ep->lock);
@@ -1294,7 +1083,8 @@ static int ctp_sock_accept(cci_event_t *event, const void *context)
 	tx->len = sizeof(*hdr_r) + sizeof(*hs);
 	tx->seq = sconn->seq;
 
-	debug(CCI_DB_CONN, "queuing conn_reply with seq %u ts %x", sconn->seq, sconn->ts);	// FIXME
+	debug(CCI_DB_CONN, "queuing conn_reply with seq %u ts %x", 
+		  sconn->seq, sconn->ts);	// FIXME
 
 	/* insert at tail of device's queued list */
 
@@ -1304,9 +1094,10 @@ static int ctp_sock_accept(cci_event_t *event, const void *context)
 	pthread_mutex_unlock(&ep->lock);
 
 	/* try to progress txs */
-
-	sock_progress_sends (ep);
-
+	pthread_mutex_lock(&sep->progress_mutex);
+	pthread_cond_signal(&sep->wait_condition);
+	pthread_mutex_unlock(&sep->progress_mutex);
+	
 	CCI_EXIT;
 
 	return CCI_SUCCESS;
@@ -1396,9 +1187,10 @@ static int ctp_sock_reject(cci_event_t *event)
 	pthread_mutex_unlock(&ep->lock);
 
 	/* try to progress txs */
-
-	sock_progress_sends (ep);
-
+	pthread_mutex_lock(&sep->progress_mutex);
+	pthread_cond_signal(&sep->wait_condition);
+	pthread_mutex_unlock(&sep->progress_mutex);
+	
 	memset(name, 0, sizeof(name));
 	sock_sin_to_name(rx->sin, name, sizeof(name));
 	debug((CCI_DB_MSG | CCI_DB_CONN), "ep %d sending reject to %s",
@@ -1687,8 +1479,9 @@ static int ctp_sock_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	pthread_mutex_unlock(&ep->lock);
 
 	/* try to progress txs */
-
-	sock_progress_sends (ep);
+	pthread_mutex_lock(&sep->progress_mutex);
+	pthread_cond_signal(&sep->wait_condition);
+	pthread_mutex_unlock(&sep->progress_mutex);
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -1749,7 +1542,6 @@ static int ctp_sock_disconnect(cci_connection_t * connection)
 }
 
 static int ctp_sock_set_opt(cci_opt_handle_t * handle,
-			cci_opt_level_t level,
 			cci_opt_name_t name, const void *val)
 {
 	int ret = CCI_SUCCESS;
@@ -1763,15 +1555,9 @@ static int ctp_sock_set_opt(cci_opt_handle_t * handle,
 		return CCI_ENODEV;
 	}
 
-	if (CCI_OPT_LEVEL_ENDPOINT == level) {
-		ep = container_of(handle->endpoint, cci__ep_t, endpoint);
-	} else {
-		conn =
-		    container_of(handle->connection, cci__conn_t, connection);
-	}
-
 	switch (name) {
 	case CCI_OPT_ENDPT_SEND_TIMEOUT:
+		ep = container_of(handle, cci__ep_t, endpoint);
 		ep->tx_timeout = *((uint32_t*) val);
 		break;
 	case CCI_OPT_ENDPT_RECV_BUF_COUNT:
@@ -1781,6 +1567,7 @@ static int ctp_sock_set_opt(cci_opt_handle_t * handle,
 		ret = CCI_ERR_NOT_IMPLEMENTED;
 		break;
 	case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
+        ep = container_of(handle, cci__ep_t, endpoint);
 		ep->keepalive_timeout = *((uint32_t*) val);
 		break;
 	case CCI_OPT_CONN_SEND_TIMEOUT:
@@ -1797,7 +1584,6 @@ static int ctp_sock_set_opt(cci_opt_handle_t * handle,
 }
 
 static int ctp_sock_get_opt(cci_opt_handle_t * handle,
-			cci_opt_level_t level,
 			cci_opt_name_t name, void *val)
 {
 	CCI_ENTER;
@@ -1825,7 +1611,8 @@ static int ctp_sock_arm_os_handle(cci_endpoint_t * endpoint, int flags)
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
-static int ctp_sock_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
+static int
+ctp_sock_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep;
@@ -1839,6 +1626,7 @@ static int ctp_sock_get_event(cci_endpoint_t * endpoint, cci_event_t ** const ev
 	}
 
 	ep = container_of(endpoint, cci__ep_t, endpoint);
+
 	sock_progress_sends (ep);
 
 	pthread_mutex_lock(&ep->lock);
@@ -1869,10 +1657,8 @@ static int ctp_sock_get_event(cci_endpoint_t * endpoint, cci_event_t ** const ev
 
 	pthread_mutex_unlock(&ep->lock);
 
-	/* TODO drain fd so that they can block again */
-
 	*event = &ev->event;
-
+	
 	CCI_EXIT;
 	return ret;
 }
@@ -1941,14 +1727,14 @@ static int sock_sendmsg(cci_os_handle_t sock, struct iovec iov[2],
 	msg.msg_iovlen = count;
 
 	ret = sendmsg(sock, &msg, 0);
-	if (ret != -1) {
-		//assert(ret == sent);
-	} else if (ret == -1) {
-		ret = errno;
-		debug(CCI_DB_MSG, "%s: sendmsg() returned %d (%s) count %d iov[0] %p:%hu iov[1] %p:%hu",
-				__func__, ret, strerror(ret), count,
-				iov[0].iov_base, (int)iov[0].iov_len,
-				iov[1].iov_base, (int)iov[1].iov_len);
+	if (ret == -1) {
+		ret = -(errno);
+		debug(CCI_DB_MSG,
+			  "%s: sendmsg() returned %d (%s) count %d iov[0] %p:%hu "
+			  "iov[1] %p:%hu",
+			  __func__, ret, strerror(ret), count,
+			  iov[0].iov_base, (int)iov[0].iov_len,
+			  iov[1].iov_base, (int)iov[1].iov_len);
 	}
 
 	return ret;
@@ -1988,15 +1774,13 @@ static void sock_progress_pending(cci__ep_t * ep)
 	sock_tx_t *tx;
 	cci__evt_t *evt, *tmp, *my_temp_evt;
 	union cci_event *event;	/* generic CCI event */
-	cci_connection_t *connection; /* generic CCI connection */
 	cci__conn_t *conn;
 	sock_conn_t *sconn;
 	sock_ep_t *sep = ep->priv;
 
 	CCI_ENTER;
 
-	TAILQ_HEAD(s_idle_txs, sock_tx) idle_txs =
-	    TAILQ_HEAD_INITIALIZER(idle_txs);
+	TAILQ_HEAD(s_idle_txs, sock_tx) idle_txs = TAILQ_HEAD_INITIALIZER(idle_txs);
 	TAILQ_HEAD(s_evts, cci__evt) evts = TAILQ_HEAD_INITIALIZER(evts);
 	TAILQ_INIT(&idle_txs);
 	TAILQ_INIT(&evts);
@@ -2012,7 +1796,6 @@ static void sock_progress_pending(cci__ep_t * ep)
         sock_tx_t *tx = container_of (evt, sock_tx_t, evt);
 
 		conn = evt->conn;
-		connection = &conn->connection;
 		sconn = conn->priv;
 		event = &evt->event;
 
@@ -2145,7 +1928,7 @@ static void sock_progress_pending(cci__ep_t * ep)
 			continue;
 		}
 	}
-    pthread_mutex_unlock (&ep->lock);
+	pthread_mutex_unlock (&ep->lock);
 
 	/* transfer txs to sock ep's list */
 	while (!TAILQ_EMPTY(&idle_txs)) {
@@ -2215,9 +1998,8 @@ static void sock_progress_queued(cci__ep_t * ep)
 	union cci_event *event;	/* generic CCI event */
 
 	CCI_ENTER;
-
-	TAILQ_HEAD(s_idle_txs, sock_tx) idle_txs =
-	    TAILQ_HEAD_INITIALIZER(idle_txs);
+	
+	TAILQ_HEAD(s_idle_txs, sock_tx) idle_txs = TAILQ_HEAD_INITIALIZER(idle_txs);
 	TAILQ_HEAD(s_evts, cci__evt) evts = TAILQ_HEAD_INITIALIZER(evts);
 	TAILQ_INIT(&idle_txs);
 	TAILQ_INIT(&evts);
@@ -2229,7 +2011,7 @@ static void sock_progress_queued(cci__ep_t * ep)
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_FOREACH_SAFE(evt, &sep->queued, entry, tmp) {
-        tx = container_of (evt, sock_tx_t, evt);
+		tx = container_of (evt, sock_tx_t, evt);
 		event = &evt->event;
 		conn = evt->conn;
 		sconn = conn->priv;
@@ -2319,19 +2101,20 @@ static void sock_progress_queued(cci__ep_t * ep)
 			event->send.status = CCI_ERR_RNR;
 		}
 
-        /* For RMA Writes, we only allow a given number of messages to be
-           in fly */
-        if (tx->msg_type == SOCK_MSG_RMA_WRITE) {
-            if (tx->rma_op->pending >= SOCK_RMA_DEPTH)
-                continue;
-        }
+		/* For RMA Writes, we only allow a given number of messages to be
+		   in fly */
+		if (tx->msg_type == SOCK_MSG_RMA_WRITE) {
+			if (tx->rma_op->pending >= SOCK_RMA_DEPTH)
+				continue;
+		}
 
 		/* need to send it */
 
 		debug(CCI_DB_MSG, "sending %s msg seq %u",
 		      sock_msg_type(tx->msg_type), tx->seq);
-        pack_piggyback_ack (ep, sconn, tx);
-		ret = sock_sendto(sep->sock, tx->buffer, tx->len, tx->rma_ptr, tx->rma_len, sconn->sin);
+		pack_piggyback_ack (ep, sconn, tx);
+		ret = sock_sendto(sep->sock, tx->buffer, tx->len, tx->rma_ptr,
+						  tx->rma_len, sconn->sin);
 		if (ret == -1) {
 			switch (errno) {
 			default:
@@ -2407,14 +2190,17 @@ static void sock_progress_queued(cci__ep_t * ep)
 static void sock_progress_sends(cci__ep_t * ep)
 {
 	sock_progress_pending (ep);
-    sock_ack_conns(ep);
+	sock_ack_conns(ep);
 	sock_progress_queued (ep);
 
 	return;
 }
 
 static int ctp_sock_send(cci_connection_t * connection,
-		     const void *msg_ptr, uint32_t msg_len, const void *context, int flags)
+			const void *msg_ptr,
+			uint32_t msg_len,
+			const void *context,
+ 			int flags)
 {
 	uint32_t iovcnt = 0;
 	struct iovec iov = { NULL, 0 };
@@ -2969,7 +2755,7 @@ static int ctp_sock_rma(cci_connection_t * connection,
 		ret = CCI_SUCCESS;
 	}
 
-	sock_progress_sends (ep);
+// 	sock_progress_sends (ep);
 
 	CCI_EXIT;
 	return ret;
@@ -3100,11 +2886,13 @@ sock_handle_active_message(sock_conn_t * sconn,
 	union cci_event *event;	/* generic CCI event */
 	cci_endpoint_t *endpoint;	/* generic CCI endpoint */
 	cci__ep_t *ep;
-
+	sock_ep_t *sep;
+	
 	CCI_ENTER;
 
 	endpoint = (&conn->connection)->endpoint;
 	ep = container_of(endpoint, cci__ep_t, endpoint);
+	sep = ep->priv;
 
 	/* get cci__evt_t to hang on ep->events */
 
@@ -3135,7 +2923,9 @@ sock_handle_active_message(sock_conn_t * sconn,
 	TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-	/* TODO notify via ep->fd */
+	/* Notify the application thread via ep->fd */
+	if (sep->fd)
+		write (sep->fd[1], "1", 1);
 
 	CCI_EXIT;
 
@@ -3623,7 +3413,7 @@ sock_handle_conn_request(sock_rx_t * rx,
 			 uint16_t len, struct sockaddr_in sin, cci__ep_t * ep)
 {
 	char name[32];
-
+	
 	CCI_ENTER;
 
 	memset(name, 0, sizeof(name));
@@ -3645,8 +3435,6 @@ sock_handle_conn_request(sock_rx_t * rx,
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
 	pthread_mutex_unlock(&ep->lock);
-
-	/* TODO notify via ep->fd */
 
 	CCI_EXIT;
 	return;
@@ -3930,8 +3718,9 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,	/* NULL if rejected */
 #endif
 
 	/* try to progress txs */
-
-	sock_progress_sends (ep);
+	pthread_mutex_lock(&sep->progress_mutex);
+	pthread_cond_signal(&sep->wait_condition);
+	pthread_mutex_unlock(&sep->progress_mutex);
 
 	CCI_EXIT;
 
@@ -4004,7 +3793,9 @@ sock_handle_conn_ack(sock_conn_t * sconn,
 		/* FIXME do what here? */
 		/* if no tx, then it timed out or this is a duplicate,
 		 * but we have a sconn */
-		debug((CCI_DB_MSG | CCI_DB_CONN), "received conn_ack and no matching tx " "(seq %u ack %u)", seq, ts);	//FIXME
+		debug((CCI_DB_MSG | CCI_DB_CONN), 
+			  "received conn_ack and no matching tx "
+			  "(seq %u ack %u)", seq, ts);	//FIXME
 	} else {
 		pthread_mutex_lock(&ep->lock);
 		if (tx->evt.event.accept.connection) {
@@ -4018,6 +3809,10 @@ sock_handle_conn_ack(sock_conn_t * sconn,
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
 	pthread_mutex_unlock(&ep->lock);
+	
+	pthread_mutex_lock(&sep->progress_mutex);
+	pthread_cond_signal(&sep->wait_condition);
+	pthread_mutex_unlock(&sep->progress_mutex);
 
 	CCI_EXIT;
 
@@ -4263,9 +4058,8 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 	uint32_t ts;
 
 	CCI_ENTER;
-
 	/* get idle rx */
-
+	
 	sep = ep->priv;
 	if (!sep || sep->closing)
 		return 0;
@@ -4276,6 +4070,7 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		CCI_EXIT;
 		return 0;
 	}
+	
 	if (!TAILQ_EMPTY(&sep->idle_rxs)) {
 		rx = TAILQ_FIRST(&sep->idle_rxs);
 		TAILQ_REMOVE(&sep->idle_rxs, rx, entry);
@@ -4293,9 +4088,9 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		   time */
 		int n = (int)(4.0 * rand() / (RAND_MAX + 1.0));
 		if (n == 0) {
-            fprintf(stderr, "Simulating lack of RX buffer...\n");
+			fprintf(stderr, "Simulating lack of RX buffer...\n");
 			rx = NULL;
-        }
+		}
 	}
 #endif
 	if (!rx) {
@@ -4340,7 +4135,7 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 			/* We do the receive using a temporary buffer so we can get enough
 			   data to send a RNR NACK */
 
-			/* From the buffer, we get the TS and SEQ from the header (this is 
+			/* From the buffer, we get the TS and SEQ from the header (this is
 			   the only we need to deal with RNR) and will be used later on */
 			header_r = (sock_header_r_t *) tmp_buff;
 			sock_parse_seq_ts(&header_r->seq_ts, &seq, &ts);
@@ -4355,7 +4150,7 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 	}
 
 	ret = recvfrom(sep->sock, rx->buffer, ep->buffer_len,
-		       0, (struct sockaddr *)&sin, &sin_len);
+				   0, (struct sockaddr *)&sin, &sin_len);
 	if (ret < (int)sizeof(sock_header_t)) {
 		q_rx = 1;
 		goto out;
@@ -4522,7 +4317,11 @@ out:
 		/* Drop the message */
 		sock_drop_msg(sep->sock);
 	}
-
+	
+	/* waking up the app thread if it is blocking on a OS handle */
+	if (sep->event_fd)
+		write (sep->fd[1], "1", 1);
+	
 	CCI_EXIT;
 
 	return again;
@@ -4709,7 +4508,7 @@ static void sock_ack_conns(cci__ep_t * ep)
 
 	while (!TAILQ_EMPTY(&txs)) {
 		tx = TAILQ_FIRST(&txs);
-        evt = &tx->evt;
+		evt = &tx->evt;
 		TAILQ_REMOVE(&txs, tx, dentry);
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_INSERT_TAIL(&sep->queued, evt, entry);
@@ -4743,7 +4542,7 @@ static void *sock_progress_thread(void *arg)
 		pthread_mutex_lock(&sep->progress_mutex);
 		pthread_cond_wait(&sep->wait_condition, &sep->progress_mutex);
 		pthread_mutex_unlock(&sep->progress_mutex);
-
+		
 		pthread_mutex_lock(&ep->lock);
 	}
 	pthread_mutex_unlock(&ep->lock);
@@ -4752,18 +4551,17 @@ static void *sock_progress_thread(void *arg)
 	return (NULL);		/* make pgcc happy */
 }
 
-static void *sock_recv_thread(void *arg)
-{
+int progress_recv (cci__ep_t *ep) {
+	sock_ep_t *sep;
 	int ret = 0;
 	struct timeval tv = { 0, SOCK_PROG_TIME_US };
 	fd_set fds;
 	int again;
-	cci__ep_t *ep = (cci__ep_t *)arg;
-	sock_ep_t *sep;
 
-	assert (ep);
 	sep = ep->priv;
-	while (!sep->closing) {
+
+	/* Not that on system without epoll support, sep->event_fd is equal to 0 */
+	if (!sep->event_fd) {
 		FD_ZERO(&fds);
 		FD_SET (sep->sock, &fds);
 		ret = select (sep->sock + 1, &fds, NULL, NULL, &tv);
@@ -4771,7 +4569,7 @@ static void *sock_recv_thread(void *arg)
 			switch (errno) {
 			case EBADF:
 				debug(CCI_DB_INFO, "select() failed with %s",
-				      strerror(errno));
+					strerror(errno));
 				break;
 			default:
 				break;
@@ -4782,10 +4580,54 @@ static void *sock_recv_thread(void *arg)
 		do {
 			again = sock_recvfrom_ep (ep);
 		} while (again == 1);
+	}
+
+#ifdef HAVE_SYS_EPOLL_H
+	else {
+		struct epoll_event events[SOCK_EP_NUM_EVTS], epoll_evt;
+
+		ret = epoll_wait(sep->event_fd, events, SOCK_EP_NUM_EVTS, 0);
+		if (ret > 0) {
+			int count = ret;
+			int i, ret2;
+
+			debug(CCI_DB_EP, "%s: epoll_wait() found %d event(s)", __func__, 
+				count);
+			for (i = 0; i < count; i++) {
+				int (*func)(cci__ep_t*) = events[i].data.ptr;
+					if ((events[i].events & EPOLLIN)) {
+					if (func != NULL && ep != NULL) {
+						(*func)(ep);
+						/* We notify the application thread */
+						write (sep->fd[1], "1", 1);
+					}
+				}
+			}
+
+		} else if (ret == -1) {
+			debug(CCI_DB_EP, "%s: epoll_wait() returned %s",
+				__func__, strerror(errno));
+		}
+	}
+#endif /* HAVE_SYS_EPOLL_H */
+
 wait4signal:
-		pthread_mutex_lock(&sep->progress_mutex);
-		pthread_cond_signal(&sep->wait_condition);
-		pthread_mutex_unlock(&sep->progress_mutex);
+// 		pthread_mutex_lock(&sep->progress_mutex);
+// 		pthread_cond_signal(&sep->wait_condition);
+// 		pthread_mutex_unlock(&sep->progress_mutex);
+
+	return CCI_SUCCESS;
+}
+
+static void *sock_recv_thread(void *arg)
+{
+	cci__ep_t *ep = (cci__ep_t *)arg;
+	sock_ep_t *sep;
+
+	assert (ep);
+	sep = ep->priv;
+	while (!sep->closing) {
+		progress_recv (ep);
 	}
 
 	pthread_exit(NULL);

@@ -1,0 +1,120 @@
+= Configuration ================================================================
+
+  The Verbs CTP is disabled by default. To enable it, add one of these option to
+  configure:
+
+    --with-verbs		# use the system default Verbs headers and libs
+    --with-verbs=${VERBS}	# use this installation of Verbs where ${VERBS}
+                                  is the path to the installation
+
+  If using the first option, it assumes the headers are in ${VERBS}/include and
+  the libraries are in ${VERBS}/lib or ${VERBS}/lib64. If this is not the case,
+  you can override the library path with:
+
+    --with-verbs-libdir=DIR
+
+  Note: The Verbs transport needs both librdmacm and libibverbs.
+  
+= Endpoint naming ==============================================================
+
+  Verbs endpoint URIs are host and port where host is a hostname or IPv4 address:
+
+    verbs://foo.com:5555
+    verbs://1.2.3.4:5555
+
+= Config file options ==========================================================
+
+  Verbs devices _must_ have this item in the config file:
+
+    transport = Verbs
+
+  Verbs devices may have the following items in the config file:
+
+    ip = 1.2.3.4
+
+  where 1.2.3.4 is the IPv4 address of the Verbs device to bind to.
+
+    interface = ib0
+
+  This tells the transport to find the IPv4 address for this interface and to
+  use it.
+
+  If both ip and interface are set, it will use the ip and ignore the interface.
+
+    port = 5555
+
+  Do not use the port option if you intend to use more than one endpoint per
+  host. This is mostly useful for running tests with a single endpoint per host.
+
+= Run-time notes ===============================================================
+
+  1. The IBoIP device must be configured and up. The librdmacm uses the
+  IBoIP device to exchange the queue pair (QP) information and manages the bring
+  up of the connection. Once the connection is established, all traffic then
+  uses the native Verbs APIs and does not use any sockets.
+
+  2. The sock driver can use the IPoIB devices. You probably don't want to
+  do this for performance reasons.
+
+  3. The Verbs transport will default to the first Verbs device found if there
+  is not a config file or if there is not a Verbs device in the config file.
+
+= Known limitations ============================================================
+
+  1. Not implemented:
+
+     Blocking via the OS handle
+
+     Keepalive messages
+
+     Adjusting send timeouts via set_opt
+
+  2. Error handling of connections
+
+     We do not catch all RDMACM events so a connection may die and we think it
+     is still up.
+
+= Performance Tuning ===========================================================
+
+  There are no-runtime tuning parameters currently. A few items may be tweaked
+  in the header file that will determine how the Verbs transport sends MSGs. The
+  Verbs transport has two methods for sending MSGs, SendRecv and RDMA. The
+  SendRecv path is more scalable and the RDMA path has lower latency. To provide
+  the benefits of both, the endpoint will allow a limited number of connections
+  to use RDMA and all other connections will use SendRecv. These macros
+  determine how many connections will use RDMA and how many messages may be
+  in-flight at once:
+
+  VERBS_EP_RMSG_CONNS sets the limit of number of connections using RDMA. Set it
+  to 0 to disable the RDMA path.
+
+  VERBS_CONN_RMSG_DEPTH sets the limit of the number of in-flight messages per
+  RDMA connection. When the sender sends more than this number of messages
+  concurrently, the additional MSGs use the SendRecv path. On RU connections,
+  they will be delivered out-of-order. On RO connections, we ensure that they
+  arrive in-order regardless of the path.
+
+  The Verbs API requires that data is sent and received from buffers that are
+  registered with the device. The Verbs transport will copy data form the user
+  buffer into a registered buffer as needed. There is an optimization that lower
+  latency at the cost of more memory in the send queue that "inlines" the send
+  and does not require the copy to a registered buffer. This option controls the
+  size that can be inlined:
+
+  VERBS_INLINE_BYTES determines the inline size. Actually, this is what we
+  request and the Verbs device tells us how much it actually will provide which
+  will be larger than we requested. This option must be set to a minimum of 4 to
+  allow RDMA MSGs to function. If you do not intend to use RMDA MSGs, this can
+  be turned off (set to 0). There is an upper limit to the amount and if it is
+  set too large, bad things may happen. ;-)
+
+  In order to post an RDMA, the Verbs API requires more data than we can pack
+  into the cci_rma_handle_t. Therefore, we must request the information from the
+  peer before posting the RDMA. This extra round-trip adds latency to each RDMA
+  which is noticeable on small RMAs but not on larger RMAs. By default we will
+  cache the most recently RDMA information for each connection. It is controlled
+  by:
+
+  VERBS_RMA_REMOTE_SIZE which sets the limit of cached RDMA data per connection.
+  Setting it to 0 will disable caching and force a rendezvous for each RDMA.
+

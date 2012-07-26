@@ -10,7 +10,8 @@ Additional copyrights may follow
 
 $HEADER$
 
-========================================================================
+
+= Requesting help ==============================================================
 
 To request help using CCI, please subscribe to the users list at:
 
@@ -27,11 +28,8 @@ test environment. This is a useful guide for preparing help requests:
 
 Thank you for using CCI.
 
-========================================================================
 
-README file for CCI
-
-= Supported Transports =
+= Supported Transports =========================================================
 
 The following transports are supported (more coming soon):
 
@@ -41,7 +39,7 @@ The following transports are supported (more coming soon):
   Cray Portals (SeaStar)
 
 
-= Current Limitations =
+= Current Limitations ==========================================================
 
 The current CCI prototype has the following limitations:
 

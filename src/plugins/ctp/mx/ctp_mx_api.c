@@ -35,10 +35,8 @@ static int mx_connect(cci_endpoint_t * endpoint, char *server_uri,
 		      void *context, int flags, struct timeval *timeout);
 static int mx_disconnect(cci_connection_t * connection);
 static int mx_set_opt(cci_opt_handle_t * handle,
-		      cci_opt_level_t level,
 		      cci_opt_name_t name, const void *val, int len);
 static int mx_get_opt(cci_opt_handle_t * handle,
-		      cci_opt_level_t level,
 		      cci_opt_name_t name, void **val, int *len);
 static int mx_arm_os_handle(cci_endpoint_t * endpoint, int flags);
 static int mx_get_event(cci_endpoint_t * endpoint,
@@ -194,7 +192,6 @@ static int mx_disconnect(cci_connection_t * connection)
 }
 
 static int mx_set_opt(cci_opt_handle_t * handle,
-		      cci_opt_level_t level,
 		      cci_opt_name_t name, const void *val, int len)
 {
 	printf("In mx_set_opt\n");
@@ -202,7 +199,6 @@ static int mx_set_opt(cci_opt_handle_t * handle,
 }
 
 static int mx_get_opt(cci_opt_handle_t * handle,
-		      cci_opt_level_t level,
 		      cci_opt_name_t name, void **val, int *len)
 {
 	printf("In mx_get_opt\n");

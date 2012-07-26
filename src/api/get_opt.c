@@ -17,7 +17,7 @@
 #include "cci.h"
 #include "plugins/ctp/ctp.h"
 
-int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
+int cci_get_opt(cci_opt_handle_t * handle,
 		cci_opt_name_t name, void *val)
 {
 	cci_plugin_ctp_t * plugin;
@@ -31,19 +31,21 @@ int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
 
 	CCI_ENTER;
 
-	if (CCI_OPT_LEVEL_ENDPOINT == level) {
-		if (handle->endpoint == NULL
-		    || name == CCI_OPT_CONN_SEND_TIMEOUT)
-			return CCI_EINVAL;
-		ep = container_of(handle->endpoint, cci__ep_t, endpoint);
+	switch (name) {
+	case CCI_OPT_ENDPT_SEND_TIMEOUT:
+	case CCI_OPT_ENDPT_RECV_BUF_COUNT:
+	case CCI_OPT_ENDPT_SEND_BUF_COUNT:
+	case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
+	case CCI_OPT_ENDPT_URI:
+	case CCI_OPT_ENDPT_RMA_ALIGN:
+		ep = container_of(handle, cci__ep_t, endpoint);
 		plugin = ep->plugin;
-	} else {
-		if (handle->connection == NULL
-		    || name != CCI_OPT_CONN_SEND_TIMEOUT)
-			return CCI_EINVAL;
+		break;
+	case CCI_OPT_CONN_SEND_TIMEOUT:
 		conn =
-		    container_of(handle->connection, cci__conn_t, connection);
+		    container_of(handle, cci__conn_t, connection);
 		plugin = conn->plugin;
+		break;
 	}
 
 	switch (name) {
@@ -95,7 +97,7 @@ int cci_get_opt(cci_opt_handle_t * handle, cci_opt_level_t level,
 			break;
 		}
 	default:
-		ret = plugin->get_opt(handle, level, name, val);
+		ret = plugin->get_opt(handle, name, val);
 	}
 
 	CCI_EXIT;
