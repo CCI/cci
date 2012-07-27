@@ -39,6 +39,8 @@
 
 #ifdef HAVE_SYS_EPOLL_H
 #include <sys/epoll.h>
+#else
+#include <poll.h>
 #endif /* HAVE_SYS_EPOLL_H */
 
 #include "cci.h"
@@ -733,8 +735,14 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	}
 #else
 	if (fd) {
+		/* We will have poll on the receive thread so we just need to create a
+		   pipe so the receive and send thread can wake up the application
+		   thread */
 		pipe (sep->fd);
 		*fd = sep->fd[0];
+		/* We set event_fd to value different than zero to know that we are
+		   in blocking mode at the application level */
+		sep->event_fd = 1;
 	}
 #endif /* HAVE_SYS_EPOLL_H */
 
@@ -808,13 +816,18 @@ static int ctp_sock_destroy_endpoint(cci_endpoint_t * endpoint)
 		cci__conn_t *conn;
 		sock_conn_t *sconn;
 
-	sep->closing = 1;
+		sep->closing = 1;
 
-	pthread_mutex_unlock(&dev->lock);
-	pthread_mutex_unlock(&ep->lock);
-	sock_terminate_threads (sep);
-	pthread_mutex_lock(&dev->lock);
-	pthread_mutex_lock(&ep->lock);
+		pthread_mutex_unlock(&dev->lock);
+		pthread_mutex_unlock(&ep->lock);
+		sock_terminate_threads (sep);
+		pthread_mutex_lock(&dev->lock);
+		pthread_mutex_lock(&ep->lock);
+		
+		if (sep->fd[0] > 0)
+			close (sep->fd[0]);
+		if (sep->fd[1] > 0)
+			close (sep->fd[1]);
 
 		if (sep->sock)
 			sock_close_socket(sep->sock);
@@ -1775,8 +1788,10 @@ static int sock_sendto(cci_os_handle_t sock, void *buf, int len,
 		}
 	}
 	ret = sock_sendmsg(sock, iov, count, sin);
+/*
 	if (ret != -1)
 		assert(ret == len);
+ */
 
 	return ret;
 }
@@ -4331,7 +4346,7 @@ out:
 	
 	/* waking up the app thread if it is blocking on a OS handle */
 	if (sep->event_fd)
-		write (sep->fd[1], "1", 1);
+		write (sep->fd[1], "a", 1);
 	
 	CCI_EXIT;
 
@@ -4595,9 +4610,9 @@ int progress_recv (cci__ep_t *ep) {
 
 #ifdef HAVE_SYS_EPOLL_H
 	else {
-		struct epoll_event events[SOCK_EP_NUM_EVTS], epoll_evt;
+		struct epoll_event events[SOCK_EP_NUM_EVTS];
 
-		ret = epoll_wait(sep->event_fd, events, SOCK_EP_NUM_EVTS, 0);
+		ret = epoll_wait (sep->event_fd, events, SOCK_EP_NUM_EVTS, 0);
 		if (ret > 0) {
 			int count = ret;
 			int i, ret2;
@@ -4606,11 +4621,11 @@ int progress_recv (cci__ep_t *ep) {
 				count);
 			for (i = 0; i < count; i++) {
 				int (*func)(cci__ep_t*) = events[i].data.ptr;
-					if ((events[i].events & EPOLLIN)) {
+				if ((events[i].events & EPOLLIN)) {
 					if (func != NULL && ep != NULL) {
 						(*func)(ep);
 						/* We notify the application thread */
-						write (sep->fd[1], "1", 1);
+						write (sep->fd[1], 'a', 1);
 					}
 				}
 			}
@@ -4618,6 +4633,25 @@ int progress_recv (cci__ep_t *ep) {
 		} else if (ret == -1) {
 			debug(CCI_DB_EP, "%s: epoll_wait() returned %s",
 				__func__, strerror(errno));
+		}
+	}
+#else
+	else {
+		struct pollfd fds[1];
+		
+		fds[0].fd = sep->sock;
+		fds[0].events = POLLIN;
+		ret = poll (fds, 1, -1);
+		if (ret > 0) {
+			int i;
+			
+			for (i = 0; i < 1; i++) {
+				if (fds[i].revents & POLLIN) {
+					sock_recvfrom_ep (ep);
+					/* We notify the application thread */
+					write (sep->fd[1], "a", 1);
+				}
+			}
 		}
 	}
 #endif /* HAVE_SYS_EPOLL_H */
