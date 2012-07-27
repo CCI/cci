@@ -48,6 +48,7 @@ cci_connection_t *control_conn = NULL;
 cci_connection_t *test_conn = NULL;
 cci_conn_attribute_t attr = CCI_CONN_ATTR_UU;
 struct timeval start, end;
+int in_flight = MAX_PENDING;
 
 #if 1
 #define LOCK
@@ -65,7 +66,8 @@ void print_usage()
 	fprintf(stderr, "\t-s\tSet to run as the server\n");
 	fprintf(stderr,
 		"\t-c\tConnection type (UU, RU, or RO) set by client only\n");
-	fprintf(stderr, "\t-t\tTimeout in seconds (default %d)\n\n", TIMEOUT);
+	fprintf(stderr, "\t-t\tTimeout in seconds (default %d)\n", TIMEOUT);
+	fprintf(stderr, "\t-i\tMax number of messages in-flight (default %d)\n\n", MAX_PENDING);
 	fprintf(stderr, "Example:\n");
 	fprintf(stderr, "server$ %s -h ip://foo -p 2211 -s\n", name);
 	fprintf(stderr, "client$ %s -h ip://foo -p 2211\n", name);
@@ -253,7 +255,7 @@ void do_client()
 		alarm(timeout);
 		gettimeofday(&start, NULL);
 
-		for (i = 0; i < MAX_PENDING; i++) {
+		for (i = 0; i < in_flight; i++) {
 			ret =
 			    cci_send(test_conn, buffer, current_size, NULL, 0);
 			if (!ret)
@@ -300,7 +302,7 @@ int main(int argc, char *argv[])
 
 	name = argv[0];
 
-	while ((c = getopt(argc, argv, "h:p:sc:t:")) != -1) {
+	while ((c = getopt(argc, argv, "h:p:sc:t:i:")) != -1) {
 		switch (c) {
 		case 'h':
 			server_uri = strdup(optarg);
@@ -328,6 +330,9 @@ int main(int argc, char *argv[])
 					timeout);
 				print_usage();
 			}
+			break;
+		case 'i':
+			in_flight = strtol(optarg, NULL, 0);
 			break;
 		default:
 			print_usage();
