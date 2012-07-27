@@ -731,6 +731,11 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 		pipe (sep->fd);
 		*fd = sep->fd[0];
 	}
+#else
+	if (fd) {
+		pipe (sep->fd);
+		*fd = sep->fd[0];
+	}
 #endif /* HAVE_SYS_EPOLL_H */
 
 	ret = sock_create_threads (ep);
@@ -1616,6 +1621,7 @@ ctp_sock_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep;
+	sock_ep_t *sep;
 	cci__evt_t *ev = NULL, *e;
 
 	CCI_ENTER;
@@ -1626,6 +1632,7 @@ ctp_sock_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
 	}
 
 	ep = container_of(endpoint, cci__ep_t, endpoint);
+	sep = ep->priv;
 
 	sock_progress_sends (ep);
 
@@ -1658,7 +1665,14 @@ ctp_sock_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
 	pthread_mutex_unlock(&ep->lock);
 
 	*event = &ev->event;
-	
+
+	/* We read on the fd to block again */
+	if (sep->event_fd) {
+		char a[1];
+
+		read (sep->fd[0], a, sizeof (a));
+	}
+
 	CCI_EXIT;
 	return ret;
 }
@@ -2923,10 +2937,6 @@ sock_handle_active_message(sock_conn_t * sconn,
 	TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-	/* Notify the application thread via ep->fd */
-	if (sep->fd)
-		write (sep->fd[1], "1", 1);
-
 	CCI_EXIT;
 
 	return;
@@ -3413,7 +3423,7 @@ sock_handle_conn_request(sock_rx_t * rx,
 			 uint16_t len, struct sockaddr_in sin, cci__ep_t * ep)
 {
 	char name[32];
-	
+
 	CCI_ENTER;
 
 	memset(name, 0, sizeof(name));
@@ -3457,7 +3467,8 @@ sock_handle_conn_request(sock_rx_t * rx,
  * Ready conn   Error
  */
 static void sock_handle_conn_reply(sock_conn_t * sconn,	/* NULL if rejected */
-				   sock_rx_t * rx, uint8_t reply,	/* CCI_SUCCESS or CCI_ECONNREFUSED */
+				   sock_rx_t * rx,
+				   uint8_t reply,	/* CCI_SUCCESS or CCI_ECONNREFUSED */
 				   uint16_t unused,
 				   uint32_t id,
 				   struct sockaddr_in sin, cci__ep_t * ep)
