@@ -4625,7 +4625,7 @@ int progress_recv (cci__ep_t *ep) {
 					if (func != NULL && ep != NULL) {
 						(*func)(ep);
 						/* We notify the application thread */
-						write (sep->fd[1], 'a', 1);
+						write (sep->fd[1], "a", 1);
 					}
 				}
 			}
