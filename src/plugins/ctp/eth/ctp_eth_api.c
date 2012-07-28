@@ -28,43 +28,42 @@ struct eth__globals *eglobals = NULL;
 /*
  * Local functions
  */
-static int eth_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int eth_finalize(cci_plugin_ctp_t *plugin);
-static const char *eth_strerror(cci_endpoint_t * endpoint, enum cci_status status);
-static int eth_create_endpoint(cci_device_t * device,
-			       int flags,
-			       cci_endpoint_t ** endpoint,
-			       cci_os_handle_t * fd);
-static int eth_destroy_endpoint(cci_endpoint_t * endpoint);
-static int eth_accept(cci_event_t *event, const void *context);
-static int eth_reject(cci_event_t *event);
-static int eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
-		       const void *data_ptr, uint32_t data_len,
-		       cci_conn_attribute_t attribute,
-		       const void *context, int flags, const struct timeval *timeout);
-static int eth_disconnect(cci_connection_t * connection);
-static int eth_set_opt(cci_opt_handle_t * handle,
-		       cci_opt_name_t name, const void *val);
-static int eth_get_opt(cci_opt_handle_t * handle,
-		       cci_opt_name_t name, void *val);
-static int eth_arm_os_handle(cci_endpoint_t * endpoint, int flags);
-static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** event);
-static int eth_return_event(cci_event_t * event);
-static int eth_send(cci_connection_t * connection,
-		    const void *msg_ptr, uint32_t msg_len, const void *context, int flags);
-static int eth_sendv(cci_connection_t * connection,
-		     const struct iovec *data, uint32_t iovcnt,
-		     const void *context, int flags);
-static int eth_rma_register(cci_endpoint_t * endpoint,
-			    cci_connection_t * connection,
-			    void *start, uint64_t length,
-			    uint64_t * rma_handle);
-static int eth_rma_deregister(uint64_t rma_handle);
-static int eth_rma(cci_connection_t * connection,
-		   const void *msg_ptr, uint32_t msg_len,
-		   uint64_t local_handle, uint64_t local_offset,
-		   uint64_t remote_handle, uint64_t remote_offset,
-		   uint64_t data_len, const void *context, int flags);
+static int ctp_eth_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int ctp_eth_finalize(cci_plugin_ctp_t *plugin);
+static const char *ctp_eth_strerror(cci_endpoint_t * endpoint, enum cci_status status);
+static int ctp_eth_create_endpoint(cci_device_t * device,
+				   int flags,
+				   cci_endpoint_t ** endpoint,
+				   cci_os_handle_t * fd);
+static int ctp_eth_destroy_endpoint(cci_endpoint_t * endpoint);
+static int ctp_eth_accept(cci_event_t *event, const void *context);
+static int ctp_eth_reject(cci_event_t *event);
+static int ctp_eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
+			   const void *data_ptr, uint32_t data_len,
+			   cci_conn_attribute_t attribute,
+			   const void *context, int flags, const struct timeval *timeout);
+static int ctp_eth_disconnect(cci_connection_t * connection);
+static int ctp_eth_set_opt(cci_opt_handle_t * handle,
+			   cci_opt_name_t name, const void *val);
+static int ctp_eth_get_opt(cci_opt_handle_t * handle,
+			   cci_opt_name_t name, void *val);
+static int ctp_eth_arm_os_handle(cci_endpoint_t * endpoint, int flags);
+static int ctp_eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** event);
+static int ctp_eth_return_event(cci_event_t * event);
+static int ctp_eth_send(cci_connection_t * connection,
+			const void *msg_ptr, uint32_t msg_len, const void *context, int flags);
+static int ctp_eth_sendv(cci_connection_t * connection,
+			 const struct iovec *data, uint32_t iovcnt,
+			 const void *context, int flags);
+static int ctp_eth_rma_register(cci_endpoint_t * endpoint,
+				void *start, uint64_t length,
+				int flags, uint64_t * rma_handle);
+static int ctp_eth_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
+static int ctp_eth_rma(cci_connection_t * connection,
+		       const void *msg_ptr, uint32_t msg_len,
+		       uint64_t local_handle, uint64_t local_offset,
+		       uint64_t remote_handle, uint64_t remote_offset,
+		       uint64_t data_len, const void *context, int flags);
 
 /*
  * Public plugin structure.
@@ -94,25 +93,25 @@ cci_plugin_ctp_t cci_ctp_eth_plugin = {
 	 },
 
 	/* API function pointers */
-	eth_init,
-	eth_finalize,
-	eth_strerror,
-	eth_create_endpoint,
-	eth_destroy_endpoint,
-	eth_accept,
-	eth_reject,
-	eth_connect,
-	eth_disconnect,
-	eth_set_opt,
-	eth_get_opt,
-	eth_arm_os_handle,
-	eth_get_event,
-	eth_return_event,
-	eth_send,
-	eth_sendv,
-	eth_rma_register,
-	eth_rma_deregister,
-	eth_rma
+	ctp_eth_init,
+	ctp_eth_finalize,
+	ctp_eth_strerror,
+	ctp_eth_create_endpoint,
+	ctp_eth_destroy_endpoint,
+	ctp_eth_accept,
+	ctp_eth_reject,
+	ctp_eth_connect,
+	ctp_eth_disconnect,
+	ctp_eth_set_opt,
+	ctp_eth_get_opt,
+	ctp_eth_arm_os_handle,
+	ctp_eth_get_event,
+	ctp_eth_return_event,
+	ctp_eth_send,
+	ctp_eth_sendv,
+	ctp_eth_rma_register,
+	ctp_eth_rma_deregister,
+	ctp_eth_rma
 };
 
 static int eth__get_device_info(cci__dev_t * _dev, struct ifaddrs *addr)
@@ -351,7 +350,7 @@ out:
 	return ret;
 }
 
-static int eth_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
+static int ctp_eth_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	int ret;
 
@@ -385,7 +384,7 @@ out:
 	return ret;
 }
 
-static int eth_finalize(cci_plugin_ctp_t *plugin)
+static int ctp_eth_finalize(cci_plugin_ctp_t *plugin)
 {
 	cci__dev_t *_dev = NULL;
 
@@ -398,7 +397,7 @@ static int eth_finalize(cci_plugin_ctp_t *plugin)
 	return CCI_SUCCESS;
 }
 
-static const char *eth_strerror(cci_endpoint_t * endpoint, enum cci_status status)
+static const char *ctp_eth_strerror(cci_endpoint_t * endpoint, enum cci_status status)
 {
 	return strerror(status);
 }
@@ -418,10 +417,10 @@ static int ccieth_uri_sscanf(const char *uri, uint8_t * addr, uint32_t * id)
 		      &addr[5], id) == 7 ? 0 : -1;
 }
 
-static int eth_create_endpoint(cci_device_t * device,
-			       int flags,
-			       cci_endpoint_t ** endpointp,
-			       cci_os_handle_t * fdp)
+static int ctp_eth_create_endpoint(cci_device_t * device,
+				   int flags,
+				   cci_endpoint_t ** endpointp,
+				   cci_os_handle_t * fdp)
 {
 	struct ccieth_ioctl_create_endpoint arg;
 	cci__dev_t *_dev = container_of(device, cci__dev_t, device);
@@ -482,7 +481,7 @@ out:
 	return ret;
 }
 
-static int eth_destroy_endpoint(cci_endpoint_t * endpointp)
+static int ctp_eth_destroy_endpoint(cci_endpoint_t * endpointp)
 {
 	struct cci_endpoint *endpoint = (struct cci_endpoint *) endpointp;
 	cci__ep_t *_ep = container_of(endpoint, cci__ep_t, endpoint);
@@ -500,7 +499,7 @@ static int eth_destroy_endpoint(cci_endpoint_t * endpointp)
 	return CCI_SUCCESS;
 }
 
-static int eth_accept(cci_event_t *event, const void *context)
+static int ctp_eth_accept(cci_event_t *event, const void *context)
 {
 	cci__evt_t *_ev = container_of(event, cci__evt_t, event);
 	eth__evt_t *eev = container_of(_ev, eth__evt_t, _ev);
@@ -550,7 +549,7 @@ static int eth_accept(cci_event_t *event, const void *context)
 	return CCI_SUCCESS;
 }
 
-static int eth_reject(cci_event_t *event)
+static int ctp_eth_reject(cci_event_t *event)
 {
 	cci__evt_t *_ev = container_of(event, cci__evt_t, event);
 	eth__evt_t *eev = container_of(_ev, eth__evt_t, _ev);
@@ -577,10 +576,10 @@ static int eth_reject(cci_event_t *event)
 	return CCI_SUCCESS;
 }
 
-static int eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
-		       const void *data_ptr, uint32_t data_len,
-		       cci_conn_attribute_t attribute,
-		       const void *context, int flags, const struct timeval *timeout)
+static int ctp_eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
+			   const void *data_ptr, uint32_t data_len,
+			   cci_conn_attribute_t attribute,
+			   const void *context, int flags, const struct timeval *timeout)
 {
 	cci__ep_t *_ep = container_of(endpoint, cci__ep_t, endpoint);
 	eth__ep_t *eep = _ep->priv;
@@ -623,7 +622,7 @@ static int eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	return CCI_SUCCESS;
 }
 
-static int eth_disconnect(cci_connection_t * connection)
+static int ctp_eth_disconnect(cci_connection_t * connection)
 {
 	cci__conn_t *_conn = container_of(connection, cci__conn_t, connection);
 	eth__conn_t *econn = container_of(_conn, eth__conn_t, _conn);
@@ -648,26 +647,26 @@ static int eth_disconnect(cci_connection_t * connection)
 	return CCI_SUCCESS;
 }
 
-static int eth_set_opt(cci_opt_handle_t * handle,
-		       cci_opt_name_t name, const void *val)
+static int ctp_eth_set_opt(cci_opt_handle_t * handle,
+			   cci_opt_name_t name, const void *val)
 {
 	printf("In eth_set_opt\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
-static int eth_get_opt(cci_opt_handle_t * handle,
-		       cci_opt_name_t name, void *val)
+static int ctp_eth_get_opt(cci_opt_handle_t * handle,
+			   cci_opt_name_t name, void *val)
 {
 	printf("In eth_get_opt\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
-static int eth_arm_os_handle(cci_endpoint_t * endpoint, int flags)
+static int ctp_eth_arm_os_handle(cci_endpoint_t * endpoint, int flags)
 {
 	return CCI_SUCCESS;
 }
 
-static int eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
+static int ctp_eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eventp)
 {
 	cci__ep_t *_ep = container_of(endpoint, cci__ep_t, endpoint);
 	eth__ep_t *eep = _ep->priv;
@@ -830,7 +829,7 @@ out_with_event:
 	return CCI_EAGAIN;
 }
 
-static int eth_return_event(cci_event_t * event)
+static int ctp_eth_return_event(cci_event_t * event)
 {
 	cci__evt_t *_ev = container_of(event, cci__evt_t, event);
 	eth__evt_t *eev = container_of(_ev, eth__evt_t, _ev);
@@ -843,8 +842,8 @@ static int eth_return_event(cci_event_t * event)
 	return 0;
 }
 
-static int eth_send(cci_connection_t * connection,
-		    const void *msg_ptr, uint32_t msg_len, const void *context, int flags)
+static int ctp_eth_send(cci_connection_t * connection,
+			const void *msg_ptr, uint32_t msg_len, const void *context, int flags)
 {
 	cci__conn_t *_conn = container_of(connection, cci__conn_t, connection);
 	eth__conn_t *econn = container_of(_conn, eth__conn_t, _conn);
@@ -886,9 +885,9 @@ static int eth_send(cci_connection_t * connection,
 	return CCI_SUCCESS;
 }
 
-static int eth_sendv(cci_connection_t * connection,
-		     const struct iovec *iov_ptr, uint32_t iov_len,
-		     const void *context, int flags)
+static int ctp_eth_sendv(cci_connection_t * connection,
+			 const struct iovec *iov_ptr, uint32_t iov_len,
+			 const void *context, int flags)
 {
 	void *buffer;
 	size_t length, offset;
@@ -913,25 +912,25 @@ static int eth_sendv(cci_connection_t * connection,
 	return ret;
 }
 
-static int eth_rma_register(cci_endpoint_t * endpoint,
-			    cci_connection_t * connection,
-			    void *start, uint64_t length, uint64_t * rma_handle)
+static int ctp_eth_rma_register(cci_endpoint_t * endpoint,
+				void *start, uint64_t length,
+				int flags, uint64_t * rma_handle)
 {
 	printf("In eth_rma_register\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
-static int eth_rma_deregister(uint64_t rma_handle)
+static int ctp_eth_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
 {
 	printf("In eth_rma_deregister\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
-static int eth_rma(cci_connection_t * connection,
-		   const void *msg_ptr, uint32_t msg_len,
-		   uint64_t local_handle, uint64_t local_offset,
-		   uint64_t remote_handle, uint64_t remote_offset,
-		   uint64_t data_len, const void *context, int flags)
+static int ctp_eth_rma(cci_connection_t * connection,
+		       const void *msg_ptr, uint32_t msg_len,
+		       uint64_t local_handle, uint64_t local_offset,
+		       uint64_t remote_handle, uint64_t remote_offset,
+		       uint64_t data_len, const void *context, int flags)
 {
 	printf("In eth_rma\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
