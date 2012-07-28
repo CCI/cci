@@ -12,6 +12,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <fcntl.h>
+#include <string.h>
 #include <assert.h>
 
 #include "ccieth_io.h"
@@ -399,8 +400,7 @@ static int eth_finalize(cci_plugin_ctp_t *plugin)
 
 static const char *eth_strerror(cci_endpoint_t * endpoint, enum cci_status status)
 {
-	printf("In eth_sterrror\n");
-	return NULL;
+	return strerror(status);
 }
 
 #define CCIETH_URI_LENGTH (6 /* prefix */ + 17 /* mac */ + 1 /* colon */ + 8 /* id */ + 1 /* \0 */)
