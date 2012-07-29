@@ -265,7 +265,9 @@ static int eth__get_devices(cci_plugin_ctp_t *plugin)
 		TAILQ_FOREACH_SAFE(_dev, &globals->configfile_devs, entry, _ndev) {
 			if (0 == strcmp("eth", _dev->device.transport)) {
 				const char * const *arg;
+				const char *gotifname = NULL;
 				int gotmac = 0;
+				unsigned char mac[6];
 
 				device = &_dev->device;
 
@@ -279,22 +281,18 @@ static int eth__get_devices(cci_plugin_ctp_t *plugin)
 				/* parse conf_argv */
 				for (arg = device->conf_argv;
 				     *arg != NULL; arg++) {
-					unsigned char lladdr[6];
-					if (6 ==
-					    sscanf(*arg,
-						   "mac=%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
-						   &lladdr[0], &lladdr[1],
-						   &lladdr[2], &lladdr[3],
-						   &lladdr[4], &lladdr[5])) {
-						edev->addr.sll_halen = 6;
-						memcpy(&edev->addr.sll_addr,
-						       lladdr, 6);
+					if (0 == strncmp(*arg, "interface=", 10)) {
+						gotifname = (*arg) + 10;
+					} else if (6 == sscanf(*arg,
+							       "mac=%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
+							       &mac[0], &mac[1], &mac[2],
+							       &mac[3], &mac[4], &mac[5])) {
 						gotmac = 1;
 					}
 				}
 
 				/* we need at least an address */
-				if (!gotmac) {
+				if (!gotmac && !gotifname) {
 					free(edev);
 					continue;
 				}
@@ -314,11 +312,23 @@ static int eth__get_devices(cci_plugin_ctp_t *plugin)
 					    addr->ifa_addr;
 					if (lladdr->sll_halen != 6)
 						continue;
-					/* is this the address we want ? */
-					if (!memcmp
-					    (&edev->addr.sll_addr,
-					     &lladdr->sll_addr, 6))
-						break;
+					if (gotifname) {
+						/* is this the interface we want ? */
+						if (0 == strcmp(addr->ifa_name, gotifname)) {
+							edev->addr.sll_halen = 6;
+							memcpy(&edev->addr.sll_addr, &lladdr->sll_addr, 6);
+							break;
+						}
+					} else if (gotmac) {
+						/* is this the address we want ? */
+						if (0 == memcmp(&edev->addr.sll_addr, &lladdr->sll_addr, 6)) {
+							edev->addr.sll_halen = 6;
+							memcpy(&edev->addr.sll_addr, mac, 6);
+							break;
+						}
+					} else {
+						assert(0);
+					}
 				}
 				if (!addr) {
 					free(edev);
