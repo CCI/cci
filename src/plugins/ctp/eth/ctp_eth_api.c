@@ -1042,6 +1042,8 @@ static int ctp_eth_rma_register(cci_endpoint_t * endpoint,
 	struct ccieth_ioctl_rma_register arg;
 	int ret;
 
+	CCI_ENTER;
+
 	arg.protection =  ((flags & CCI_FLAG_READ ) ? PROT_READ  : 0)
 			| ((flags & CCI_FLAG_WRITE) ? PROT_WRITE : 0);
 	arg.buffer_ptr = (uintptr_t) start;
@@ -1050,12 +1052,18 @@ static int ctp_eth_rma_register(cci_endpoint_t * endpoint,
 	ret = ioctl(eep->fd, CCIETH_IOCTL_RMA_REGISTER, &arg);
 	if (ret < 0) {
 		perror("ioctl rma register");
-		return errno;
+		ret = errno;
+		goto out;
 	} else {
 		*rma_handle = arg.handle;
 	}
 
+	CCI_EXIT;
 	return CCI_SUCCESS;
+
+out:
+	CCI_EXIT;
+	return ret;
 }
 
 static int ctp_eth_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * rma_handle)
@@ -1065,15 +1073,23 @@ static int ctp_eth_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * 
 	eth__ep_t *eep = _ep->priv;
 	int ret;
 
+	CCI_ENTER;
+
 	arg.handle = rma_handle;
 
 	ret = ioctl(eep->fd, CCIETH_IOCTL_RMA_DEREGISTER, &arg);
 	if (ret < 0) {
 		perror("ioctl rma deregister");
-		return errno;
+		ret = errno;
+		goto out;
 	}
 
+	CCI_EXIT;
 	return CCI_SUCCESS;
+
+out:
+	CCI_EXIT;
+	return ret;
 }
 
 static int ctp_eth_rma(cci_connection_t * connection,
@@ -1090,8 +1106,12 @@ static int ctp_eth_rma(cci_connection_t * connection,
 	struct ccieth_ioctl_rma arg;
 	int ret;
 
-	if (!connection || connection->attribute == CCI_CONN_ATTR_UU)
-		return CCI_EINVAL;
+	CCI_ENTER;
+
+	if (!connection || connection->attribute == CCI_CONN_ATTR_UU) {
+		ret = CCI_EINVAL;
+		goto out;
+	}
 
 	/* ccieth always copies to kernel sk_buffs */
 	flags &= ~CCI_FLAG_NO_COPY;
@@ -1118,8 +1138,14 @@ static int ctp_eth_rma(cci_connection_t * connection,
 	ret = ioctl(eep->fd, CCIETH_IOCTL_RMA, &arg);
 	if (ret < 0) {
 		perror("ioctl rma");
-		return errno;
+		ret = errno;
+		goto out;
 	}
 
+	CCI_EXIT;
 	return CCI_SUCCESS;
+
+out:
+	CCI_EXIT;
+	return ret;
 }
