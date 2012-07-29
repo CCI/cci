@@ -658,7 +658,8 @@ static int ctp_eth_disconnect(cci_connection_t * connection)
 static int ctp_eth_set_opt(cci_opt_handle_t * handle,
 			   cci_opt_name_t name, const void *val)
 {
-	printf("In eth_set_opt\n");
+	CCI_ENTER;
+	CCI_EXIT;
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
