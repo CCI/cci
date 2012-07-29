@@ -18,7 +18,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #ifdef HAVE_IFADDRS_H
-#include <net/if_arp.h>
+#include <sys/socket.h>
 #include <net/if.h>
 #include <ifaddrs.h>
 #endif
