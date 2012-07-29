@@ -484,7 +484,9 @@ static int ctp_eth_create_endpoint(cci_device_t * device,
 
 	TAILQ_INIT(&eep->connections);
 
-	*fdp = eep->fd = fd;
+	eep->fd = fd;
+	if (fdp)
+		*fdp = fd;
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
