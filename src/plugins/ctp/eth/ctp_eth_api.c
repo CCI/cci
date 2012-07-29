@@ -466,6 +466,11 @@ static int ctp_eth_create_endpoint(cci_device_t * device,
 	ccieth_uri_sprintf(uri, (const uint8_t *)&edev->addr.sll_addr, arg.id);
 	_ep->uri = uri;
 
+	_ep->rx_buf_cnt = -1;	/* FIXME: infinite? */
+	_ep->tx_buf_cnt = 64;	/* FIXME: #define io ccieth_io.h */
+	_ep->tx_timeout = 0;	/* FIXME */
+	_ep->keepalive_timeout = 0;	/* FIXME */
+
 	TAILQ_INIT(&eep->connections);
 
 	*fdp = eep->fd = fd;
@@ -521,6 +526,8 @@ static int ctp_eth_accept(cci_event_t *event, const void *context)
 		return CCI_ENOMEM;
 	_conn = &econn->_conn;
 	_conn->plugin = _ep->plugin;
+	_conn->tx_timeout = _ep->tx_timeout;
+	_conn->keepalive_timeout = _ep->keepalive_timeout;
 
 	econn->id = conn_id;
 	assert(econn->id != CCIETH_CONNECTION_INVALID_ID);
@@ -540,7 +547,6 @@ static int ctp_eth_accept(cci_event_t *event, const void *context)
 	_conn->connection.endpoint = &_ep->endpoint;
 	_conn->connection.attribute = ge->connect_request.attribute;
 	_conn->connection.context = (void *)context;
-
 
 	pthread_mutex_lock(&_ep->lock);
 	TAILQ_INSERT_TAIL(&eep->connections, econn, entry);
@@ -597,6 +603,8 @@ static int ctp_eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		return CCI_ENOMEM;
 	_conn = &econn->_conn;
 	_conn->plugin = _ep->plugin;
+	_conn->tx_timeout = _ep->tx_timeout;
+
 	_conn->connection.endpoint = endpoint;
 	_conn->connection.attribute = attribute;
 	_conn->connection.context = (void *)context;
@@ -657,7 +665,8 @@ static int ctp_eth_set_opt(cci_opt_handle_t * handle,
 static int ctp_eth_get_opt(cci_opt_handle_t * handle,
 			   cci_opt_name_t name, void *val)
 {
-	printf("In eth_get_opt\n");
+	CCI_ENTER;
+	CCI_EXIT;
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
