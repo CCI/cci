@@ -121,6 +121,8 @@ static int eth__get_device_info(cci__dev_t * _dev, struct ifaddrs *addr)
 	struct ccieth_ioctl_get_info ioctl_arg;
 	int err;
 
+	CCI_ENTER;
+
 	/* default values */
 	device->max_send_size = -1;
 
@@ -175,9 +177,12 @@ done:
 	      device->max_send_size, device->rate,
 	      device->pci.domain, device->pci.bus, device->pci.dev,
 	      device->pci.func);
+
+	CCI_EXIT;
 	return 0;
 
 out:
+	CCI_EXIT;
 	return -1;
 }
 
@@ -388,12 +393,16 @@ static int ctp_eth_finalize(cci_plugin_ctp_t *plugin)
 {
 	cci__dev_t *_dev = NULL;
 
+	CCI_ENTER;
+
         TAILQ_FOREACH(_dev, &globals->devs, entry)
 		if (!strcmp(_dev->device.transport, "eth"))
 			free(_dev->priv);
 
 	close(eglobals->fd);
 	free(eglobals);
+
+	CCI_EXIT;
 	return CCI_SUCCESS;
 }
 
@@ -432,6 +441,8 @@ static int ctp_eth_create_endpoint(cci_device_t * device,
 	char *uri;
 	int fd;
 	int ret;
+
+	CCI_ENTER;
 
 	_ep = container_of(endpoint, cci__ep_t, endpoint);
 	eep = calloc(1, sizeof(eth__ep_t));
@@ -474,6 +485,8 @@ static int ctp_eth_create_endpoint(cci_device_t * device,
 	TAILQ_INIT(&eep->connections);
 
 	*fdp = eep->fd = fd;
+
+	CCI_EXIT;
 	return CCI_SUCCESS;
 
 out_with_fd:
@@ -483,6 +496,7 @@ out_with_uri:
 out_with_eep:
 	free(eep);
 out:
+	CCI_EXIT;
 	return ret;
 }
 
@@ -491,6 +505,8 @@ static int ctp_eth_destroy_endpoint(cci_endpoint_t * endpointp)
 	struct cci_endpoint *endpoint = (struct cci_endpoint *) endpointp;
 	cci__ep_t *_ep = container_of(endpoint, cci__ep_t, endpoint);
 	eth__ep_t *eep = _ep->priv;
+
+	CCI_ENTER;
 
 	while (!TAILQ_EMPTY(&eep->connections)) {
 		eth__conn_t *econn = TAILQ_FIRST(&eep->connections);
@@ -501,6 +517,8 @@ static int ctp_eth_destroy_endpoint(cci_endpoint_t * endpointp)
 	close(eep->fd);
 	free((void *) _ep->uri);
 	free(eep);
+
+	CCI_EXIT;
 	return CCI_SUCCESS;
 }
 
@@ -517,13 +535,20 @@ static int ctp_eth_accept(cci_event_t *event, const void *context)
 	eth__conn_t *econn;
 	int err;
 
+	CCI_ENTER;
+
 	if (event->type != CCI_EVENT_CONNECT_REQUEST
-	    || !eev->type_params.connect_request.need_reply)
-		return CCI_EINVAL;
+	    || !eev->type_params.connect_request.need_reply) {
+		err = CCI_EINVAL;
+		goto out;
+	}
 
 	econn = malloc(sizeof(*econn));
-	if (!econn)
-		return CCI_ENOMEM;
+	if (!econn) {
+		err = CCI_ENOMEM;
+		goto out;
+	}
+
 	_conn = &econn->_conn;
 	_conn->plugin = _ep->plugin;
 	_conn->tx_timeout = _ep->tx_timeout;
@@ -537,8 +562,8 @@ static int ctp_eth_accept(cci_event_t *event, const void *context)
 	err = ioctl(eep->fd, CCIETH_IOCTL_CONNECT_ACCEPT, &ac);
 	if (err < 0) {
 		perror("ioctl connect accept");
-		free(econn);
-		return errno;
+		err = errno;
+		goto out_with_econn;
 	}
 
 	eev->type_params.connect_request.need_reply = 0;
@@ -552,7 +577,14 @@ static int ctp_eth_accept(cci_event_t *event, const void *context)
 	TAILQ_INSERT_TAIL(&eep->connections, econn, entry);
 	pthread_mutex_unlock(&_ep->lock);
 
+	CCI_EXIT;
 	return CCI_SUCCESS;
+
+out_with_econn:
+	free(econn);
+out:
+	CCI_EXIT;
+	return err;
 }
 
 static int ctp_eth_reject(cci_event_t *event)
@@ -566,20 +598,30 @@ static int ctp_eth_reject(cci_event_t *event)
 	struct ccieth_ioctl_connect_reject rj;
 	int err;
 
+	CCI_ENTER;
+
 	if (event->type != CCI_EVENT_CONNECT_REQUEST
-	    || !eev->type_params.connect_request.need_reply)
-		return CCI_EINVAL;
+	    || !eev->type_params.connect_request.need_reply) {
+		err = CCI_EINVAL;
+		goto out;
+	}
 
 	rj.conn_id = conn_id;
 	err = ioctl(eep->fd, CCIETH_IOCTL_CONNECT_REJECT, &rj);
 	if (err < 0) {
 		perror("ioctl connect reject");
-		return errno;
+		err = errno;
+		goto out;
 	}
 
 	eev->type_params.connect_request.need_reply = 0;
 
+	CCI_EXIT;
 	return CCI_SUCCESS;
+
+out:
+	CCI_EXIT;
+	return err;
 }
 
 static int ctp_eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
@@ -594,13 +636,20 @@ static int ctp_eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	struct ccieth_ioctl_connect_request arg;
 	int ret;
 
+	CCI_ENTER;
+
 	if (ccieth_uri_sscanf
-	    (server_uri, (uint8_t *) & arg.dest_addr, &arg.dest_eid) < 0)
-		return CCI_EINVAL;
+	    (server_uri, (uint8_t *) & arg.dest_addr, &arg.dest_eid) < 0) {
+		ret = CCI_EINVAL;
+		goto out;
+	}
 
 	econn = malloc(sizeof(*econn));
-	if (!econn)
-		return CCI_ENOMEM;
+	if (!econn) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
 	_conn = &econn->_conn;
 	_conn->plugin = _ep->plugin;
 	_conn->tx_timeout = _ep->tx_timeout;
@@ -619,15 +668,22 @@ static int ctp_eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	ret = ioctl(eep->fd, CCIETH_IOCTL_CONNECT_REQUEST, &arg);
 	if (ret < 0) {
 		perror("ioctl connect request");
-		free(econn);
-		return errno;
+		ret = errno;
+		goto out_with_econn;
 	}
 
 	pthread_mutex_lock(&_ep->lock);
 	TAILQ_INSERT_TAIL(&eep->connections, econn, entry);
 	pthread_mutex_unlock(&_ep->lock);
 
+	CCI_EXIT;
 	return CCI_SUCCESS;
+
+out_with_econn:
+	free(econn);
+out:
+	CCI_EXIT;
+	return ret;
 }
 
 static int ctp_eth_disconnect(cci_connection_t * connection)
@@ -639,6 +695,8 @@ static int ctp_eth_disconnect(cci_connection_t * connection)
 	eth__ep_t *eep = _ep->priv;
 	struct ccieth_ioctl_disconnect arg;
 	int ret;
+
+	CCI_ENTER;
 
 	arg.conn_id = econn->id;
 	ret = ioctl(eep->fd, CCIETH_IOCTL_DISCONNECT, &arg);
@@ -652,6 +710,7 @@ static int ctp_eth_disconnect(cci_connection_t * connection)
 	pthread_mutex_unlock(&_ep->lock);
 	free(econn);
 
+	CCI_EXIT;
 	return CCI_SUCCESS;
 }
 
@@ -687,9 +746,14 @@ static int ctp_eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eve
 	char *data;
 	int ret;
 
+	CCI_ENTER;
+
 	eev = malloc(sizeof(*eev) + _ep->dev->device.max_send_size);
-	if (!eev)
-		return CCI_ENOMEM;
+	if (!eev) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
 	_ev = &eev->_ev;
 	event = &_ev->event;
 	ge = &eev->ioctl_event;
@@ -832,10 +896,14 @@ static int ctp_eth_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eve
 		goto out_with_event;
 	}
 	*eventp = event;
+
+	CCI_EXIT;
 	return CCI_SUCCESS;
 
 out_with_event:
 	free(eev);
+out:
+	CCI_EXIT;
 	return CCI_EAGAIN;
 }
 
@@ -843,13 +911,24 @@ static int ctp_eth_return_event(cci_event_t * event)
 {
 	cci__evt_t *_ev = container_of(event, cci__evt_t, event);
 	eth__evt_t *eev = container_of(_ev, eth__evt_t, _ev);
+	int ret;
+
+	CCI_ENTER;
 
 	if (event->type == CCI_EVENT_CONNECT_REQUEST
-	    && eev->type_params.connect_request.need_reply)
-		return CCI_EINVAL;
+	    && eev->type_params.connect_request.need_reply) {
+		ret = CCI_EINVAL;
+		goto out;
+	}
 
 	free(eev);
+
+	CCI_EXIT;
 	return 0;
+
+out:
+	CCI_EXIT;
+	return ret;
 }
 
 static int ctp_eth_send(cci_connection_t * connection,
@@ -862,6 +941,8 @@ static int ctp_eth_send(cci_connection_t * connection,
 	eth__ep_t *eep = _ep->priv;
 	struct ccieth_ioctl_msg arg;
 	int ret;
+
+	CCI_ENTER;
 
 	/* ccieth always copies to kernel sk_buffs */
 	flags &= ~CCI_FLAG_NO_COPY;
@@ -889,10 +970,16 @@ static int ctp_eth_send(cci_connection_t * connection,
 	ret = ioctl(eep->fd, CCIETH_IOCTL_MSG, &arg);
 	if (ret < 0) {
 		perror("ioctl send");
-		return errno;
+		ret = errno;
+		goto out;
 	}
 
+	CCI_EXIT;
 	return CCI_SUCCESS;
+
+out:
+	CCI_EXIT;
+	return ret;
 }
 
 static int ctp_eth_sendv(cci_connection_t * connection,
@@ -904,13 +991,17 @@ static int ctp_eth_sendv(cci_connection_t * connection,
 	unsigned i;
 	int ret;
 
+	CCI_ENTER;
+
 	for(i = 0, length = 0;
 	    i < iov_len;
 	    length += iov_ptr[i].iov_len, i++);
 
 	buffer = malloc(length);
-	if (!buffer)
-		return CCI_ENOMEM;
+	if (!buffer) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
 
 	for(i = 0, offset = 0; i < iov_len; offset += iov_ptr[i].iov_len, i++)
 		memcpy(buffer + offset, iov_ptr[i].iov_base, iov_ptr[i].iov_len);
@@ -919,6 +1010,8 @@ static int ctp_eth_sendv(cci_connection_t * connection,
 
 	free(buffer);
 
+out:
+	CCI_EXIT;
 	return ret;
 }
 
