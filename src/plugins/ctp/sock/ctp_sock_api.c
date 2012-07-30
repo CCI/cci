@@ -3044,7 +3044,8 @@ sock_handle_ack(sock_conn_t * sconn,
 
 	if (count == 1) {
 		assert(type == SOCK_MSG_ACK_ONLY || type == SOCK_MSG_ACK_UP_TO
-               || type == SOCK_MSG_SEND || type == SOCK_MSG_RMA_WRITE);
+               || type == SOCK_MSG_SEND || type == SOCK_MSG_RMA_WRITE
+               || type == SOCK_MSG_RMA_READ_REQUEST);
 	} else {
 		assert(type == SOCK_MSG_SACK);
 	}
