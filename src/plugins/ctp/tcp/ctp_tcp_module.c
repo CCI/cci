@@ -14,18 +14,18 @@
 #include <stdio.h>
 
 #include "cci.h"
-#include "plugins/core/core.h"
+#include "plugins/ctp/ctp.h"
 
-#include "core_tcp.h"
+#include "ctp_tcp.h"
 
-int cci_core_tcp_post_load(cci_plugin_t * me)
+int cci_ctp_tcp_post_load(cci_plugin_t * me)
 {
 	assert(me);
 	debug(CCI_DB_DRVR, "In tcp post_load");
 	return CCI_SUCCESS;
 }
 
-int cci_core_tcp_pre_unload(cci_plugin_t * me)
+int cci_ctp_tcp_pre_unload(cci_plugin_t * me)
 {
 	assert(me);
 	debug(CCI_DB_DRVR, "In tcp pre_unload");

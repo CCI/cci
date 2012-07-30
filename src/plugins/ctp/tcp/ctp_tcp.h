@@ -10,8 +10,8 @@
  *
  */
 
-#ifndef CCI_CORE_TCP_H
-#define CCI_CORE_TCP_H
+#ifndef CCI_CTP_TCP_H
+#define CCI_CTP_TCP_H
 
 #include <netinet/in.h>
 #include <assert.h>
@@ -1041,8 +1041,8 @@ typedef struct tcp_globals {
 
 extern tcp_globals_t *sglobals;
 
-int cci_core_tcp_post_load(cci_plugin_t * me);
-int cci_core_tcp_pre_unload(cci_plugin_t * me);
+int cci_ctp_tcp_post_load(cci_plugin_t * me);
+int cci_ctp_tcp_pre_unload(cci_plugin_t * me);
 
 END_C_DECLS
-#endif				/* CCI_CORE_TCP_H */
+#endif				/* CCI_CTP_TCP_H */

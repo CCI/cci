@@ -39,8 +39,8 @@
 #include "cci.h"
 #include "cci_lib_types.h"
 #include "cci-api.h"
-#include "plugins/core/core.h"
-#include "core_tcp.h"
+#include "plugins/ctp/ctp.h"
+#include "ctp_tcp.h"
 
 #define DEBUG_RNR 0
 
@@ -57,42 +57,40 @@ pthread_t progress_tid, recv_tid;
 /*
  * Local functions
  */
-static int tcp_init(cci_plugin_core_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
-static int tcp_finalize(cci_plugin_core_t * plugin);
-static const char *tcp_strerror(cci_endpoint_t * endpoint,
+static int ctp_tcp_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps);
+static int ctp_tcp_finalize(cci_plugin_ctp_t * plugin);
+static const char *ctp_tcp_strerror(cci_endpoint_t * endpoint,
 				 enum cci_status status);
-static int tcp_create_endpoint(cci_device_t * device,
+static int ctp_tcp_create_endpoint(cci_device_t * device,
 				int flags,
 				cci_endpoint_t ** endpoint,
 				cci_os_handle_t * fd);
-static int tcp_destroy_endpoint(cci_endpoint_t * endpoint);
-static int tcp_accept(cci_event_t *event, const void *context);
-static int tcp_reject(cci_event_t *conn_req);
-static int tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
+static int ctp_tcp_destroy_endpoint(cci_endpoint_t * endpoint);
+static int ctp_tcp_accept(cci_event_t *event, const void *context);
+static int ctp_tcp_reject(cci_event_t *conn_req);
+static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 			const void *data_ptr, uint32_t data_len,
 			cci_conn_attribute_t attribute,
 			const void *context, int flags, const struct timeval *timeout);
-static int tcp_disconnect(cci_connection_t * connection);
-static int tcp_set_opt(cci_opt_handle_t * handle,
-			cci_opt_level_t level,
-			cci_opt_name_t name, const void *val, int len);
-static int tcp_get_opt(cci_opt_handle_t * handle,
-			cci_opt_level_t level,
-			cci_opt_name_t name, void **val, int *len);
-static int tcp_arm_os_handle(cci_endpoint_t * endpoint, int flags);
-static int tcp_get_event(cci_endpoint_t * endpoint,
+static int ctp_tcp_disconnect(cci_connection_t * connection);
+static int ctp_tcp_set_opt(cci_opt_handle_t * handle,
+			cci_opt_name_t name, const void *val);
+static int ctp_tcp_get_opt(cci_opt_handle_t * handle,
+			cci_opt_name_t name, void *val);
+static int ctp_tcp_arm_os_handle(cci_endpoint_t * endpoint, int flags);
+static int ctp_tcp_get_event(cci_endpoint_t * endpoint,
 			  cci_event_t ** const event);
-static int tcp_return_event(cci_event_t * event);
-static int tcp_send(cci_connection_t * connection,
+static int ctp_tcp_return_event(cci_event_t * event);
+static int ctp_tcp_send(cci_connection_t * connection,
 		     const void *msg_ptr, uint32_t msg_len, const void *context, int flags);
-static int tcp_sendv(cci_connection_t * connection,
+static int ctp_tcp_sendv(cci_connection_t * connection,
 		      const struct iovec *data, uint32_t iovcnt,
 		      const void *context, int flags);
-static int tcp_rma_register(cci_endpoint_t * endpoint,
+static int ctp_tcp_rma_register(cci_endpoint_t * endpoint,
 			     void *start, uint64_t length,
 			     int flags, uint64_t * rma_handle);
-static int tcp_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
-static int tcp_rma(cci_connection_t * connection,
+static int ctp_tcp_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
+static int ctp_tcp_rma(cci_connection_t * connection,
 		    const void *header_ptr, uint32_t header_len,
 		    uint64_t local_handle, uint64_t local_offset,
 		    uint64_t remote_handle, uint64_t remote_offset,
@@ -110,7 +108,7 @@ static int tcp_sendto(cci_os_handle_t sock, void *buf, int len);
  *
  * The name of this structure must be of the following form:
  *
- *    cci_core_<your_plugin_name>_plugin
+ *    cci_ctp_<your_plugin_name>_plugin
  *
  * This allows the symbol to be found after the plugin is dynamically
  * opened.
@@ -118,40 +116,40 @@ static int tcp_sendto(cci_os_handle_t sock, void *buf, int len);
  * Note that your_plugin_name should match the direct name where the
  * plugin resides.
  */
-cci_plugin_core_t cci_core_tcp_plugin = {
+cci_plugin_ctp_t cci_ctp_tcp_plugin = {
 	{
 	 /* Logistics */
 	 CCI_ABI_VERSION,
-	 CCI_CORE_API_VERSION,
+	 CCI_CTP_API_VERSION,
 	 "tcp",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
 	 30,
 
 	 /* Bootstrap function pointers */
-	 cci_core_tcp_post_load,
-	 cci_core_tcp_pre_unload,
+	 cci_ctp_tcp_post_load,
+	 cci_ctp_tcp_pre_unload,
 	 },
 
 	/* API function pointers */
-	tcp_init,
-	tcp_finalize,
-	tcp_strerror,
-	tcp_create_endpoint,
-	tcp_destroy_endpoint,
-	tcp_accept,
-	tcp_reject,
-	tcp_connect,
-	tcp_disconnect,
-	tcp_set_opt,
-	tcp_get_opt,
-	tcp_arm_os_handle,
-	tcp_get_event,
-	tcp_return_event,
-	tcp_send,
-	tcp_sendv,
-	tcp_rma_register,
-	tcp_rma_deregister,
-	tcp_rma
+	ctp_tcp_init,
+	ctp_tcp_finalize,
+	ctp_tcp_strerror,
+	ctp_tcp_create_endpoint,
+	ctp_tcp_destroy_endpoint,
+	ctp_tcp_accept,
+	ctp_tcp_reject,
+	ctp_tcp_connect,
+	ctp_tcp_disconnect,
+	ctp_tcp_set_opt,
+	ctp_tcp_get_opt,
+	ctp_tcp_arm_os_handle,
+	ctp_tcp_get_event,
+	ctp_tcp_return_event,
+	ctp_tcp_send,
+	ctp_tcp_sendv,
+	ctp_tcp_rma_register,
+	ctp_tcp_rma_deregister,
+	ctp_tcp_rma
 };
 
 static inline void
@@ -281,7 +279,7 @@ out:
 	return ret;
 }
 
-static int tcp_init(cci_plugin_core_t *plugin,
+static int ctp_tcp_init(cci_plugin_ctp_t *plugin,
 		     uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	int ret, count = 0;
@@ -508,7 +506,7 @@ static int tcp_init(cci_plugin_core_t *plugin,
 	return ret;
 }
 
-static const char *tcp_strerror(cci_endpoint_t * endpoint,
+static const char *ctp_tcp_strerror(cci_endpoint_t * endpoint,
 				 enum cci_status status)
 {
 	char *str;
@@ -525,7 +523,7 @@ static const char *tcp_strerror(cci_endpoint_t * endpoint,
  *      and destroyed all endpoints.
  *      All we need to do if free dev->priv
  */
-static int tcp_finalize(cci_plugin_core_t * plugin)
+static int ctp_tcp_finalize(cci_plugin_ctp_t * plugin)
 {
 	int i;
 	cci__dev_t *dev = NULL;
@@ -873,7 +871,7 @@ out:
 	return ret;
 }
 
-static int tcp_create_endpoint(cci_device_t * device,
+static int ctp_tcp_create_endpoint(cci_device_t * device,
 				int flags,
 				cci_endpoint_t ** endpointp,
 				cci_os_handle_t * fd)
@@ -990,7 +988,7 @@ static int tcp_create_endpoint(cci_device_t * device,
 	return ret;
 }
 
-static int tcp_destroy_endpoint(cci_endpoint_t * endpoint)
+static int ctp_tcp_destroy_endpoint(cci_endpoint_t * endpoint)
 {
 	cci__ep_t *ep = NULL;
 	cci__dev_t *dev = NULL;
@@ -1070,7 +1068,7 @@ tcp_compare_s32(const void *pa, const void *pb)
 	return (*(int32_t*) pb - *(int32_t*) pa);
 }
 
-static int tcp_accept(cci_event_t *event, const void *context)
+static int ctp_tcp_accept(cci_event_t *event, const void *context)
 {
 	uint8_t a;
 	uint32_t peer_seq;
@@ -1227,7 +1225,7 @@ out:
  * We cannot use the event's buffer since the app will most likely return the
  * event before we get an ack from the client. We will get a tx for the reply.
  */
-static int tcp_reject(cci_event_t *event)
+static int ctp_tcp_reject(cci_event_t *event)
 {
 	int ret = CCI_SUCCESS;
 	uint8_t a;
@@ -1365,7 +1363,7 @@ static int tcp_getaddrinfo(const char *uri, in_addr_t * in, uint16_t * port)
 	return CCI_SUCCESS;
 }
 
-static int tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
+static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 			const void *data_ptr, uint32_t data_len,
 			cci_conn_attribute_t attribute,
 			const void *context, int flags, const struct timeval *timeout)
@@ -1541,7 +1539,7 @@ static int tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	return ret;
 }
 
-static int tcp_disconnect(cci_connection_t * connection)
+static int ctp_tcp_disconnect(cci_connection_t * connection)
 {
 	int i, found = 0;
 	cci__conn_t *conn = NULL;
@@ -1606,9 +1604,8 @@ static int tcp_disconnect(cci_connection_t * connection)
 	return CCI_SUCCESS;
 }
 
-static int tcp_set_opt(cci_opt_handle_t * handle,
-			cci_opt_level_t level,
-			cci_opt_name_t name, const void *val, int len)
+static int ctp_tcp_set_opt(cci_opt_handle_t * handle,
+			cci_opt_name_t name, const void *val)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
@@ -1621,15 +1618,9 @@ static int tcp_set_opt(cci_opt_handle_t * handle,
 		return CCI_ENODEV;
 	}
 
-	if (CCI_OPT_LEVEL_ENDPOINT == level) {
-		ep = container_of(handle->endpoint, cci__ep_t, endpoint);
-	} else {
-		conn =
-		    container_of(handle->connection, cci__conn_t, connection);
-	}
-
 	switch (name) {
 	case CCI_OPT_ENDPT_SEND_TIMEOUT:
+		ep = container_of(handle, cci__ep_t, endpoint);
 		assert(len == sizeof(ep->tx_timeout));
 		memcpy(&ep->tx_timeout, val, len);
 		break;
@@ -1640,10 +1631,12 @@ static int tcp_set_opt(cci_opt_handle_t * handle,
 		ret = CCI_ERR_NOT_IMPLEMENTED;
 		break;
 	case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
+		ep = container_of(handle, cci__ep_t, endpoint);
 		assert(len == sizeof(ep->keepalive_timeout));
 		memcpy(&ep->keepalive_timeout, val, len);
 		break;
 	case CCI_OPT_CONN_SEND_TIMEOUT:
+		conn = container_of(handle, cci__conn_t, connection);
 		assert(len == sizeof(conn->tx_timeout));
 		memcpy(&conn->tx_timeout, val, len);
 		break;
@@ -1657,9 +1650,8 @@ static int tcp_set_opt(cci_opt_handle_t * handle,
 	return ret;
 }
 
-static int tcp_get_opt(cci_opt_handle_t * handle,
-			cci_opt_level_t level,
-			cci_opt_name_t name, void **val, int *len)
+static int ctp_tcp_get_opt(cci_opt_handle_t * handle,
+			cci_opt_name_t name, void *val)
 {
 	CCI_ENTER;
 
@@ -1673,7 +1665,7 @@ static int tcp_get_opt(cci_opt_handle_t * handle,
 	return CCI_EINVAL;
 }
 
-static int tcp_arm_os_handle(cci_endpoint_t * endpoint, int flags)
+static int ctp_tcp_arm_os_handle(cci_endpoint_t * endpoint, int flags)
 {
 	CCI_ENTER;
 
@@ -1686,7 +1678,7 @@ static int tcp_arm_os_handle(cci_endpoint_t * endpoint, int flags)
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
-static int tcp_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
+static int ctp_tcp_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep;
@@ -1741,7 +1733,7 @@ static int tcp_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
 	return ret;
 }
 
-static int tcp_return_event(cci_event_t * event)
+static int ctp_tcp_return_event(cci_event_t * event)
 {
 	cci__ep_t *ep;
 	tcp_ep_t *tep;
@@ -2119,7 +2111,7 @@ static void tcp_progress_sends(cci__ep_t * ep)
 	return;
 }
 
-static int tcp_send(cci_connection_t * connection, const void *msg_ptr,
+static int ctp_tcp_send(cci_connection_t * connection, const void *msg_ptr,
 			uint32_t msg_len, const void *context, int flags)
 {
 	uint32_t iovcnt = 0;
@@ -2134,7 +2126,7 @@ static int tcp_send(cci_connection_t * connection, const void *msg_ptr,
 	return tcp_sendv(connection, &iov, iovcnt, context, flags);
 }
 
-static int tcp_sendv(cci_connection_t * connection,
+static int ctp_tcp_sendv(cci_connection_t * connection,
 		      const struct iovec *data, uint32_t iovcnt,
 		      const void *context, int flags)
 {
@@ -2296,7 +2288,7 @@ static int tcp_sendv(cci_connection_t * connection,
 	return ret;
 }
 
-static int tcp_rma_register(cci_endpoint_t * endpoint,
+static int ctp_tcp_rma_register(cci_endpoint_t * endpoint,
 			     void *start, uint64_t length,
 			     int flags, uint64_t * rma_handle)
 {
@@ -2337,7 +2329,7 @@ static int tcp_rma_register(cci_endpoint_t * endpoint,
 	return CCI_SUCCESS;
 }
 
-static int tcp_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
+static int ctp_tcp_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
 {
 	int ret = CCI_EINVAL;
 	tcp_rma_handle_t *handle =
@@ -2431,7 +2423,7 @@ generate_context_id(tcp_conn_t * tconn, const void *context, uint64_t * context_
 	*context_id = index;
 }
 
-static int tcp_rma(cci_connection_t * connection,
+static int ctp_tcp_rma(cci_connection_t * connection,
 		    const void *msg_ptr, uint32_t msg_len,
 		    uint64_t local_handle, uint64_t local_offset,
 		    uint64_t remote_handle, uint64_t remote_offset,
