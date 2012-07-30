@@ -3097,7 +3097,7 @@ static int verbs_handle_msg(cci__ep_t * ep, struct ibv_wc wc)
 		seqno = VERBS_SEQNO(ntohl(wc.imm_data));
 
 		/* record incoming seqno */
-		if (seqno != vconn->expected)
+		if (seqno != vconn->expected && vconn->rbuf)
 			queue = 1;
 		else
 			vconn->expected++;
