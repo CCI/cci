@@ -27,7 +27,6 @@ BEGIN_C_DECLS
 #define SOCK_UDP_MAX            (65508)	/* 64 KB - 8 B UDP - 20 B IP */
 #define SOCK_MAX_HDR_SIZE       (52)	/* max sock header size (RMA) */
 #define SOCK_MAX_HDRS           (SOCK_MAX_HDR_SIZE + 20 + 8)	/* IP + UDP */
-/* FIXME */
 #define SOCK_DEFAULT_MSS        (SOCK_UDP_MAX - SOCK_MAX_HDR_SIZE)	/* assume jumbo frames */
 #define SOCK_MIN_MSS            (1500 - SOCK_MAX_HDR_SIZE)
 #define SOCK_MAX_SACK           (4)	/* pairs of start/end acks */
@@ -49,6 +48,8 @@ BEGIN_C_DECLS
 #define SOCK_RMA_DEPTH          (256)	/* how many in-flight msgs per RMA */
 #define ACK_TIMEOUT             (100) /* Timeout associated to ACK blocks */
 #define PENDING_ACK_THRESHOLD   (SOCK_RMA_DEPTH/4) /* Maximum size of a ACK block */
+#define SOCK_EP_NUM_EVTS        (64)
+
 static inline uint64_t sock_tv_to_usecs(struct timeval tv)
 {
 	return (tv.tv_sec * 1000000) + tv.tv_usec;
@@ -905,14 +906,17 @@ typedef struct sock_rma_op {
 } sock_rma_op_t;
 
 typedef struct sock_ep {
-    /*! ID of the recv thread for the endpoint */
-    pthread_t recv_tid;
+	int event_fd;
+	int fd[2];
 
-    /*! ID of the progress thread for the endpoint */
-    pthread_t progress_tid;
+	/*! ID of the recv thread for the endpoint */
+	pthread_t recv_tid;
 
-    pthread_mutex_t progress_mutex;
-    pthread_cond_t  wait_condition;
+	/*! ID of the progress thread for the endpoint */
+	pthread_t progress_tid;
+
+	pthread_mutex_t progress_mutex;
+	pthread_cond_t  wait_condition;
 
 	/* Our IP and port */
 	struct sockaddr_in sin;
