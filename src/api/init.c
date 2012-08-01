@@ -18,7 +18,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #ifdef HAVE_IFADDRS_H
-#include <net/if_arp.h>
+#include <sys/socket.h>
 #include <net/if.h>
 #include <ifaddrs.h>
 #endif
@@ -223,9 +223,9 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 #if __linux__
 	struct ethtool_drvinfo edi;
 	struct ethtool_cmd ecmd;
-#endif /* __linux__ */
 	struct ifreq ifr;
 	int sockfd;
+#endif /* __linux__ */
 
 	/* mark the MSS as unknown in case we fail later */
 	device->max_send_size = -1;
@@ -306,10 +306,12 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 
 	return 0;
 
+#if __linux__
 out_with_sockfd:
 	close(sockfd);
 out:
 	return -1;
+#endif
 }
 #endif
 

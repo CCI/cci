@@ -48,6 +48,11 @@ cci_connection_t *control_conn = NULL;
 cci_connection_t *test_conn = NULL;
 cci_conn_attribute_t attr = CCI_CONN_ATTR_UU;
 struct timeval start, end;
+int in_flight = MAX_PENDING;
+int blocking = 0;
+cci_os_handle_t fd = 0;
+int nfds = 0;
+fd_set rfds;
 
 #if 1
 #define LOCK
@@ -65,7 +70,9 @@ void print_usage()
 	fprintf(stderr, "\t-s\tSet to run as the server\n");
 	fprintf(stderr,
 		"\t-c\tConnection type (UU, RU, or RO) set by client only\n");
-	fprintf(stderr, "\t-t\tTimeout in seconds (default %d)\n\n", TIMEOUT);
+	fprintf(stderr, "\t-t\tTimeout in seconds (default %d)\n", TIMEOUT);
+	fprintf(stderr, "\t-i\tMax number of messages in-flight (default %d)\n", MAX_PENDING);
+	fprintf(stderr, "\t-b\tBlock using the OS handle instead of polling\n\n");
 	fprintf(stderr, "Example:\n");
 	fprintf(stderr, "server$ %s -h ip://foo -p 2211 -s\n", name);
 	fprintf(stderr, "client$ %s -h ip://foo -p 2211\n", name);
@@ -82,6 +89,15 @@ static void poll_events(void)
 {
 	int ret;
 	cci_event_t *event;
+
+	if (blocking) {
+		FD_ZERO(&rfds);
+		FD_SET(fd, &rfds);
+
+		ret = select(nfds, &rfds, NULL, NULL, NULL);
+		if (!ret)
+			return;
+	}
 
 	ret = cci_get_event(endpoint, &event);
 	if (ret != 0) {
@@ -253,7 +269,7 @@ void do_client()
 		alarm(timeout);
 		gettimeofday(&start, NULL);
 
-		for (i = 0; i < MAX_PENDING; i++) {
+		for (i = 0; i < in_flight; i++) {
 			ret =
 			    cci_send(test_conn, buffer, current_size, NULL, 0);
 			if (!ret)
@@ -297,10 +313,11 @@ int main(int argc, char *argv[])
 	uint32_t caps = 0;
 	cci_os_handle_t ep_fd;
 	char *uri = NULL;
+	cci_os_handle_t *os_handle = NULL;
 
 	name = argv[0];
 
-	while ((c = getopt(argc, argv, "h:p:sc:t:")) != -1) {
+	while ((c = getopt(argc, argv, "h:p:sc:t:i:bc:")) != -1) {
 		switch (c) {
 		case 'h':
 			server_uri = strdup(optarg);
@@ -329,6 +346,13 @@ int main(int argc, char *argv[])
 				print_usage();
 			}
 			break;
+		case 'i':
+			in_flight = strtol(optarg, NULL, 0);
+			break;
+		case 'b':
+			blocking = 1;
+			os_handle = &fd;
+			break;
 		default:
 			print_usage();
 		}
@@ -347,7 +371,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* create an endpoint */
-	ret = cci_create_endpoint(NULL, 0, &endpoint, &ep_fd);
+	ret = cci_create_endpoint(NULL, 0, &endpoint, os_handle);
 	if (ret) {
 		fprintf(stderr, "cci_create_endpoint() failed with %s\n",
 			cci_strerror(NULL, ret));
@@ -361,6 +385,12 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	printf("Opened %s\n", uri);
+
+	if (blocking) {
+		nfds = fd + 1;
+		FD_ZERO(&rfds);
+		FD_SET(fd, &rfds);
+	}
 
 #if MPI_DEBUG
 	MPI_Init(&argc, &argv);
