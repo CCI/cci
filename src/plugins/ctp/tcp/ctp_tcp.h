@@ -17,6 +17,7 @@
 #include <assert.h>
 #include <arpa/inet.h>
 #include <sys/select.h>
+#include <poll.h>
 
 #include "cci/config.h"
 #include "cci.h"
@@ -24,31 +25,22 @@
 #include "cci-api.h"
 
 BEGIN_C_DECLS
-#define TCP_UDP_MAX            (65508)	/* 64 KB - 8 B UDP - 20 B IP */
-#define TCP_MAX_HDR_SIZE       (52)	/* max tcp header size (RMA) */
-#define TCP_MAX_HDRS           (TCP_MAX_HDR_SIZE + 20 + 8)	/* IP + UDP */
-/* FIXME */
-#define TCP_DEFAULT_MSS        (TCP_UDP_MAX - TCP_MAX_HDR_SIZE)	/* assume jumbo frames */
-#define TCP_MIN_MSS            (1500 - TCP_MAX_HDR_SIZE)
-#define TCP_MAX_SACK           (4)	/* pairs of start/end acks */
-#define TCP_ACK_DELAY          (1)	/* send an ack after every Nth send */
-#define TCP_EP_TX_TIMEOUT_SEC  (64)	/* seconds for now */
-#define TCP_EP_RX_CNT          (16*1024)	/* number of rx active messages */
-#define TCP_EP_TX_CNT          (16*1024)	/* number of tx active messages */
-#define TCP_EP_HASH_SIZE       (256)	/* nice round number */
-#define TCP_MAX_EPS            (256)	/* max tcp fd value - 1 */
-#define TCP_BLOCK_SIZE         (64)	/* use 64b blocks for id storage */
-#define TCP_NUM_BLOCKS         (16384)	/* number of blocks */
-#define TCP_MAX_ID             (TCP_BLOCK_SIZE * TCP_NUM_BLOCKS)
-    /* 1048576 conns per endpoint */
-#define TCP_PROG_TIME_US       (100)	/* try to progress every N microseconds */
-#define TCP_RESEND_TIME_SEC    (1)	/* time between resends in seconds */
-#define TCP_PEEK_LEN           (32)	/* large enough for RMA header */
-#define TCP_CONN_REQ_HDR_LEN   ((int) (sizeof(struct tcp_header_r)))
-    /* header + seqack */
-#define TCP_RMA_DEPTH          (256)	/* how many in-flight msgs per RMA */
-#define ACK_TIMEOUT             (100) /* Timeout associated to ACK blocks */
-#define PENDING_ACK_THRESHOLD   (TCP_RMA_DEPTH/4) /* Maximum size of a ACK block */
+#define TCP_DEFAULT_MSS        (8*1024)	/* assume jumbo frames */
+#define TCP_MIN_MSS            (128)
+#define TCP_MAX_MSS            (9000)
+
+#define TCP_EP_RX_CNT          (16*1024)	/* number of rx messages */
+#define TCP_EP_TX_CNT          (16*1024)	/* number of tx messages */
+#define TCP_PROG_TIME_MS       (10)	/* try to progress every N milliseconds */
+
+#define TCP_HDR_LEN            (8)	/* common header size */
+
+#define TCP_RMA_DEPTH          (16)	/* how many in-flight msgs per RMA */
+#define TCP_RMA_FRAG_SIZE      (128*1024)
+#define TCP_RMA_FRAG_MAX       (1024*1024)
+
+#define TCP_EP_MAX_CONNS       (1024)
+
 static inline uint64_t tcp_tv_to_usecs(struct timeval tv)
 {
 	return (tv.tv_sec * 1000000) + tv.tv_usec;
@@ -65,19 +57,19 @@ static inline uint64_t tcp_get_usecs(void)
 
 /* Valid URI include:
  *
- * ip://1.2.3.4:5555      # IPv4 address and port
- * ip://foo.bar.com:5555  # Resolvable name and port
- */
-
-/* Valid URI arguments:
- *
- * :eth0                  # Interface name
+ * tcp://1.2.3.4:5555      # IPv4 address and port
+ * tcp://foo.bar.com:5555  # Resolvable name and port
  */
 
 /* A tcp device needs the following items in the config file:
  *
- * transport = tcp          # must be lowercase
+ * transport = tcp        # must be lowercase
+ *
  * ip = 0.0.0.0           # valid IPv4 address of the adapter to use
+ *
+ * or
+ *
+ * inerface = ethN        # where ethN is a up interface
  *
  * A tcp device may have these items:
  *
@@ -95,17 +87,13 @@ typedef enum tcp_msg_type {
 	TCP_MSG_CONN_ACK,	/* ACK */
 	TCP_MSG_DISCONNECT,	/* spec says no disconnect is sent */
 	TCP_MSG_SEND,
-	TCP_MSG_RNR,		/* for both active msg and RMA */
+	TCP_MSG_RNR,		/* for both msg and RMA */
 	TCP_MSG_KEEPALIVE,
 
 	/* the rest apply to reliable connections only */
 
-	TCP_MSG_PING,		/* no data, just echo timestamp for RTTM */
-	TCP_MSG_ACK_ONLY,	/* ack only this seqno */
-	TCP_MSG_ACK_UP_TO,	/* ack up to and including this seqno */
-	TCP_MSG_SACK,		/* ack these blocks of sequences */
+	TCP_MSG_ACK,		/* acking a MSG */
 	TCP_MSG_RMA_WRITE,
-	TCP_MSG_RMA_WRITE_DONE,
 	TCP_MSG_RMA_READ_REQUEST,
 	TCP_MSG_RMA_READ_REPLY,
 	TCP_MSG_RMA_INVALID,	/* invalid handle */
@@ -124,171 +112,89 @@ typedef enum tcp_msg_type {
 
 /* generic header:
 
-    <---------- 32 bits ---------->
-    <- 8 -> <--8--> <---- 16 ----->
-   +-------+-------+---------------+
-   | type  |   A   |       B       |
-   +-------+-------+---------------+
-   |               C               |
-   +-------+-------+---------------+
+    <----------- 32 bits ---------->
+    <---------- 28b ---------->  4b
+   +---------------------------+----+
+   |             A             |type|
+   +---------------------------+----+
+   |               B                |
+   +--------------------------------+
 
-   where each message type decides how to use A, B, and C
+   where each message type decides how to use A and B
 
  */
 
 typedef struct tcp_header {
-	uint32_t type;		/* upper 8b are type, next 8b are A and rest are B */
-	uint32_t c;
-	char data[0];		/* start unreliable payload here */
+	uint32_t type;		/* lower 4b are type and the rest are A */
+	uint32_t b;
+	char data[0];		/* start payload here */
 } tcp_header_t;
 
 /* type, a, and b bit mangling */
 
-#define TCP_TYPE_BITS      (8)
-#define TCP_TYPE_MASK      (0xFF)
-#define TCP_TYPE_SHIFT     (24)
+#define TCP_TYPE_BITS      (4)
+#define TCP_TYPE_MASK      (0xF)
+#define TCP_TYPE_SHIFT     (0)
 
-#define TCP_A_BITS         (8)
-#define TCP_A_MASK         (0xFF)
+#define TCP_A_BITS         (28)
+#define TCP_A_SHIFT        (TCP_TYPE_BITS)
+#define TCP_A_MASK         ((1 << TCP_A_BITS) - 1)
 #define TCP_A_MAX          (TCP_A_MASK)
-#define TCP_A_SHIFT        (16)
 
-#define TCP_B_BITS         (16)
-#define TCP_B_MASK         (0xFFFF)
-#define TCP_B_MAX          (TCP_B_MASK)
+#define TCP_TYPE(x)        ((uint8_t)  ((x) & TCP_TYPE_MASK))
+#define TCP_A(x)           ((uint32_t) (((x) >> TCP_A_SHIFT)))
 
-#define TCP_TYPE(x)        ((uint8_t)  ((x) >> TCP_TYPE_SHIFT))
-#define TCP_A(x)           ((uint8_t) (((x) >> TCP_A_SHIFT) & \
-                                                    TCP_A_MASK))
-#define TCP_B(x)           ((uint16_t) ((x) & TCP_B_MASK))
-
-#define TCP_PACK_TYPE(type,a,b)                    \
-        ((((uint32_t) (type)) << TCP_TYPE_SHIFT) | \
-         (((uint32_t) (a)) << TCP_A_SHIFT) |       \
-          ((uint32_t) (b)))
+#define TCP_PACK_TYPE(type,a) \
+        (((uint32_t) (type)) | (((uint32_t) (a)) << TCP_A_SHIFT))
 
 static inline void
-tcp_pack_header(tcp_header_t * header,
-		 tcp_msg_type_t type, uint8_t a, uint16_t b, uint32_t c)
+tcp_pack_header(tcp_header_t * header, tcp_msg_type_t type,
+	        uint32_t a, uint32_t b)
 {
 	assert(type < TCP_MSG_TYPE_MAX && type > TCP_MSG_INVALID);
 
-	header->type = htonl(TCP_PACK_TYPE(type, a, b));
-	header->c = htonl(c);
+	header->type = htonl(TCP_PACK_TYPE(type, a));
+	header->b = htonl(b);
 }
 
 static inline void
-tcp_parse_header(tcp_header_t * header,
-		  tcp_msg_type_t * type,
-		  uint8_t * a, uint16_t * b, uint32_t * c)
+tcp_parse_header(tcp_header_t * header, tcp_msg_type_t * type,
+		 uint32_t * a, uint32_t * b)
 {
 	uint32_t hl = ntohl(header->type);
 
 	*type = (enum tcp_msg_type)TCP_TYPE(hl);
 	*a = TCP_A(hl);
-	*b = TCP_B(hl);
-	*c = ntohl(header->c);
+	*b = ntohl(header->b);
 }
-
-/* Reliable message headers (RO and RU) add a seq and timestamp */
-
-#define TCP_SEQ_BITS       (32)
-#define TCP_SEQ_MASK       (~0)
-#define TCP_ACK_MASK       (TCP_SEQ_MASK)
-
-#define TCP_U32_LT(a,b)    ((int)((a)-(b)) < 0)
-#define TCP_U32_LTE(a,b)   ((int)((a)-(b)) <= 0)
-#define TCP_U32_GT(a,b)    ((int)((a)-(b)) > 0)
-#define TCP_U32_GTE(a,b)   ((int)((a)-(b)) >= 0)
-#define TCP_U32_MIN(a,b)   ((TCP_U32_LT(a, b)) ? (a) : (b))
-#define TCP_U32_MAX(a,b)   ((TCP_U32_GT(a, b)) ? (a) : (b))
-
-#define TCP_U64_LT(a,b)    ((int64_t)((a)-(b)) < 0)
-#define TCP_U64_LTE(a,b)   ((int64_t)((a)-(b)) <= 0)
-#define TCP_U64_GT(a,b)    ((int64_t)((a)-(b)) > 0)
-#define TCP_U64_GTE(a,b)   ((int64_t)((a)-(b)) >= 0)
-#define TCP_U64_MIN(a,b)   ((TCP_U64_LT(a, b)) ? (a) : (b))
-#define TCP_U64_MAX(a,b)   ((TCP_U64_GT(a, b)) ? (a) : (b))
-
-#define TCP_SEQ_LT(a,b)    TCP_U32_LT(a,b)
-#define TCP_SEQ_LTE(a,b)   TCP_U32_LTE(a,b)
-#define TCP_SEQ_GT(a,b)    TCP_U32_GT(a,b)
-#define TCP_SEQ_GTE(a,b)   TCP_U32_GTE(a,b)
-#define TCP_SEQ_MIN(a,b)   TCP_U32_MIN(a,b)
-#define TCP_SEQ_MAX(a,b)   TCP_U32_MAX(a,b)
-
-/* sequence and timestamp
-
-    <---------- 32 bits ---------->
-   +-------------------------------+
-   |              seq              |
-   +-------------------------------+
-   |           timestamp           |
-   +-------------------------------+
-
-*/
-
-typedef struct tcp_seq_ts {
-	uint32_t seq;
-	uint32_t ts;
-} tcp_seq_ts_t;
-
-static inline void
-tcp_pack_seq_ts(tcp_seq_ts_t * sa, uint32_t seq, uint32_t ts)
-{
-	sa->seq = htonl(seq);
-	sa->ts = htonl(ts);
-}
-
-static inline void
-tcp_parse_seq_ts(tcp_seq_ts_t * sa, uint32_t * seq, uint32_t * ts)
-{
-	*seq = ntohl(sa->seq);
-	*ts = ntohl(sa->ts);
-}
-
-/* reliable header */
-
-typedef struct tcp_header_r {
-	tcp_header_t   header;
-	tcp_seq_ts_t   seq_ts;
-	uint32_t        pb_ack; /* piggybacked ACK */
-	char            data[0]; /* start reliable payload here */
-} tcp_header_r_t;
 
 /* Common message headers (RO, RU, and UU) */
 
 /* connection request/reply */
 typedef struct tcp_handshake {
-	uint32_t id;		/* id that peer uses when sending to me */
-	uint32_t ack;		/* to ack the request and reply */
 	uint32_t max_recv_buffer_count;	/* max recvs that I can handle */
 	uint32_t mss;		/* lower of each endpoint */
 	uint32_t keepalive;	/* keepalive timeout (when activated) */
 } tcp_handshake_t;
 
 static inline void
-tcp_pack_handshake(tcp_handshake_t * hs, uint32_t id, uint32_t ack,
+tcp_pack_handshake(tcp_handshake_t * hs,
 		    uint32_t max_recv_buffer_count, uint32_t mss,
 		    uint32_t keepalive)
 {
-	assert(mss <= (TCP_UDP_MAX - TCP_MAX_HDR_SIZE));
+	assert(mss <= (TCP_MAX_MSS));
 	assert(mss >= TCP_MIN_MSS);
 
-	hs->id = htonl(id);
-	hs->ack = htonl(ack);
 	hs->max_recv_buffer_count = htonl(max_recv_buffer_count);
 	hs->mss = htonl(mss);
 	hs->keepalive = htonl(keepalive);
 }
 
 static inline void
-tcp_parse_handshake(tcp_handshake_t * hs, uint32_t * id, uint32_t * ack,
+tcp_parse_handshake(tcp_handshake_t * hs,
 		     uint32_t * max_recv_buffer_count, uint32_t * mss,
 		     uint32_t * ka)
 {
-	*id = ntohl(hs->id);
-	*ack = ntohl(hs->ack);
 	*max_recv_buffer_count = ntohl(hs->max_recv_buffer_count);
 	*mss = ntohl(hs->mss);
 	*ka = ntohl(hs->keepalive);
@@ -296,24 +202,14 @@ tcp_parse_handshake(tcp_handshake_t * hs, uint32_t * id, uint32_t * ack,
 
 /* connection request header:
 
-    <---------- 32 bits ---------->
-    <- 8 -> <- 8 -> <---- 16 ----->
-   +-------+-------+---------------+
-   | type  | attr  |   data len    |
-   +-------+-------+---------------+
-   |               0               |
-   +-------------------------------+
+    <------------ 32 bits ------------>
+    <- 8b -> <----- 16b- --->  4b   4b
+   +--------+----------------+----+----+
+   |  rsvd  |    data len    |attr|type|
+   +--------+----------------+----+----+
+   |                 0                 |
+   +-----------------------------------+
 
-   +-------------------------------+
-   |              seq              |
-   +-------------------------------+
-   |           timestamp           |
-   +-------------------------------+
-
-   +-------------------------------+
-   |           client id           |
-   +-------------------------------+
-   |               0               |
    +-------------------------------+
    |      max_recv_buffer_count    |
    +-------------------------------+
@@ -327,9 +223,7 @@ tcp_parse_handshake(tcp_handshake_t * hs, uint32_t * id, uint32_t * ack,
 
    attr: CCI_CONN_ATTR_[UU|RU|RO]
    data len: amount of user data following header
-   id: peer uses ID when sending to us
-   seq: starting sequence number for this connection
-   ts: timestamp in usecs
+   c: reserved
    max_recv_buffer_count: number of msgs we can receive
    mss: max send size
    keepalive: if keepalive is activated, this specifies the keepalive timeout
@@ -337,40 +231,31 @@ tcp_parse_handshake(tcp_handshake_t * hs, uint32_t * id, uint32_t * ack,
 
 static inline void
 tcp_pack_conn_request(tcp_header_t * header, cci_conn_attribute_t attr,
-		       uint16_t data_len, uint32_t id)
+		       uint16_t data_len)
 {
-	tcp_pack_header(header, TCP_MSG_CONN_REQUEST, (uint8_t) attr,
-			 data_len, id);
+	uint32_t a = attr | (data_len << 4);
+	tcp_pack_header(header, TCP_MSG_CONN_REQUEST, a, 0);
 }
 
 /* connection reply header:
 
-    <---------- 32 bits ---------->
-    <- 8 -> <- 8 -> <---- 16 ----->
-   +-------+-------+---------------+
-   | type  | reply |   reserved    |
-   +-------+-------+---------------+
-   |           client id           |
-   +-------------------------------+
+    <------------ 32 bits ------------>
+    <------- 20b ------> <- 8b ->  4b
+   +--------------------+--------+----+
+   |        rsvd        |  reply |type|
+   +--------------------+--------+----+
+   |                0                 |
+   +----------------------------------+
 
-   +-------------------------------+
-   |              seq              |
-   +-------------------------------+
-   |           timestamp           |
-   +-------------------------------+
-
-   +-------------------------------+
-   |           server id           |
-   +-------------------------------+
-   |          client's seq         |
    +-------------------------------+
    |      max_recv_buffer_count    |
    +-------------------------------+
    |              mss              |
    +-------------------------------+
+   |            keepalive          |
+   +-------------------------------+
 
    The reply is 0 for success else errno.
-   I use this ID when sending to this peer.
    The accepting peer will send his id back in the payload (length 4)
 
    reply: CCI_EVENT_CONNECT_[ACCEPTED|REJECTED]
@@ -378,159 +263,91 @@ tcp_pack_conn_request(tcp_header_t * header, cci_conn_attribute_t attr,
  */
 
 static inline void
-tcp_pack_conn_reply(tcp_header_t * header, uint8_t reply, uint32_t id)
+tcp_pack_conn_reply(tcp_header_t * header, uint8_t reply)
 {
-	tcp_pack_header(header, TCP_MSG_CONN_REPLY, reply, 0, id);
+	tcp_pack_header(header, TCP_MSG_CONN_REPLY, reply, 0);
 }
 
 /* connection ack header:
 
-    <---------- 32 bits ---------->
-    <- 8 -> <- 8 -> <---- 16 ----->
-   +-------+-----------------------+
-   | type  |       reserved        |
-   +-------+-----------------------+
-   |           peer_id             |
-   +-------------------------------+
-
-   I use this ID when sending to this peer.
+    <----------- 32 bits ---------->
+    <---------- 28b ---------->  4b
+   +----------------------------+----+
+   |         reserved           |type|
+   +----------------------------+----+
+   |            reserved             |
+   +---------------------------------+
 
  */
 
 static inline void tcp_pack_conn_ack(tcp_header_t * header, uint32_t id)
 {
-	tcp_pack_header(header, TCP_MSG_CONN_ACK, 0, 0, id);
+	tcp_pack_header(header, TCP_MSG_CONN_ACK, 0, 0);
 }
 
 /* send header:
 
-    <---------- 32 bits ---------->
-    <- 8 -> <- 8 -> <---- 16 ----->
-   +-------+-------+---------------+
-   | type  | rsvd  |   data len    |
-   +-------+-------+---------------+
-   |              id               |
-   +-------------------------------+
+    <----------- 32 bits ---------->
+    <--- 12b --> <---- 16b ----->  4b
+   +------------+----------------+----+
+   |    rsvd    |       len      |type|
+   +------------+----------------+----+
+   |               tx_id              |
+   +----------------------------------+
 
-   The user header and the data follow the send header.
-   The ID is the value assigned to me by the peer (peer_id).
-
-   If reliable, includes seq and ts
+   length of payload
+   tx_id for reliable connections
 
  */
 
 static inline void
-tcp_pack_send(tcp_header_t * header, uint16_t len, uint32_t id)
+tcp_pack_send(tcp_header_t * header, uint16_t len, uint32_t tx_id)
 {
-	tcp_pack_header(header, TCP_MSG_SEND, 0, len, id);
+	tcp_pack_header(header, TCP_MSG_SEND, len, tx_id);
 }
 
 /* keepalive header:
 
-    <---------- 32 bits ---------->
-    <- 8 -> <-------- 24 --------->
-   +-------+-----------------------+
-   | type  |       reserved        |
-   +-------+-----------------------+
-   |              id               |
-   +-------------------------------+
+    <----------- 32 bits ---------->
+    <---------- 28b ---------->  4b
+   +---------------------------+----+
+   |         reserved          |type|
+   +---------------------------+----+
+   |           reserved             |
+   +--------------------------------+
 
  */
 
-static inline void tcp_pack_keepalive(tcp_header_t * header, uint32_t id)
+static inline void tcp_pack_keepalive(tcp_header_t * header)
 {
-	tcp_pack_header(header, TCP_MSG_KEEPALIVE, 0, 0, id);
+	tcp_pack_header(header, TCP_MSG_KEEPALIVE, 0, 0);
 }
 
-/* nack header and nack(s)
+/* ack header:
 
-    <---------- 32 bits ---------->
-    <- 8 -> <- 8 -> <---- 16 ----->
-   +-------+-------+---------------+
-   | type  |  cnt  |               |
-   +-------+-----------------------+
-   |              seq              |
-   +-------------------------------+
-   |           timestamp           |
-   +-------------------------------+
- 
-   type: TCP_MSG_RNR
+    <----------- 32 bits ---------->
+    <--------- 24b -------->  4b   4b
+   +------------------------+----+----+
+   |        reserved        |stat|type|
+   +------------------------+----+----+
+   |              tx_id               |
+   +----------------------------------+
+
+   type: TCP_MSG_ACK
+   stat: CCI_SUCCESS, CCI_ERR_RNR, CCI_ERR_RMA_HANDLE
 
  */
-/* FIXME: do we really need "count" */
 static inline void
-tcp_pack_nack(tcp_header_r_t * header_r, tcp_msg_type_t type,
-	       uint32_t peer_id, uint32_t seq, uint32_t ts, int count)
+tcp_pack_ack(tcp_header_t * header, tcp_msg_type_t type, uint32_t tx_id)
 {
-	tcp_pack_header(&header_r->header, type, (uint8_t) count, 0, peer_id);
-	tcp_pack_seq_ts(&header_r->seq_ts, seq, ts);
+	tcp_pack_header(header, TCP_MSG_ACK, 0, tx_id);
 }
 
 static inline void
-tcp_parse_nack(tcp_header_r_t * header_r, tcp_msg_type_t type)
+tcp_parse_ack(tcp_header_t * header, uint32_t *tx_id)
 {
-	/* Nothing to do? */
-}
-
-/* ack header and ack(s):
-
-    <---------- 32 bits ---------->
-    <- 8 -> <- 8 -> <---- 16 ----->
-   +-------+-------+---------------+
-   | type  |  cnt  |   reserved    |
-   +-------+-----------------------+
-   |              id               |
-   +-------------------------------+
-   |              seq              |
-   +-------------------------------+
-   |           timestamp           |
-   +-------------------------------+
-   |              ack              |
-   +-------------------------------+
-
-   type: TCP_MSG_[ACK_ONLY|ACK_UP_TO|SACK]
-   cnt: number of acks (1 or 2, 4, 6, 8 if SACK)
-   id: ID of the receiver assigned to the sender
-   ack: ack payload starting at header_r->data
-
- */
-
-static inline void
-tcp_pack_ack(tcp_header_r_t * header_r, tcp_msg_type_t type,
-	      uint32_t peer_id, uint32_t seq, uint32_t ts, uint32_t * ack,
-	      int count)
-{
-	int i;
-	uint32_t *p = (uint32_t *) & header_r->data;
-
-	assert(count > 0);
-	if (count == 1)
-		assert(type == TCP_MSG_ACK_ONLY || type == TCP_MSG_ACK_UP_TO);
-	else {
-		assert(type == TCP_MSG_SACK);
-		assert(count % 2 == 0);
-		assert(count / 2 <= TCP_MAX_SACK);
-	}
-
-	tcp_pack_header(&header_r->header, type, (uint8_t) count, 0, peer_id);
-	tcp_pack_seq_ts(&header_r->seq_ts, seq, ts);
-	for (i = 0; i < count; i++)
-		p[i] = htonl(ack[i]);
-}
-
-/* Caller must provide storage for (TCP_MAX_SACK * 2) acks */
-/* Count = number of acks. If sack, count each start and end */
-static inline void
-tcp_parse_ack(tcp_header_r_t * header_r, tcp_msg_type_t type,
-	       uint32_t * ack, int count)
-{
-	int i;
-	uint32_t *p = (uint32_t *) & header_r->data;
-
-	assert(type);
-	assert(ack != NULL);
-	for (i = 0; i < count; i++)
-		ack[i] = (uint32_t) ntohl(p[i]);
+	*tx_id = ntohl(header->b);
+	return;
 }
 
 /* RMA headers */
@@ -578,7 +395,7 @@ tcp_parse_rma_handle_offset(tcp_rma_handle_offset_t * ho,
 }
 
 typedef struct tcp_rma_header {
-	tcp_header_r_t header_r;
+	tcp_header_t header;
 	tcp_rma_handle_offset_t local;
 	tcp_rma_handle_offset_t remote;
 	char data[0];
@@ -586,23 +403,13 @@ typedef struct tcp_rma_header {
 
 /* RMA write
 
-    <---------- 32 bits ---------->
-    <- 8 -> <- 8 -> <---- 16 ----->
-   +-------+-------+---------------+
-   | type  |   a   |    data_len   |
-   +-------+-------+---------------+
-   |            peer id            |
-   +-------------------------------+
-
-   +-------------------------------+
-   |              seq              |
-   +-------------------------------+
-   |           timestamp           |
-   +-------------------------------+
-
-   +-------------------------------+
-   |        ACK Piggyback          |
-   +-------------------------------+
+    <----------- 32 bits ---------->
+    <----------- 28b ---------->  4b
+   +----------------------------+----+
+   |             len            |type|
+   +----------------------------+----+
+   |              tx_id              |
+   +---------------------------------+
 
    +-------------------------------+
    |     local handle (0 - 31)     |
@@ -625,8 +432,7 @@ typedef struct tcp_rma_header {
    +-------------------------------+
    |             data              |
 
-   a = unused
-   data_len = number of data bytes in this message
+   length of payload
    local handle: cci_rma() caller's handle (stays same for each packet)
    local offset: offset into the local handle (changes for each packet)
    remote handle: passive peer's handle (stays same for each packet)
@@ -634,34 +440,24 @@ typedef struct tcp_rma_header {
  */
 
 static inline void
-tcp_pack_rma_write(tcp_rma_header_t * write, uint16_t data_len,
-		    uint32_t peer_id, uint32_t seq, uint32_t ts,
-		    uint64_t local_handle, uint64_t local_offset,
-		    uint64_t remote_handle, uint64_t remote_offset)
+tcp_pack_rma_write(tcp_rma_header_t * write, uint32_t data_len, uint32_t tx_id,
+		   uint64_t local_handle, uint64_t local_offset,
+		   uint64_t remote_handle, uint64_t remote_offset)
 {
-	tcp_pack_header(&write->header_r.header, TCP_MSG_RMA_WRITE,
-			 0, data_len, peer_id);
-	tcp_pack_seq_ts(&write->header_r.seq_ts, seq, ts);
+	tcp_pack_header(&write->header, TCP_MSG_RMA_WRITE, data_len, tx_id);
 	tcp_pack_rma_handle_offset(&write->local, local_handle, local_offset);
-	tcp_pack_rma_handle_offset(&write->remote, remote_handle,
-				    remote_offset);
+	tcp_pack_rma_handle_offset(&write->remote, remote_handle, remote_offset);
 }
 
 /* RMA read request
 
-    <---------- 32 bits ---------->
-    <- 8 -> <- 8 -> <---- 16 ----->
-   +-------+-----------------------+
-   | type  |   a   |       b       |
-   +-------+-----------------------+
-   |            peer id            |
-   +-------------------------------+
-
-   +-------------------------------+
-   |              seq              |
-   +-------------------------------+
-   |           timestamp           |
-   +-------------------------------+
+    <----------- 32 bits ---------->
+    <----------- 28b ---------->  4b
+   +----------------------------+----+
+   |             len            |type|
+   +----------------------------+----+
+   |              tx_id              |
+   +---------------------------------+
 
    +-------------------------------+
    |     local handle (0 - 31)     |
@@ -681,68 +477,35 @@ tcp_pack_rma_write(tcp_rma_header_t * write, uint16_t data_len,
    |     remote offset (32 - 63)   |
    +-------------------------------+
 
-   +-------------------------------+
-   |        context (0 - 31)       |
-   +-------------------------------+
-   |        context (32 - 64)      |
-   +-------------------------------+
-   a = unused
+   type is TCP_MSG_RMA_READ_REQUEST or TCP_MSG_RMA_READ_REPLY
+   length of _requested_ payload
    local handle: cci_rma() caller's handle (stays same for each packet)
    local offset: offset into the local handle (changes for each packet)
    remote handle: passive peer's handle (stays same for each packet)
    remote offset: offset into the remote handle (changes for each packet)
-   context: context of the RMA operation
  */
 
 static inline void
-tcp_pack_rma_read(tcp_rma_header_t * read, uint64_t data_len,
-		   uint32_t peer_id, uint32_t seq, uint32_t ts,
-		   uint64_t local_handle, uint64_t local_offset,
-		   uint64_t remote_handle, uint64_t remote_offset)
+tcp_pack_rma_read_request(tcp_rma_header_t * read, uint64_t data_len, uint32_t tx_id,
+		  uint64_t local_handle, uint64_t local_offset,
+		  uint64_t remote_handle, uint64_t remote_offset)
 {
-	tcp_pack_header(&read->header_r.header, TCP_MSG_RMA_READ_REQUEST,
-			 0, data_len, peer_id);
-	tcp_pack_seq_ts(&read->header_r.seq_ts, seq, ts);
+	tcp_pack_header(&read->header, TCP_MSG_RMA_READ_REQUEST, data_len, tx_id);
 	tcp_pack_rma_handle_offset(&read->local, local_handle, local_offset);
-	tcp_pack_rma_handle_offset(&read->remote, remote_handle,
-				    remote_offset);
+	tcp_pack_rma_handle_offset(&read->remote, remote_handle, remote_offset);
 }
-
-/* RMA WRITE DONE message
-    <---------- 32 bits ---------->
-    <- 8 -> <- 8 -> <---- 16 ----->
-   +-------+-----------------------+
-   | type  |   a   |  context_id   |
-   +-------+-----------------------+
-   |            peer id            |
-   +-------------------------------+
-
-   +-------------------------------+
-   |              seq              |
-   +-------------------------------+
-   |           timestamp           |
-   +-------------------------------+
-
-   TODO: description
- */
 
 static inline void
-tcp_pack_rma_write_done(tcp_rma_header_t * write, uint16_t data_len,
-            uint32_t peer_id, uint32_t seq, uint32_t ts)
+tcp_pack_rma_read_reply(tcp_rma_header_t * read, uint64_t data_len, uint32_t tx_id,
+		  uint64_t local_handle, uint64_t local_offset,
+		  uint64_t remote_handle, uint64_t remote_offset)
 {
-	tcp_pack_header(&write->header_r.header, TCP_MSG_RMA_WRITE_DONE,
-			 0, data_len, peer_id);
-	tcp_pack_seq_ts(&write->header_r.seq_ts, seq, ts);
+	tcp_pack_header(&read->header, TCP_MSG_RMA_READ_REPLY, data_len, tx_id);
+	tcp_pack_rma_handle_offset(&read->local, local_handle, local_offset);
+	tcp_pack_rma_handle_offset(&read->remote, remote_handle, remote_offset);
 }
-
-/************* Windowing and Acking *******************/
 
 /************* TCP private structures ****************/
-
-typedef struct tcp_iov {
-	void *addr;
-	uint16_t len;
-} tcp_iov_t;
 
 typedef enum tcp_tx_state_t {
 	/*! available, held by endpoint */
@@ -758,7 +521,7 @@ typedef enum tcp_tx_state_t {
 	TCP_TX_COMPLETED
 } tcp_tx_state_t;
 
-/*! Send active message context.
+/*! Send message context.
 *
 * \ingroup messages */
 typedef struct tcp_tx {
@@ -767,6 +530,9 @@ typedef struct tcp_tx {
 
 	/*! Message type */
 	tcp_msg_type_t msg_type;
+
+	/*! Msg ID */
+	uint32_t id;
 
 	/*! Flags (CCI_FLAG_[BLOCKING|SILENT|NO_COPY]) */
 	int flags;
@@ -778,36 +544,19 @@ typedef struct tcp_tx {
 	void *buffer;
 
 	/*! Buffer length */
-	uint16_t len;
+	uint32_t len;
 
 	void *rma_ptr;
 	uint16_t rma_len;
 
-	/*! Entry for hanging on ep->idle_txs, dev->queued, dev->pending */
-	 TAILQ_ENTRY(tcp_tx) dentry;
-
-	/*! Entry for hanging on ep->txs */
-	 TAILQ_ENTRY(tcp_tx) tentry;
-
-	/*! Entry for sconn->tx_seqs */
-	 TAILQ_ENTRY(tcp_tx) tx_seq;
-
-	/*! If reliable, use the following: */
-
-	/*! Sequence number */
-	uint32_t seq;
-
-	/*! Send attempts */
-	uint32_t send_count;
-
-	/*! Last send in microseconds */
-	uint64_t last_attempt_us;
-
 	/*! Timeout in microseconds */
 	uint64_t timeout_us;
 
-	/*! Owning RMA op if not active message */
+	/*! Owning RMA op if not message */
 	struct tcp_rma_op *rma_op;
+
+	/*! RMA fragment ID */
+	uint32_t rma_id;
 
 	/*! Number of RNR nacks received */
 	uint32_t rnr;
@@ -816,7 +565,7 @@ typedef struct tcp_tx {
 	struct sockaddr_in sin;
 } tcp_tx_t;
 
-/*! Receive active message context.
+/*! Receive message context.
  *
  * \ingroup messages */
 typedef struct tcp_rx {
@@ -829,11 +578,8 @@ typedef struct tcp_rx {
 	/*! Buffer length */
 	uint16_t len;
 
-	/*! Entry for hanging on ep->idle_rxs, ep->loaned */
-	 TAILQ_ENTRY(tcp_rx) entry;
-
-	/*! Entry for hanging on ep->rxs */
-	 TAILQ_ENTRY(tcp_rx) gentry;
+	/*! rx ID */
+	uint32_t id;
 
 	/*! Peer's sockaddr_in for connection requests */
 	struct sockaddr_in sin;
@@ -873,17 +619,17 @@ typedef struct tcp_rma_op {
 	/*! RMA id for ordering in case of fence */
 	uint32_t id;
 
-	/*! Number of msgs for data transfer (excluding remote compeltion msg) */
+	/*! Number of fragments for data transfer (excluding remote completion msg) */
 	uint32_t num_msgs;
 
 	/*! Next segment to send */
 	uint32_t next;
 
-	/*! Number of messages in-flight */
-	uint32_t pending;
+	/*! Last fragment acked */
+	int32_t acked;
 
-	/*! Number of messages completed */
-	uint32_t completed;
+	/*! Number of fragments pending */
+	uint32_t pending;
 
 	/*! Status of the RMA op */
 	cci_status_t status;
@@ -897,69 +643,81 @@ typedef struct tcp_rma_op {
 	/*! Pointer to tx for remote completion if needed */
 	tcp_tx_t *tx;
 
-	/*! Application AM len */
+	/*! Application completion msg len */
 	uint16_t msg_len;
 
-	/*! Application AM ptr if provided */
+	/*! Application completion msg ptr if provided */
 	char *msg_ptr;
 } tcp_rma_op_t;
 
 typedef struct tcp_ep {
-    /*! ID of the recv thread for the endpoint */
-    pthread_t recv_tid;
-
-    /*! ID of the progress thread for the endpoint */
-    pthread_t progress_tid;
-
-    pthread_mutex_t progress_mutex;
-    pthread_cond_t  wait_condition;
-
-	/* Our IP and port */
-	struct sockaddr_in sin;
-
-	/*! Is closing? */
-	int closing;
-
-	/*! Socket for sending/recving */
+	/*! Socket for listen */
 	cci_os_handle_t sock;
 
-	/*! Array of conn lists hased over IP/port */
-	TAILQ_HEAD(s_conns, tcp_conn) conn_hash[TCP_EP_HASH_SIZE];
+	/*! List of open connections */
+	TAILQ_HEAD(s_conns, tcp_conn) conns;
 
-	/*! List of all txs */
-	TAILQ_HEAD(s_txs, tcp_tx) txs;
+	/*! For polling connection sockets */
+	struct pollfd *fds;
+
+	/*! Number of pollfds */
+	nfds_t nfds;
+
+	/*! Array of conns indexed by fds */
+	cci__conn_t **c;
+
+	/*! TX common buffer */
+	void *tx_buf;
+
+	/*! All txs */
+	tcp_tx_t *txs;
 
 	/*! List of idle txs */
-	TAILQ_HEAD(s_txsi, tcp_tx) idle_txs;
+	TAILQ_HEAD(s_itxs, cci__evt) idle_txs;
 
-	/*! List of all rxs */
-	TAILQ_HEAD(s_rxs, tcp_rx) rxs;
+	/*! RX common buffer */
+	void *rx_buf;
+
+	/*! All rxs */
+	tcp_rx_t *rxs;
 
 	/*! List of idle rxs */
-	TAILQ_HEAD(s_rxsi, tcp_rx) idle_rxs;
+	TAILQ_HEAD(s_rxsi, cci__evt) idle_rxs;
+
+	/*! Pipe for OS handle */
+	int pipe[2];
 
 	/*! Connection id blocks */
 	uint64_t *ids;
 
-    /*! Queued sends */
-    TAILQ_HEAD(s_queued, cci__evt) queued;
+	/* Our IP and port */
+	struct sockaddr_in sin;
 
-    /*! Pending (in-flight) sends */
-    TAILQ_HEAD(s_pending, cci__evt) pending;
+	/*! Queued sends */
+	TAILQ_HEAD(s_queued, cci__evt) queued;
 
-    /*! List of all connections with keepalive enabled */
-    /* FIXME: revisit the code to use this 
-    TAILQ_HEAD(s_ka, tcp_conn) ka_conns;
-    */
+	/*! Pending (in-flight) sends */
+	TAILQ_HEAD(s_pending, cci__evt) pending;
+
+	/*! List of all connections with keepalive enabled */
+	/* FIXME: revisit the code to use this
+	TAILQ_HEAD(s_ka, tcp_conn) ka_conns;
+	*/
+
+        void *conn_tree;                /* tree of peer conn ids */
+        pthread_rwlock_t conn_tree_lock;        /* rw lock */
 
 	/*! List of active connections awaiting replies */
-	TAILQ_HEAD(s_active, tcp_conn) active_hash[TCP_EP_HASH_SIZE];
+	TAILQ_HEAD(s_active, tcp_conn) active;
 
 	/*! List of RMA registrations */
 	TAILQ_HEAD(s_handles, tcp_rma_handle) handles;
 
 	/*! List of RMA ops */
 	TAILQ_HEAD(s_ops, tcp_rma_op) rma_ops;
+
+	/*! ID of the recv thread for the endpoint */
+	pthread_t tid;
 } tcp_ep_t;
 
 /* Connection info */
@@ -984,21 +742,6 @@ typedef enum tcp_conn_status {
 	TCP_CONN_READY
 } tcp_conn_status_t;
 
-/* ACK_ONLY:    start == end, one item in list
- * ACK_UP_TO:   end > start, one item in list
- * SACK:        multiple items in list
- */
-typedef struct tcp_ack {
-	/*! Starting seq inclusive */
-	uint32_t start;
-
-	/*! Ending seq inclusive */
-	uint32_t end;
-
-	/*! Hang on sconn->to_ack */
-	 TAILQ_ENTRY(tcp_ack) entry;
-} tcp_ack_t;
-
 typedef struct tcp_conn {
 	/*! Owning conn */
 	cci__conn_t *conn;
@@ -1009,11 +752,11 @@ typedef struct tcp_conn {
 	/*! Peer's sockaddr_in (IP, port) */
 	const struct sockaddr_in sin;
 
-	/*! ID we assigned to us by peer - use when sending to peer */
-	uint32_t peer_id;
+	/*! socket for this connection */
+	uint32_t fd;
 
-	/*! ID we assigned to peer - peer uses to send to us and we use to look up conn */
-	uint32_t id;
+	/*! Index in tep->fds */
+	uint32_t index;
 
 	/*! Max sends in flight to this peer (i.e. rwnd) */
 	uint32_t max_tx_cnt;
@@ -1021,75 +764,19 @@ typedef struct tcp_conn {
 	/*! Entry to hang on tcp_ep->conns[hash] */
 	 TAILQ_ENTRY(tcp_conn) entry;
 
-	/*! Last sequence number sent */
-	uint32_t seq;
-
-	/* Lowest pending seq */
-	uint32_t seq_pending;
-
-	/*! Pending send count (waiting on acks) (i.e. flightsize) */
-	uint32_t pending;
-
-#define TCP_INITIAL_CWND 2
-	/*! Congestion window */
-	uint32_t cwnd;
-
-	/*! Slow start threshhold */
-	uint32_t ssthresh;
-
-	/*! Pending sends waiting on acks */
-	 TAILQ_HEAD(s_tx_seqs, tcp_tx) tx_seqs;
-
-	/*! Peer's last contiguous seqno acked (ACK_UP_TO) */
-	uint32_t acked;
-
-	/*! Peer's last timestamp received */
-	uint32_t ts;
-
-	/*! Seq of last ack tx */
-	uint32_t last_ack_seq;
-
-	/*! Timestamp of last ack tx */
-	uint64_t last_ack_ts;
-
-	/*! Do we have an ack queued to send? */
-	int ack_queued;
-
-	/*! List of sequence numbers to ack */
-	TAILQ_HEAD(s_acks, tcp_ack) acks;
-
-	/*! Last RMA started */
-	uint32_t rma_id;
-
 	/*! List of RMA ops in process in case of fence */
 	TAILQ_HEAD(s_rmas, tcp_rma_op) rmas;
 
 	/*! Flag to know if the receiver is ready or not */
 	uint32_t rnr;
-
-	/*! Array of RMA contextes (used for RMA reads) */
-	const void **rma_contexts;
-
-	/*! Current size of the array of RMA contexts */
-	uint32_t max_rma_contexts;
 } tcp_conn_t;
-
-/* Only call if holding the ep->lock and sconn->acks is not empty
- *
- * If only one item, return 0
- * If more than one item, return 1
- */
-static inline int tcp_need_sack(tcp_conn_t * sconn)
-{
-	return TAILQ_FIRST(&sconn->acks) != TAILQ_LAST(&sconn->acks, s_acks);
-}
 
 typedef struct tcp_dev {
 	/*! Our IP address in network order */
 	in_addr_t ip;
 
-    /*! Our port in network byte order */
-    in_port_t port;
+	/*! Our port in network byte order */
+	in_port_t port;
 } tcp_dev_t;
 
 typedef enum tcp_fd_type {
@@ -1152,7 +839,7 @@ typedef enum device_state {
 #define FD_COPY(a,b) memcpy(a,b,sizeof(fd_set))
 #endif
 
-extern tcp_globals_t *sglobals;
+extern tcp_globals_t *tglobals;
 
 int cci_ctp_tcp_post_load(cci_plugin_t * me);
 int cci_ctp_tcp_pre_unload(cci_plugin_t * me);
