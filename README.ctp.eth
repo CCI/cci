@@ -1,0 +1,71 @@
+= Configuration ================================================================
+
+  The eth CTP is enabled by default on Linux, disabled elsewhere.
+
+= Endpoint naming ==============================================================
+
+  Eth endpoint URIs are MAC addresses followed by an endpoint number:
+
+    eth://00:24:d5:0f:bd:34:3
+
+= Config file options ==========================================================
+
+  Eth devices _must_ have a transport item and either a mac line or a interface
+  line in the config file:
+
+    transport = eth
+    mac = 00:24:d5:0f:bd:34
+
+    transport = eth
+    interface = eth1
+
+  where 00:24:d5:0f:bd:34 is the MAC address or eth1 is the interface name of
+  the device to bind to.
+
+= Driver configuration =========================================================
+
+  The eth CTP requires the ccieth kernel driver to be loaded.
+
+  To build the driver, run configure and make under the driver directory:
+
+  $ cd contrib/driver/ccieth/linux
+  $ ./configure
+  $ make
+
+  If building for a custom kernel instead of the currently running one, you
+  may pass the corresponding release version (what uname -r would say) or the
+  path to the kernel source/build tree on the configure line. For instance:
+
+  $ ./configure --with-linux-release=3.0.0-1-amd64
+  $ ./configure --with-linux=/usr/src/linux-2.6.35-mine
+  $ ./configure --with-linux=/usr/src/linux-2.6.35-fast --with-linux-build=/usr/src/linux-2.6.35-fast-amd64
+
+  Once built, load the driver:
+
+  # insmod ccieth.ko
+
+  You should get a /dev/ccieth. Make it available to everybody:
+
+  # chmod 0444 /dev/ccieth
+
+  You may add a udev rule to do so under /etc/udev/rules.d/ :
+
+    KERNEL=="ccieth", MODE="0444"
+
+= Known limitations ============================================================
+
+Not implemented:
+
+  RMA
+  Keepalive timeout
+  TX timeout
+
+= Performance Tuning ===========================================================
+
+CCI_CTP_ETH_ALLOW_LOOPBACK
+    If no config file is given, use the loopback interface "lo" as the
+    default device. Otherwise, this interface is ignored.
+
+CCI_CTP_ETH_FORCE_GET_INFO_IOCTL
+    Use CCI specific ioctls to retrieve device information instead of
+    ethtool.

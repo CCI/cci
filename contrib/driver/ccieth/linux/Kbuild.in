@@ -1,0 +1,21 @@
+#
+# Copyright © 2011-2012 Inria.  All rights reserved.
+# $COPYRIGHT$
+#
+
+ccflags-y = -I@abs_top_builddir@
+ifeq ($(DEBUG),1)
+ccflags-y += -DCONFIG_CCIETH_DEBUG=1
+endif
+ifeq ($(STATS),1)
+ccflags-y += -DCONFIG_CCIETH_DEBUGFS=1
+endif
+ifneq ($(FAULT),)
+ccflags-y += -DCONFIG_CCIETH_FAULT=$(FAULT)
+endif
+ifneq ($(CFLAGS),)
+ccflags-y += $(CFLAGS)
+endif
+
+obj-m += ccieth.o
+ccieth-y = ccieth_main.o ccieth_msg.o ccieth_connect.o
