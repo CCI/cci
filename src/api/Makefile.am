@@ -28,3 +28,6 @@ libcci_api_la_SOURCES = \
         strerror.c
 
 libcci_api_la_LIBADD = -lpthread
+
+EXTRA_DIST = \
+	cci-api.h
