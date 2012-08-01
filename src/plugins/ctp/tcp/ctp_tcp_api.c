@@ -1339,7 +1339,7 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	pthread_mutex_lock(&ep->lock);
 	tconn->index = tep->nfds++;
 	tep->fds[tconn->index].fd = tconn->fd;
-	tep->fds[tconn->index].events = POLLOUT | POLLERR;
+	tep->fds[tconn->index].events = POLLOUT | POLLHUP | POLLERR;
 
 	tep->c[tconn->index] = conn;
 
@@ -1357,7 +1357,7 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		}
 	} else {
 		/* TODO connect completed, send CONN_REQUEST */
-		tep->fds[tconn->index].events = POLLIN | POLLERR;
+		tep->fds[tconn->index].events = POLLIN | POLLHUP | POLLERR;
 	}
 
 	/* try to progress txs */
@@ -3782,10 +3782,13 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
 			fd = start;
 			last = start;
 			which = POLLOUT;
-		} else if (tep->fds[start].revents & POLLERR) {
+		} else if (tep->fds[start].revents & POLLHUP) {
 			fd = start;
 			last = start;
 			which = POLLERR;
+		} else if (tep->fds[start].revents & POLLERR) {
+			fd = start;
+			last = start;
 		}
 		if (start == last)
 			break;
@@ -3801,7 +3804,7 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
 			goto out;
 		}
 		tep->fds[tep->nfds].fd = ret;
-		tep->fds[tep->nfds].events = POLLIN | POLLERR;
+		tep->fds[tep->nfds].events = POLLIN | POLLHUP | POLLERR;
 		tep->nfds++;
 		assert(tep->nfds < TCP_EP_MAX_CONNS);
 
