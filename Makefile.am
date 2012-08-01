@@ -18,9 +18,10 @@ EXTRA_DIST = 				\
 	COPYING				\
 	INSTALL				\
 	README				\
+	README.ctp.eth			\
+	README.ctp.gni			\
 	README.ctp.sock			\
 	README.ctp.verbs		\
-	README.ctp.gni			\
 	config/cci_get_version.sh 	\
 	config/distscript.csh
 
