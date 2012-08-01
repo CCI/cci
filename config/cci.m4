@@ -114,6 +114,9 @@ AC_DEFUN([CCI_SETUP_CTP],[
     AC_CHECK_HEADERS([ifaddrs.h], [
 	AC_CHECK_FUNCS([getifaddrs])
     ])
+    AC_CHECK_HEADERS([sys/epoll.h], [
+    AC_CHECK_FUNCS([epoll_create])
+    ])
     AC_CHECK_DECLS([ethtool_cmd_speed],,,[[#include <linux/ethtool.h>]])
 
     #

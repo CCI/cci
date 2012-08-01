@@ -13,10 +13,16 @@ SUBDIRS = include src
 # "make distcheck" requires that tarballs are able to be able to "make
 # dist", so we have to include config/distscript.csh.
 #
-EXTRA_DIST = \
-        README VERSION \
-        config/cci_get_version.sh \
-        config/distscript.csh
+EXTRA_DIST = 				\
+	VERSION				\
+	COPYING				\
+	INSTALL				\
+	README				\
+	README.ctp.sock			\
+	README.ctp.verbs		\
+	README.ctp.gni			\
+	config/cci_get_version.sh 	\
+	config/distscript.csh
 
 dist-hook:
 	csh "$(top_srcdir)/config/distscript.csh" "$(top_srcdir)" "$(distdir)" "$(HWLOC_VERSION)" "$(HWLOC_SVN_R)"
