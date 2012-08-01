@@ -602,28 +602,35 @@ CCI_DECLSPEC const char *cci_strerror(cci_endpoint_t *endpoint,
 /*!
   Connection request attributes.
 
-  Reliable connections deliver messages once. If the packet cannot
+  CCI provides optional reliability and ordering to meet the varying
+  needs of applications.
+
+  Unreliable connections are always unordered (Unreliable/Unordered or
+  UU). UU connections may be unicast or multicast. UU connections offer
+  no delivery guarantees; messages may arrive once, multiple times or
+  never. UU connections have no timeout.
+
+  UU multicast connections are always unidirectional, send *or* receive.
+  If an endpoint wants to join a multicast group to both send and
+  receive, it needs to establish two distinct connections, one for
+  sending and one for receiving.
+
+  UU connections (unicast or multicast) only support messages (see
+  Communications below).
+
+  Reliable connections may be ordered (Reliable/Ordered or RO) or
+  unordered (Reliable/Unordered or RU). Reliable connections are unicast
+  only. Reliable connections deliver messages once. If the packet cannot
   be delivered after a specific amount of time, the connection is
   broken; there is no guarantee regarding which messages have been
   received successfully before the connection was broken.
 
-  Connections can be ordered or unordered, but note that ordered
-  unreliable connections are forbidden.  Also, note that ordering of
-  RMA operations only applies to target notification, not data
-  delivery.
+  For reliable connections, RU connections allow the most aggressive
+  optimization of the underlying network(s) to provide better
+  performance. RO connections will reduce performance on most networks.
 
-  For reliable connections, unordered connections allow the most
-  aggressive optimization of the underlying network(s) to provide better
-  performance. Requesting Ordered connections will reduce performance on
-  most networks.
-
-  Unreliable unordered connections have no timeout.
-
-  Multicast is always unreliable unordered.  Multicast connections
-  are always unidirectional, send *or* receive.  If an endpoint wants
-  to join a multicast group to both send and receive, it needs to
-  establish two distinct connections, one for sending and one for
-  receiving.
+  Reliable connections support both messages and remote memory access
+  (see Communications below).
 
   \ingroup connection
 */
@@ -1573,10 +1580,17 @@ CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
   the RMA has completed. It is guaranteed to arrive after the RMA operation
   has finished.
 
+  In an ordered connection, RMA completion events are ordered according
+  to the ordering of the cci_send() or cci_rma() calls in the local peer.
+  For instance a cci_rma() with completion message posted between two
+  cci_send() will generate a completion event on the target between the
+  receive events of these sends.
+
   CCI makes no guarantees about the data delivery within the RMA operation
   (e.g., no last-byte-written-last).
 
-  Only a local completion will be generated.
+  A local completion will be generated. If a completion message is provided,
+  then a remote completion will be generated as well.
 
   \param[in] connection     Connection (destination).
   \param[in] msg_ptr         Pointer to data for the remote completion.
