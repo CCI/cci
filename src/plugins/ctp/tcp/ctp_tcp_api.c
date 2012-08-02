@@ -90,7 +90,7 @@ static void tcp_progress_sends(cci__ep_t * ep);
 static void *tcp_progress_thread(void *arg);
 static int tcp_progress_ep(cci__ep_t *ep);
 static int tcp_recvfrom_ep(cci__ep_t * ep);
-static int tcp_sendto(cci_os_handle_t sock, void *buf, int len,
+static int tcp_sendto(cci__ep_t *ep, cci_os_handle_t sock, void *buf, int len,
 			void *rma_ptr, uint16_t rma_len);
 
 /*
@@ -1639,7 +1639,7 @@ static int tcp_sendmsg(cci_os_handle_t sock, struct iovec iov[2], int count)
 	return ret;
 }
 
-static int tcp_sendto(cci_os_handle_t sock, void *buf, int len,
+static int tcp_sendto(cci__ep_t *ep, cci_os_handle_t sock, void *buf, int len,
 			void *rma_ptr, uint16_t rma_len)
 {
 	int ret;
@@ -1658,7 +1658,9 @@ static int tcp_sendto(cci_os_handle_t sock, void *buf, int len,
 			len += rma_len;
 		}
 	}
+	pthread_mutex_lock(&ep->lock);
 	ret = tcp_sendmsg(sock, iov, count);
+	pthread_mutex_unlock(&ep->lock);
 	if (ret != -1)
 		assert(ret == len);
 
@@ -1801,7 +1803,7 @@ static void tcp_progress_pending(cci__ep_t * ep)
 		}
 #endif
 
-		ret = tcp_sendto(tconn->fd, tx->buffer, tx->len, tx->rma_ptr, tx->rma_len);
+		ret = tcp_sendto(ep, tconn->fd, tx->buffer, tx->len, tx->rma_ptr, tx->rma_len);
 		if (ret != tx->len) {
 			debug((CCI_DB_MSG | CCI_DB_INFO),
 			      "sendto() failed with %s",
@@ -1965,7 +1967,7 @@ static void tcp_progress_queued(cci__ep_t * ep)
 
 		/* need to send it */
 
-		ret = tcp_sendto(tconn->fd, tx->buffer, tx->len, tx->rma_ptr, tx->rma_len);
+		ret = tcp_sendto(ep, tconn->fd, tx->buffer, tx->len, tx->rma_ptr, tx->rma_len);
 		if (ret == -1) {
 			switch (errno) {
 			default:
@@ -2168,7 +2170,7 @@ static int ctp_tcp_sendv(cci_connection_t * connection,
 
 	/* if unreliable, try to send */
 	if (!is_reliable) {
-		ret = tcp_sendto(tconn->fd, tx->buffer, tx->len, tx->rma_ptr, tx->rma_len);
+		ret = tcp_sendto(ep, tconn->fd, tx->buffer, tx->len, tx->rma_ptr, tx->rma_len);
 		if (ret == tx->len) {
 			/* queue event on enpoint's completed queue */
 			tx->state = TCP_TX_COMPLETED;
@@ -2764,6 +2766,7 @@ static void tcp_handle_rnr(tcp_conn_t * tconn, uint32_t seq)
 		tconn->rnr = seq;
 }
 
+#if 0
 /*!
   Handle incoming ack
 
@@ -2775,7 +2778,6 @@ static void
 tcp_handle_ack(tcp_conn_t * tconn,
 		tcp_rx_t * rx)
 {
-#if 0
 	int i = 0;
 	int found = 0;
 	cci__conn_t *conn = tconn->conn;
@@ -3213,10 +3215,10 @@ tcp_handle_ack(tcp_conn_t * tconn,
 	pthread_cond_signal(&tep->wait_condition);
 	pthread_mutex_unlock(&tep->progress_mutex);
 
-#endif
 	CCI_EXIT;
 	return;
 }
+#endif
 
 #if 0
 static void
@@ -3433,7 +3435,7 @@ static void tcp_handle_conn_reply(tcp_conn_t * tconn,	/* NULL if rejected */
 			/* simply ack this msg and cleanup */
 			memset(&hdr, 0, sizeof(hdr));
 			tcp_pack_conn_ack(&hdr, id);
-			ret = tcp_sendto(tconn->fd, &hdr, len, NULL, 0);
+			ret = tcp_sendto(ep, tconn->fd, &hdr, len, NULL, 0);
 			if (ret != len) {
 				debug((CCI_DB_CONN | CCI_DB_MSG),
 				      "ep %d failed to send conn_ack with %s",
@@ -3636,7 +3638,7 @@ tcp_handle_rma_read_request(tcp_conn_t * tconn, tcp_rx_t * rx, uint32_t len)
 		read->header.type =
 			htonl(TCP_PACK_TYPE(TCP_MSG_RMA_READ_REPLY, len));
 
-		ret = tcp_sendto(tconn->fd, read, sizeof(*read), ptr, len);
+		ret = tcp_sendto(ep, tconn->fd, read, sizeof(*read), ptr, len);
 	} else {
 		/* TODO return CCI_ERR_RMA_HANDLE */
 	}
@@ -3805,21 +3807,14 @@ out_with_error:
 	return;
 }
 
-static void
-tcp_handle_conn_request(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx, uint32_t a)
+static inline int
+tcp_recv_msg(int fd, void *ptr, uint32_t len)
 {
-	int ret;
-	tcp_ep_t *tep = ep->priv;
-	tcp_conn_t *tconn = conn->priv;
-	tcp_header_t *hdr = rx->buffer;
-	tcp_handshake_t *hs = rx->buffer + sizeof(*hdr);
-	cci_conn_attribute_t attr = a & 0xF;
-	uint32_t len = (a >> 4) & 0xFFFF;
-	uint32_t total = len + sizeof(*hs), offset = 0;
-	uint32_t rx_cnt, mss, ka;
+	int ret = CCI_SUCCESS;
+	uint32_t offset = 0;
 
 	do {
-		ret = recv(tconn->fd, hdr + offset, total - offset, 0);
+		ret = recv(fd, ptr + offset, len - offset, 0);
 		if (ret < 0) {
 			ret = errno;
 			debug(CCI_DB_MSG, "%s: recv() failed with %s",
@@ -3831,7 +3826,29 @@ tcp_handle_conn_request(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx, uint32_t
 			goto out;
 		}
 		offset += ret;
-	} while (offset < total);
+	} while (offset < len);
+out:
+	return ret;
+}
+
+static void
+tcp_handle_conn_request(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx, uint32_t a)
+{
+	int ret;
+	tcp_ep_t *tep = ep->priv;
+	tcp_conn_t *tconn = conn->priv;
+	tcp_header_t *hdr = rx->buffer;
+	tcp_handshake_t *hs = rx->buffer + sizeof(*hdr);
+	cci_conn_attribute_t attr = a & 0xF;
+	uint32_t len = (a >> 4) & 0xFFFF;
+	uint32_t total = len + sizeof(*hs);
+	uint32_t rx_cnt, mss, ka;
+
+	ret = tcp_recv_msg(tconn->fd, hdr->data, total);
+	if (ret) {
+		/* TODO handle error */
+		goto out;
+	}
 
 	tcp_parse_handshake(hs, &rx_cnt, &mss, &ka);
 
@@ -3889,24 +3906,15 @@ tcp_handle_conn_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx, uint32_t a
 	tcp_header_t *hdr = rx->buffer;
 	tcp_handshake_t *hs = rx->buffer + sizeof(*hdr);
 	int reply = a & 0xFF;
-	uint32_t total = sizeof(*hs), offset = 0;
+	uint32_t total = sizeof(*hs);
 	uint32_t rx_cnt, mss, ka;
 	tcp_tx_t *tx = NULL;
 
-	do {
-		ret = recv(tconn->fd, hdr + offset, total - offset, 0);
-		if (ret < 0) {
-			ret = errno;
-			debug(CCI_DB_MSG, "%s: recv() failed with %s",
-				__func__, strerror(ret));
-			goto out;
-		} else if (ret == 0) {
-			debug(CCI_DB_MSG, "%s: recv() failed - peer closed "
-				"connection", __func__);
-			goto out;
-		}
-		offset += ret;
-	} while (offset < total);
+	ret = tcp_recv_msg(tconn->fd, hdr->data, total);
+	if (ret) {
+		/* TODO handle error */
+		goto out;
+	}
 
 	tcp_parse_handshake(hs, &rx_cnt, &mss, &ka);
 
@@ -3985,6 +3993,68 @@ tcp_handle_conn_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx)
 }
 
 static void
+tcp_handle_send(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
+		uint32_t a, uint32_t tx_id)
+{
+	int ret;
+	tcp_conn_t *tconn = conn->priv;
+	tcp_header_t *hdr = rx->buffer, ack;
+	uint32_t len = a & 0xFFFF;
+	uint32_t total = len;
+
+	ret = tcp_recv_msg(tconn->fd, hdr->data, total);
+	if (ret) {
+		/* TODO handle error */
+		goto out;
+	}
+
+	rx->evt.event.type = CCI_EVENT_RECV;
+	if (len)
+		rx->evt.event.recv.ptr = hdr->data;
+	else
+		rx->evt.event.recv.ptr = NULL;
+	rx->evt.event.recv.len = len;
+
+	/* queue event on endpoint's completed event queue */
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
+	pthread_mutex_unlock(&ep->lock);
+
+	ret = CCI_SUCCESS;
+out:
+	if (cci_conn_is_reliable(conn)) {
+		tcp_pack_ack(&ack, tx_id, ret);
+		pthread_mutex_lock(&ep->lock);
+		send(tconn->fd, &ack, sizeof(ack), 0);
+		pthread_mutex_lock(&ep->lock);
+	}
+
+	/* TODO close conn */
+
+	return;
+}
+
+static void
+tcp_handle_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
+		uint32_t a, uint32_t tx_id)
+{
+	tcp_ep_t *tep = ep->priv;
+	tcp_tx_t *tx = &tep->txs[tx_id];
+	uint32_t status = a & 0xFF;
+
+	tx->evt.event.send.status = status ? CCI_ERR_DISCONNECTED : CCI_SUCCESS;
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_REMOVE(&tep->pending, &tx->evt, entry);
+	TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
+	tcp_put_rx_locked(tep, rx);
+	pthread_mutex_unlock(&ep->lock);
+
+	return;
+}
+
+static void
 tcp_handle_recv(cci__ep_t *ep, cci__conn_t *conn)
 {
 	int ret;
@@ -3992,7 +4062,7 @@ tcp_handle_recv(cci__ep_t *ep, cci__conn_t *conn)
 	tcp_conn_t *tconn = conn->priv;
 	tcp_rx_t *rx = NULL;
 	tcp_header_t *hdr = NULL;
-	uintptr_t len = sizeof(*hdr), offset = 0;
+	uintptr_t len = sizeof(*hdr);
 	tcp_msg_type_t type;
 	uint32_t a, b;
 	uint32_t q_rx = 0;
@@ -4007,26 +4077,13 @@ tcp_handle_recv(cci__ep_t *ep, cci__conn_t *conn)
 	rx->evt.conn = conn;
 	hdr = rx->buffer;
 
-	do {
-		ret = recv(tconn->fd, hdr + offset, len - offset, 0);
-		if (ret < 0) {
-			ret = errno;
-			debug(CCI_DB_MSG, "%s: recv() failed with %s",
-				__func__, strerror(ret));
-			/* TODO cleanup connection */
-			tconn->status = TCP_CONN_CLOSING;
-			q_rx = 1;
-			goto out;
-		} else if (ret == 0) {
-			debug(CCI_DB_MSG, "%s: recv() failed - peer closed "
-				"connection", __func__);
-			/* TODO cleanup connection */
-			tconn->status = TCP_CONN_CLOSING;
-			q_rx = 1;
-			goto out;
-		}
-		offset += ret;
-	} while (offset < len);
+	ret = tcp_recv_msg(tconn->fd, hdr, len);
+	if (ret) {
+		/* TODO handle error */
+		q_rx = 1;
+		tconn->status = TCP_CONN_CLOSING;
+		goto out;
+	}
 
 	tcp_parse_header(hdr, &type, &a, &b);
 
@@ -4041,8 +4098,10 @@ tcp_handle_recv(cci__ep_t *ep, cci__conn_t *conn)
 		tcp_handle_conn_ack(ep, conn, rx);
 		break;
 	case TCP_MSG_SEND:
+		tcp_handle_send(ep, conn, rx, a, b);
 		break;
 	case TCP_MSG_ACK:
+		tcp_handle_ack(ep, conn, rx, a, b);
 		break;
 	case TCP_MSG_RNR:
 		break;
@@ -4393,7 +4452,7 @@ static int tcp_recvfrom_ep(cci__ep_t * ep)
 		/* Nothing to do? */
 		break;
 	case TCP_MSG_ACK:
-		tcp_handle_ack(tconn, rx);
+		//tcp_handle_ack(tconn, rx);
 		break;
 	case TCP_MSG_RMA_WRITE:
 		tcp_handle_rma_write(tconn, rx, b);
@@ -4442,7 +4501,7 @@ out:
 			/* XXX: Should we queue the message or we send it? 
 			   I seems to me that it should be queued to maintain order as much as
 			   possible (but what about RU connections? */
-			tcp_sendto(tconn->fd, buffer, len, NULL, 0);
+			tcp_sendto(ep, tconn->fd, buffer, len, NULL, 0);
 		}
 
 		/* Drop the message */
@@ -4520,7 +4579,7 @@ static void tcp_keepalive(cci__ep_t *ep)
 			hdr = (tcp_header_t *) buffer;
 			tcp_pack_keepalive(hdr);
 			len = sizeof(*hdr);
-			tcp_sendto(tconn->fd, buffer, len, NULL, 0);
+			tcp_sendto(ep, tconn->fd, buffer, len, NULL, 0);
 		}
 	}
 

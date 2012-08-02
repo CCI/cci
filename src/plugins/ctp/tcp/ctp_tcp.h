@@ -339,9 +339,9 @@ static inline void tcp_pack_keepalive(tcp_header_t * header)
 
  */
 static inline void
-tcp_pack_ack(tcp_header_t * header, tcp_msg_type_t type, uint32_t tx_id)
+tcp_pack_ack(tcp_header_t * header, uint32_t tx_id, uint32_t status)
 {
-	tcp_pack_header(header, TCP_MSG_ACK, 0, tx_id);
+	tcp_pack_header(header, TCP_MSG_ACK, status, tx_id);
 }
 
 static inline void
