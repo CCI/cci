@@ -206,7 +206,8 @@ static inline int tcp_terminate_threads (tcp_ep_t *tep)
 {
 	assert (tep);
 
-	pthread_join(tep->tid, NULL);
+	if (tep->tid)
+		pthread_join(tep->tid, NULL);
 
 	return CCI_SUCCESS;
 }
