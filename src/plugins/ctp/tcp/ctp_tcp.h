@@ -605,6 +605,9 @@ typedef struct tcp_rma_handle {
 	/*! Application memory */
 	void *start;
 
+	/*! Access flags */
+	uint32_t flags;
+
 	/* Entry for hanging on ep->handles */
 	 TAILQ_ENTRY(tcp_rma_handle) entry;
 

@@ -1571,10 +1571,13 @@ static int ctp_tcp_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eve
 		}
 	}
 
-	if (ev)
+	if (ev) {
 		TAILQ_REMOVE(&ep->evts, ev, entry);
-	else
+	} else {
 		ret = CCI_EAGAIN;
+		if (TAILQ_EMPTY(&tep->idle_rxs))
+			ret = CCI_ENOBUFS;
+	}
 
 	pthread_mutex_unlock(&ep->lock);
 
@@ -2287,6 +2290,7 @@ static int ctp_tcp_rma_register(cci_endpoint_t * endpoint,
 	handle->ep = ep;
 	handle->length = length;
 	handle->start = start;
+	handle->flags = flags;
 	handle->refcnt = 1;
 
 	pthread_mutex_lock(&ep->lock);
@@ -2407,6 +2411,7 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	rma_op->local_offset = local_offset;
 	rma_op->remote_handle = remote_handle;
 	rma_op->remote_offset = remote_offset;
+	/* avoid modulo */
 	rma_op->num_msgs = data_len / TCP_RMA_FRAG_SIZE;
 	if ((rma_op->num_msgs * TCP_RMA_FRAG_SIZE) < data_len)
 		rma_op->num_msgs++;
