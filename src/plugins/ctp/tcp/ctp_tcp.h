@@ -164,6 +164,7 @@ tcp_parse_header(tcp_header_t * header, tcp_msg_type_t * type,
 	uint32_t hl = ntohl(header->type);
 
 	*type = (enum tcp_msg_type)TCP_TYPE(hl);
+	assert(*type < TCP_MSG_TYPE_MAX && *type > TCP_MSG_INVALID);
 	*a = TCP_A(hl);
 	*b = ntohl(header->b);
 }
@@ -657,6 +658,12 @@ typedef struct tcp_ep {
 	/*! List of open connections */
 	TAILQ_HEAD(s_conns, tcp_conn) conns;
 
+	/*! Set when polling - only one poll at a time.
+	 *  The poller will need to access fds, nfds, c and they cannot change
+	 *  while is_polling is set. We need to queue any changes and the
+	 *  poller can perform them after processing the poll results. */
+	uint32_t is_polling;
+
 	/*! For polling connection sockets */
 	struct pollfd *fds;
 
@@ -709,6 +716,9 @@ typedef struct tcp_ep {
 
 	/*! List of active connections awaiting replies */
 	TAILQ_HEAD(s_active, tcp_conn) active;
+
+	/*! List of passive connections awaiting requests and acks */
+	TAILQ_HEAD(s_passive, tcp_conn) passive;
 
 	/*! List of RMA registrations */
 	TAILQ_HEAD(s_handles, tcp_rma_handle) handles;
