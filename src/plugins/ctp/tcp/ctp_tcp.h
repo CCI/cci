@@ -208,7 +208,7 @@ tcp_parse_handshake(tcp_handshake_t * hs,
    +--------+----------------+----+----+
    |  rsvd  |    data len    |attr|type|
    +--------+----------------+----+----+
-   |                 0                 |
+   |               tx id               |
    +-----------------------------------+
 
    +-------------------------------+
@@ -224,7 +224,7 @@ tcp_parse_handshake(tcp_handshake_t * hs,
 
    attr: CCI_CONN_ATTR_[UU|RU|RO]
    data len: amount of user data following header
-   c: reserved
+   tx id: tx used for message
    max_recv_buffer_count: number of msgs we can receive
    mss: max send size
    keepalive: if keepalive is activated, this specifies the keepalive timeout
@@ -232,10 +232,10 @@ tcp_parse_handshake(tcp_handshake_t * hs,
 
 static inline void
 tcp_pack_conn_request(tcp_header_t * header, cci_conn_attribute_t attr,
-		       uint16_t data_len)
+		       uint16_t data_len, uint32_t tx_id)
 {
 	uint32_t a = attr | (data_len << 4);
-	tcp_pack_header(header, TCP_MSG_CONN_REQUEST, a, 0);
+	tcp_pack_header(header, TCP_MSG_CONN_REQUEST, a, tx_id);
 }
 
 /* connection reply header:
@@ -245,7 +245,7 @@ tcp_pack_conn_request(tcp_header_t * header, cci_conn_attribute_t attr,
    +--------------------+--------+----+
    |        rsvd        |  reply |type|
    +--------------------+--------+----+
-   |                0                 |
+   |              tx id               |
    +----------------------------------+
 
    +-------------------------------+
@@ -257,7 +257,7 @@ tcp_pack_conn_request(tcp_header_t * header, cci_conn_attribute_t attr,
    +-------------------------------+
 
    The reply is 0 for success else errno.
-   The accepting peer will send his id back in the payload (length 4)
+   The tx id is from the active client (to lookup its tx)
 
    reply: CCI_EVENT_CONNECT_[ACCEPTED|REJECTED]
    mss: max app payload (user header and user data)
@@ -742,11 +742,17 @@ typedef enum tcp_conn_status {
 	/*! NULL (intial) state */
 	TCP_CONN_INIT = 0,
 
-	/*! Waiting on server ACK */
-	TCP_CONN_ACTIVE,
+	/*! Waiting on connect */
+	TCP_CONN_ACTIVE1,
 
-	/*! Waiting on client ACK */
-	TCP_CONN_PASSIVE,
+	/*! Waiting on conn reply */
+	TCP_CONN_ACTIVE2,
+
+	/*! Waiting on client request */
+	TCP_CONN_PASSIVE1,
+
+	/*! Waiting on conn ack */
+	TCP_CONN_PASSIVE2,
 
 	/*! Connection open and useable */
 	TCP_CONN_READY
