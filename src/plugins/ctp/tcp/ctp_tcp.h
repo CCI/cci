@@ -176,12 +176,13 @@ typedef struct tcp_handshake {
 	uint32_t max_recv_buffer_count;	/* max recvs that I can handle */
 	uint32_t mss;		/* lower of each endpoint */
 	uint32_t keepalive;	/* keepalive timeout (when activated) */
+	uint32_t server_tx_id;  /* id of server's tx */
 } tcp_handshake_t;
 
 static inline void
 tcp_pack_handshake(tcp_handshake_t * hs,
 		    uint32_t max_recv_buffer_count, uint32_t mss,
-		    uint32_t keepalive)
+		    uint32_t keepalive, uint32_t server_tx_id)
 {
 	assert(mss <= (TCP_MAX_MSS));
 	assert(mss >= TCP_MIN_MSS);
@@ -189,16 +190,18 @@ tcp_pack_handshake(tcp_handshake_t * hs,
 	hs->max_recv_buffer_count = htonl(max_recv_buffer_count);
 	hs->mss = htonl(mss);
 	hs->keepalive = htonl(keepalive);
+	hs->server_tx_id = htonl(server_tx_id);
 }
 
 static inline void
 tcp_parse_handshake(tcp_handshake_t * hs,
 		     uint32_t * max_recv_buffer_count, uint32_t * mss,
-		     uint32_t * ka)
+		     uint32_t * ka, uint32_t *server_tx_id)
 {
 	*max_recv_buffer_count = ntohl(hs->max_recv_buffer_count);
 	*mss = ntohl(hs->mss);
 	*ka = ntohl(hs->keepalive);
+	*server_tx_id = ntohl(hs->server_tx_id);
 }
 
 /* connection request header:
@@ -218,6 +221,8 @@ tcp_parse_handshake(tcp_handshake_t * hs,
    +-------------------------------+
    |            keepalive          |
    +-------------------------------+
+   |          server tx_id         |
+   +-------------------------------+
 
    The peer uses the id when sending to us.
    The user data follows the header.
@@ -228,14 +233,15 @@ tcp_parse_handshake(tcp_handshake_t * hs,
    max_recv_buffer_count: number of msgs we can receive
    mss: max send size
    keepalive: if keepalive is activated, this specifies the keepalive timeout
+   server tx_id: 0 in conn_request and set by server in conn_reply
  */
 
 static inline void
 tcp_pack_conn_request(tcp_header_t * header, cci_conn_attribute_t attr,
-		       uint16_t data_len, uint32_t tx_id)
+		       uint16_t data_len, uint32_t client_tx_id)
 {
 	uint32_t a = attr | (data_len << 4);
-	tcp_pack_header(header, TCP_MSG_CONN_REQUEST, a, tx_id);
+	tcp_pack_header(header, TCP_MSG_CONN_REQUEST, a, client_tx_id);
 }
 
 /* connection reply header:
@@ -245,7 +251,7 @@ tcp_pack_conn_request(tcp_header_t * header, cci_conn_attribute_t attr,
    +--------------------+--------+----+
    |        rsvd        |  reply |type|
    +--------------------+--------+----+
-   |              tx id               |
+   |          client tx id            |
    +----------------------------------+
 
    +-------------------------------+
@@ -255,18 +261,21 @@ tcp_pack_conn_request(tcp_header_t * header, cci_conn_attribute_t attr,
    +-------------------------------+
    |            keepalive          |
    +-------------------------------+
+   |          server tx_id         |
+   +-------------------------------+
 
    The reply is 0 for success else errno.
    The tx id is from the active client (to lookup its tx)
 
    reply: CCI_EVENT_CONNECT_[ACCEPTED|REJECTED]
    mss: max app payload (user header and user data)
+   server tx_id: set by server, client will return in conn_ack
  */
 
 static inline void
-tcp_pack_conn_reply(tcp_header_t * header, uint8_t reply)
+tcp_pack_conn_reply(tcp_header_t * header, uint8_t reply, uint32_t client_tx_id)
 {
-	tcp_pack_header(header, TCP_MSG_CONN_REPLY, reply, 0);
+	tcp_pack_header(header, TCP_MSG_CONN_REPLY, reply, client_tx_id);
 }
 
 /* connection ack header:
@@ -276,14 +285,14 @@ tcp_pack_conn_reply(tcp_header_t * header, uint8_t reply)
    +----------------------------+----+
    |         reserved           |type|
    +----------------------------+----+
-   |            reserved             |
+   |          server tx_id           |
    +---------------------------------+
 
  */
 
-static inline void tcp_pack_conn_ack(tcp_header_t * header, uint32_t id)
+static inline void tcp_pack_conn_ack(tcp_header_t * header, uint32_t server_tx_id)
 {
-	tcp_pack_header(header, TCP_MSG_CONN_ACK, 0, 0);
+	tcp_pack_header(header, TCP_MSG_CONN_ACK, 0, server_tx_id);
 }
 
 /* send header:
