@@ -2033,7 +2033,8 @@ static void tcp_progress_queued(cci__ep_t * ep)
 			tx->state = TCP_TX_PENDING;
 			TAILQ_INSERT_TAIL(&tep->pending, evt, entry);
 			debug((CCI_DB_CONN | CCI_DB_MSG),
-			      "moving queued %s tx to pending",
+			      "moving queued %s %s tx to pending",
+			      is_reliable ? "reliable" : "unreliable",
 			      tcp_msg_type(tx->msg_type));
 			if (tx->msg_type == TCP_MSG_RMA_WRITE)
 				tx->rma_op->pending++;
@@ -3907,6 +3908,8 @@ tcp_handle_conn_request(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx, uint32_t
 	conn->keepalive_timeout = ka;
 	if (mss < conn->connection.max_send_size)
 		conn->connection.max_send_size = mss;
+
+	conn->connection.attribute = attr;
 
 	if (cci_conn_is_reliable(conn)) {
 		tconn->max_tx_cnt = rx_cnt < ep->tx_buf_cnt ?
