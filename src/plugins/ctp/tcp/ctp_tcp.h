@@ -557,7 +557,7 @@ typedef struct tcp_tx {
 	uint32_t len;
 
 	void *rma_ptr;
-	uint16_t rma_len;
+	uint32_t rma_len;
 
 	/*! Timeout in microseconds */
 	uint64_t timeout_us;
