@@ -2124,7 +2124,7 @@ static void sock_progress_queued(cci__ep_t * ep)
 				TAILQ_INSERT_TAIL(&evts, evt, entry);
 			}
 			continue;
-		}
+		} /* end timeout case */
 
 		if ((tx->last_attempt_us + (SOCK_RESEND_TIME_SEC * 1000000)) >
 			now)
@@ -2188,6 +2188,7 @@ static void sock_progress_queued(cci__ep_t * ep)
 				continue;
 			}
 		}
+
 		/* msg sent, dequeue */
 		TAILQ_REMOVE(&sep->queued, &tx->evt, entry);
 		if (tx->msg_type == SOCK_MSG_SEND)
@@ -3045,8 +3046,7 @@ sock_handle_ack(sock_conn_t * sconn,
 	sock_header_r_t *hdr_r = rx->buffer;
 	uint32_t acks[SOCK_MAX_SACK * 2];
 
-	TAILQ_HEAD(s_idle_txs, sock_tx) idle_txs =
-		TAILQ_HEAD_INITIALIZER(idle_txs);
+	TAILQ_HEAD(s_idle_txs, sock_tx) idle_txs = TAILQ_HEAD_INITIALIZER(idle_txs);
 	TAILQ_HEAD(s_evts, cci__evt) evts = TAILQ_HEAD_INITIALIZER(evts);
 	TAILQ_INIT(&idle_txs);
 	TAILQ_INIT(&evts);
@@ -3094,8 +3094,7 @@ sock_handle_ack(sock_conn_t * sconn,
 						"%s acking only seq %u", __func__,
 						acks[0]);
 					TAILQ_REMOVE(&sep->pending, &tx->evt, entry);
-					TAILQ_REMOVE(&sconn->tx_seqs, tx,
-							tx_seq);
+					TAILQ_REMOVE(&sconn->tx_seqs, tx, tx_seq);
 					if (tx->msg_type == SOCK_MSG_RMA_WRITE)
 						tx->rma_op->pending--;
 					if (tx->msg_type == SOCK_MSG_SEND) {
@@ -3126,22 +3125,15 @@ sock_handle_ack(sock_conn_t * sconn,
 						if the receiver was always ready to receive, the 
 						complete the send with a success status. Otherwise,
 						we complete the send with a RNR status */
-						if (conn->connection.
-							attribute ==
-							CCI_CONN_ATTR_RO
-							&& tx->rnr != 0) {
-							tx->evt.event.send.
-								status =
-								CCI_ERR_RNR;
+						if (conn->connection.attribute == CCI_CONN_ATTR_RO
+							&& tx->rnr != 0) 
+						{
+							tx->evt.event.send.status = CCI_ERR_RNR;
 						} else {
-							tx->evt.event.send.
-								status =
-								CCI_SUCCESS;
+							tx->evt.event.send.status = CCI_SUCCESS;
 						}
 						/* store locally until we can drop the locks */
-						TAILQ_INSERT_TAIL(&evts,
-								&tx->evt,
-								entry);
+						TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
 					}
 				}
 				found = 1;
@@ -3189,14 +3181,10 @@ sock_handle_ack(sock_conn_t * sconn,
 							&& tx->rnr != 0) {
 							tx->evt.event.send.status = CCI_ERR_RNR;
 						} else {
-							tx->evt.event.send.
-								status =
-								CCI_SUCCESS;
+							tx->evt.event.send.status = CCI_SUCCESS;
 						}
 						/* store locally until we can drop the locks */
-						TAILQ_INSERT_TAIL(&evts,
-								&tx->evt,
-								entry);
+						TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
 					}
 					found++;
 				}
@@ -4639,6 +4627,16 @@ static void *sock_progress_thread(void *arg)
 		pthread_mutex_lock(&ep->lock);
 	}
 	pthread_mutex_unlock(&ep->lock);
+
+	/* Drain all pending ACKs */
+	for (i = 0; i < SOCK_EP_HASH_SIZE; i++) {
+		if (!TAILQ_EMPTY(&sep->conn_hash[i])) {
+			TAILQ_FOREACH(sconn, &sep->conn_hash[i], entry) {
+				sconn->last_ack_ts = sconn->last_ack_ts - 2 * ACK_TIMEOUT;
+			}
+		}
+	}
+	sock_ack_conns (ep);
 
 	pthread_exit(NULL);
 	return (NULL);		/* make pgcc happy */
