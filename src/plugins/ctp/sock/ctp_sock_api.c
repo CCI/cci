@@ -4531,9 +4531,25 @@ static void sock_ack_conns(cci__ep_t * ep)
 					if (1 == sock_need_sack(sconn)) {
 						sock_ack_t *tmp;
 
+						if (SOCK_U64_LT(now, sconn->last_ack_ts + ACK_TIMEOUT)) {
+							debug (CCI_DB_MSG, "Delaying ACK");
+							break;
+						}
+
 						type = SOCK_MSG_SACK;
 						count = 0;
 
+						/* We first count the number of pending ACKs */
+						TAILQ_FOREACH_SAFE(ack, &sconn->acks, entry, tmp) {
+							count++;
+						}
+
+						if (count <= PENDING_ACK_THRESHOLD) {
+							debug (CCI_DB_MSG, "Delaying ACK");
+							break;
+						}
+
+						count = 0;
 						TAILQ_FOREACH_SAFE(ack, &sconn->acks, entry, tmp) {
 							TAILQ_REMOVE (&sconn->acks, ack, entry);
 							acks[count++] = ack->start;
@@ -4553,8 +4569,7 @@ static void sock_ack_conns(cci__ep_t * ep)
 							debug (CCI_DB_MSG, "Delaying ACK");
 							break;
 						}
-						TAILQ_REMOVE(&sconn->acks, ack,
-								entry);
+						TAILQ_REMOVE(&sconn->acks, ack, entry);
 						if (ack->start == sconn->acked)
 							sconn->acked = ack->end;
 						acks[0] = ack->end;
