@@ -2659,8 +2659,8 @@ static int ctp_sock_rma(cci_connection_t * connection,
 	rma_op->remote_handle = remote_handle;
 	rma_op->remote_offset = remote_offset;
 	rma_op->id = ++(sconn->rma_id);
-	rma_op->num_msgs = data_len / connection->max_send_size;
-	if (data_len % connection->max_send_size)
+	rma_op->num_msgs = data_len / SOCK_DEFAULT_RMA_MSS;
+	if (data_len % SOCK_DEFAULT_RMA_MSS)
 		rma_op->num_msgs++;
 	rma_op->completed = 0;
 	rma_op->status = CCI_SUCCESS;	/* for now */
@@ -2723,17 +2723,15 @@ static int ctp_sock_rma(cci_connection_t * connection,
 		/* we have all the txs we need, pack them and queue them */
 		for (i = 0; i < cnt; i++) {
 			sock_tx_t *tx = txs[i];
-			uint64_t offset =
-				(uint64_t) i * (uint64_t) connection->max_send_size;
-			sock_rma_header_t *write =
-				(sock_rma_header_t *) tx->buffer;
+			uint64_t offset = (uint64_t) i * (uint64_t) SOCK_DEFAULT_RMA_MSS;
+			sock_rma_header_t *write = (sock_rma_header_t *) tx->buffer;
 
 			rma_op->next = i + 1;
 			tx->msg_type = SOCK_MSG_RMA_WRITE;
 			tx->flags = flags | CCI_FLAG_SILENT;
 			tx->state = SOCK_TX_QUEUED;
 			/* payload size for now */
-			tx->len = (uint16_t) connection->max_send_size;
+			tx->len = (uint16_t) SOCK_DEFAULT_RMA_MSS;
 			tx->send_count = 0;
 			tx->last_attempt_us = 0ULL;
 			tx->timeout_us = 0ULL;
@@ -2745,10 +2743,8 @@ static int ctp_sock_rma(cci_connection_t * connection,
 			tx->evt.ep = ep;
 
 			if (i == (rma_op->num_msgs - 1)) {
-				if (data_len % connection->max_send_size)
-					tx->len =
-						data_len %
-						connection->max_send_size;
+				if (data_len % SOCK_DEFAULT_RMA_MSS)
+					tx->len = data_len % SOCK_DEFAULT_RMA_MSS;
 			}
 
 			tx->rma_ptr = (void*)(uintptr_t)(local->start + offset);
@@ -3318,7 +3314,7 @@ sock_handle_ack(sock_conn_t * sconn,
 				tx->flags = rma_op->flags | CCI_FLAG_SILENT;
 				tx->state = SOCK_TX_QUEUED;
 				/* payload size for now */
-				tx->len = (uint16_t) connection->max_send_size;
+				tx->len = (uint16_t) SOCK_DEFAULT_RMA_MSS;
 				tx->send_count = 0;
 				tx->last_attempt_us = 0ULL;
 				tx->timeout_us = 0ULL;
@@ -3328,16 +3324,12 @@ sock_handle_ack(sock_conn_t * sconn,
 				tx->evt.event.send.connection = connection;
 				tx->evt.conn = conn;
 				if (i == (rma_op->num_msgs - 1)) {
-					if (rma_op->data_len %
-						connection->max_send_size)
-						tx->len =
-							rma_op->data_len %
-							connection->max_send_size;
+					if (rma_op->data_len % SOCK_DEFAULT_RMA_MSS)
+						tx->len = rma_op->data_len % SOCK_DEFAULT_RMA_MSS;
 				}
 				tx->seq = ++(sconn->seq);
 
-				offset = (uint64_t) i *(uint64_t)
-				connection->max_send_size;
+				offset = (uint64_t) i *(uint64_t) SOCK_DEFAULT_RMA_MSS;
 
 				sock_pack_rma_write(write, tx->len,
 							sconn->peer_id, tx->seq, 0,
@@ -4608,6 +4600,8 @@ static void *sock_progress_thread(void *arg)
 {
 	cci__ep_t *ep = (cci__ep_t *) arg;
 	sock_ep_t *sep;
+	int i;
+	sock_conn_t *sconn = NULL;
 
 	assert (ep);
 	sep = ep->priv;
