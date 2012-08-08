@@ -556,6 +556,9 @@ typedef struct tcp_tx {
 	/*! Buffer length */
 	uint32_t len;
 
+	/*! Amount of data (len + rma_len) sent */
+	uintptr_t offset;
+
 	void *rma_ptr;
 	uint32_t rma_len;
 
@@ -712,11 +715,13 @@ typedef struct tcp_ep {
 	/* Our IP and port */
 	struct sockaddr_in sin;
 
+#if 0
 	/*! Queued sends */
 	TAILQ_HEAD(s_queued, cci__evt) queued;
 
 	/*! Pending (in-flight) sends */
 	TAILQ_HEAD(s_pending, cci__evt) pending;
+#endif
 
 	/*! List of all connections with keepalive enabled */
 	/* FIXME: revisit the code to use this
@@ -778,10 +783,16 @@ typedef struct tcp_conn {
 	tcp_conn_status_t status;
 
 	/*! Peer's sockaddr_in (IP, port) */
-	const struct sockaddr_in sin;
+	struct sockaddr_in sin;
 
 	/*! socket for this connection */
 	uint32_t fd;
+
+	/*! Lock for receiving */
+	pthread_mutex_t rlock;
+
+	/*! Lock for sending */
+	pthread_mutex_t slock;
 
 	/*! Index in tep->fds */
 	uint32_t index;
@@ -791,6 +802,12 @@ typedef struct tcp_conn {
 
 	/*! Entry to hang on tcp_ep->conns[hash] */
 	 TAILQ_ENTRY(tcp_conn) entry;
+
+	/*! Queued sends */
+	TAILQ_HEAD(s_queued, cci__evt) queued;
+
+	/*! Pending (in-flight) sends */
+	TAILQ_HEAD(s_pending, cci__evt) pending;
 
 	/*! List of RMA ops in process in case of fence */
 	TAILQ_HEAD(s_rmas, tcp_rma_op) rmas;
