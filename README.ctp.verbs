@@ -63,8 +63,6 @@
 
   1. Not implemented:
 
-     Blocking via the OS handle
-
      Keepalive messages
 
      Adjusting send timeouts via set_opt

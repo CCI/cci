@@ -343,12 +343,10 @@ void do_client()
 			current_size *= 2;
 
 		if (current_size >= 64 * 1024) {
-			iters /= 2;
-			if (iters < 16)
-				iters = 16;
-			warmup /= 2;
-			if (warmup < 2)
-				warmup = 2;
+			if (iters >= 32)
+				iters /= 2;
+			if (warmup >= 4)
+				warmup /= 2;
 		}
 	}
 

@@ -18,6 +18,9 @@ AC_CONFIG_AUX_DIR([./config])
 # -I in ACLOCAL_AMFLAGS in the top-level Makefile.am.
 AC_CONFIG_MACRO_DIR([./config])
 
+# Define $target
+AC_CANONICAL_TARGET
+
 CCI_CONFIGURE_SETUP
 
 cci_show_title "Configuring CCI distribution tarball"
