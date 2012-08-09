@@ -2544,6 +2544,9 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	else
 		rma_op->msg_ptr = NULL;
 
+	debug(CCI_DB_MSG, "%s: starting RMA %s ***", __func__,
+		flags & CCI_FLAG_WRITE ? "Write" : "Read");
+
 	if (flags & CCI_FLAG_WRITE) {
 		int i, cnt, err = 0;
 		tcp_tx_t **txs = NULL;
@@ -2599,6 +2602,7 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 			tx->len = sizeof(*write);
 			tx->rma_len = TCP_RMA_FRAG_SIZE; /* for now */
 			tx->rma_op = rma_op;
+			tx->rma_id = i;
 
 			tx->evt.event.type = CCI_EVENT_SEND;
 			tx->evt.event.send.status = CCI_SUCCESS; /* for now */
@@ -2611,7 +2615,12 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 					tx->rma_len = data_len % TCP_RMA_FRAG_SIZE;
 			}
 
-			tx->rma_ptr = (void*)(uintptr_t)(local->start + offset);
+			tx->rma_ptr = local->start + local_offset + offset;
+
+			debug(CCI_DB_MSG, "%s: RMA Write local offset %"PRIu64" "
+				"remote offset %"PRIu64" length %u", __func__,
+				local_offset + offset, remote_offset + offset,
+				tx->rma_len);
 
 			tcp_pack_rma_write(write, tx->rma_len, tx->id,
 					    local_handle,
@@ -4274,7 +4283,7 @@ tcp_handle_rma_write(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 
 	/* valid remote handle, copy the data */
 	debug(CCI_DB_INFO, "%s: recv'ing data into target buffer", __func__);
-	ptr = remote->start + (uintptr_t) remote_offset + (uintptr_t) len;
+	ptr = remote->start + (uintptr_t) remote_offset;
 	ret = tcp_recv_msg(tconn->fd, ptr, len);
 	debug(CCI_DB_MSG, "%s: recv'd data into target buffer", __func__);
 	if (ret)
@@ -4303,6 +4312,10 @@ tcp_progress_rma_write(cci__ep_t *ep, cci__conn_t *conn,
 	if (status && (rma_op->status == CCI_SUCCESS))
 		rma_op->status = status;
 
+	pthread_mutex_lock(&tconn->slock);
+	TAILQ_REMOVE(&tconn->pending, &tx->evt, entry);
+	pthread_mutex_unlock(&tconn->slock);
+
 	if (tx->rma_id == (rma_op->num_msgs - 1)) {
 		/* last segment - complete rma */
 		tx->evt.event.send.status = rma_op->status;
@@ -4311,8 +4324,10 @@ tcp_progress_rma_write(cci__ep_t *ep, cci__conn_t *conn,
 		TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
 		pthread_mutex_unlock(&ep->lock);
 		free(rma_op);
+		debug(CCI_DB_MSG, "%s: completed RMA Write ***", __func__);
 	} else if (rma_op->next == rma_op->num_msgs) {
 		/* no more fragments, we don't need this tx anymore */
+		debug(CCI_DB_MSG, "%s: releasing tx %p", __func__, tx);
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_INSERT_TAIL(&tep->idle_txs, &tx->evt, entry);
 		pthread_mutex_unlock(&ep->lock);
@@ -4328,13 +4343,23 @@ tcp_progress_rma_write(cci__ep_t *ep, cci__conn_t *conn,
 
 		tx->state = TCP_TX_QUEUED;
 		tx->rma_len = TCP_RMA_FRAG_SIZE; /* for now */
+		tx->offset = 0;
+		tx->rma_id = i;
+
+		debug(CCI_DB_MSG, "%s: sending fragment %d at offset %"PRIu64,
+			__func__, i, offset);
 
 		if (i == (rma_op->num_msgs - 1)) {
 			if (rma_op->data_len % TCP_RMA_FRAG_SIZE)
 				tx->rma_len = rma_op->data_len % TCP_RMA_FRAG_SIZE;
 		}
 
-		tx->rma_ptr = (void*)(uintptr_t)(local->start + offset);
+		tx->rma_ptr = (void*)(uintptr_t)(local->start + rma_op->local_offset + offset);
+
+		debug(CCI_DB_MSG, "%s: RMA Write local offset %"PRIu64" "
+			"remote offset %"PRIu64" length %u", __func__,
+			rma_op->local_offset + offset,
+			rma_op->remote_offset + offset, tx->rma_len);
 
 		tcp_pack_rma_write(write, tx->rma_len, tx->id,
 				    rma_op->local_handle,
@@ -4344,9 +4369,7 @@ tcp_progress_rma_write(cci__ep_t *ep, cci__conn_t *conn,
 
 		pthread_mutex_lock(&tconn->slock);
 		TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
-		/* FIXME is the below needed? */
-		//TAILQ_INSERT_TAIL(&tconn->rmas, rma_op, rmas);
-		//TAILQ_INSERT_TAIL(&tep->rma_ops, rma_op, entry);
+		tep->fds[tconn->index].events = POLLIN | POLLOUT;
 		pthread_mutex_unlock(&tconn->slock);
 	}
 
