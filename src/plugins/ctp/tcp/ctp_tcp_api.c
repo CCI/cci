@@ -2324,7 +2324,7 @@ static int ctp_tcp_sendv(cci_connection_t * connection,
 	if (!is_reliable) {
 		ret = tcp_sendto(tconn->fd, tx->buffer, tx->len, tx->rma_ptr,
 				tx->rma_len, &tx->offset);
-		if (ret == tx->len) {
+		if (ret == CCI_SUCCESS) {
 			/* queue event on enpoint's completed queue */
 			tx->state = TCP_TX_COMPLETED;
 			pthread_mutex_lock(&ep->lock);
