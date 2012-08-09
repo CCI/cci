@@ -513,7 +513,7 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 				cci_endpoint_t ** endpointp,
 				cci_os_handle_t * fd)
 {
-	int i, ret;
+	int i, ret, one = 1;
 	cci__dev_t *dev = NULL;
 	cci__ep_t *ep = NULL;
 	tcp_ep_t *tep = NULL;
@@ -555,6 +555,14 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 		ret = errno;
 		goto out;
 	}
+
+	ret = setsockopt(tep->sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+	if (ret) {
+		ret = errno;
+		debug(CCI_DB_EP, "%s: setting SO_REUSEADDR returned %s",
+			__func__, strerror(ret));
+	}
+
 	/* bind socket to device */
 	tdev = dev->priv;
 	memset(&sin, 0, sizeof(sin));
@@ -4579,8 +4587,11 @@ tcp_poll_events(cci__ep_t *ep)
 			debug(CCI_DB_WARN, "%s: unhandled revents %u",
 				__func__, revents);
 		if (found)
-			count -= found;
+			count--;
 		i++;
+
+		if (count == tep->nfds)
+			break; /* because OSX returns the wrong count from poll */
 	} while (count);
 
 out:
