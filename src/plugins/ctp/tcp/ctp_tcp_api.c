@@ -1920,6 +1920,7 @@ tcp_progress_conn_sends(cci__conn_t *conn)
 {
 	int ret, is_reliable = 0;
 	tcp_conn_t *tconn = conn->priv;
+	tcp_tx_t *read_reply = NULL;
 
 	is_reliable = cci_conn_is_reliable(conn);
 	tconn = conn->priv;
@@ -1934,7 +1935,8 @@ tcp_progress_conn_sends(cci__conn_t *conn)
 			tconn->status == TCP_CONN_ACTIVE1)
 			break;
 
-		if (tx->msg_type == TCP_MSG_RMA_WRITE) {
+		if (tx->msg_type == TCP_MSG_RMA_WRITE ||
+			tx->msg_type == TCP_MSG_RMA_READ_REQUEST) {
 			if (tx->rma_op->pending >= TCP_RMA_DEPTH)
 				break;
 		}
@@ -1963,7 +1965,11 @@ tcp_progress_conn_sends(cci__conn_t *conn)
 				debug(CCI_DB_MSG, "%s: completed %s send to conn %p",
 					__func__, tcp_msg_type(tx->msg_type), conn);
 				TAILQ_REMOVE(&tconn->queued, evt, entry);
-				TAILQ_INSERT_TAIL(&tconn->pending, evt, entry);
+				if (tx->msg_type != TCP_MSG_RMA_READ_REPLY) {
+					TAILQ_INSERT_TAIL(&tconn->pending, evt, entry);
+				} else {
+					read_reply = tx;
+				}
 			} else {
 				break;
 			}
@@ -1976,6 +1982,16 @@ tcp_progress_conn_sends(cci__conn_t *conn)
 		tep->fds[tconn->index].events = POLLIN;
 	}
 	pthread_mutex_unlock(&tconn->slock);
+
+	if (read_reply) {
+		cci_endpoint_t *endpoint = conn->connection.endpoint;
+		cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
+		tcp_ep_t *tep = ep->priv;
+
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_INSERT_HEAD(&tep->idle_txs, &read_reply->evt, entry);
+		pthread_mutex_unlock(&ep->lock);
+	}
 
 	return;
 }
@@ -2478,7 +2494,7 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 		    uint64_t remote_handle, uint64_t remote_offset,
 		    uint64_t data_len, const void *context, int flags)
 {
-	int ret = CCI_SUCCESS;
+	int ret = CCI_SUCCESS, i, cnt, err = 0;
 	cci__ep_t *ep = NULL;
 	cci__conn_t *conn = NULL;
 	tcp_ep_t *tep = NULL;
@@ -2487,6 +2503,9 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	    (tcp_rma_handle_t *) ((uintptr_t) local_handle);
 	tcp_rma_handle_t *h = NULL;
 	tcp_rma_op_t *rma_op = NULL;
+	tcp_tx_t **txs = NULL;
+	tcp_msg_type_t msg_type = flags & CCI_FLAG_WRITE ?
+		TCP_MSG_RMA_WRITE : TCP_MSG_RMA_READ_REQUEST;
 
 	CCI_ENTER;
 
@@ -2555,102 +2574,112 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	debug(CCI_DB_MSG, "%s: starting RMA %s ***", __func__,
 		flags & CCI_FLAG_WRITE ? "Write" : "Read");
 
-	if (flags & CCI_FLAG_WRITE) {
-		int i, cnt, err = 0;
-		tcp_tx_t **txs = NULL;
+	//if (flags & CCI_FLAG_WRITE) {
+	cnt = rma_op->num_msgs < TCP_RMA_DEPTH ?
+	    rma_op->num_msgs : TCP_RMA_DEPTH;
 
-		cnt = rma_op->num_msgs < TCP_RMA_DEPTH ?
-		    rma_op->num_msgs : TCP_RMA_DEPTH;
-
-		txs = calloc(cnt, sizeof(*txs));
-		if (!txs) {
-			pthread_mutex_lock(&ep->lock);
-			local->refcnt--;
-			pthread_mutex_unlock(&ep->lock);
-			free(rma_op);
-			CCI_EXIT;
-			return CCI_ENOMEM;
-		}
-
+	txs = calloc(cnt, sizeof(*txs));
+	if (!txs) {
 		pthread_mutex_lock(&ep->lock);
-		for (i = 0; i < cnt; i++) {
-			txs[i] = tcp_get_tx_locked(tep);
-			if (!txs[i])
-				err++;
-		}
-		if (err) {
-			for (i = 0; i < cnt; i++) {
-				if (txs[i])
-					TAILQ_INSERT_HEAD(&tep->idle_txs,
-							  &txs[i]->evt, entry);
-			}
-			local->refcnt--;
-		}
+		local->refcnt--;
 		pthread_mutex_unlock(&ep->lock);
+		free(rma_op);
+		CCI_EXIT;
+		return CCI_ENOMEM;
+	}
 
-		if (err) {
-			free(txs);
-			free(rma_op);
-			CCI_EXIT;
-			return CCI_ENOBUFS;
-		}
-
-		/* we have all the txs we need, pack them and queue them */
+	pthread_mutex_lock(&ep->lock);
+	for (i = 0; i < cnt; i++) {
+		txs[i] = tcp_get_tx_locked(tep);
+		if (!txs[i])
+			err++;
+	}
+	if (err) {
 		for (i = 0; i < cnt; i++) {
-			tcp_tx_t *tx = txs[i];
-			uint64_t offset =
-			    (uint64_t) i * (uint64_t) TCP_RMA_FRAG_SIZE;
-			tcp_rma_header_t *write =
-			    (tcp_rma_header_t *) tx->buffer;
-
-			rma_op->next = i + 1;
-			tx->msg_type = TCP_MSG_RMA_WRITE;
-			tx->flags = flags | CCI_FLAG_SILENT;
-			tx->state = TCP_TX_QUEUED;
-			tx->len = sizeof(*write);
-			tx->rma_len = TCP_RMA_FRAG_SIZE; /* for now */
-			tx->rma_op = rma_op;
-			tx->rma_id = i;
-
-			tx->evt.event.type = CCI_EVENT_SEND;
-			tx->evt.event.send.status = CCI_SUCCESS; /* for now */
-			tx->evt.event.send.context = (void *)context;
-			tx->evt.event.send.connection = connection;
-			tx->evt.conn = conn;
-
-			if (i == (rma_op->num_msgs - 1)) {
-				if (data_len % TCP_RMA_FRAG_SIZE)
-					tx->rma_len = data_len % TCP_RMA_FRAG_SIZE;
-			}
-
-			tx->rma_ptr = local->start + local_offset + offset;
-
-			debug(CCI_DB_MSG, "%s: RMA Write local offset %"PRIu64" "
-				"remote offset %"PRIu64" length %u", __func__,
-				local_offset + offset, remote_offset + offset,
-				tx->rma_len);
-
-			tcp_pack_rma_write(write, tx->rma_len, tx->id,
-					    local_handle,
-					    local_offset + offset,
-					    remote_handle,
-					    remote_offset + offset);
+			if (txs[i])
+				TAILQ_INSERT_HEAD(&tep->idle_txs,
+						  &txs[i]->evt, entry);
 		}
-		pthread_mutex_lock(&tconn->slock);
-		for (i = 0; i < cnt; i++)
-			TAILQ_INSERT_TAIL(&tconn->queued, &(txs[i])->evt, entry);
-		TAILQ_INSERT_TAIL(&tconn->rmas, rma_op, rmas);
-		tep->fds[tconn->index].events = POLLIN | POLLOUT;
-		pthread_mutex_unlock(&tconn->slock);
+		local->refcnt--;
+	}
+	pthread_mutex_unlock(&ep->lock);
 
-		pthread_mutex_lock(&ep->lock);
-		TAILQ_INSERT_TAIL(&tep->rma_ops, rma_op, entry);
-		pthread_mutex_unlock(&ep->lock);
-
-		/* it is no longer needed */
+	if (err) {
 		free(txs);
+		free(rma_op);
+		CCI_EXIT;
+		return CCI_ENOBUFS;
+	}
 
-		ret = CCI_SUCCESS;
+	/* we have all the txs we need, pack them and queue them */
+	for (i = 0; i < cnt; i++) {
+		tcp_tx_t *tx = txs[i];
+		uint64_t offset =
+		    (uint64_t) i * (uint64_t) TCP_RMA_FRAG_SIZE;
+		tcp_rma_header_t *rma_hdr =
+		    (tcp_rma_header_t *) tx->buffer;
+
+		rma_op->next = i + 1;
+		tx->msg_type = msg_type;
+		tx->flags = flags | CCI_FLAG_SILENT;
+		tx->state = TCP_TX_QUEUED;
+		tx->len = sizeof(*rma_hdr);
+		tx->rma_len = TCP_RMA_FRAG_SIZE; /* for now */
+		tx->rma_op = rma_op;
+		tx->rma_id = i;
+
+		tx->evt.event.type = CCI_EVENT_SEND;
+		tx->evt.event.send.status = CCI_SUCCESS; /* for now */
+		tx->evt.event.send.context = (void *)context;
+		tx->evt.event.send.connection = connection;
+		tx->evt.conn = conn;
+
+		if (i == (rma_op->num_msgs - 1)) {
+			if (data_len % TCP_RMA_FRAG_SIZE)
+				tx->rma_len = data_len % TCP_RMA_FRAG_SIZE;
+		}
+
+		tx->rma_ptr = local->start + local_offset + offset;
+
+		debug(CCI_DB_MSG, "%s: %s local offset %"PRIu64" "
+			"remote offset %"PRIu64" length %u", __func__,
+			tcp_msg_type(msg_type),
+			local_offset + offset, remote_offset + offset,
+			tx->rma_len);
+
+		if (msg_type == TCP_MSG_RMA_WRITE) {
+			tcp_pack_rma_write(rma_hdr, tx->rma_len, tx->id,
+						local_handle,
+						local_offset + offset,
+						remote_handle,
+						remote_offset + offset);
+		} else {
+			tcp_pack_rma_read_request(rma_hdr, tx->rma_len, tx->id,
+						local_handle,
+						local_offset + offset,
+						remote_handle,
+						remote_offset + offset);
+			tx->rma_ptr = NULL;
+			tx->rma_len = 0;
+		}
+	}
+	pthread_mutex_lock(&tconn->slock);
+	for (i = 0; i < cnt; i++)
+		TAILQ_INSERT_TAIL(&tconn->queued, &(txs[i])->evt, entry);
+	TAILQ_INSERT_TAIL(&tconn->rmas, rma_op, rmas);
+	tep->fds[tconn->index].events = POLLIN | POLLOUT;
+	pthread_mutex_unlock(&tconn->slock);
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_TAIL(&tep->rma_ops, rma_op, entry);
+	pthread_mutex_unlock(&ep->lock);
+
+	/* it is no longer needed */
+	free(txs);
+
+	ret = CCI_SUCCESS;
+
+#if 0
 	} else if (flags & CCI_FLAG_READ) {
 		int i, cnt, err = 0;
 		tcp_tx_t **txs = NULL;
@@ -2743,6 +2772,7 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 
 		ret = CCI_SUCCESS;
 	}
+#endif
 
 	tcp_progress_conn_sends(conn);
 
@@ -4308,12 +4338,116 @@ out:
 }
 
 static void
-tcp_progress_rma_write(cci__ep_t *ep, cci__conn_t *conn,
+tcp_handle_rma_read_request(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
+			uint32_t len, uint32_t tx_id)
+{
+	int ret;
+	tcp_ep_t *tep = ep->priv;
+	tcp_conn_t *tconn = conn->priv;
+	tcp_header_t ack;
+	tcp_tx_t *tx = NULL;
+	tcp_rma_header_t *read_request = rx->buffer; /* need to read more */
+	tcp_rma_header_t *read_reply = NULL;
+	uint32_t handle_len = 2 * sizeof(read_request->local);
+	uint64_t local_handle, local_offset, remote_handle, remote_offset;
+	tcp_rma_handle_t *remote, *h = NULL;
+
+	debug(CCI_DB_MSG, "%s: recv'ing RMA_READ_REQUEST on conn %p with len %u",
+		__func__, conn, len);
+
+	ret = tcp_recv_msg(tconn->fd, read_request->header.data, handle_len);
+	if (ret) {
+		/* TODO handle error */
+		goto out;
+	}
+
+	tcp_parse_rma_handle_offset(&read_request->local, &local_handle,
+				     &local_offset);
+	tcp_parse_rma_handle_offset(&read_request->remote, &remote_handle,
+				     &remote_offset);
+	remote = (tcp_rma_handle_t *) (uintptr_t) remote_handle;
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_FOREACH(h, &tep->handles, entry) {
+		if (h == remote) {
+			break;
+		}
+	}
+	pthread_mutex_unlock(&ep->lock);
+
+	if (h != remote) {
+		/* remote is no longer valid, send CCI_ERR_RMA_HANDLE */
+		ret = CCI_ERR_RMA_HANDLE;
+		debug(CCI_DB_WARN, "%s: remote handle not valid", __func__);
+		goto out;
+	} else if (remote->start + (uintptr_t) remote_offset >
+		   remote->start + (uintptr_t) remote->length) {
+		/* offset exceeds remote handle's range, send nak */
+		ret = CCI_ERR_RMA_HANDLE;
+		debug(CCI_DB_WARN, "%s: remote offset not valid", __func__);
+		goto out;
+	} else if (remote->start + (uintptr_t) remote_offset + (uintptr_t) len >
+		   remote->start + (uintptr_t) remote->length) {
+		/* length exceeds remote handle's range, send nak */
+		ret = CCI_ERR_RMA_HANDLE;
+		debug(CCI_DB_WARN, "%s: remote length not valid", __func__);
+		goto out;
+	}
+
+	tx = tcp_get_tx(ep);
+	if (!tx) {
+		ret = CCI_ERR_RNR;
+		goto out;
+	}
+
+	tx->msg_type = TCP_MSG_RMA_READ_REPLY;
+	tx->flags = CCI_FLAG_SILENT;
+	tx->state = TCP_TX_QUEUED;
+	tx->len = sizeof(*read_reply);
+	tx->rma_op = NULL;
+	tx->rma_ptr = remote->start + (uintptr_t) remote_offset;
+	tx->rma_len = len;
+
+	tx->evt.event.type = CCI_EVENT_SEND;
+	tx->evt.event.send.status = CCI_SUCCESS; /* for now */
+	tx->evt.event.send.context = NULL;
+	tx->evt.event.send.connection = &conn->connection;
+	tx->evt.conn = conn;
+
+	read_reply = tx->buffer;
+	tcp_pack_rma_read_reply(read_reply, len, tx_id,
+			local_handle,
+			local_offset,
+			remote_handle,
+			remote_offset);
+
+	pthread_mutex_lock(&tconn->slock);
+	TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
+	tep->fds[tconn->index].events = POLLIN | POLLOUT;
+	pthread_mutex_unlock(&tconn->slock);
+
+out:
+	if (ret) {
+		tcp_pack_ack(&ack, tx_id, ret);
+		pthread_mutex_lock(&ep->lock);
+		send(tconn->fd, &ack, sizeof(ack), 0);
+		tcp_put_rx_locked(tep, rx);
+		pthread_mutex_unlock(&ep->lock);
+	} else {
+		tcp_put_rx(rx);
+	}
+
+	return;
+}
+
+static void
+tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 			tcp_rx_t *rx, uint32_t status, tcp_tx_t *tx)
 {
 	tcp_ep_t *tep = ep->priv;
 	tcp_conn_t *tconn = conn->priv;
 	tcp_rma_op_t *rma_op = tx->rma_op;
+	tcp_msg_type_t msg_type = tx->msg_type;
 
 	rma_op->acked = tx->rma_id;
 
@@ -4329,10 +4463,12 @@ tcp_progress_rma_write(cci__ep_t *ep, cci__conn_t *conn,
 		tx->evt.event.send.status = rma_op->status;
 
 		pthread_mutex_lock(&ep->lock);
+		TAILQ_REMOVE(&tep->rma_ops, rma_op, entry);
 		TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
 		pthread_mutex_unlock(&ep->lock);
 		free(rma_op);
-		debug(CCI_DB_MSG, "%s: completed RMA Write ***", __func__);
+		debug(CCI_DB_MSG, "%s: completed %s ***",
+			__func__, tcp_msg_type(msg_type));
 	} else if (rma_op->next == rma_op->num_msgs) {
 		/* no more fragments, we don't need this tx anymore */
 		debug(CCI_DB_MSG, "%s: releasing tx %p", __func__, tx);
@@ -4340,11 +4476,11 @@ tcp_progress_rma_write(cci__ep_t *ep, cci__conn_t *conn,
 		TAILQ_INSERT_TAIL(&tep->idle_txs, &tx->evt, entry);
 		pthread_mutex_unlock(&ep->lock);
 	} else {
-		/* send next fragment */
+		/* send next fragment (or read fragment request) */
 		int i = rma_op->next++;
 		uint64_t offset =
 		    (uint64_t) i * (uint64_t) TCP_RMA_FRAG_SIZE;
-		tcp_rma_header_t *write =
+		tcp_rma_header_t *rma_hdr =
 			(tcp_rma_header_t *) tx->buffer;
 		tcp_rma_handle_t *local =
 			(tcp_rma_handle_t *) ((uintptr_t) rma_op->local_handle);
@@ -4364,16 +4500,27 @@ tcp_progress_rma_write(cci__ep_t *ep, cci__conn_t *conn,
 
 		tx->rma_ptr = (void*)(uintptr_t)(local->start + rma_op->local_offset + offset);
 
-		debug(CCI_DB_MSG, "%s: RMA Write local offset %"PRIu64" "
+		debug(CCI_DB_MSG, "%s: %s local offset %"PRIu64" "
 			"remote offset %"PRIu64" length %u", __func__,
+			tcp_msg_type(msg_type),
 			rma_op->local_offset + offset,
 			rma_op->remote_offset + offset, tx->rma_len);
 
-		tcp_pack_rma_write(write, tx->rma_len, tx->id,
-				    rma_op->local_handle,
-				    rma_op->local_offset + offset,
-				    rma_op->remote_handle,
-				    rma_op->remote_offset + offset);
+		if (msg_type == TCP_MSG_RMA_WRITE) {
+			tcp_pack_rma_write(rma_hdr, tx->rma_len, tx->id,
+					rma_op->local_handle,
+					rma_op->local_offset + offset,
+					rma_op->remote_handle,
+					rma_op->remote_offset + offset);
+		} else {
+			tcp_pack_rma_read_request(rma_hdr, tx->rma_len, tx->id,
+					rma_op->local_handle,
+					rma_op->local_offset + offset,
+					rma_op->remote_handle,
+					rma_op->remote_offset + offset);
+			tx->rma_ptr = NULL;
+			tx->rma_len = 0;
+		}
 
 		pthread_mutex_lock(&tconn->slock);
 		TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
@@ -4382,6 +4529,79 @@ tcp_progress_rma_write(cci__ep_t *ep, cci__conn_t *conn,
 	}
 
 	tcp_put_rx(rx);
+
+	return;
+}
+
+static void
+tcp_handle_rma_read_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
+				uint32_t len, uint32_t tx_id)
+{
+	int ret;
+	tcp_ep_t *tep = ep->priv;
+	tcp_conn_t *tconn = conn->priv;
+	tcp_rma_header_t *rma_header = rx->buffer; /* need to read more */
+	uint32_t handle_len = 2 * sizeof(rma_header->local);
+	uint64_t local_handle, local_offset;
+	tcp_rma_handle_t *local, *h = NULL;
+	void *ptr = NULL;
+	tcp_tx_t *tx = &tep->txs[tx_id];
+
+	debug(CCI_DB_MSG, "%s: recv'ing RMA_READ_REPLY on conn %p with len %u",
+		__func__, conn, len);
+
+	ret = tcp_recv_msg(tconn->fd, rma_header->header.data, handle_len);
+	if (ret) {
+		/* TODO handle error */
+		debug(CCI_DB_MSG, "%s: recv_msg() returned %s",
+			__func__, strerror(ret));
+		goto out;
+	}
+
+	tcp_parse_rma_handle_offset(&rma_header->local, &local_handle,
+				     &local_offset);
+	local = (tcp_rma_handle_t *) (uintptr_t) local_handle;
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_FOREACH(h, &tep->handles, entry) {
+		if (h == local) {
+			break;
+		}
+	}
+	pthread_mutex_unlock(&ep->lock);
+
+	if (h != local) {
+		/* local is no longer valid, send CCI_ERR_RMA_HANDLE */
+		ret = CCI_ERR_RMA_HANDLE;
+		debug(CCI_DB_WARN, "%s: local handle not valid", __func__);
+		goto out;
+	} else if (local->start + (uintptr_t) local_offset >
+		   local->start + (uintptr_t) local->length) {
+		/* offset exceeds local handle's range, send nak */
+		ret = CCI_ERR_RMA_HANDLE;
+		debug(CCI_DB_WARN, "%s: local offset not valid", __func__);
+		goto out;
+	} else if (local->start + (uintptr_t) local_offset + (uintptr_t) len >
+		   local->start + (uintptr_t) local->length) {
+		/* length exceeds local handle's range, send nak */
+		ret = CCI_ERR_RMA_HANDLE;
+		debug(CCI_DB_WARN, "%s: local length not valid", __func__);
+		goto out;
+	}
+
+	/* valid local handle, copy the data */
+	debug(CCI_DB_INFO, "%s: recv'ing data into target buffer", __func__);
+	ptr = local->start + (uintptr_t) local_offset;
+	ret = tcp_recv_msg(tconn->fd, ptr, len);
+	debug(CCI_DB_MSG, "%s: recv'd data into target buffer", __func__);
+	if (ret)
+		debug(CCI_DB_MSG, "%s: recv'ing RMA READ payload failed with %s",
+			__func__, strerror(ret));
+out:
+	if (ret) {
+		/* TODO we need to drain the message from the fd */
+	}
+	tcp_progress_rma(ep, conn, rx, ret, tx);
 
 	return;
 }
@@ -4414,7 +4634,7 @@ tcp_handle_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		pthread_mutex_unlock(&ep->lock);
 		break;
 	case TCP_MSG_RMA_WRITE:
-		tcp_progress_rma_write(ep, conn, rx, status, tx);
+		tcp_progress_rma(ep, conn, rx, status, tx);
 		break;
 	default:
 		debug(CCI_DB_MSG, "%s: peer acked tx %p with type %s",
@@ -4428,7 +4648,6 @@ static void
 tcp_handle_recv(cci__ep_t *ep, cci__conn_t *conn)
 {
 	int ret;
-	//tcp_ep_t *tep = ep->priv;
 	tcp_conn_t *tconn = conn->priv;
 	tcp_rx_t *rx = NULL;
 	tcp_header_t *hdr = NULL;
@@ -4484,8 +4703,10 @@ tcp_handle_recv(cci__ep_t *ep, cci__conn_t *conn)
 		tcp_handle_rma_write(ep, conn, rx, a, b);
 		break;
 	case TCP_MSG_RMA_READ_REQUEST:
+		tcp_handle_rma_read_request(ep, conn, rx, a, b);
 		break;
 	case TCP_MSG_RMA_READ_REPLY:
+		tcp_handle_rma_read_reply(ep, conn, rx, a, b);
 		break;
 	case TCP_MSG_RMA_INVALID:
 		break;
