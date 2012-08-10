@@ -728,9 +728,6 @@ typedef struct tcp_ep {
 	TAILQ_HEAD(s_ka, tcp_conn) ka_conns;
 	*/
 
-        void *conn_tree;                /* tree of peer conn ids */
-        pthread_rwlock_t conn_tree_lock;        /* rw lock */
-
 	/*! List of active connections awaiting replies */
 	TAILQ_HEAD(s_active, tcp_conn) active;
 
