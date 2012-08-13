@@ -1323,6 +1323,9 @@ out:
 				      "failed with %s\n", strerror(rc));
 		}
 
+		if (vep->ib_channel)
+			ibv_destroy_comp_channel(vep->ib_channel);
+
 		if (vep->id_rc)
 			rdma_destroy_ep(vep->id_rc);
 
@@ -1428,6 +1431,9 @@ static int ctp_verbs_destroy_endpoint(cci_endpoint_t * endpoint)
 	vep->tx_pool = NULL;
 	verbs_destroy_tx_pool(vep->tx_pool_old);
 	vep->tx_pool_old = NULL;
+
+	if (vep->ib_channel)
+		ibv_destroy_comp_channel(vep->ib_channel);
 
 	if (vep->id_rc)
 		rdma_destroy_id(vep->id_rc);
@@ -2245,6 +2251,7 @@ static int ctp_verbs_disconnect(cci_connection_t * connection)
 
 	rdma_destroy_ep(vconn->id);
 
+	free((void *)conn->uri);
 	free(vconn);
 	free(conn);
 
