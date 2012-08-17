@@ -3630,7 +3630,6 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 	}
 
 	memset(wc, 0, sizeof(wc));	/* silence valgrind */
-again:
 	ret = ibv_poll_cq(vep->cq, VERBS_WC_CNT, wc);
 	if (ret == -1) {
 		ret = errno;
@@ -3683,8 +3682,6 @@ again:
 			}
 		}
 	}
-	if (found)
-		goto again;
 
 	if (success)
 		ret = CCI_SUCCESS;
