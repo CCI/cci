@@ -1066,6 +1066,7 @@ static int verbs_get_cq_event(cci__ep_t * ep);
 static int verbs_get_cm_event(cci__ep_t * ep);
 static int verbs_get_rdma_msg_event(cci__ep_t* ep);
 
+#if 0
 void *
 verbs_progress_thread(void *arg)
 {
@@ -1079,6 +1080,7 @@ verbs_progress_thread(void *arg)
 
 	pthread_exit(NULL);
 }
+#endif
 
 static int
 ctp_verbs_create_endpoint(cci_device_t * device,
@@ -1192,6 +1194,18 @@ ctp_verbs_create_endpoint(cci_device_t * device,
 
 	if (fd) {
 		vep->ib_channel = ibv_create_comp_channel(vep->id_rc->verbs);
+
+		fflags = fcntl(vep->ib_channel->fd, F_GETFL, 0);
+		if (fflags == -1) {
+			ret = errno;
+			goto out;
+		}
+
+		ret = fcntl(vep->ib_channel->fd, F_SETFL, fflags | O_NONBLOCK);
+		if (ret == -1) {
+			ret = errno;
+			goto out;
+		}
 	}
 
 	vep->cq_size = VERBS_EP_CQ_CNT;
@@ -1200,6 +1214,9 @@ ctp_verbs_create_endpoint(cci_device_t * device,
 		ret = errno;
 		goto out;
 	}
+
+	if (fd)
+		ibv_req_notify_cq(vep->cq, 0);
 
 	ret = verbs_create_tx_pool(ep, ep->tx_buf_cnt);
 
@@ -1244,6 +1261,7 @@ ctp_verbs_create_endpoint(cci_device_t * device,
 			goto out;
 		}
 
+		memset(&ev, 0, sizeof(ev));
 		ev.data.ptr = (void *) verbs_get_cm_event;
 		ev.events = EPOLLIN;
 
@@ -1266,7 +1284,7 @@ ctp_verbs_create_endpoint(cci_device_t * device,
 			goto out;
 		}
 
-		ibv_req_notify_cq(vep->cq, 0);
+		//ibv_req_notify_cq(vep->cq, 0);
 
 		*fd = vep->fd;
 	}
@@ -3532,19 +3550,19 @@ out:
 
 }
 
-#define VERBS_WC_CNT	8
+#define VERBS_WC_CNT	32
 
 static int verbs_get_cq_event(cci__ep_t * ep)
 {
 	int ret = CCI_EAGAIN;
 	int i = 0;
-	int found = 0;
+	int found = 0, success = 0;
 	struct ibv_wc wc[VERBS_WC_CNT];
 	verbs_ep_t *vep = ep->priv;
 
 	CCI_ENTER;
 
-	{
+	if (vep->rdma_msg_used) {
 		verbs_conn_t *vconn = NULL;
 
 		TAILQ_FOREACH(vconn, &vep->conns, entry) {
@@ -3568,13 +3586,15 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 			ibv_req_notify_cq(vep->cq, 0);
 		} else {
 			ret = errno;
-			debug(CCI_DB_ALL, "%s: ibv_get_cq_event() returned %s (%d)",
-				__func__, strerror(ret), ret);
+			if (ret != EAGAIN)
+				debug(CCI_DB_ALL, "%s: ibv_get_cq_event() returned %s (%d)",
+					__func__, strerror(ret), ret);
+			return ret;
 		}
 	}
 
 	memset(wc, 0, sizeof(wc));	/* silence valgrind */
-
+again:
 	ret = ibv_poll_cq(vep->cq, VERBS_WC_CNT, wc);
 	if (ret == -1) {
 		ret = errno;
@@ -3584,6 +3604,9 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 	found = ret;
 	if (found == 0)
 		ret = CCI_EAGAIN;
+
+	debug(CCI_DB_EP, "%s: poll_cq() found %d events", __func__, found);
+	success++;
 
 	for (i = 0; i < found; i++) {
 		if (wc[i].status != IBV_WC_SUCCESS) {
@@ -3624,7 +3647,11 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 			}
 		}
 	}
+	if (found)
+		goto again;
 
+	if (success)
+		ret = CCI_SUCCESS;
 out:
 	CCI_EXIT;
 	return ret;
@@ -3672,18 +3699,26 @@ static int verbs_progress_ep(cci__ep_t * ep)
 				if (!(events[i].events & EPOLLIN)) {
 					debug(CCI_DB_EP, "%s: epoll error on %s"
 						" fd", __func__,
-						events[i].data.fd ==
-						vep->rdma_channel->fd ?
+						func == (void *) verbs_get_cm_event ?
 						"rdma" : "ib");
 				} else {
 					ret2 = (*func)(ep);
-					if (ret2 == CCI_SUCCESS)
+					if (ret2 == CCI_SUCCESS) {
 						ret = CCI_SUCCESS;
+					} else {
+						debug(CCI_DB_EP, "%s: %s returned %s",
+							__func__,
+						func == (void *) verbs_get_cm_event ?
+						"rdma" : "ib",
+						cci_strerror(&ep->endpoint, ret2));
+					}
 				}
 			}
 		} else if (ret == -1) {
 			debug(CCI_DB_EP, "%s: epoll_wait() returned %s",
 				__func__, strerror(errno));
+		} else {
+			debug(CCI_DB_EP, "%s: epoll_wait() returned 0?", __func__);
 		}
 	} else {
 again:
