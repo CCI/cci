@@ -381,6 +381,7 @@ typedef struct verbs_ep {
 				   RDMA MSGs */
 
 	int fd;			/* epoll() fd */
+	int pipe[2];		/* pipe to notify app */
 	int acks;		/* accumulated acks from ibv_get_cq_event() */
 	pthread_t tid;		/* progress thread */
 	int is_progressing;	/* being progressed? */

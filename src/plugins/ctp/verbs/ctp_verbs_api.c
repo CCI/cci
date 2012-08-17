@@ -1082,13 +1082,32 @@ verbs_progress_thread(void *arg)
 }
 #endif
 
+static inline int
+verbs_make_nonblocking(cci_os_handle_t fd)
+{
+	int ret, flags;
+
+	flags = fcntl(fd, F_GETFL, 0);
+	if (flags == -1) {
+		ret = errno;
+		goto out;
+	}
+
+	ret = fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+	if (ret == -1) {
+		ret = errno;
+		goto out;
+	}
+out:
+	return ret;
+}
+
 static int
 ctp_verbs_create_endpoint(cci_device_t * device,
 		      int flags,
 		      cci_endpoint_t ** endpointp, cci_os_handle_t * fd)
 {
 	int ret = CCI_SUCCESS;
-	int fflags = 0;
 	char name[MAXHOSTNAMELEN + 16];	/* verbs:// + host + port */
 	cci__dev_t *dev = NULL;
 	cci__ep_t *ep = NULL;
@@ -1136,17 +1155,9 @@ ctp_verbs_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 
-	fflags = fcntl(vep->rdma_channel->fd, F_GETFL, 0);
-	if (fflags == -1) {
-		ret = errno;
+	ret = verbs_make_nonblocking(vep->rdma_channel->fd);
+	if (ret)
 		goto out;
-	}
-
-	ret = fcntl(vep->rdma_channel->fd, F_SETFL, fflags | O_NONBLOCK);
-	if (ret == -1) {
-		ret = errno;
-		goto out;
-	}
 
 	ret = rdma_create_id(vep->rdma_channel, &vep->id_rc, ep, RDMA_PS_TCP);
 	if (ret == -1) {
@@ -1195,17 +1206,9 @@ ctp_verbs_create_endpoint(cci_device_t * device,
 	if (fd) {
 		vep->ib_channel = ibv_create_comp_channel(vep->id_rc->verbs);
 
-		fflags = fcntl(vep->ib_channel->fd, F_GETFL, 0);
-		if (fflags == -1) {
-			ret = errno;
+		ret = verbs_make_nonblocking(vep->ib_channel->fd);
+		if (ret)
 			goto out;
-		}
-
-		ret = fcntl(vep->ib_channel->fd, F_SETFL, fflags | O_NONBLOCK);
-		if (ret == -1) {
-			ret = errno;
-			goto out;
-		}
 	}
 
 	vep->cq_size = VERBS_EP_CQ_CNT;
@@ -1238,9 +1241,22 @@ ctp_verbs_create_endpoint(cci_device_t * device,
 		goto out;
 
 	if (fd) {
+		int i;
 		struct epoll_event ev;
 
-		ret = epoll_create(2);
+		ret = pipe(vep->pipe);
+		if (ret) {
+			ret = errno;
+			goto out;
+		}
+
+		for (i = 0; i < 2; i++) {
+			ret = verbs_make_nonblocking(vep->pipe[i]);
+			if (ret)
+				goto out;
+		}
+
+		ret = epoll_create(3);
 		if (ret == -1) {
 			ret = errno;
 			debug(CCI_DB_EP, "%s: epoll() returned %s", __func__,
@@ -1249,17 +1265,9 @@ ctp_verbs_create_endpoint(cci_device_t * device,
 		}
 		vep->fd = ret;
 
-		fflags = fcntl(vep->fd, F_GETFL, 0);
-		if (fflags == -1) {
-			ret = errno;
+		ret = verbs_make_nonblocking(vep->fd);
+		if (ret)
 			goto out;
-		}
-
-		ret = fcntl(vep->fd, F_SETFL, fflags | O_NONBLOCK);
-		if (ret == -1) {
-			ret = errno;
-			goto out;
-		}
 
 		memset(&ev, 0, sizeof(ev));
 		ev.data.ptr = (void *) verbs_get_cm_event;
@@ -1284,7 +1292,23 @@ ctp_verbs_create_endpoint(cci_device_t * device,
 			goto out;
 		}
 
-		//ibv_req_notify_cq(vep->cq, 0);
+		/* The IB channel only provides edge-triggered behavior. To provide
+		 * level-triggered behavior, we will need to add the pipe to the
+		 * epoll set. We will keep a byte in the pipe as long as there is
+		 * one event on ep->evts. This has the side benefit of not requiring
+		 * verbs_get_cq_event() reap all the completions to we can return
+		 * after a bounded amount of work.
+		 */
+		ev.data.ptr = NULL;
+		ev.events = EPOLLIN;
+
+		ret = epoll_ctl(vep->fd, EPOLL_CTL_ADD, vep->pipe[0], &ev);
+		if (ret == -1) {
+			ret = errno;
+			debug(CCI_DB_EP, "%s: epoll_ctl() returned %s", __func__,
+					strerror(ret));
+			goto out;
+		}
 
 		*fd = vep->fd;
 	}
@@ -2853,6 +2877,29 @@ out:
 	return ret;
 }
 
+static inline void
+verbs_queue_evt_locked(cci__ep_t *ep, cci__evt_t *evt)
+{
+	char need_write = 0;
+	verbs_ep_t *vep = ep->priv;
+
+	if (vep->fd && TAILQ_EMPTY(&ep->evts))
+		need_write = 1;
+	TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+	if (need_write) {
+		debug(CCI_DB_EP, "%s: writing to pipe", __func__);
+		write(vep->pipe[1], &need_write, 1);
+	}
+}
+
+static inline void
+verbs_queue_evt(cci__ep_t *ep, cci__evt_t *evt)
+{
+	pthread_mutex_lock(&ep->lock);
+	verbs_queue_evt_locked(ep, evt);
+	pthread_mutex_unlock(&ep->lock);
+}
+
 static int verbs_handle_conn_payload(cci__ep_t * ep, struct ibv_wc wc)
 {
 	int ret = CCI_SUCCESS;
@@ -2922,9 +2969,7 @@ static int verbs_handle_conn_payload(cci__ep_t * ep, struct ibv_wc wc)
 	else
 		rx->evt.event.request.data_ptr = NULL;
 
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
-	pthread_mutex_unlock(&ep->lock);
+	verbs_queue_evt(ep, &rx->evt);
 out:
 	CCI_EXIT;
 	return ret;
@@ -2999,10 +3044,7 @@ static int verbs_handle_conn_reply(cci__ep_t * ep, struct ibv_wc wc)
 		rx->evt.event.connect.connection = NULL;
 	}
 
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
-	pthread_mutex_unlock(&ep->lock);
-
+	verbs_queue_evt(ep, &rx->evt);
 out:
 	CCI_EXIT;
 	return ret;
@@ -3068,7 +3110,7 @@ static int verbs_poll_rdma_msgs(verbs_conn_t * vconn)
 					rx->evt.event.request.data_ptr = NULL;
 
 				pthread_mutex_lock(&ep->lock);
-				TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
+				verbs_queue_evt_locked(ep, &rx->evt);
 				while (!TAILQ_EMPTY(&vconn->early)) {
 					cci__evt_t *evt = TAILQ_FIRST(&vconn->early);
 					verbs_rx_t *rx = container_of(evt, verbs_rx_t, evt);
@@ -3142,7 +3184,7 @@ static int verbs_handle_msg(cci__ep_t * ep, struct ibv_wc wc)
 
 	pthread_mutex_lock(&ep->lock);
 	if (!queue) {
-		TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
+		verbs_queue_evt_locked(ep, &rx->evt);
 	} else {
 		rx->seqno = seqno;
 		TAILQ_INSERT_TAIL(&vconn->early, &rx->evt, entry);
@@ -3388,9 +3430,7 @@ static int verbs_complete_send_msg(cci__ep_t * ep, struct ibv_wc wc)
 	CCI_ENTER;
 
 	tx->evt.event.send.status = verbs_wc_to_cci_status(wc.status);
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
-	pthread_mutex_unlock(&ep->lock);
+	verbs_queue_evt(ep, &tx->evt);
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -3445,9 +3485,7 @@ static int verbs_handle_rma_completion(cci__ep_t * ep, struct ibv_wc wc)
 	if (rma_op->msg_len == 0 || rma_op->status != CCI_SUCCESS) {
 queue:
 		/* we are done, queue it for the app */
-		pthread_mutex_lock(&ep->lock);
-		TAILQ_INSERT_TAIL(&ep->evts, &rma_op->evt, entry);
-		pthread_mutex_unlock(&ep->lock);
+		verbs_queue_evt(ep, &rma_op->evt);
 	} else {
 		uint32_t iovcnt = 1;
 		struct iovec iov;
@@ -3501,9 +3539,7 @@ static int verbs_handle_send_completion(cci__ep_t * ep, struct ibv_wc wc)
 				free(conn);
 			} else {
 				queue_tx = 0;
-				pthread_mutex_lock(&ep->lock);
-				TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
-				pthread_mutex_unlock(&ep->lock);
+				verbs_queue_evt(ep, &tx->evt);
 			}
 		}
 		break;
@@ -3700,8 +3736,10 @@ static int verbs_progress_ep(cci__ep_t * ep)
 					debug(CCI_DB_EP, "%s: epoll error on %s"
 						" fd", __func__,
 						func == (void *) verbs_get_cm_event ?
-						"rdma" : "ib");
+						"rdma" : func ? "ib" : "queued_ib");
 				} else {
+					if (!func)
+						continue;
 					ret2 = (*func)(ep);
 					if (ret2 == CCI_SUCCESS) {
 						ret = CCI_SUCCESS;
@@ -3782,7 +3820,15 @@ ctp_verbs_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
 	}
 
 	if (ev) {
+		char one = 0;
+		verbs_ep_t *vep = ep->priv;
+
 		TAILQ_REMOVE(&ep->evts, ev, entry);
+		if (vep->fd && TAILQ_EMPTY(&ep->evts)) {
+			debug(CCI_DB_EP, "%s: reading from pipe", __func__);
+			read(vep->pipe[0], &one, 1);
+			assert(one == 1);
+		}
 	} else {
 		ret = CCI_EAGAIN;
 	}
