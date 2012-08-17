@@ -94,8 +94,11 @@ static void poll_events(void)
 		FD_ZERO(&rfds);
 		FD_SET(fd, &rfds);
 
+again:
 		ret = select(nfds, &rfds, NULL, NULL, NULL);
-		if (!ret)
+		if (ret == -1 && errno == EINTR)
+			goto again;
+		else if (ret < 1)
 			return;
 	}
 
@@ -311,7 +314,7 @@ int main(int argc, char *argv[])
 {
 	int ret, c;
 	uint32_t caps = 0;
-	cci_os_handle_t ep_fd;
+	//cci_os_handle_t ep_fd;
 	char *uri = NULL;
 	cci_os_handle_t *os_handle = NULL;
 
