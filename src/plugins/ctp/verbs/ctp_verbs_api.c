@@ -3607,7 +3607,7 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 		}
 	}
 
-	if (vep->fd) {
+	if (vep->fd && !vep->check_cq) {
 		struct ibv_cq *cq;
 		void *cq_ctx;
 
@@ -3619,6 +3619,7 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 				ibv_ack_cq_events(vep->cq, VERBS_ACK_CNT);
 				vep->acks = 0;
 			}
+			debug(CCI_DB_EP, "%s: rearming cq", __func__);
 			ibv_req_notify_cq(vep->cq, 0);
 		} else {
 			ret = errno;
@@ -3642,6 +3643,9 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 
 	debug(CCI_DB_EP, "%s: poll_cq() found %d events", __func__, found);
 	success++;
+
+	if (vep->fd)
+		vep->check_cq = 1;
 
 	for (i = 0; i < found; i++) {
 		if (wc[i].status != IBV_WC_SUCCESS) {
@@ -3718,7 +3722,7 @@ static int verbs_progress_ep(cci__ep_t * ep)
 		return CCI_EAGAIN;
 	}
 
-	if (vep->fd) {
+	if (vep->fd && !vep->check_cq) {
 		struct epoll_event events[VERBS_EP_NUM_EVTS];
 
 		ret = epoll_wait(vep->fd, events, VERBS_EP_NUM_EVTS, 0);
@@ -3753,7 +3757,8 @@ static int verbs_progress_ep(cci__ep_t * ep)
 			debug(CCI_DB_EP, "%s: epoll_wait() returned %s",
 				__func__, strerror(errno));
 		} else {
-			debug(CCI_DB_EP, "%s: epoll_wait() returned 0?", __func__);
+			if (!vep->check_cq)
+				debug(CCI_DB_EP, "%s: epoll_wait() returned 0?", __func__);
 		}
 	} else {
 again:
