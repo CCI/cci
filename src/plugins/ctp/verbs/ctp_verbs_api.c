@@ -4017,11 +4017,15 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 	is_reliable = cci_conn_is_reliable(conn);
 
 	/* get a tx */
-	tx = verbs_get_tx(ep);
-	if (!tx) {
-		debug(CCI_DB_MSG, "%s: no txs", __func__);
-		CCI_EXIT;
-		return CCI_ENOBUFS;
+	if (!(rma_op && rma_op->tx)) {
+		tx = verbs_get_tx(ep);
+		if (!tx) {
+			debug(CCI_DB_MSG, "%s: no txs", __func__);
+			CCI_EXIT;
+			return CCI_ENOBUFS;
+		}
+	} else {
+		tx = rma_op->tx;
 	}
 
 	/* tx bookkeeping */
@@ -4071,7 +4075,8 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 
 	/* always copy into tx's buffer */
 	if (len) {
-		if (len > (vconn->inline_size - 4 - pad) || iovcnt != 1) {
+		if (((len > (vconn->inline_size - 4 - pad)) || iovcnt != 1)
+			&& !(rma_op && rma_op->tx)) {
 			uint32_t offset = 0;
 
 			ptr = tx->buffer;
@@ -4409,6 +4414,17 @@ ctp_verbs_rma(cci_connection_t * connection,
 	rma_op->evt.conn = conn;
 	rma_op->evt.priv = rma_op;
 
+	if (msg_ptr && msg_len) {
+		rma_op->tx = verbs_get_tx(ep);
+		if (!rma_op->tx) {
+			ret = CCI_ENOBUFS;
+			goto out;
+		}
+		memcpy(rma_op->tx->buffer, msg_ptr, msg_len);
+		rma_op->msg_ptr = rma_op->tx->buffer;
+		rma_op->msg_len = msg_len;
+	}
+
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&vep->rma_ops, rma_op, entry);
 	pthread_mutex_unlock(&ep->lock);
@@ -4423,6 +4439,10 @@ ctp_verbs_rma(cci_connection_t * connection,
 	if (ret) {
 		/* FIXME clean up? */
 	}
+
+out:
+	if (ret)
+		free(rma_op);
 
 	CCI_EXIT;
 	return ret;
