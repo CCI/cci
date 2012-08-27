@@ -46,6 +46,7 @@ int remote_completion = 0;
 void *rmt_comp_msg = NULL;
 uint32_t rmt_comp_len = 0;
 cci_os_handle_t fd = 0;
+int ignore_os_handle = 0;
 int blocking = 0;
 int nfds = 0;
 fd_set rfds;
@@ -66,7 +67,7 @@ options_t opts = { 0ULL, 0, 0, 0, 0 };
 void print_usage()
 {
 	fprintf(stderr, "usage: %s -h <server_uri> [-s] [-i <iters>] "
-		"[-W <warmup>] [-c <type>] [-n] "
+		"[-W <warmup>] [-c <type>] [-n] [-b|-o]"
 		"[[-w | -r] [-m <max_rma_size> [-C]]]\n", name);
 	fprintf(stderr, "where:\n");
 	fprintf(stderr, "\t-h\tServer's URI\n");
@@ -81,7 +82,8 @@ void print_usage()
 	fprintf(stderr, "\t-r\tUse RMA READ instead of MSGs\n");
 	fprintf(stderr, "\t-m\tTest RMA messages up to max_rma_size\n");
 	fprintf(stderr, "\t-C\tSend RMA remote completion message\n");
-	fprintf(stderr, "\t-b\tBlock using the OS handle instead of polling\n\n");
+	fprintf(stderr, "\t-b\tBlock using the OS handle instead of polling\n");
+	fprintf(stderr, "\t-o\tGet OS handle but don't use it\n\n");
 	fprintf(stderr, "Example:\n");
 	fprintf(stderr, "server$ %s -h ip://foo -p 2211 -s\n", name);
 	fprintf(stderr, "client$ %s -h ip://foo -p 2211\n", name);
@@ -471,7 +473,7 @@ int main(int argc, char *argv[])
 
 	name = argv[0];
 
-	while ((c = getopt(argc, argv, "h:sRc:nwrm:Ci:W:b")) != -1) {
+	while ((c = getopt(argc, argv, "h:sRc:nwrm:Ci:W:bo")) != -1) {
 		switch (c) {
 		case 'h':
 			server_uri = strdup(optarg);
@@ -520,6 +522,10 @@ int main(int argc, char *argv[])
 			blocking = 1;
 			os_handle = &fd;
 			break;
+		case 'o':
+			ignore_os_handle = 1;
+			os_handle = &fd;
+			break;
 		default:
 			print_usage();
 		}
@@ -527,6 +533,13 @@ int main(int argc, char *argv[])
 
 	if (!is_server && !server_uri) {
 		fprintf(stderr, "Must select -h or -s\n");
+		print_usage();
+	}
+
+	if (blocking && ignore_os_handle) {
+		fprintf(stderr, "-b and -o are not compatible.\n");
+		fprintf(stderr, "-b will block using select() using the OS handle.\n");
+		fprintf(stderr, "-o will obtain the OS handle, but not use it to wait.\n");
 		print_usage();
 	}
 

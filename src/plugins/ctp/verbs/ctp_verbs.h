@@ -380,7 +380,9 @@ typedef struct verbs_ep {
 	uint32_t rdma_msg_used;	/* number of connections using
 				   RDMA MSGs */
 
+	int check_cq;		/* set if fd && poll_cq() returned events */
 	int fd;			/* epoll() fd */
+	int pipe[2];		/* pipe to notify app */
 	int acks;		/* accumulated acks from ibv_get_cq_event() */
 	pthread_t tid;		/* progress thread */
 	int is_progressing;	/* being progressed? */
