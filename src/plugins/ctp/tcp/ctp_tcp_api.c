@@ -1799,24 +1799,10 @@ tcp_queue_tx(tcp_ep_t *tep, tcp_conn_t *tconn, cci__evt_t *evt)
 	pthread_mutex_unlock(&tconn->slock);
 }
 
-static int ctp_tcp_send(cci_connection_t * connection,
-		     const void *msg_ptr, uint32_t msg_len, const void *context, int flags)
-{
-	uint32_t iovcnt = 0;
-	struct iovec iov = { NULL, 0 };
-
-	if (msg_ptr && msg_len) {
-		iovcnt = 1;
-		iov.iov_base = (void *) msg_ptr;
-		iov.iov_len = msg_len;
-	}
-
-	return ctp_tcp_sendv(connection, &iov, iovcnt, context, flags);
-}
-
-static int ctp_tcp_sendv(cci_connection_t * connection,
+static int tcp_send_common(cci_connection_t * connection,
 		      const struct iovec *data, uint32_t iovcnt,
-		      const void *context, int flags)
+		      const void *context, int flags,
+		      tcp_rma_op_t *rma_op)
 {
 	int i, ret, is_reliable = 0, data_len = 0;
 	char *func = iovcnt < 2 ? "send" : "sendv";
@@ -1849,10 +1835,14 @@ static int ctp_tcp_sendv(cci_connection_t * connection,
 	is_reliable = cci_conn_is_reliable(conn);
 
 	/* get a tx */
-	tx = tcp_get_tx(ep, 0);
-	if (!tx) {
-		debug(CCI_DB_FUNC, "exiting %s", func);
-		return CCI_ENOBUFS;
+	if (rma_op && rma_op->tx) {
+		tx = rma_op->tx;
+	} else {
+		tx = tcp_get_tx(ep, 0);
+		if (!tx) {
+			debug(CCI_DB_FUNC, "exiting %s", func);
+			return CCI_ENOBUFS;
+		}
 	}
 
 	tx->rma_ptr = NULL;
@@ -1891,7 +1881,11 @@ static int ctp_tcp_sendv(cci_connection_t * connection,
 	 use sendmsg() with an iovec. */
 
 	for (i = 0; i < iovcnt; i++) {
-		memcpy(ptr, data[i].iov_base, data[i].iov_len);
+		if (!(rma_op && rma_op->tx)) {
+			/* don't copy - the data is already in place
+			 * from the rma() call */
+			memcpy(ptr, data[i].iov_base, data[i].iov_len);
+		}
 		ptr += data[i].iov_len;
 		tx->len += data[i].iov_len;
 	}
@@ -1957,6 +1951,41 @@ static int ctp_tcp_sendv(cci_connection_t * connection,
 	}
 
 	debug(CCI_DB_FUNC, "exiting %s", func);
+	return ret;
+}
+
+static int ctp_tcp_send(cci_connection_t * connection,
+		     const void *msg_ptr, uint32_t msg_len, const void *context, int flags)
+{
+	int ret = CCI_SUCCESS;
+	uint32_t iovcnt = 0;
+	struct iovec iov = { NULL, 0 };
+
+	CCI_ENTER;
+
+	if (msg_ptr && msg_len) {
+		iovcnt = 1;
+		iov.iov_base = (void *) msg_ptr;
+		iov.iov_len = msg_len;
+	}
+
+	ret = tcp_send_common(connection, &iov, iovcnt, context, flags, NULL);
+
+	CCI_EXIT;
+	return ret;
+}
+
+static int ctp_tcp_sendv(cci_connection_t * connection,
+		      const struct iovec *data, uint32_t iovcnt,
+		      const void *context, int flags)
+{
+	int ret = CCI_SUCCESS;
+
+	CCI_ENTER;
+
+	ret = tcp_send_common(connection, data, iovcnt, context, flags, NULL);
+
+	CCI_EXIT;
 	return ret;
 }
 
@@ -2122,15 +2151,22 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	rma_op->msg_len = (uint16_t) msg_len;
 	rma_op->tx = NULL;
 
-	if (msg_len)
-		rma_op->msg_ptr = (void *) msg_ptr;
-	else
+	if (msg_len) {
+		rma_op->tx = tcp_get_tx(ep, 0);
+		if (!rma_op->tx) {
+			ret = CCI_ENOBUFS;
+			goto out;
+		}
+		rma_op->msg_ptr = rma_op->tx->buffer;
+		rma_op->msg_len = msg_len;
+		memcpy(rma_op->msg_ptr + sizeof(tcp_header_t), msg_ptr, msg_len);
+	} else {
 		rma_op->msg_ptr = NULL;
+	}
 
 	debug(CCI_DB_MSG, "%s: starting RMA %s ***", __func__,
 		flags & CCI_FLAG_WRITE ? "Write" : "Read");
 
-	//if (flags & CCI_FLAG_WRITE) {
 	cnt = rma_op->num_msgs < TCP_RMA_DEPTH ?
 	    rma_op->num_msgs : TCP_RMA_DEPTH;
 
@@ -2237,6 +2273,13 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 
 	tcp_progress_conn_sends(conn);
 
+out:
+	if (ret) {
+		pthread_mutex_lock(&ep->lock);
+		local->refcnt--;
+		pthread_mutex_unlock(&ep->lock);
+		free(rma_op);
+	}
 	CCI_EXIT;
 	return ret;
 }
@@ -2627,14 +2670,12 @@ tcp_handle_rma_write(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		ret = CCI_ERR_RMA_HANDLE;
 		debug(CCI_DB_WARN, "%s: remote handle not valid", __func__);
 		goto out;
-	} else if (remote->start + (uintptr_t) remote_offset >
-		   remote->start + (uintptr_t) remote->length) {
+	} else if (remote_offset > remote->length) {
 		/* offset exceeds remote handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
 		debug(CCI_DB_WARN, "%s: remote offset not valid", __func__);
 		goto out;
-	} else if (remote->start + (uintptr_t) remote_offset + (uintptr_t) len >
-		   remote->start + (uintptr_t) remote->length) {
+	} else if ((remote_offset + len) > remote->length) {
 		/* length exceeds remote handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
 		debug(CCI_DB_WARN, "%s: remote length not valid", __func__);
@@ -2707,14 +2748,12 @@ tcp_handle_rma_read_request(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		ret = CCI_ERR_RMA_HANDLE;
 		debug(CCI_DB_WARN, "%s: remote handle not valid", __func__);
 		goto out;
-	} else if (remote->start + (uintptr_t) remote_offset >
-		   remote->start + (uintptr_t) remote->length) {
+	} else if (remote_offset > remote->length) {
 		/* offset exceeds remote handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
 		debug(CCI_DB_WARN, "%s: remote offset not valid", __func__);
 		goto out;
-	} else if (remote->start + (uintptr_t) remote_offset + (uintptr_t) len >
-		   remote->start + (uintptr_t) remote->length) {
+	} else if ((remote_offset + len) > remote->length) {
 		/* length exceeds remote handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
 		debug(CCI_DB_WARN, "%s: remote length not valid", __func__);
@@ -2788,17 +2827,46 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 	pthread_mutex_unlock(&tconn->slock);
 
 	if (tx->rma_id == (rma_op->num_msgs - 1)) {
+		int ret;
+
 		/* last segment - complete rma */
 		tx->evt.event.send.status = rma_op->status;
+		if (rma_op->status || !rma_op->msg_ptr) {
+			pthread_mutex_lock(&ep->lock);
+			TAILQ_REMOVE(&tep->rma_ops, rma_op, entry);
+			TAILQ_REMOVE(&tconn->rmas, rma_op, rmas);
+			TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
+			pthread_mutex_unlock(&ep->lock);
+			debug(CCI_DB_MSG, "%s: completed %s ***",
+				__func__, tcp_msg_type(msg_type));
+		} else {
+			struct iovec iov;
 
-		pthread_mutex_lock(&ep->lock);
-		TAILQ_REMOVE(&tep->rma_ops, rma_op, entry);
-		TAILQ_REMOVE(&tconn->rmas, rma_op, rmas);
-		TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
-		pthread_mutex_unlock(&ep->lock);
+			iov.iov_base = rma_op->msg_ptr;
+			iov.iov_len = rma_op->msg_len;
+
+			pthread_mutex_lock(&ep->lock);
+			TAILQ_REMOVE(&tep->rma_ops, rma_op, entry);
+			TAILQ_REMOVE(&tconn->rmas, rma_op, rmas);
+			pthread_mutex_unlock(&ep->lock);
+			debug(CCI_DB_MSG, "%s: sending RMA completion MSG ***",
+				__func__);
+			ret = tcp_send_common(&conn->connection,
+						&iov,
+						1,
+						rma_op->context,
+						rma_op->flags,
+						rma_op);
+			if (ret) {
+				rma_op->status = ret;
+				pthread_mutex_lock(&ep->lock);
+				TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
+				pthread_mutex_unlock(&ep->lock);
+			} else {
+				tcp_put_tx(tx);
+			}
+		}
 		free(rma_op);
-		debug(CCI_DB_MSG, "%s: completed %s ***",
-			__func__, tcp_msg_type(msg_type));
 	} else if (rma_op->next == rma_op->num_msgs) {
 		/* no more fragments, we don't need this tx anymore */
 		debug(CCI_DB_MSG, "%s: releasing tx %p", __func__, tx);
@@ -2900,14 +2968,12 @@ tcp_handle_rma_read_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		ret = CCI_ERR_RMA_HANDLE;
 		debug(CCI_DB_WARN, "%s: local handle not valid", __func__);
 		goto out;
-	} else if (local->start + (uintptr_t) local_offset >
-		   local->start + (uintptr_t) local->length) {
+	} else if (local_offset > local->length) {
 		/* offset exceeds local handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
 		debug(CCI_DB_WARN, "%s: local offset not valid", __func__);
 		goto out;
-	} else if (local->start + (uintptr_t) local_offset + (uintptr_t) len >
-		   local->start + (uintptr_t) local->length) {
+	} else if ((local_offset + len) > local->length) {
 		/* length exceeds local handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
 		debug(CCI_DB_WARN, "%s: local length not valid", __func__);
