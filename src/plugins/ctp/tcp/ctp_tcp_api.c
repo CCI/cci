@@ -842,7 +842,7 @@ tcp_get_tx_locked(tcp_ep_t *tep)
 }
 
 static inline tcp_tx_t *
-tcp_get_tx(cci__ep_t *ep)
+tcp_get_tx(cci__ep_t *ep, int allocate)
 {
 	tcp_ep_t *tep = ep->priv;
 	tcp_tx_t *tx = NULL;
@@ -850,6 +850,15 @@ tcp_get_tx(cci__ep_t *ep)
 	pthread_mutex_lock(&ep->lock);
 	tx = tcp_get_tx_locked(tep);
 	pthread_mutex_unlock(&ep->lock);
+
+	if (!tx && allocate) {
+		do {
+			tx = calloc(1, sizeof(*tx));
+		} while (!tx);
+		do {
+			tx->buffer = calloc(1, sizeof(*ack));
+		} while (!tx->buffer);
+	}
 
 	return tx;
 }
@@ -957,7 +966,7 @@ static int ctp_tcp_accept(cci_event_t *event, const void *context)
 	tconn = conn->priv;
 
 	/* get a tx */
-	tx = tcp_get_tx(ep);
+	tx = tcp_get_tx(ep, 0);
 	if (!tx) {
 		/* TODO send reject */
 		/* TODO remove from tep->fds, t->c, tep->nfds-- */
@@ -1058,7 +1067,7 @@ static int ctp_tcp_reject(cci_event_t *event)
 	rx = container_of(evt, tcp_rx_t, evt);
 
 	/* get a tx */
-	tx = tcp_get_tx(ep);
+	tx = tcp_get_tx(ep, 0);
 	if (!tx) {
 		ret = CCI_ENOBUFS;
 		goto out;
@@ -1315,7 +1324,7 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	pthread_mutex_unlock(&ep->lock);
 
 	/* get a tx */
-	tx = tcp_get_tx(ep);
+	tx = tcp_get_tx(ep, 0);
 	if (!tx) {
 		ret = CCI_ENOBUFS;
 		goto out;
@@ -1831,7 +1840,7 @@ static int ctp_tcp_sendv(cci_connection_t * connection,
 	is_reliable = cci_conn_is_reliable(conn);
 
 	/* get a tx */
-	tx = tcp_get_tx(ep);
+	tx = tcp_get_tx(ep, 0);
 	if (!tx) {
 		debug(CCI_DB_FUNC, "exiting %s", func);
 		return CCI_ENOBUFS;
@@ -2555,15 +2564,7 @@ out:
 		tcp_tx_t *tx = NULL;
 		tcp_header_t *ack;
 
-		tx = tcp_get_tx(ep);
-		if (!tx) {
-			do {
-				tx = calloc(1, sizeof(*tx));
-			} while (!tx);
-			do {
-				tx->buffer = calloc(1, sizeof(*ack));
-			} while (!tx->buffer);
-		}
+		tx = tcp_get_tx(ep, 1);
 
 		tx->msg_type = TCP_MSG_ACK;
 		tx->len = sizeof(*ack);
@@ -2646,15 +2647,7 @@ tcp_handle_rma_write(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		debug(CCI_DB_MSG, "%s: recv'ing RMA WRITE payload failed with %s",
 			__func__, strerror(ret));
 out:
-	tx = tcp_get_tx(ep);
-	if (!tx) {
-		do {
-			tx = calloc(1, sizeof(*tx));
-		} while (!tx);
-		do {
-			tx->buffer = calloc(1, sizeof(*ack));
-		} while (!tx->buffer);
-	}
+	tx = tcp_get_tx(ep, 1);
 
 	tx->msg_type = TCP_MSG_ACK;
 	tx->len = sizeof(*ack);
@@ -2728,7 +2721,7 @@ tcp_handle_rma_read_request(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		goto out;
 	}
 
-	tx = tcp_get_tx(ep);
+	tx = tcp_get_tx(ep, 0);
 	if (!tx) {
 		ret = CCI_ERR_RNR;
 		goto out;
@@ -2764,15 +2757,7 @@ out:
 	if (ret) {
 		tcp_header_t *ack;
 
-		tx = tcp_get_tx(ep);
-		if (!tx) {
-			do {
-				tx = calloc(1, sizeof(*tx));
-			} while (!tx);
-			do {
-				tx->buffer = calloc(1, sizeof(*ack));
-			} while (!tx->buffer);
-		}
+		tx = tcp_get_tx(ep, 1);
 
 		tx->msg_type = TCP_MSG_ACK;
 		tx->len = sizeof(*ack);
