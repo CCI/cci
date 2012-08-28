@@ -856,7 +856,7 @@ tcp_get_tx(cci__ep_t *ep, int allocate)
 			tx = calloc(1, sizeof(*tx));
 		} while (!tx);
 		do {
-			tx->buffer = calloc(1, sizeof(*ack));
+			tx->buffer = calloc(1, sizeof(tcp_header_t));
 		} while (!tx->buffer);
 	}
 
@@ -1097,9 +1097,9 @@ static int ctp_tcp_reject(cci_event_t *event)
 	/* insert at tail of endpoint's queued list */
 
 	tx->state = TCP_TX_QUEUED;
-	pthread_mutex_lock(&ep->lock);
+	pthread_mutex_lock(&tconn->slock);
 	TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
-	pthread_mutex_unlock(&ep->lock);
+	pthread_mutex_unlock(&tconn->slock);
 
 	/* try to progress txs */
 
@@ -1386,9 +1386,9 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	tx->state = TCP_TX_QUEUED;
 
 	/* insert at tail of conn's queued list */
-	pthread_mutex_lock(&ep->lock);
+	pthread_mutex_lock(&tconn->slock);
 	TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
-	pthread_mutex_unlock(&ep->lock);
+	pthread_mutex_unlock(&tconn->slock);
 
 	/* ok, initiate connect()... */
 	ret = connect(tconn->fd, (struct sockaddr *)&sin, slen);
@@ -1790,6 +1790,15 @@ tcp_progress_ep(cci__ep_t *ep)
 	return ret;
 }
 
+static inline void
+tcp_queue_tx(tcp_ep_t *tep, tcp_conn_t *tconn, cci__evt_t *evt)
+{
+	pthread_mutex_lock(&tconn->slock);
+	TAILQ_INSERT_TAIL(&tconn->queued, evt, entry);
+	tep->fds[tconn->index].events = POLLIN | POLLOUT;
+	pthread_mutex_unlock(&tconn->slock);
+}
+
 static int ctp_tcp_send(cci_connection_t * connection,
 		     const void *msg_ptr, uint32_t msg_len, const void *context, int flags)
 {
@@ -1914,10 +1923,7 @@ static int ctp_tcp_sendv(cci_connection_t * connection,
 	debug(CCI_DB_MSG, "%s: queuing MSG %p to conn %p", __func__, tx, conn);
 
 	tx->state = TCP_TX_QUEUED;
-	pthread_mutex_lock(&tconn->slock);
-	TAILQ_INSERT_TAIL(&tconn->queued, evt, entry);
-	tep->fds[tconn->index].events = POLLIN | POLLOUT;
-	pthread_mutex_unlock(&tconn->slock);
+	tcp_queue_tx(tep, tconn, evt);
 
 	/* try to progress txs */
 
@@ -2572,10 +2578,7 @@ out:
 		ack = tx->buffer;
 		tcp_pack_ack(ack, tx_id, ret);
 
-		pthread_mutex_lock(&tconn->slock);
-		TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
-		tep->fds[tconn->index].events = POLLIN | POLLOUT;
-		pthread_mutex_unlock(&tconn->slock);
+		tcp_queue_tx(tep, tconn, &tx->evt);
 	}
 
 	/* TODO close conn */
@@ -2655,10 +2658,7 @@ out:
 	ack = tx->buffer;
 	tcp_pack_ack(ack, tx_id, ret);
 
-	pthread_mutex_lock(&tconn->slock);
-	TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
-	tep->fds[tconn->index].events = POLLIN | POLLOUT;
-	pthread_mutex_unlock(&tconn->slock);
+	tcp_queue_tx(tep, tconn, &tx->evt);
 
 	tcp_put_rx(rx);
 
@@ -2748,10 +2748,7 @@ tcp_handle_rma_read_request(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 			remote_handle,
 			remote_offset);
 
-	pthread_mutex_lock(&tconn->slock);
-	TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
-	tep->fds[tconn->index].events = POLLIN | POLLOUT;
-	pthread_mutex_unlock(&tconn->slock);
+	tcp_queue_tx(tep, tconn, &tx->evt);
 
 out:
 	if (ret) {
@@ -2765,10 +2762,7 @@ out:
 		ack = tx->buffer;
 		tcp_pack_ack(ack, tx_id, ret);
 
-		pthread_mutex_lock(&tconn->slock);
-		TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
-		tep->fds[tconn->index].events = POLLIN | POLLOUT;
-		pthread_mutex_unlock(&tconn->slock);
+		tcp_queue_tx(tep, tconn, &tx->evt);
 	}
 	tcp_put_rx(rx);
 
@@ -2856,10 +2850,7 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 			tx->rma_len = 0;
 		}
 
-		pthread_mutex_lock(&tconn->slock);
-		TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
-		tep->fds[tconn->index].events = POLLIN | POLLOUT;
-		pthread_mutex_unlock(&tconn->slock);
+		tcp_queue_tx(tep, tconn, &tx->evt);
 	}
 
 	tcp_put_rx(rx);
@@ -3101,9 +3092,12 @@ tcp_poll_events(cci__ep_t *ep)
 		cci__conn_t *conn = tep->c[i];
 		tcp_conn_t *tconn = NULL;
 
-		if (revents)
+		if (revents) {
 			debug(CCI_DB_CONN, "%s: revents 0x%x",
 				__func__, revents);
+		} else {
+			goto increment;
+		}
 
 		if (conn)
 			tconn = conn->priv;
@@ -3145,6 +3139,7 @@ tcp_poll_events(cci__ep_t *ep)
 				__func__, revents);
 		if (found)
 			count--;
+increment:
 		i++;
 
 		if (count == tep->nfds)
