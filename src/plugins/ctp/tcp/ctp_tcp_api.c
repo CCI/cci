@@ -2667,6 +2667,8 @@ out:
 	tep->fds[tconn->index].events = POLLIN | POLLOUT;
 	pthread_mutex_unlock(&tconn->slock);
 
+	tcp_put_rx(rx);
+
 	return;
 }
 
