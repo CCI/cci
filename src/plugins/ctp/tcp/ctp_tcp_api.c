@@ -369,6 +369,9 @@ static int ctp_tcp_init(cci_plugin_ctp_t *plugin,
 					uint16_t    port;
 					port = atoi (s_port);
 					tdev->port = htons(port);
+				} else if (0 == strncmp("bufsize=", *arg, 8)) {
+					const char *size_str = *arg + 8;
+					tdev->bufsize = strtol(size_str, NULL, 0);
 				}
 			}
 			if (tdev->ip != 0) {
@@ -1257,6 +1260,7 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	cci__dev_t *dev = NULL;
 	cci__conn_t *conn = NULL;
 	tcp_ep_t *tep = NULL;
+	tcp_dev_t *tdev = NULL;
 	tcp_conn_t *tconn = NULL;
 	tcp_tx_t *tx = NULL;
 	tcp_header_t *hdr = NULL;
@@ -1280,6 +1284,7 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 	tep = ep->priv;
 	dev = ep->dev;
+	tdev = dev->priv;
 
 	memset(&sin, 0, sizeof(sin));
 	sin.sin_family = AF_INET;
@@ -1297,6 +1302,22 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		goto out;
 	}
 	fd = ret;
+
+	if (tdev->bufsize) {
+		uint32_t bufsize = tdev->bufsize;
+		socklen_t opt_len = sizeof(bufsize);
+
+		debug(CCI_DB_CONN, "%s: setting socket buffer sizes to %u",
+			__func__, bufsize);
+
+		ret = setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &bufsize, opt_len);
+		if (ret) debug(CCI_DB_ALL, "%s: unable to set SO_SNDBUF (%s)",
+				__func__, strerror(errno));
+
+		ret = setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bufsize, opt_len);
+		if (ret) debug(CCI_DB_ALL, "%s: unable to set SO_RCVBUF (%s)",
+				__func__, strerror(errno));
+	}
 
 	ret = tcp_new_conn(ep, sin, fd, &conn);
 	if (ret)

@@ -819,6 +819,9 @@ typedef struct tcp_dev {
 
 	/*! Our port in network byte order */
 	in_port_t port;
+
+	/*! Set socket buffers sizes */
+	uint32_t bufsize;
 } tcp_dev_t;
 
 typedef enum tcp_fd_type {
