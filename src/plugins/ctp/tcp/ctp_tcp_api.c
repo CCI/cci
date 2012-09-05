@@ -2861,6 +2861,13 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 			debug(CCI_DB_MSG, "%s: completed %s ***",
 				__func__, tcp_msg_type(msg_type));
 		} else {
+			/* FIXME: This sends the completion MSG after the last
+			 * RMA fragment is acked which adds a MSG latency
+			 * on top of the RMA latency. Ideally, we would
+			 * send the MSG just after sending the last
+			 * RMA fragment which would knock off most of
+			 * the MSG latency.
+			 */
 			struct iovec iov;
 
 			iov.iov_base = rma_op->msg_ptr;
