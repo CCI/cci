@@ -561,9 +561,10 @@ CCI_DECLSPEC int cci_create_endpoint(cci_device_t * device,
    \return Each transport may have additional error codes.
 
    Successful completion of this function makes all data structures
-   and state associated with the endpoint (including the OS handle)
-   stale.  All open connections are closed immediately -- it is exactly
-   as if cci_disconnect() was invoked on every open connection on this
+   and state associated with the endpoint stale (including the OS
+   handle, connections, events, event buffers, and RMA registrations).
+   All open connections are closed immediately -- it is exactly as if
+   cci_disconnect() was invoked on every open connection on this
    endpoint.
 
   \ingroup endpoints
