@@ -51,6 +51,14 @@ BEGIN_C_DECLS
 #define PENDING_ACK_THRESHOLD   (SOCK_RMA_DEPTH/4) /* Maximum size of a ACK block */
 #define SOCK_EP_NUM_EVTS        (64)
 
+/*
+ * System Parameters
+ */
+
+/* System send buffer size. Set to 0 for the default system size */
+#define SOCK_SNDBUF_SIZE        (0) 
+#define SOCK_RCVBUF_SIZE        (0)
+
 static inline uint64_t sock_tv_to_usecs(struct timeval tv)
 {
 	return (tv.tv_sec * 1000000) + tv.tv_usec;
