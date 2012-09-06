@@ -317,7 +317,6 @@ void do_server()
 		if (ret == CCI_SUCCESS) {
 			switch (event->type) {
 			case CCI_EVENT_CONNECT_REQUEST:
-				printf ("event_connect_request...\n");
 				if (accept) {
 					opts = *((options_t *) event->request.data_ptr);
 					ret = cci_accept(event, NULL);
@@ -328,8 +327,6 @@ void do_server()
 				}
 				break;
 			case CCI_EVENT_ACCEPT:
-				printf ("event_accept...\n");
-
 				ready = 1;
 				connection = event->accept.connection;
 
