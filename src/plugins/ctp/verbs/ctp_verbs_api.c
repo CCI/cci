@@ -3429,8 +3429,12 @@ static int verbs_complete_send_msg(cci__ep_t * ep, struct ibv_wc wc)
 
 	CCI_ENTER;
 
-	tx->evt.event.send.status = verbs_wc_to_cci_status(wc.status);
-	verbs_queue_evt(ep, &tx->evt);
+	if (!(tx->flags & CCI_FLAG_SILENT)) {
+		tx->evt.event.send.status = verbs_wc_to_cci_status(wc.status);
+		verbs_queue_evt(ep, &tx->evt);
+	} else {
+		verbs_return_tx(tx);
+	}
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -3484,8 +3488,14 @@ static int verbs_handle_rma_completion(cci__ep_t * ep, struct ibv_wc wc)
 	rma_op->status = verbs_wc_to_cci_status(wc.status);
 	if (rma_op->msg_len == 0 || rma_op->status != CCI_SUCCESS) {
 queue:
-		/* we are done, queue it for the app */
-		verbs_queue_evt(ep, &rma_op->evt);
+		if (!(rma_op->flags & CCI_FLAG_SILENT)) {
+			/* we are done, queue it for the app */
+			verbs_queue_evt(ep, &rma_op->evt);
+		} else {
+			if (rma_op->tx)
+				verbs_return_tx(rma_op->tx);
+			free(rma_op);
+		}
 	} else {
 		uint32_t iovcnt = 1;
 		struct iovec iov;
