@@ -4347,7 +4347,7 @@ static int verbs_post_rma(verbs_rma_op_t * rma_op)
 		wr.send_flags |= IBV_SEND_INLINE;
 	if (rma_op->flags & CCI_FLAG_FENCE)
 		wr.send_flags |= IBV_SEND_FENCE;
-	wr.wr.rdma.remote_addr = rma_op->remote_addr;
+	wr.wr.rdma.remote_addr = rma_op->remote_addr + rma_op->remote_offset;
 	wr.wr.rdma.rkey = rma_op->rkey;
 
 	ret = ibv_post_send(vconn->id->qp, &wr, &bad_wr);
