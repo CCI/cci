@@ -625,8 +625,6 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	}
 
 	if (sndbuf_size > 0) {
-		int bufsize;
-
 		ret = setsockopt (sep->sock, SOL_SOCKET, SO_SNDBUF,
 						  &sndbuf_size, sizeof (sndbuf_size));
 		if (ret == -1)
@@ -634,8 +632,6 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	}
 
 	if (rcvbuf_size > 0) {
-		int bufsize;
-
 		ret = setsockopt (sep->sock, SOL_SOCKET, SO_RCVBUF,
 						  &rcvbuf_size, sizeof (rcvbuf_size));
 		if (ret == -1)
@@ -2637,6 +2633,7 @@ static int ctp_sock_rma(cci_connection_t * connection,
 		(sock_rma_handle_t *) ((uintptr_t) local_handle);
 	sock_rma_handle_t *h = NULL;
 	sock_rma_op_t *rma_op = NULL;
+    size_t max_send_size;
 
 	CCI_ENTER;
 
@@ -2687,8 +2684,9 @@ static int ctp_sock_rma(cci_connection_t * connection,
 	rma_op->remote_handle = remote_handle;
 	rma_op->remote_offset = remote_offset;
 	rma_op->id = ++(sconn->rma_id);
-	rma_op->num_msgs = data_len / connection->max_send_size;
-	if (data_len % connection->max_send_size)
+    RMA_PAYLOAD_SIZE (connection, max_send_size);
+	rma_op->num_msgs = data_len / max_send_size;
+	if (data_len % max_send_size)
 		rma_op->num_msgs++;
 	rma_op->completed = 0;
 	rma_op->status = CCI_SUCCESS;	/* for now */
@@ -2706,6 +2704,9 @@ static int ctp_sock_rma(cci_connection_t * connection,
 		int i, cnt, err = 0;
 		sock_tx_t **txs = NULL;
 		uint64_t old_seq = 0ULL;
+        size_t max_send_size;
+
+        RMA_PAYLOAD_SIZE (connection, max_send_size);
 
 		cnt = rma_op->num_msgs < SOCK_RMA_DEPTH ?
 			rma_op->num_msgs : SOCK_RMA_DEPTH;
@@ -2751,7 +2752,7 @@ static int ctp_sock_rma(cci_connection_t * connection,
 		/* we have all the txs we need, pack them and queue them */
 		for (i = 0; i < cnt; i++) {
 			sock_tx_t *tx = txs[i];
-			uint64_t offset = (uint64_t)i * (uint64_t)connection->max_send_size;
+			uint64_t offset = (uint64_t)i * (uint64_t)max_send_size;
 			sock_rma_header_t *write = (sock_rma_header_t *) tx->buffer;
 
 			rma_op->next = i + 1;
@@ -2759,7 +2760,7 @@ static int ctp_sock_rma(cci_connection_t * connection,
 			tx->flags = flags | CCI_FLAG_SILENT;
 			tx->state = SOCK_TX_QUEUED;
 			/* payload size for now */
-			tx->len = (uint16_t) connection->max_send_size;
+			tx->len = (uint16_t)max_send_size;
 			tx->send_count = 0;
 			tx->last_attempt_us = 0ULL;
 			tx->timeout_us = 0ULL;
@@ -2771,8 +2772,8 @@ static int ctp_sock_rma(cci_connection_t * connection,
 			tx->evt.ep = ep;
 
 			if (i == (rma_op->num_msgs - 1)) {
-				if (data_len % connection->max_send_size)
-					tx->len = data_len % connection->max_send_size;
+				if (data_len % max_send_size)
+					tx->len = data_len % max_send_size;
 			}
 
 			tx->rma_ptr = (void*)(uintptr_t)(local->start + offset);
@@ -3336,13 +3337,15 @@ sock_handle_ack(sock_conn_t * sconn,
 				sock_rma_header_t *write =
 					(sock_rma_header_t *) tx->buffer;
 				uint64_t offset = 0ULL;
+                size_t max_send_size;
 
 				/* send more data */
 				i = rma_op->next++;
 				tx->flags = rma_op->flags | CCI_FLAG_SILENT;
 				tx->state = SOCK_TX_QUEUED;
 				/* payload size for now */
-				tx->len = (uint16_t) connection->max_send_size;
+                RMA_PAYLOAD_SIZE (connection, max_send_size);
+				tx->len = (uint16_t) max_send_size;
 				tx->send_count = 0;
 				tx->last_attempt_us = 0ULL;
 				tx->timeout_us = 0ULL;
@@ -3352,14 +3355,14 @@ sock_handle_ack(sock_conn_t * sconn,
 				tx->evt.event.send.connection = connection;
 				tx->evt.conn = conn;
 				if (i == (rma_op->num_msgs - 1)) {
-					if (rma_op->data_len % connection->max_send_size)
-						tx->len = rma_op->data_len % connection->max_send_size;
+					if (rma_op->data_len % max_send_size)
+						tx->len = rma_op->data_len % max_send_size;
 				}
 				tx->seq = ++(sconn->seq);
 				tx->rma_len = tx->len;
 				tx->len = sizeof(sock_rma_header_t);
 
-				offset = (uint64_t) i * (uint64_t) connection->max_send_size;
+				offset = (uint64_t) i * (uint64_t) max_send_size;
 
 				sock_pack_rma_write(write, tx->len,
 							sconn->peer_id, tx->seq, 0,
@@ -4529,7 +4532,7 @@ static inline int sock_ack_sconn (sock_ep_t *sep, sock_conn_t *sconn)
 	if (last == 0ULL)
 		last = now;
 	else if (last + 10ULL > now)
-		return;
+		return 0;
 
 	last = now;
 	
@@ -4560,7 +4563,7 @@ static inline int sock_ack_sconn (sock_ep_t *sep, sock_conn_t *sconn)
 				count <= PENDING_ACK_THRESHOLD)
 			{
 				debug (CCI_DB_MSG, "Delaying ACK");
-				return;
+				return 0;
 			}
 			
 			count = 0;
@@ -4581,7 +4584,7 @@ static inline int sock_ack_sconn (sock_ep_t *sep, sock_conn_t *sconn)
 				&& (ack->end - ack->start < PENDING_ACK_THRESHOLD))
 			{
 				debug (CCI_DB_MSG, "Delaying ACK");
-				return;
+				return 0;
 			}
 			TAILQ_REMOVE(&sconn->acks, ack, entry);
 			if (ack->start == sconn->acked)
@@ -4609,7 +4612,7 @@ static inline int sock_ack_sconn (sock_ep_t *sep, sock_conn_t *sconn)
 
 static void sock_ack_conns(cci__ep_t * ep)
 {
-	int i, ret;
+	int i;
 	sock_ep_t *sep = ep->priv;
 	sock_conn_t *sconn = NULL;
 	sock_tx_t *tx = NULL;
@@ -4635,9 +4638,12 @@ static void sock_ack_conns(cci__ep_t * ep)
 	for (i = 0; i < SOCK_EP_HASH_SIZE; i++) {
 		if (!TAILQ_EMPTY(&sep->conn_hash[i])) {
 			TAILQ_FOREACH(sconn, &sep->conn_hash[i], entry) {
+#if 0
 				do {
 					ret = sock_ack_sconn (sep, sconn);
 				} while (ret > 0);
+#endif
+                sock_ack_sconn (sep, sconn);
 			}
 		}
 	}
