@@ -3669,6 +3669,13 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 		} else {
 			switch (wc[i].opcode) {
 			case IBV_WC_SEND:
+				if (wc[i].status != IBV_WC_SUCCESS) {
+					verbs_rma_op_t *rma_op =
+					    (verbs_rma_op_t *) (uintptr_t)
+					    wc[i].wr_id;
+					if (rma_op->msg_type == VERBS_MSG_RMA)
+						goto complete_rma;
+				}
 				ret = verbs_handle_send_completion(ep, wc[i]);
 				break;
 			case IBV_WC_RDMA_WRITE:
@@ -3684,6 +3691,7 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 					}
 				}
 			case IBV_WC_RDMA_READ:
+complete_rma:
 				ret = verbs_handle_rma_completion(ep, wc[i]);
 				break;
 			default:
@@ -4413,8 +4421,8 @@ ctp_verbs_rma(cci_connection_t * connection,
 	rma_op->len = data_len;
 	rma_op->context = (void *)context;
 	rma_op->flags = flags;
-	rma_op->msg_len = msg_len;
-	rma_op->msg_ptr = (void *) msg_ptr;
+	rma_op->msg_len = 0;
+	rma_op->msg_ptr = NULL;
 
 	rma_op->evt.event.type = CCI_EVENT_SEND;
 	rma_op->evt.event.send.connection = connection;
