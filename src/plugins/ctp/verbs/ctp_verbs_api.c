@@ -3488,6 +3488,7 @@ static int verbs_handle_rma_completion(cci__ep_t * ep, struct ibv_wc wc)
 	rma_op->status = verbs_wc_to_cci_status(wc.status);
 	if (rma_op->msg_len == 0 || rma_op->status != CCI_SUCCESS) {
 queue:
+		rma_op->evt.event.send.status = rma_op->status;
 		if (!(rma_op->flags & CCI_FLAG_SILENT)) {
 			/* we are done, queue it for the app */
 			verbs_queue_evt(ep, &rma_op->evt);
