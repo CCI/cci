@@ -3933,7 +3933,7 @@ sock_handle_conn_ack(sock_conn_t * sconn,
 */
 static void
 sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
-				uint16_t data_len)
+							 uint16_t data_len, uint32_t id)
 {
 	cci__ep_t *ep = NULL;
 	cci__conn_t *conn = sconn->conn;
@@ -3961,6 +3961,9 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	sep = ep->priv;
 
 	hdr_r = (sock_header_r_t *) rx->buffer;
+	if (hdr_r->pb_ack != 0) {
+		sock_handle_ack (sconn, SOCK_MSG_RMA_READ_REQUEST, rx, 1, id);
+	}
 
 	/* Parse the RMA read request message */
 	sock_parse_rma_handle_offset(&read->local,
@@ -3989,8 +3992,6 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	if (rc != CCI_SUCCESS)
 		debug(CCI_DB_MSG, "%s: RMA Write failed", __func__);
 
-	/* Put the RMA_READ_REQUEST into the pending queue until the msg is
-	acked */
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
 	pthread_mutex_unlock(&ep->lock);
@@ -4099,7 +4100,8 @@ lookup_contextid(sock_conn_t * sconn, uint64_t context_id, void **context)
 }
 
 static void
-sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
+sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len,
+						   uint32_t id)
 {
 	cci__evt_t *evt;
 	cci__conn_t *conn = sconn->conn;
@@ -4110,6 +4112,10 @@ sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 	uint64_t context_id = 0;
 	void *context;
 	sock_header_r_t *hdr_r = rx->buffer;
+	
+	if (hdr_r->pb_ack != 0) {
+		sock_handle_ack (sconn, SOCK_MSG_RMA_WRITE_DONE, rx, 1, id);
+	}
 
 	endpoint = (&conn->connection)->endpoint;
 	ep = container_of(endpoint, cci__ep_t, endpoint);
@@ -4376,10 +4382,10 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		sock_handle_rma_write(sconn, rx, b);
 		break;
 	case SOCK_MSG_RMA_WRITE_DONE:
-		sock_handle_rma_write_done(sconn, rx, b);
+		sock_handle_rma_write_done(sconn, rx, b, id);
 		break;
 	case SOCK_MSG_RMA_READ_REQUEST:
-		sock_handle_rma_read_request(sconn, rx, b);
+		sock_handle_rma_read_request(sconn, rx, b, id);
 		break;
 	case SOCK_MSG_RMA_READ_REPLY:
 		break;
