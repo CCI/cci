@@ -3508,9 +3508,11 @@ static int verbs_handle_rma_completion(cci__ep_t * ep, struct ibv_wc wc)
 				TAILQ_REMOVE(&vconn->remotes, rem, entry);
 				vconn->num_remotes--;
 				try_again = 1;
+				break;
 			}
 		}
 		pthread_mutex_unlock(&ep->lock);
+		free(rem);
 
 		if (try_again) {
 			ret = verbs_conn_request_rma_remote(rma_op, rma_op->remote_handle);
