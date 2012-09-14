@@ -3349,16 +3349,18 @@ static int verbs_handle_rma_remote_reply(cci__ep_t * ep, struct ibv_wc wc)
 		    verbs_ntohll(remote->info.remote_addr);
 		remote->info.rkey = ntohl(remote->info.rkey);
 		if (VERBS_RMA_REMOTE_SIZE) {
+			verbs_rma_remote_t *last = NULL;
+
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_INSERT_HEAD(&vconn->remotes, remote, entry);
 			vconn->num_remotes++;
 			if (vconn->num_remotes > VERBS_RMA_REMOTE_SIZE) {
-				verbs_rma_remote_t *last =
-				    TAILQ_LAST(&vconn->remotes, s_rems);
+				last = TAILQ_LAST(&vconn->remotes, s_rems);
 				TAILQ_REMOVE(&vconn->remotes, last, entry);
-				free(last);
+				vconn->num_remotes--;
 			}
 			pthread_mutex_unlock(&ep->lock);
+			free(last);
 		}
 		/* find RMA op waiting for this remote_handle
 		 * and post the RMA */
@@ -3477,6 +3479,9 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 		  uint32_t iovcnt, const void *context, int flags,
 		  verbs_rma_op_t * rma_op);
 
+static int
+verbs_conn_request_rma_remote(verbs_rma_op_t * rma_op, uint64_t remote_handle);
+
 static int verbs_handle_rma_completion(cci__ep_t * ep, struct ibv_wc wc)
 {
 	int ret = CCI_SUCCESS;
@@ -3486,6 +3491,35 @@ static int verbs_handle_rma_completion(cci__ep_t * ep, struct ibv_wc wc)
 	CCI_ENTER;
 
 	rma_op->status = verbs_wc_to_cci_status(wc.status);
+
+	if (rma_op->status != CCI_SUCCESS &&
+		rma_op->status == CCI_ERR_RMA_HANDLE) {
+
+		int try_again = 0;
+		cci__conn_t *conn =
+			container_of(&rma_op->evt.event.send.connection,
+					cci__conn_t, connection);
+		verbs_conn_t *vconn = conn->priv;
+		verbs_rma_remote_t *rem = NULL;
+
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_FOREACH(rem, &vconn->remotes, entry) {
+			if (rem->info.remote_handle == rma_op->remote_handle) {
+				TAILQ_REMOVE(&vconn->remotes, rem, entry);
+				vconn->num_remotes--;
+				try_again = 1;
+			}
+		}
+		pthread_mutex_unlock(&ep->lock);
+
+		if (try_again) {
+			ret = verbs_conn_request_rma_remote(rma_op, rma_op->remote_handle);
+			if (ret == CCI_SUCCESS)
+				return ret;
+			/* else fall through with rma_op->status = CCI_ERR_RMA_HANDLE */
+		}
+	}
+
 	if (rma_op->msg_len == 0 || rma_op->status != CCI_SUCCESS) {
 queue:
 		rma_op->evt.event.send.status = rma_op->status;
