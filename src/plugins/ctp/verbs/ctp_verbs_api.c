@@ -3497,7 +3497,7 @@ static int verbs_handle_rma_completion(cci__ep_t * ep, struct ibv_wc wc)
 
 		int try_again = 0;
 		cci__conn_t *conn =
-			container_of(&rma_op->evt.event.send.connection,
+			container_of(rma_op->evt.event.send.connection,
 					cci__conn_t, connection);
 		verbs_conn_t *vconn = conn->priv;
 		verbs_rma_remote_t *rem = NULL;
