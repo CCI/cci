@@ -2633,7 +2633,7 @@ static int ctp_sock_rma(cci_connection_t * connection,
 		(sock_rma_handle_t *) ((uintptr_t) local_handle);
 	sock_rma_handle_t *h = NULL;
 	sock_rma_op_t *rma_op = NULL;
-    size_t max_send_size;
+	size_t max_send_size;
 
 	CCI_ENTER;
 
@@ -2684,7 +2684,7 @@ static int ctp_sock_rma(cci_connection_t * connection,
 	rma_op->remote_handle = remote_handle;
 	rma_op->remote_offset = remote_offset;
 	rma_op->id = ++(sconn->rma_id);
-    RMA_PAYLOAD_SIZE (connection, max_send_size);
+	RMA_PAYLOAD_SIZE (connection, max_send_size);
 	rma_op->num_msgs = data_len / max_send_size;
 	if (data_len % max_send_size)
 		rma_op->num_msgs++;
@@ -2704,10 +2704,9 @@ static int ctp_sock_rma(cci_connection_t * connection,
 		int i, cnt, err = 0;
 		sock_tx_t **txs = NULL;
 		uint64_t old_seq = 0ULL;
-        size_t max_send_size;
+		size_t max_send_size;
 
-        RMA_PAYLOAD_SIZE (connection, max_send_size);
-
+		RMA_PAYLOAD_SIZE (connection, max_send_size);
 		cnt = rma_op->num_msgs < SOCK_RMA_DEPTH ?
 			rma_op->num_msgs : SOCK_RMA_DEPTH;
 
@@ -3084,7 +3083,8 @@ sock_handle_ack(sock_conn_t * sconn,
 	if (count == 1) {
 		assert(type == SOCK_MSG_ACK_ONLY || type == SOCK_MSG_ACK_UP_TO
 			|| type == SOCK_MSG_SEND || type == SOCK_MSG_RMA_WRITE
-			|| type == SOCK_MSG_RMA_READ_REQUEST);
+			|| type == SOCK_MSG_RMA_READ_REQUEST
+			|| type == SOCK_MSG_RMA_WRITE_DONE);
 	} else {
 		assert(type == SOCK_MSG_SACK);
 	}
@@ -3095,7 +3095,10 @@ sock_handle_ack(sock_conn_t * sconn,
 			sconn->seq_pending = acks[0];
 	} else if (type == SOCK_MSG_ACK_UP_TO) {
 		sconn->seq_pending = acks[0];
-	} else if (type == SOCK_MSG_SEND || type == SOCK_MSG_RMA_WRITE) {
+	} else if (type == SOCK_MSG_SEND
+			   || type == SOCK_MSG_RMA_WRITE
+			   || type == SOCK_MSG_RMA_WRITE_DONE
+			   || type == SOCK_MSG_RMA_READ_REQUEST) {
 		/* Piggybacked ACK */
 		acks[0] = hdr_r->pb_ack;
 		if (sconn->seq_pending == acks[0] - 1)
@@ -3109,10 +3112,12 @@ sock_handle_ack(sock_conn_t * sconn,
 	pthread_mutex_lock(&dev->lock);
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_FOREACH_SAFE(tx, &sconn->tx_seqs, tx_seq, tmp) {
-		/* Note that SOCK_MSG_SEND and SOCK_MSG_RMA_WRITE msgs can include a 
-		piggybacked ACK */
+		/* Note that type of msgs can include a piggybacked ACK */
 		if (type == SOCK_MSG_ACK_ONLY || type == SOCK_MSG_SEND 
-									|| type == SOCK_MSG_RMA_WRITE) {
+									|| type == SOCK_MSG_RMA_WRITE
+									|| type == SOCK_MSG_RMA_READ_REQUEST
+									|| type == SOCK_MSG_RMA_WRITE_DONE)
+		{
 			if (tx->seq == acks[0]) {
 				if (tx->state == SOCK_TX_PENDING) {
 					debug(CCI_DB_MSG,
@@ -3337,14 +3342,14 @@ sock_handle_ack(sock_conn_t * sconn,
 				sock_rma_header_t *write =
 					(sock_rma_header_t *) tx->buffer;
 				uint64_t offset = 0ULL;
-                size_t max_send_size;
+				size_t max_send_size;
 
 				/* send more data */
 				i = rma_op->next++;
 				tx->flags = rma_op->flags | CCI_FLAG_SILENT;
 				tx->state = SOCK_TX_QUEUED;
 				/* payload size for now */
-                RMA_PAYLOAD_SIZE (connection, max_send_size);
+				RMA_PAYLOAD_SIZE (connection, max_send_size);
 				tx->len = (uint16_t) max_send_size;
 				tx->send_count = 0;
 				tx->last_attempt_us = 0ULL;
@@ -4537,17 +4542,18 @@ static inline int sock_ack_sconn (sock_ep_t *sep, sock_conn_t *sconn)
 	last = now;
 	
 	if (!TAILQ_EMPTY(&sconn->acks)) {
-		count = 1;
 		sock_header_r_t *hdr_r;
 		uint32_t acks[SOCK_MAX_SACK * 2];
 		sock_ack_t *ack = NULL;
 		sock_msg_type_t type = SOCK_MSG_ACK_UP_TO;
 		char buffer[SOCK_MAX_HDR_SIZE];
 		int len = 0;
-		
+
+		count = 1;
 		memset(buffer, 0, sizeof(buffer));
 		
 		if (1 == sock_need_sack(sconn)) {
+			/* There are more than one element in the list of pending acks */
 			sock_ack_t *tmp;
 			
 			type = SOCK_MSG_SACK;
@@ -4579,6 +4585,7 @@ static inline int sock_ack_sconn (sock_ep_t *sep, sock_conn_t *sconn)
 				sconn->acked = acks[1];
 			}
 		} else {
+			/* There is only one element in the list of pending acks */
 			ack = TAILQ_FIRST(&sconn->acks);
 			if (SOCK_U64_LT(now, sconn->last_ack_ts + ACK_TIMEOUT)
 				&& (ack->end - ack->start < PENDING_ACK_THRESHOLD))
@@ -4643,7 +4650,7 @@ static void sock_ack_conns(cci__ep_t * ep)
 					ret = sock_ack_sconn (sep, sconn);
 				} while (ret > 0);
 #endif
-                sock_ack_sconn (sep, sconn);
+				sock_ack_sconn (sep, sconn);
 			}
 		}
 	}
