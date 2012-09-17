@@ -400,6 +400,7 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 
 			sdev = dev->priv;
 			sdev->port = 0;
+			sdev->bufsize = 0;
 
 			/* default values */
 			device->up = 1;
@@ -423,6 +424,9 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 					uint16_t    port;
 					port = atoi (s_port);
 					sdev->port = htons(port);
+				} else if (0 == strncmp("bufsize=", *arg, 8)) {
+					const char *size_str = *arg + 8;
+					sdev->bufsize = strtol(size_str, NULL, 0);
 				}
 			}
 			if (sdev->ip != 0) {
@@ -624,6 +628,13 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 
+	sdev = dev->priv;
+
+	if (sndbuf_size < sdev->bufsize)
+		sndbuf_size = sdev->bufsize;
+	if (rcvbuf_size < sdev->bufsize)
+		rcvbuf_size = sdev->bufsize;
+
 	if (sndbuf_size > 0) {
 		ret = setsockopt (sep->sock, SOL_SOCKET, SO_SNDBUF,
 						  &sndbuf_size, sizeof (sndbuf_size));
@@ -639,7 +650,6 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	}
 
 	/* bind socket to device */
-	sdev = dev->priv;
 	memset(&sin, 0, sizeof(sin));
 	sin.sin_family = AF_INET;
 	sin.sin_addr.s_addr = sdev->ip;
