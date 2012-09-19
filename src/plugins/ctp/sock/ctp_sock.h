@@ -33,8 +33,8 @@ BEGIN_C_DECLS
 #define SOCK_MAX_SACK           (4)	/* pairs of start/end acks */
 #define SOCK_ACK_DELAY          (1)	/* send an ack after every Nth send */
 #define SOCK_EP_TX_TIMEOUT_SEC  (64)	/* seconds for now */
-#define SOCK_EP_RX_CNT          (16*1024)	/* number of rx active messages */
-#define SOCK_EP_TX_CNT          (16*1024)	/* number of tx active messages */
+#define SOCK_EP_RX_CNT          (128*1024)	/* number of rx active messages */
+#define SOCK_EP_TX_CNT          (128*1024)	/* number of tx active messages */
 #define SOCK_EP_HASH_SIZE       (256)	/* nice round number */
 #define SOCK_MAX_EPS            (256)	/* max sock fd value - 1 */
 #define SOCK_BLOCK_SIZE         (64)	/* use 64b blocks for id storage */
@@ -46,8 +46,8 @@ BEGIN_C_DECLS
 #define SOCK_PEEK_LEN           (32)	/* large enough for RMA header */
 #define SOCK_CONN_REQ_HDR_LEN   ((int) (sizeof(struct sock_header_r)))
     /* header + seqack */
-#define SOCK_RMA_DEPTH          (256)	/* how many in-flight msgs per RMA */
-#define ACK_TIMEOUT             (100) /* Timeout associated to ACK blocks */
+#define SOCK_RMA_DEPTH          (16)	/* how many in-flight msgs per RMA */
+#define ACK_TIMEOUT             (500) /* Timeout associated to ACK blocks */
 #define PENDING_ACK_THRESHOLD   (SOCK_RMA_DEPTH/4) /* Maximum size of a ACK block */
 #define SOCK_EP_NUM_EVTS        (64)
 
@@ -1085,6 +1085,9 @@ typedef struct sock_conn {
 
 	/*! Current size of the array of RMA contexts */
 	uint32_t max_rma_contexts;
+
+	/*! Last index used in the array of RMA contexts */
+	uint64_t last_rma_context_index;
 } sock_conn_t;
 
 /* Only call if holding the ep->lock and sconn->acks is not empty

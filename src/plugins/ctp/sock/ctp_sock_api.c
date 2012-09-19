@@ -875,6 +875,10 @@ static int ctp_sock_destroy_endpoint(cci_endpoint_t * endpoint)
 				sconn = TAILQ_FIRST(&sep->conn_hash[i]);
 				TAILQ_REMOVE(&sep->conn_hash[i], sconn, entry);
 				conn = sconn->conn;
+				if (sconn->rma_contexts != NULL) {
+					free (sconn->rma_contexts);
+					sconn->rma_contexts = NULL;
+				}
 
 				free(conn);
 				free(sconn);
@@ -2593,38 +2597,56 @@ static int ctp_sock_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handl
 static inline void
 generate_context_id(sock_conn_t * sconn, const void *context, uint64_t * context_id)
 {
-	uint64_t index = 0;
+	uint64_t index;
 
 	if (sconn->rma_contexts == NULL) {
 		/* We do not have the array allocated yet, so we perform the alloc */
-		/* FIXME: we never free that memory */
-		sconn->rma_contexts =
-			calloc(0, CONTEXTS_BLOCK_SIZE * sizeof(void *));
+		sconn->rma_contexts = malloc(CONTEXTS_BLOCK_SIZE * sizeof(void *));
 		sconn->max_rma_contexts = CONTEXTS_BLOCK_SIZE;
+		sconn->last_rma_context_index = 0;
+		for (index = 0; index < CONTEXTS_BLOCK_SIZE; index++)
+			sconn->rma_contexts[index] = NULL;
+		index = 0;
+	} else {
+		if (sconn->last_rma_context_index + 1 < sconn->max_rma_contexts)
+			index = sconn->last_rma_context_index + 1;
+		else
+			index = 0;
 	}
 
 	/* We look for an empty element in the array, the index will be used as
-	unique ID for that specific context */
+	   unique ID for that specific context */
 	while (sconn->rma_contexts[index] != NULL) {
 		index++;
+		/* If we reach the end of the array, we look at continue to look from
+		   the beginning of the array */
 		if (index == sconn->max_rma_contexts) {
+			index = 0;
+		}
+
+		/* If we reach again the last used index, it means the array is full */
+		if (index == sconn->last_rma_context_index) {
+			int i;
+
 			/* We reach the end of the array and the array is full, we extend
 			the array */
 			sconn->rma_contexts = realloc(sconn->rma_contexts,
 							sconn->max_rma_contexts +
 							CONTEXTS_BLOCK_SIZE);
-			for (index = sconn->max_rma_contexts;
-				index <
-				sconn->max_rma_contexts + CONTEXTS_BLOCK_SIZE;
-				index++) {
-				sconn->rma_contexts[index] = NULL;
+			for (i = sconn->max_rma_contexts;
+				i < sconn->max_rma_contexts + CONTEXTS_BLOCK_SIZE;
+				i++)
+			{
+				sconn->rma_contexts[i] = NULL;
 			}
 			index = sconn->max_rma_contexts;
 			sconn->max_rma_contexts += CONTEXTS_BLOCK_SIZE;
 		}
 	}
 
+
 	sconn->rma_contexts[index] = context;
+	sconn->last_rma_context_index = index;
 	*context_id = index;
 }
 
@@ -3422,26 +3444,20 @@ sock_handle_ack(sock_conn_t * sconn,
 						rma_op->context;
 					tx->evt.conn = conn;
 					tx->evt.ep = ep;
-					memset(tx->buffer, 0,
-						sizeof(sock_rma_header_t));
-					write =
-						(sock_rma_header_t *) tx->buffer;
-					context_id = (uint64_t) rma_op->context;
+					memset(tx->buffer, 0, sizeof(sock_rma_header_t));
+					write = (sock_rma_header_t *) tx->buffer;
+                    memcpy (&context_id, rma_op->context, sizeof (uint64_t));
 					sock_pack_rma_write_done(write,
 								(uint16_t) rma_op->msg_len,
 								sconn->peer_id,
 								tx->seq, 0);
 					/* Include the context id */
-					memcpy(&hdr_r->data, &context_id,
-						sizeof(uint64_t));
+					memcpy(&hdr_r->data, &context_id, sizeof(uint64_t));
 					msg_ptr =
-						(void *)(hdr_r->data +
-							sizeof(uint64_t));
-					memcpy(msg_ptr, rma_op->msg_ptr,
-						tx->len);
+						(void *)(hdr_r->data + sizeof(uint64_t));
+					memcpy(msg_ptr, rma_op->msg_ptr, tx->len);
 					tx->len +=
-						sizeof(sock_rma_header_t) +
-						sizeof(uint64_t);
+						sizeof(sock_rma_header_t) + sizeof(uint64_t);
 					TAILQ_INSERT_TAIL(&queued, tx, dentry);
 					continue;
 				} else {
@@ -3995,6 +4011,9 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	flags |= CCI_FLAG_WRITE;
 	flags |= CCI_FLAG_SILENT;
 
+	/* FIXME: free that memory at some point */
+	context = malloc (sizeof (uint64_t));
+	memcpy (context, &context_id, sizeof (uint64_t));
 	rc = ctp_sock_rma(connection,
 			&context_id, sizeof(uint64_t),
 			local_handle, local_offset,
@@ -4118,11 +4137,11 @@ sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len,
 	union cci_event *event;	/* generic CCI event */
 	cci_endpoint_t *endpoint;	/* generic CCI endpoint */
 	cci__ep_t *ep;
-	sock_ep_t *sep = NULL;
+    sock_ep_t *sep = NULL;
 	uint64_t context_id = 0;
 	void *context;
 	sock_header_r_t *hdr_r = rx->buffer;
-	
+
 	if (hdr_r->pb_ack != 0) {
 		sock_handle_ack (sconn, SOCK_MSG_RMA_WRITE_DONE, rx, 1, id);
 	}
@@ -4141,7 +4160,7 @@ sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len,
 	event->recv.len = len;
 	lookup_contextid (sconn, context_id, &context);
 	/* For RMA_READ, we lookup the context based on the received context id
-	For RMA_WRITE, the context_id is actually the context itself */
+	   For RMA_WRITE, the context_id is actually the context itself */
 	if (context != NULL)
 		*((void **)&event->recv.ptr) = context;
 	else
@@ -4154,7 +4173,7 @@ sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len,
 	pthread_mutex_unlock(&ep->lock);
 
 	/* waking up the app thread if it is blocking on a OS handle */
-	sep = ep->priv;
+    sep = ep->priv;
 	if (sep->event_fd)
 		write (sep->fd[1], "a", 1);
 }
