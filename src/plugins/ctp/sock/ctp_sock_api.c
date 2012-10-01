@@ -671,8 +671,8 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	}
 
 	memset(name, 0, sizeof(name));
-	sprintf(name, "ip://");
-	sock_sin_to_name(sep->sin, name + (uintptr_t) 5, sizeof(name) - 5);
+	sprintf(name, "sock://");
+	sock_sin_to_name(sep->sin, name + (uintptr_t) 7, sizeof(name) - 7);
 	ep->uri = strdup(name);
 
 	for (i = 0; i < SOCK_EP_HASH_SIZE; i++) {
@@ -1266,8 +1266,8 @@ static int sock_getaddrinfo(const char *uri, in_addr_t * in, uint16_t * port)
 	char *hostname, *svc, *colon;
 	struct addrinfo *ai = NULL, hints;
 
-	if (0 == strncmp("ip://", uri, 5))
-		hostname = strdup(&uri[5]);
+	if (0 == strncmp("sock://", uri, 7))
+		hostname = strdup(&uri[7]);
 	else {
 		CCI_EXIT;
 		return CCI_EINVAL;
