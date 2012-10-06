@@ -516,6 +516,7 @@ typedef int cci_os_handle_t;
   \return CCI_SUCCESS   The endpoint is ready for use.
   \return CCI_EINVAL    Endpoint or fd is NULL.
   \return CCI_ENODEV    Device is not "up".
+  \return CCI_ENODEV    Device is NULL and no CCI device is available.
   \return CCI_ENOMEM    Unable to allocate enough memory.
   \return Each transport may have additional error codes.
 
