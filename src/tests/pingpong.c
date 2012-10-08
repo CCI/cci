@@ -41,7 +41,8 @@ cci_device_t **devices = NULL;
 cci_endpoint_t *endpoint = NULL;
 cci_connection_t *connection = NULL;
 cci_conn_attribute_t attr = CCI_CONN_ATTR_UU;
-uint64_t local_rma_handle = 0ULL;
+cci_rma_handle_t *local_rma_handle;
+cci_rma_handle_t *server_rma_handle;
 int remote_completion = 0;
 void *rmt_comp_msg = NULL;
 uint32_t rmt_comp_len = 0;
@@ -52,7 +53,7 @@ int nfds = 0;
 fd_set rfds;
 
 typedef struct options {
-	uint64_t server_rma_handle;
+	struct cci_rma_handle rma_handle;
 	uint32_t max_rma_size;
 #define MSGS      0
 #define RMA_WRITE 1
@@ -62,7 +63,7 @@ typedef struct options {
 	int pad;
 } options_t;
 
-options_t opts = { 0ULL, 0, 0, 0, 0 };
+options_t opts;
 
 void print_usage()
 {
@@ -130,8 +131,7 @@ static void poll_events(void)
 							    rmt_comp_msg,
 							    rmt_comp_len,
 							    local_rma_handle, 0,
-							    opts.
-							    server_rma_handle,
+							    &opts.rma_handle,
 							    0, current_size,
 							    (void *)1,
 							    opts.flags);
@@ -154,8 +154,7 @@ static void poll_events(void)
 							    rmt_comp_msg,
 							    rmt_comp_len,
 							    local_rma_handle, 0,
-							    opts.
-							    server_rma_handle,
+							    &opts.rma_handle,
 							    0, current_size,
 							    (void *)1,
 							    opts.flags);
@@ -283,7 +282,7 @@ void do_client()
 		ret = cci_rma_register(endpoint, buffer, max, flags,
 				       &local_rma_handle);
 		check_return(endpoint, "cci_rma_register", ret, 1);
-		fprintf(stderr, "local_rma_handle is 0x%" PRIx64 "\n",
+		fprintf(stderr, "local_rma_handle is %p\n",
 			local_rma_handle);
 		min = 1;
 		if (opts.method == RMA_WRITE)
@@ -314,7 +313,7 @@ void do_client()
 		else
 			ret = cci_rma(connection, rmt_comp_msg, rmt_comp_len,
 				      local_rma_handle, 0,
-				      opts.server_rma_handle, 0,
+				      &opts.rma_handle, 0,
 				      current_size, (void *)1, opts.flags);
 		check_return(endpoint, func, ret, 1);
 
@@ -426,10 +425,12 @@ void do_server()
 								     opts.
 								     max_rma_size,
 								     opts.method == RMA_WRITE ? CCI_FLAG_WRITE : CCI_FLAG_READ,
-								     &opts.
-								     server_rma_handle);
+								     &server_rma_handle);
 						check_return(endpoint, "cci_rma_register",
 							     ret, 1);
+						memcpy(&opts.rma_handle,
+								server_rma_handle,
+								sizeof(*server_rma_handle));
 					}
 					ret =
 					    cci_send(connection, &opts,
@@ -454,7 +455,7 @@ void do_server()
 		poll_events();
 
 	if (opts.method != MSGS) {
-		ret = cci_rma_deregister(endpoint, opts.server_rma_handle);
+		ret = cci_rma_deregister(endpoint, server_rma_handle);
 		check_return(endpoint, "cci_rma_deregister", ret, 1);
 	}
 

@@ -69,13 +69,13 @@ typedef int (*cci_sendv_fn_t) (cci_connection_t * connection,
 			       const void *context, int flags);
 typedef int (*cci_rma_register_fn_t) (cci_endpoint_t * endpoint,
 				      void *start, uint64_t length,
-				      int flags, uint64_t * rma_handle);
+				      int flags, cci_rma_handle_t ** rma_handle);
 typedef int (*cci_rma_deregister_fn_t) (cci_endpoint_t * endpoint,
-					uint64_t rma_handle);
+					cci_rma_handle_t * rma_handle);
 typedef int (*cci_rma_fn_t) (cci_connection_t * connection,
 			     const void *msg_ptr, uint32_t msg_len,
-			     uint64_t local_handle, uint64_t local_offset,
-			     uint64_t remote_handle, uint64_t remote_offset,
+			     cci_rma_handle_t * local_handle, uint64_t local_offset,
+			     cci_rma_handle_t * remote_handle, uint64_t remote_offset,
 			     uint64_t data_len, const void *context, int flags);
 
 /* Plugin struct */
