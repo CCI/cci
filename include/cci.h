@@ -119,7 +119,9 @@ CCI_DECLSPEC int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
   This is the last CCI function that must be called; no other
   CCI functions can be invoked after this function.
 
-   \return CCI_SUCCESS  CCI has been properly finalized.
+  \return CCI_SUCCESS  CCI has been properly finalized.
+  \return CCI_ERROR    CCI was not initialized when cci_finalize()
+                       was called.
 
   If cci_init was invoked multiple times, cci_finalize() should be
   called as many times, and only the last one will not be a no-op.
@@ -514,6 +516,7 @@ typedef int cci_os_handle_t;
   \return CCI_SUCCESS   The endpoint is ready for use.
   \return CCI_EINVAL    Endpoint or fd is NULL.
   \return CCI_ENODEV    Device is not "up".
+  \return CCI_ENODEV    Device is NULL and no CCI device is available.
   \return CCI_ENOMEM    Unable to allocate enough memory.
   \return Each transport may have additional error codes.
 
@@ -561,9 +564,10 @@ CCI_DECLSPEC int cci_create_endpoint(cci_device_t * device,
    \return Each transport may have additional error codes.
 
    Successful completion of this function makes all data structures
-   and state associated with the endpoint (including the OS handle)
-   stale.  All open connections are closed immediately -- it is exactly
-   as if cci_disconnect() was invoked on every open connection on this
+   and state associated with the endpoint stale (including the OS
+   handle, connections, events, event buffers, and RMA registrations).
+   All open connections are closed immediately -- it is exactly as if
+   cci_disconnect() was invoked on every open connection on this
    endpoint.
 
   \ingroup endpoints

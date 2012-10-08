@@ -30,7 +30,7 @@ int cci_finalize(void)
 
 	if (!initialized) {
 		/* not initialized */
-		ret = CCI_EINVAL;
+		ret = CCI_ERROR;
 		goto out;
 	}
 

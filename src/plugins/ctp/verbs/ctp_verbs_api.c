@@ -3349,16 +3349,18 @@ static int verbs_handle_rma_remote_reply(cci__ep_t * ep, struct ibv_wc wc)
 		    verbs_ntohll(remote->info.remote_addr);
 		remote->info.rkey = ntohl(remote->info.rkey);
 		if (VERBS_RMA_REMOTE_SIZE) {
+			verbs_rma_remote_t *last = NULL;
+
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_INSERT_HEAD(&vconn->remotes, remote, entry);
 			vconn->num_remotes++;
 			if (vconn->num_remotes > VERBS_RMA_REMOTE_SIZE) {
-				verbs_rma_remote_t *last =
-				    TAILQ_LAST(&vconn->remotes, s_rems);
+				last = TAILQ_LAST(&vconn->remotes, s_rems);
 				TAILQ_REMOVE(&vconn->remotes, last, entry);
-				free(last);
+				vconn->num_remotes--;
 			}
 			pthread_mutex_unlock(&ep->lock);
+			free(last);
 		}
 		/* find RMA op waiting for this remote_handle
 		 * and post the RMA */
@@ -3429,8 +3431,12 @@ static int verbs_complete_send_msg(cci__ep_t * ep, struct ibv_wc wc)
 
 	CCI_ENTER;
 
-	tx->evt.event.send.status = verbs_wc_to_cci_status(wc.status);
-	verbs_queue_evt(ep, &tx->evt);
+	if (!(tx->flags & CCI_FLAG_SILENT)) {
+		tx->evt.event.send.status = verbs_wc_to_cci_status(wc.status);
+		verbs_queue_evt(ep, &tx->evt);
+	} else {
+		verbs_return_tx(tx);
+	}
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -3473,6 +3479,9 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 		  uint32_t iovcnt, const void *context, int flags,
 		  verbs_rma_op_t * rma_op);
 
+static int
+verbs_conn_request_rma_remote(verbs_rma_op_t * rma_op, uint64_t remote_handle);
+
 static int verbs_handle_rma_completion(cci__ep_t * ep, struct ibv_wc wc)
 {
 	int ret = CCI_SUCCESS;
@@ -3482,10 +3491,48 @@ static int verbs_handle_rma_completion(cci__ep_t * ep, struct ibv_wc wc)
 	CCI_ENTER;
 
 	rma_op->status = verbs_wc_to_cci_status(wc.status);
+
+	if (rma_op->status != CCI_SUCCESS &&
+		rma_op->status == CCI_ERR_RMA_HANDLE) {
+
+		int try_again = 0;
+		cci__conn_t *conn =
+			container_of(rma_op->evt.event.send.connection,
+					cci__conn_t, connection);
+		verbs_conn_t *vconn = conn->priv;
+		verbs_rma_remote_t *rem = NULL;
+
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_FOREACH(rem, &vconn->remotes, entry) {
+			if (rem->info.remote_handle == rma_op->remote_handle) {
+				TAILQ_REMOVE(&vconn->remotes, rem, entry);
+				vconn->num_remotes--;
+				try_again = 1;
+				break;
+			}
+		}
+		pthread_mutex_unlock(&ep->lock);
+		free(rem);
+
+		if (try_again) {
+			ret = verbs_conn_request_rma_remote(rma_op, rma_op->remote_handle);
+			if (ret == CCI_SUCCESS)
+				return ret;
+			/* else fall through with rma_op->status = CCI_ERR_RMA_HANDLE */
+		}
+	}
+
 	if (rma_op->msg_len == 0 || rma_op->status != CCI_SUCCESS) {
 queue:
-		/* we are done, queue it for the app */
-		verbs_queue_evt(ep, &rma_op->evt);
+		rma_op->evt.event.send.status = rma_op->status;
+		if (!(rma_op->flags & CCI_FLAG_SILENT)) {
+			/* we are done, queue it for the app */
+			verbs_queue_evt(ep, &rma_op->evt);
+		} else {
+			if (rma_op->tx)
+				verbs_return_tx(rma_op->tx);
+			free(rma_op);
+		}
 	} else {
 		uint32_t iovcnt = 1;
 		struct iovec iov;
@@ -3659,6 +3706,13 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 		} else {
 			switch (wc[i].opcode) {
 			case IBV_WC_SEND:
+				if (wc[i].status != IBV_WC_SUCCESS) {
+					verbs_rma_op_t *rma_op =
+					    (verbs_rma_op_t *) (uintptr_t)
+					    wc[i].wr_id;
+					if (rma_op->msg_type == VERBS_MSG_RMA)
+						goto complete_rma;
+				}
 				ret = verbs_handle_send_completion(ep, wc[i]);
 				break;
 			case IBV_WC_RDMA_WRITE:
@@ -3674,6 +3728,7 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 					}
 				}
 			case IBV_WC_RDMA_READ:
+complete_rma:
 				ret = verbs_handle_rma_completion(ep, wc[i]);
 				break;
 			default:
@@ -4347,7 +4402,7 @@ static int verbs_post_rma(verbs_rma_op_t * rma_op)
 		wr.send_flags |= IBV_SEND_INLINE;
 	if (rma_op->flags & CCI_FLAG_FENCE)
 		wr.send_flags |= IBV_SEND_FENCE;
-	wr.wr.rdma.remote_addr = rma_op->remote_addr;
+	wr.wr.rdma.remote_addr = rma_op->remote_addr + rma_op->remote_offset;
 	wr.wr.rdma.rkey = rma_op->rkey;
 
 	ret = ibv_post_send(vconn->id->qp, &wr, &bad_wr);
@@ -4403,8 +4458,8 @@ ctp_verbs_rma(cci_connection_t * connection,
 	rma_op->len = data_len;
 	rma_op->context = (void *)context;
 	rma_op->flags = flags;
-	rma_op->msg_len = msg_len;
-	rma_op->msg_ptr = (void *) msg_ptr;
+	rma_op->msg_len = 0;
+	rma_op->msg_ptr = NULL;
 
 	rma_op->evt.event.type = CCI_EVENT_SEND;
 	rma_op->evt.event.send.connection = connection;

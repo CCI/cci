@@ -95,10 +95,11 @@ AH_BOTTOM([
 ])
 
 # If debug mode, add -g
+CFLAGS_save="$CFLAGS"
 AC_ARG_ENABLE([cci-debug],
     AS_HELP_STRING([--enable-cci-debug],
                    [Build w/support for debugging symbols]),
-                   AC_SUBST([DEBUG_FLAGS],["-O0 -g"]),
+                   AC_SUBST([CFLAGS],["-g -O0 -Wall $CFLAGS_save"]),
                    [])
 
 # Check for Cray GNI (Gemini) headers and libs
