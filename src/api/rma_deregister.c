@@ -15,7 +15,7 @@
 #include "cci.h"
 #include "plugins/ctp/ctp.h"
 
-int cci_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
+int cci_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * rma_handle)
 {
 	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
 	return ep->plugin->rma_deregister(endpoint, rma_handle);

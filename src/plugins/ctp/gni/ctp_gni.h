@@ -59,8 +59,6 @@ BEGIN_C_DECLS
 	GNI_MSG_CONN_ACK,		/* client -> server */
 	GNI_MSG_DISCONNECT,
 	GNI_MSG_SEND,
-	GNI_MSG_RMA_REMOTE_REQUEST,
-	GNI_MSG_RMA_REMOTE_REPLY,
 	GNI_MSG_KEEPALIVE,
 	GNI_MSG_RMA,
 	GNI_MSG_TYPE_MAX,
@@ -158,44 +156,6 @@ typedef struct gni_conn_request {
       If success, return server's smsg info
  */
 
-/* RMA Remote Handle Request
-
-    <----------- 32 bits ----------->
-    <---------- 28b ----------->  4b
-   +----------------------------+----+
-   |             B              |  A |
-   +----------------------------+----+
-
-   where A is GNI_MSG_RMA_REMOTE_REQUEST and B is unused.
-
-   The payload is the uint64_t remote handle.
- */
-
-typedef struct gni_rma_addr_mhndl {
-	uint64_t remote_handle;		/* the CCI remote handle */
-	uint64_t remote_addr;		/* the gni remote address */
-	gni_mem_handle_t remote_mem_hndl;	/* two uint64_t */
-} gni_rma_addr_mhndl_t;
-
-/* RMA Remote Handle Reply
-
-    <----------- 32 bits ----------->
-    <---------- 27b ----------> 1  4b
-   +---------------------------+-+----+
-   |             C             |B|  A |
-   +---------------------------+-+----+
-
-   where A is GNI_MSG_RMA_REMOTE_REPLY
-   B is 0 for ERR_NOT_FOUND and 1 for SUCCESS
-   C is unused
-
-   The payload is:
-
-       uint64_t remote_handle
-       uint64_t remote_addr
-       gni_mem_handle_t remote_mem_hndl
- */
-
 /* Keepalive
 
     <----------- 32 bits ----------->
@@ -214,18 +174,6 @@ typedef struct gni_rma_addr_mhndl {
 #define GNI_EP_TX_CNT		(16 * 1024)	/* default send buffer count */
 #define GNI_PROG_TIME_US	(100000)	/* try to progress every N microseconds */
 #define GNI_CONN_CREDIT		(8)		/* mbox max msgs */
-
-/* RMA Remote Cache
- *
- * gni needs 96 bits of info to post an RDMA (remote_addr and rkey). Since the
- * CCI remote handle is a uint64_t, we need to use a rendezvous to obtain the
- * remote_addr and rkey for a given handle. We can cache the most recently used
- * remote handle information on a LRU list attached to the local RMA handle. Each
- * RMA remote uses 36 bytes on a 64-bit machine. There is a scaling trade-off
- * in order to avoid additional rendezvous round-trips since the memory usage
- * will be up to (number of connections * size of LRU list * 36 bytes).
- */
-#define GNI_RMA_REMOTE_SIZE	(4)	/* size of LRU list of RMA remote handles */
 
 /* Data structures */
 
@@ -275,14 +223,16 @@ typedef struct gni_rma_handle {
 	gni_mem_handle_t mh;		/* memory handle */
 	cci__ep_t *ep;			/* owning endpoint */
 	TAILQ_ENTRY(gni_rma_handle) entry;	/* hang on gep->handles */
+
+	/* CCI RMA handle
+	   rma_handle->stuff[0] holds the base address
+	   rma_handle->stuff[1-2] holds the GNI memory handle
+	 */
+	cci_rma_handle_t rma_handle;	/* CCI RMA handle */
+
 	uint32_t refcnt;		/* reference count */
 	TAILQ_HEAD(s_rma_ops, gni_rma_op) rma_ops;	/* list of all rma_ops */
 } gni_rma_handle_t;
-
-typedef struct gni_rma_remote {
-	TAILQ_ENTRY(gni_rma_remote) entry;	/* hang on gconn->remotes */
-	gni_rma_addr_mhndl_t info;	/* handle, addr, and mem_hndl */
-} gni_rma_remote_t;
 
 typedef enum gni_rma_queue {
 	GNI_RMA_QUEUE_NONE,
@@ -297,14 +247,11 @@ typedef struct gni_rma_op {
 	gni_msg_type_t msg_type;	/* to be compatible with tx */
 	TAILQ_ENTRY(gni_rma_op) entry;	/* gep->rmas */
 	TAILQ_ENTRY(gni_rma_op) gentry;	/* handle->rma_ops */
-	uint64_t local_handle;
+	cci_rma_handle_t *local_handle;
 	uint64_t local_offset;
-	uint64_t remote_handle;
+	cci_rma_handle_t *remote_handle;
 	uint64_t remote_offset;
 	uint64_t data_len;
-
-	uint64_t remote_addr;
-	gni_mem_handle_t remote_mem_hndl; /* memory handle */
 
 	void *buf;			/* bounce buffer for unaligned GETs */
 
@@ -399,10 +346,8 @@ typedef struct gni_conn {
 	uint32_t buff_size;		/* length */
 	gni_mem_handle_t mem_hndl;	/* memory handle */
 
-	uint32_t num_remotes;
 	uint32_t rma_op_cnt;		/* track posted RMAs in case we need to fence */
 
-	TAILQ_HEAD(s_rems, gni_rma_remote) remotes;	/* LRU list of remote handles */
 	TAILQ_HEAD(w_ops, gni_rma_op) rma_ops;	/* rma ops waiting on remotes */
 	TAILQ_HEAD(v_ops, gni_rma_op) fenced;	/* fenced rma ops */
 	TAILQ_ENTRY(gni_conn) entry;	/* hangs on gep->conns */

@@ -99,13 +99,13 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 		      const void *context, int flags);
 static int ctp_sock_rma_register(cci_endpoint_t * endpoint,
 			     void *start, uint64_t length,
-			     int flags, uint64_t * rma_handle);
+			     int flags, cci_rma_handle_t ** rma_handle);
 static int ctp_sock_rma_deregister(cci_endpoint_t * endpoint,
-								   uint64_t rma_handle);
+					cci_rma_handle_t * rma_handle);
 static int ctp_sock_rma(cci_connection_t * connection,
 		    const void *header_ptr, uint32_t header_len,
-		    uint64_t local_handle, uint64_t local_offset,
-		    uint64_t remote_handle, uint64_t remote_offset,
+		    cci_rma_handle_t * local_handle, uint64_t local_offset,
+		    cci_rma_handle_t * remote_handle, uint64_t remote_offset,
 		    uint64_t data_len, const void *context, int flags);
 
 static uint8_t sock_ip_hash(in_addr_t ip, uint16_t port);
@@ -2450,7 +2450,7 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 
 static int ctp_sock_rma_register(cci_endpoint_t * endpoint,
 			     void *start, uint64_t length,
-			     int flags, uint64_t * rma_handle)
+			     int flags, cci_rma_handle_t ** rma_handle)
 {
 	/* FIXME use read/write flags? */
 	cci__ep_t *ep = NULL;
@@ -2476,24 +2476,24 @@ static int ctp_sock_rma_register(cci_endpoint_t * endpoint,
 	handle->ep = ep;
 	handle->length = length;
 	handle->start = start;
+	*((uint64_t *)&handle->rma_handle.stuff[0]) = (uintptr_t)handle;
 	handle->refcnt = 1;
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&sep->handles, handle, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-	*rma_handle = (uint64_t) ((uintptr_t) handle);
+	*rma_handle = &handle->rma_handle;
 
 	CCI_EXIT;
 
 	return CCI_SUCCESS;
 }
 
-static int ctp_sock_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
+static int ctp_sock_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * rma_handle)
 {
 	int ret = CCI_EINVAL;
-	sock_rma_handle_t *handle =
-	    (sock_rma_handle_t *) ((uintptr_t) rma_handle);
+	sock_rma_handle_t *handle = container_of(rma_handle, sock_rma_handle_t, rma_handle);
 	cci__ep_t *ep = NULL;
 	sock_ep_t *sep = NULL;
 	sock_rma_handle_t *h = NULL;
@@ -2585,8 +2585,8 @@ generate_context_id(sock_conn_t * sconn, const void *context, uint64_t * context
 
 static int ctp_sock_rma(cci_connection_t * connection,
 		    const void *msg_ptr, uint32_t msg_len,
-		    uint64_t local_handle, uint64_t local_offset,
-		    uint64_t remote_handle, uint64_t remote_offset,
+		    cci_rma_handle_t * local_handle, uint64_t local_offset,
+		    cci_rma_handle_t * remote_handle, uint64_t remote_offset,
 		    uint64_t data_len, const void *context, int flags)
 {
 	int ret = CCI_ERR_NOT_IMPLEMENTED;
@@ -2594,8 +2594,7 @@ static int ctp_sock_rma(cci_connection_t * connection,
 	cci__conn_t *conn = NULL;
 	sock_ep_t *sep = NULL;
 	sock_conn_t *sconn = NULL;
-	sock_rma_handle_t *local =
-	    (sock_rma_handle_t *) ((uintptr_t) local_handle);
+	sock_rma_handle_t *local = container_of(local_handle, sock_rma_handle_t, rma_handle);
 	sock_rma_handle_t *h = NULL;
 	sock_rma_op_t *rma_op = NULL;
 
@@ -2744,9 +2743,9 @@ static int ctp_sock_rma(cci_connection_t * connection,
 			tx->rma_len = tx->len;
 
 			sock_pack_rma_write(write, tx->len, sconn->peer_id,
-					    tx->seq, 0, local_handle,
+					    tx->seq, 0, local_handle->stuff[0],
 					    local_offset + offset,
-					    remote_handle,
+					    remote_handle->stuff[0],
 					    remote_offset + offset);
 			tx->len = sizeof(sock_rma_header_t);
 		}
@@ -2788,8 +2787,8 @@ static int ctp_sock_rma(cci_connection_t * connection,
 		tx->timeout_us = 0ULL;
 		tx->last_attempt_us = 0ULL;
 		sock_pack_rma_read(read, data_len, sconn->peer_id, tx->seq, 0,
-				   local_handle, local_offset,
-				   remote_handle, remote_offset);
+				   local_handle->stuff[0], local_offset,
+				   remote_handle->stuff[0], remote_offset);
 		tx->len = sizeof(sock_rma_header_t);
 		generate_context_id(sconn, context, &context_id);
 		memcpy(read->data, &data_len, sizeof(uint64_t));
@@ -3281,8 +3280,8 @@ sock_handle_ack(sock_conn_t * sconn,
 		rma_op = tx->rma_op;
 		if (rma_op && rma_op->status == CCI_SUCCESS) {
 			sock_rma_handle_t *local =
-			    (sock_rma_handle_t *) ((uintptr_t)
-						   rma_op->local_handle);
+				container_of(rma_op->local_handle, sock_rma_handle_t,
+						rma_handle);
 			rma_op->completed++;
 
 			/* progress RMA */
@@ -3339,10 +3338,10 @@ sock_handle_ack(sock_conn_t * sconn,
 
 				sock_pack_rma_write(write, tx->len,
 						    sconn->peer_id, tx->seq, 0,
-						    rma_op->local_handle,
+						    rma_op->local_handle->stuff[0],
 						    rma_op->local_offset +
 						    offset,
-						    rma_op->remote_handle,
+						    rma_op->remote_handle->stuff[0],
 						    rma_op->remote_offset +
 						    offset);
 				memcpy(write->data, local->start + offset,
@@ -3897,9 +3896,9 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	uint64_t msg_local_offset;
 	uint64_t msg_remote_handle;
 	uint64_t msg_remote_offset;
-	uint64_t local_handle;
+	cci_rma_handle_t local_handle;
 	uint64_t local_offset;
-	uint64_t remote_handle;
+	cci_rma_handle_t remote_handle;
 	uint64_t remote_offset;
 	uint32_t seq, ts;
 	int rc;
@@ -3925,18 +3924,21 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	memcpy(&context_id, (void *)((char *)read->data + sizeof(uint64_t)),
 	       sizeof(uint64_t));
 
-	local_handle = msg_remote_handle;
+	/* FIXME - lookup local handle */
+	*((uint64_t*)&local_handle.stuff[0]) = msg_remote_handle;
 	local_offset = msg_remote_offset;
-	remote_handle = msg_local_handle;
+	*((uint64_t*)&remote_handle.stuff[0]) = msg_local_handle;
 	remote_offset = msg_local_offset;
 
 	flags |= CCI_FLAG_WRITE;
 	flags |= CCI_FLAG_SILENT;
 
+	/* FIXME passing handles using stack variables to RMA which
+	 * change as soon as this function returns */
 	rc = ctp_sock_rma(connection,
 		      &context_id, sizeof(uint64_t),
-		      local_handle, local_offset,
-		      remote_handle, remote_offset, recved_data_len, context, flags);
+		      &local_handle, local_offset,
+		      &remote_handle, remote_offset, recved_data_len, context, flags);
 	if (rc != CCI_SUCCESS)
 		debug(CCI_DB_MSG, "%s: RMA Write failed", __func__);
 
