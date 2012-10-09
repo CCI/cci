@@ -536,6 +536,33 @@ sock_parse_ack(sock_header_r_t * header_r, sock_msg_type_t type,
 
 /* RMA headers */
 
+typedef union sock_u64 {
+	uint64_t ull;
+	uint32_t ul[2];
+} sock_u64_t;
+
+static inline uint64_t sock_ntohll(uint64_t val)
+{
+	sock_u64_t net = {.ull = val };
+	sock_u64_t host;
+
+	host.ul[0] = ntohl(net.ul[1]);
+	host.ul[1] = ntohl(net.ul[0]);
+
+	return host.ull;
+}
+
+static inline uint64_t sock_htonll(uint64_t val)
+{
+	sock_u64_t host = {.ull = val };
+	sock_u64_t net;
+
+	net.ul[0] = htonl(host.ul[1]);
+	net.ul[1] = htonl(host.ul[0]);
+
+	return net.ull;
+}
+
 /* RMA handle offset
 
     <---------- 32 bits ---------->
@@ -552,30 +579,24 @@ sock_parse_ack(sock_header_r_t * header_r, sock_msg_type_t type,
  */
 
 typedef struct sock_rma_handle_offset {
-	uint32_t handle_high;
-	uint32_t handle_low;
-	uint32_t offset_high;
-	uint32_t offset_low;
+	uint64_t handle;
+	uint64_t offset;
 } sock_rma_handle_offset_t;
 
 static inline void
 sock_pack_rma_handle_offset(sock_rma_handle_offset_t * ho,
-			    uint64_t handle, uint64_t offset)
+			uint64_t handle, uint64_t offset)
 {
-	ho->handle_high = htonl((uint32_t) (handle >> 32));
-	ho->handle_low = htonl((uint32_t) (handle & 0xFFFFFFFF));
-	ho->offset_high = htonl((uint32_t) (offset >> 32));
-	ho->offset_low = htonl((uint32_t) (offset & 0xFFFFFFFF));
+	ho->handle = sock_htonll(handle);
+	ho->offset = sock_htonll(offset);
 }
 
 static inline void
 sock_parse_rma_handle_offset(sock_rma_handle_offset_t * ho,
-			     uint64_t * handle, uint64_t * offset)
+			uint64_t * handle, uint64_t * offset)
 {
-	*handle = ((uint64_t) ntohl(ho->handle_high)) << 32;
-	*handle |= (uint64_t) ntohl(ho->handle_low);
-	*offset = ((uint64_t) ntohl(ho->offset_high)) << 32;
-	*offset |= (uint64_t) ntohl(ho->offset_low);
+	*handle = sock_ntohll(ho->handle);
+	*offset = sock_ntohll(ho->offset);
 }
 
 typedef struct sock_rma_header {
@@ -850,6 +871,11 @@ typedef struct sock_rma_handle {
 	/*! Application memory */
 	void *start;
 
+	/*! CCI RMA handle
+	    rma_handle->stuff[0] = address of sock_rma_handle_t
+	 */
+	cci_rma_handle_t rma_handle;
+
 	/* Entry for hanging on ep->handles */
 	 TAILQ_ENTRY(sock_rma_handle) entry;
 
@@ -864,9 +890,9 @@ typedef struct sock_rma_op {
 	/*! Entry to hang on sconn->rmas */
 	TAILQ_ENTRY(sock_rma_op) rmas;
 
-	uint64_t local_handle;
+	cci_rma_handle_t * local_handle;
 	uint64_t local_offset;
-	uint64_t remote_handle;
+	cci_rma_handle_t * remote_handle;
 	uint64_t remote_offset;
 
 	uint64_t data_len;

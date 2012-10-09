@@ -1518,6 +1518,18 @@ CCI_DECLSPEC int cci_sendv(cci_connection_t * connection,
 /* RMA Area operations */
 
 /*!
+  Opaque RMA handle for use with cci_rma().
+
+  The RMA handle contains all information that a transport will need to
+  initiate a remote RMA operation. The contents should not be inspected
+  or modified by the application. The contents are serialized and ready
+  for sending to peers.
+*/
+typedef const struct cci_rma_handle {
+	uint64_t stuff[4];
+} cci_rma_handle_t;
+
+/*!
   Register memory for RMA operations.
 
   Prior to accessing memory using RMA, the application must register
@@ -1548,7 +1560,7 @@ CCI_DECLSPEC int cci_sendv(cci_connection_t * connection,
 CCI_DECLSPEC int cci_rma_register(cci_endpoint_t * endpoint,
 				  void *start, uint64_t length,
 				  int flags,
-				  uint64_t * rma_handle);
+				  cci_rma_handle_t ** rma_handle);
 
 /*!
   Deregister memory.
@@ -1567,7 +1579,7 @@ CCI_DECLSPEC int cci_rma_register(cci_endpoint_t * endpoint,
   \ingroup communications
  */
 CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
-				    uint64_t rma_handle);
+				    cci_rma_handle_t * rma_handle);
 
 /*!
   Perform a RMA operation between local and remote memory.
@@ -1633,8 +1645,8 @@ CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
 */
 CCI_DECLSPEC int cci_rma(cci_connection_t * connection,
 			 const void *msg_ptr, uint32_t msg_len,
-			 uint64_t local_handle, uint64_t local_offset,
-			 uint64_t remote_handle, uint64_t remote_offset,
+			 cci_rma_handle_t * local_handle, uint64_t local_offset,
+			 cci_rma_handle_t * remote_handle, uint64_t remote_offset,
 			 uint64_t data_len, const void *context, int flags);
 
 #endif				/* CCI_H */
