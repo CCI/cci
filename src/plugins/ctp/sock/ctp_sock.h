@@ -705,7 +705,7 @@ sock_pack_rma_write(sock_rma_header_t * write, uint16_t data_len,
  */
 
 static inline void
-sock_pack_rma_read(sock_rma_header_t * read, uint64_t data_len,
+sock_pack_rma_read_request(sock_rma_header_t * read, uint64_t data_len,
 		   uint32_t peer_id, uint32_t seq, uint32_t ts,
 		   uint64_t local_handle, uint64_t local_offset,
 		   uint64_t remote_handle, uint64_t remote_offset)
@@ -717,6 +717,22 @@ sock_pack_rma_read(sock_rma_header_t * read, uint64_t data_len,
 	sock_pack_rma_handle_offset(&read->remote, remote_handle,
 				    remote_offset);
 }
+
+
+static inline void
+sock_pack_rma_read_reply (sock_rma_header_t * read, uint64_t data_len,
+                        uint32_t peer_id, uint32_t seq, uint32_t ts,
+                        uint64_t local_handle, uint64_t local_offset,
+                        uint64_t remote_handle, uint64_t remote_offset)
+{
+    sock_pack_header(&read->header_r.header, SOCK_MSG_RMA_READ_REPLY, 0,
+                    data_len, peer_id);
+    sock_pack_seq_ts(&read->header_r.seq_ts, seq, ts);
+    sock_pack_rma_handle_offset(&read->local, local_handle, local_offset);
+    sock_pack_rma_handle_offset(&read->remote, remote_handle, remote_offset);
+}
+
+
 
 /* RMA WRITE DONE message
     <---------- 32 bits ---------->
