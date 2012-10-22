@@ -59,6 +59,11 @@ BEGIN_C_DECLS
 #define SOCK_SNDBUF_SIZE        (0) 
 #define SOCK_RCVBUF_SIZE        (0)
 
+/* Macro used to avoid warnings from compilers when a parameter is not used */
+#define UNUSED_PARAM(p) do {	\
+	(void)(p);					\
+	} while (0);
+
 static inline uint64_t sock_tv_to_usecs(struct timeval tv)
 {
 	return (tv.tv_sec * 1000000) + tv.tv_usec;
@@ -480,6 +485,8 @@ static inline void
 sock_parse_nack(sock_header_r_t * header_r, sock_msg_type_t type)
 {
 	/* Nothing to do? */
+	UNUSED_PARAM (header_r);
+	UNUSED_PARAM (type);
 }
 
 /* ack header and ack(s):
@@ -706,9 +713,9 @@ sock_pack_rma_write(sock_rma_header_t * write, uint16_t data_len,
 
 static inline void
 sock_pack_rma_read_request(sock_rma_header_t * read, uint64_t data_len,
-		   uint32_t peer_id, uint32_t seq, uint32_t ts,
-		   uint64_t local_handle, uint64_t local_offset,
-		   uint64_t remote_handle, uint64_t remote_offset)
+						   uint32_t peer_id, uint32_t seq, uint32_t ts,
+						   uint64_t local_handle, uint64_t local_offset,
+						   uint64_t remote_handle, uint64_t remote_offset)
 {
 	sock_pack_header(&read->header_r.header, SOCK_MSG_RMA_READ_REQUEST,
 			 0, data_len, peer_id);
@@ -721,15 +728,15 @@ sock_pack_rma_read_request(sock_rma_header_t * read, uint64_t data_len,
 
 static inline void
 sock_pack_rma_read_reply (sock_rma_header_t * read, uint64_t data_len,
-                        uint32_t peer_id, uint32_t seq, uint32_t ts,
-                        uint64_t local_handle, uint64_t local_offset,
-                        uint64_t remote_handle, uint64_t remote_offset)
+		uint32_t peer_id, uint32_t seq, uint32_t ts,
+		uint64_t local_handle, uint64_t local_offset,
+		uint64_t remote_handle, uint64_t remote_offset)
 {
-    sock_pack_header(&read->header_r.header, SOCK_MSG_RMA_READ_REPLY, 0,
-                    data_len, peer_id);
-    sock_pack_seq_ts(&read->header_r.seq_ts, seq, ts);
-    sock_pack_rma_handle_offset(&read->local, local_handle, local_offset);
-    sock_pack_rma_handle_offset(&read->remote, remote_handle, remote_offset);
+	sock_pack_header(&read->header_r.header, SOCK_MSG_RMA_READ_REPLY, 0,
+					data_len, peer_id);
+	sock_pack_seq_ts(&read->header_r.seq_ts, seq, ts);
+	sock_pack_rma_handle_offset(&read->local, local_handle, local_offset);
+	sock_pack_rma_handle_offset(&read->remote, remote_handle, remote_offset);
 }
 
 
@@ -738,7 +745,7 @@ sock_pack_rma_read_reply (sock_rma_header_t * read, uint64_t data_len,
     <---------- 32 bits ---------->
     <- 8 -> <- 8 -> <---- 16 ----->
    +-------+-----------------------+
-   | type  |   a   |  context_id   |
+   | type  |   a   |    context    |
    +-------+-----------------------+
    |            peer id            |
    +-------------------------------+
@@ -1095,15 +1102,6 @@ typedef struct sock_conn {
 
 	/*! Flag to know if the receiver is ready or not */
 	uint32_t rnr;
-
-	/*! Array of RMA contextes (used for RMA reads) */
-	const void **rma_contexts;
-
-	/*! Current size of the array of RMA contexts */
-	uint32_t max_rma_contexts;
-
-	/*! Last index used in the array of RMA contexts */
-	uint64_t last_rma_context_index;
 } sock_conn_t;
 
 /* Only call if holding the ep->lock and sconn->acks is not empty
