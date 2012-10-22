@@ -721,8 +721,7 @@ sock_pack_rma_read_request(sock_rma_header_t * read, uint64_t data_len,
 			 0, data_len, peer_id);
 	sock_pack_seq_ts(&read->header_r.seq_ts, seq, ts);
 	sock_pack_rma_handle_offset(&read->local, local_handle, local_offset);
-	sock_pack_rma_handle_offset(&read->remote, remote_handle,
-				    remote_offset);
+	sock_pack_rma_handle_offset(&read->remote, remote_handle, remote_offset);
 }
 
 
