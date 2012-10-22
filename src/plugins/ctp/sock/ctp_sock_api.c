@@ -1764,7 +1764,6 @@ ctp_sock_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
 			ret = CCI_ERROR;
 	}
 
-
 	CCI_EXIT;
 	return ret;
 }
@@ -4116,16 +4115,16 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	tx->evt.conn = conn;
 
 	rma_hdr = (sock_rma_header_t*)tx->buffer;
-	sock_pack_rma_read_reply(rma_hdr, (uint16_t)remote->length, sconn->peer_id,
+	sock_pack_rma_read_reply(rma_hdr, (uint16_t)len, sconn->peer_id,
 							tx->seq, 0,
 							local_handle,
 							local_offset,
 							remote_handle,
 							remote_offset);
 	debug (CCI_DB_MSG,
-		   "%s: Copying %lu bytes in RMA_READ_REPLY msg",
-		   __func__, remote->length);
-	memcpy(rma_hdr->data, tx->rma_ptr, remote->length);
+		   "%s: Copying %d bytes in RMA_READ_REPLY msg",
+		   __func__, len);
+	memcpy(rma_hdr->data, tx->rma_ptr, len);
 	/* We piggyback the seq of the initial READ REUQEST so it can act as an ACK */
 	hdr_r = (sock_header_r_t*) tx->buffer;
 	hdr_r->pb_ack = seq;
