@@ -1,0 +1,12 @@
+#
+# Copyright © 2011-2012 Inria.  All rights reserved.
+# $COPYRIGHT$
+#
+
+CCIETH_LINUX_BUILD_PATH	=	@CCIETH_LINUX_BUILD_PATH@
+
+all:
+	make -C $(CCIETH_LINUX_BUILD_PATH) M=`pwd` $(CCIETH_KBUILD_ARGS)
+
+clean:
+	make -C $(CCIETH_LINUX_BUILD_PATH) M=`pwd` clean

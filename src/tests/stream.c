@@ -316,10 +316,7 @@ int main(int argc, char *argv[])
 {
 	int ret, c;
 	uint32_t caps = 0;
-<<<<<<< HEAD
-=======
 	//cci_os_handle_t ep_fd;
->>>>>>> master
 	char *uri = NULL;
 	cci_os_handle_t *os_handle = NULL;
 
