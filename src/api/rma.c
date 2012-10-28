@@ -19,11 +19,17 @@
 
 int cci_rma(cci_connection_t * connection,
 	    const void *header_ptr, uint32_t header_len,
-	    uint64_t local_handle, uint64_t local_offset,
-	    uint64_t remote_handle, uint64_t remote_offset,
+	    cci_rma_handle_t * local_handle, uint64_t local_offset,
+	    cci_rma_handle_t * remote_handle, uint64_t remote_offset,
 	    uint64_t data_len, const void *context, int flags)
 {
 	cci__conn_t *conn = NULL;
+
+	if (NULL == local_handle || NULL == remote_handle) {
+		debug(CCI_DB_INFO, "%s: %s handle is NULL\n",
+			__func__, !local_handle ? "local" : "remote");
+		return CCI_EINVAL;
+	}
 
 	if (NULL == connection || 0 == data_len) {
 		if (NULL == connection)

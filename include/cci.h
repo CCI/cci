@@ -119,7 +119,9 @@ CCI_DECLSPEC int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
   This is the last CCI function that must be called; no other
   CCI functions can be invoked after this function.
 
-   \return CCI_SUCCESS  CCI has been properly finalized.
+  \return CCI_SUCCESS  CCI has been properly finalized.
+  \return CCI_ERROR    CCI was not initialized when cci_finalize()
+                       was called.
 
   If cci_init was invoked multiple times, cci_finalize() should be
   called as many times, and only the last one will not be a no-op.
@@ -514,6 +516,7 @@ typedef int cci_os_handle_t;
   \return CCI_SUCCESS   The endpoint is ready for use.
   \return CCI_EINVAL    Endpoint or fd is NULL.
   \return CCI_ENODEV    Device is not "up".
+  \return CCI_ENODEV    Device is NULL and no CCI device is available.
   \return CCI_ENOMEM    Unable to allocate enough memory.
   \return Each transport may have additional error codes.
 
@@ -561,9 +564,10 @@ CCI_DECLSPEC int cci_create_endpoint(cci_device_t * device,
    \return Each transport may have additional error codes.
 
    Successful completion of this function makes all data structures
-   and state associated with the endpoint (including the OS handle)
-   stale.  All open connections are closed immediately -- it is exactly
-   as if cci_disconnect() was invoked on every open connection on this
+   and state associated with the endpoint stale (including the OS
+   handle, connections, events, event buffers, and RMA registrations).
+   All open connections are closed immediately -- it is exactly as if
+   cci_disconnect() was invoked on every open connection on this
    endpoint.
 
   \ingroup endpoints
@@ -602,28 +606,35 @@ CCI_DECLSPEC const char *cci_strerror(cci_endpoint_t *endpoint,
 /*!
   Connection request attributes.
 
-  Reliable connections deliver messages once. If the packet cannot
+  CCI provides optional reliability and ordering to meet the varying
+  needs of applications.
+
+  Unreliable connections are always unordered (Unreliable/Unordered or
+  UU). UU connections may be unicast or multicast. UU connections offer
+  no delivery guarantees; messages may arrive once, multiple times or
+  never. UU connections have no timeout.
+
+  UU multicast connections are always unidirectional, send *or* receive.
+  If an endpoint wants to join a multicast group to both send and
+  receive, it needs to establish two distinct connections, one for
+  sending and one for receiving.
+
+  UU connections (unicast or multicast) only support messages (see
+  Communications below).
+
+  Reliable connections may be ordered (Reliable/Ordered or RO) or
+  unordered (Reliable/Unordered or RU). Reliable connections are unicast
+  only. Reliable connections deliver messages once. If the packet cannot
   be delivered after a specific amount of time, the connection is
   broken; there is no guarantee regarding which messages have been
   received successfully before the connection was broken.
 
-  Connections can be ordered or unordered, but note that ordered
-  unreliable connections are forbidden.  Also, note that ordering of
-  RMA operations only applies to target notification, not data
-  delivery.
+  For reliable connections, RU connections allow the most aggressive
+  optimization of the underlying network(s) to provide better
+  performance. RO connections will reduce performance on most networks.
 
-  For reliable connections, unordered connections allow the most
-  aggressive optimization of the underlying network(s) to provide better
-  performance. Requesting Ordered connections will reduce performance on
-  most networks.
-
-  Unreliable unordered connections have no timeout.
-
-  Multicast is always unreliable unordered.  Multicast connections
-  are always unidirectional, send *or* receive.  If an endpoint wants
-  to join a multicast group to both send and receive, it needs to
-  establish two distinct connections, one for sending and one for
-  receiving.
+  Reliable connections support both messages and remote memory access
+  (see Communications below).
 
   \ingroup connection
 */
@@ -1507,6 +1518,18 @@ CCI_DECLSPEC int cci_sendv(cci_connection_t * connection,
 /* RMA Area operations */
 
 /*!
+  Opaque RMA handle for use with cci_rma().
+
+  The RMA handle contains all information that a transport will need to
+  initiate a remote RMA operation. The contents should not be inspected
+  or modified by the application. The contents are serialized and ready
+  for sending to peers.
+*/
+typedef const struct cci_rma_handle {
+	uint64_t stuff[4];
+} cci_rma_handle_t;
+
+/*!
   Register memory for RMA operations.
 
   Prior to accessing memory using RMA, the application must register
@@ -1537,7 +1560,7 @@ CCI_DECLSPEC int cci_sendv(cci_connection_t * connection,
 CCI_DECLSPEC int cci_rma_register(cci_endpoint_t * endpoint,
 				  void *start, uint64_t length,
 				  int flags,
-				  uint64_t * rma_handle);
+				  cci_rma_handle_t ** rma_handle);
 
 /*!
   Deregister memory.
@@ -1556,7 +1579,7 @@ CCI_DECLSPEC int cci_rma_register(cci_endpoint_t * endpoint,
   \ingroup communications
  */
 CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
-				    uint64_t rma_handle);
+				    cci_rma_handle_t * rma_handle);
 
 /*!
   Perform a RMA operation between local and remote memory.
@@ -1573,10 +1596,17 @@ CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
   the RMA has completed. It is guaranteed to arrive after the RMA operation
   has finished.
 
+  In an ordered connection, RMA completion events are ordered according
+  to the ordering of the cci_send() or cci_rma() calls in the local peer.
+  For instance a cci_rma() with completion message posted between two
+  cci_send() will generate a completion event on the target between the
+  receive events of these sends.
+
   CCI makes no guarantees about the data delivery within the RMA operation
   (e.g., no last-byte-written-last).
 
-  Only a local completion will be generated.
+  A local completion will be generated. If a completion message is provided,
+  then a remote completion will be generated as well.
 
   \param[in] connection     Connection (destination).
   \param[in] msg_ptr         Pointer to data for the remote completion.
@@ -1615,8 +1645,8 @@ CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
 */
 CCI_DECLSPEC int cci_rma(cci_connection_t * connection,
 			 const void *msg_ptr, uint32_t msg_len,
-			 uint64_t local_handle, uint64_t local_offset,
-			 uint64_t remote_handle, uint64_t remote_offset,
+			 cci_rma_handle_t * local_handle, uint64_t local_offset,
+			 cci_rma_handle_t * remote_handle, uint64_t remote_offset,
 			 uint64_t data_len, const void *context, int flags);
 
 #endif				/* CCI_H */

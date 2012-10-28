@@ -18,6 +18,9 @@ AC_CONFIG_AUX_DIR([./config])
 # -I in ACLOCAL_AMFLAGS in the top-level Makefile.am.
 AC_CONFIG_MACRO_DIR([./config])
 
+# Define $target
+AC_CANONICAL_TARGET
+
 CCI_CONFIGURE_SETUP
 
 cci_show_title "Configuring CCI distribution tarball"
@@ -92,10 +95,11 @@ AH_BOTTOM([
 ])
 
 # If debug mode, add -g
+CFLAGS_save="$CFLAGS"
 AC_ARG_ENABLE([cci-debug],
     AS_HELP_STRING([--enable-cci-debug],
                    [Build w/support for debugging symbols]),
-                   AC_SUBST([DEBUG_FLAGS],["-O0 -g"]),
+                   AC_SUBST([CFLAGS],["-g -O0 -Wall $CFLAGS_save"]),
                    [])
 
 # Check for Cray GNI (Gemini) headers and libs

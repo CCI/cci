@@ -41,17 +41,19 @@ cci_device_t **devices = NULL;
 cci_endpoint_t *endpoint = NULL;
 cci_connection_t *connection = NULL;
 cci_conn_attribute_t attr = CCI_CONN_ATTR_UU;
-uint64_t local_rma_handle = 0ULL;
+cci_rma_handle_t *local_rma_handle;
+cci_rma_handle_t *server_rma_handle;
 int remote_completion = 0;
 void *rmt_comp_msg = NULL;
 uint32_t rmt_comp_len = 0;
 cci_os_handle_t fd = 0;
+int ignore_os_handle = 0;
 int blocking = 0;
 int nfds = 0;
 fd_set rfds;
 
 typedef struct options {
-	uint64_t server_rma_handle;
+	struct cci_rma_handle rma_handle;
 	uint32_t max_rma_size;
 #define MSGS      0
 #define RMA_WRITE 1
@@ -61,12 +63,12 @@ typedef struct options {
 	int pad;
 } options_t;
 
-options_t opts = { 0ULL, 0, 0, 0, 0 };
+options_t opts;
 
 void print_usage()
 {
 	fprintf(stderr, "usage: %s -h <server_uri> [-s] [-i <iters>] "
-		"[-W <warmup>] [-c <type>] [-n] "
+		"[-W <warmup>] [-c <type>] [-n] [-b|-o]"
 		"[[-w | -r] [-m <max_rma_size> [-C]]]\n", name);
 	fprintf(stderr, "where:\n");
 	fprintf(stderr, "\t-h\tServer's URI\n");
@@ -81,7 +83,8 @@ void print_usage()
 	fprintf(stderr, "\t-r\tUse RMA READ instead of MSGs\n");
 	fprintf(stderr, "\t-m\tTest RMA messages up to max_rma_size\n");
 	fprintf(stderr, "\t-C\tSend RMA remote completion message\n");
-	fprintf(stderr, "\t-b\tBlock using the OS handle instead of polling\n\n");
+	fprintf(stderr, "\t-b\tBlock using the OS handle instead of polling\n");
+	fprintf(stderr, "\t-o\tGet OS handle but don't use it\n\n");
 	fprintf(stderr, "Example:\n");
 	fprintf(stderr, "server$ %s -h ip://foo -p 2211 -s\n", name);
 	fprintf(stderr, "client$ %s -h ip://foo -p 2211\n", name);
@@ -128,8 +131,7 @@ static void poll_events(void)
 							    rmt_comp_msg,
 							    rmt_comp_len,
 							    local_rma_handle, 0,
-							    opts.
-							    server_rma_handle,
+							    &opts.rma_handle,
 							    0, current_size,
 							    (void *)1,
 							    opts.flags);
@@ -152,8 +154,7 @@ static void poll_events(void)
 							    rmt_comp_msg,
 							    rmt_comp_len,
 							    local_rma_handle, 0,
-							    opts.
-							    server_rma_handle,
+							    &opts.rma_handle,
 							    0, current_size,
 							    (void *)1,
 							    opts.flags);
@@ -281,7 +282,7 @@ void do_client()
 		ret = cci_rma_register(endpoint, buffer, max, flags,
 				       &local_rma_handle);
 		check_return(endpoint, "cci_rma_register", ret, 1);
-		fprintf(stderr, "local_rma_handle is 0x%" PRIx64 "\n",
+		fprintf(stderr, "local_rma_handle is %p\n",
 			local_rma_handle);
 		min = 1;
 		if (opts.method == RMA_WRITE)
@@ -312,7 +313,7 @@ void do_client()
 		else
 			ret = cci_rma(connection, rmt_comp_msg, rmt_comp_len,
 				      local_rma_handle, 0,
-				      opts.server_rma_handle, 0,
+				      &opts.rma_handle, 0,
 				      current_size, (void *)1, opts.flags);
 		check_return(endpoint, func, ret, 1);
 
@@ -343,12 +344,10 @@ void do_client()
 			current_size *= 2;
 
 		if (current_size >= 64 * 1024) {
-			iters /= 2;
-			if (iters < 16)
-				iters = 16;
-			warmup /= 2;
-			if (warmup < 2)
-				warmup = 2;
+			if (iters >= 32)
+				iters /= 2;
+			if (warmup >= 4)
+				warmup /= 2;
 		}
 	}
 
@@ -426,10 +425,12 @@ void do_server()
 								     opts.
 								     max_rma_size,
 								     opts.method == RMA_WRITE ? CCI_FLAG_WRITE : CCI_FLAG_READ,
-								     &opts.
-								     server_rma_handle);
+								     &server_rma_handle);
 						check_return(endpoint, "cci_rma_register",
 							     ret, 1);
+						memcpy(&opts.rma_handle,
+								server_rma_handle,
+								sizeof(*server_rma_handle));
 					}
 					ret =
 					    cci_send(connection, &opts,
@@ -454,7 +455,7 @@ void do_server()
 		poll_events();
 
 	if (opts.method != MSGS) {
-		ret = cci_rma_deregister(endpoint, opts.server_rma_handle);
+		ret = cci_rma_deregister(endpoint, server_rma_handle);
 		check_return(endpoint, "cci_rma_deregister", ret, 1);
 	}
 
@@ -473,7 +474,7 @@ int main(int argc, char *argv[])
 
 	name = argv[0];
 
-	while ((c = getopt(argc, argv, "h:sRc:nwrm:Ci:W:b")) != -1) {
+	while ((c = getopt(argc, argv, "h:sRc:nwrm:Ci:W:bo")) != -1) {
 		switch (c) {
 		case 'h':
 			server_uri = strdup(optarg);
@@ -522,6 +523,10 @@ int main(int argc, char *argv[])
 			blocking = 1;
 			os_handle = &fd;
 			break;
+		case 'o':
+			ignore_os_handle = 1;
+			os_handle = &fd;
+			break;
 		default:
 			print_usage();
 		}
@@ -529,6 +534,13 @@ int main(int argc, char *argv[])
 
 	if (!is_server && !server_uri) {
 		fprintf(stderr, "Must select -h or -s\n");
+		print_usage();
+	}
+
+	if (blocking && ignore_os_handle) {
+		fprintf(stderr, "-b and -o are not compatible.\n");
+		fprintf(stderr, "-b will block using select() using the OS handle.\n");
+		fprintf(stderr, "-o will obtain the OS handle, but not use it to wait.\n");
 		print_usage();
 	}
 

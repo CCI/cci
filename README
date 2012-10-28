@@ -36,14 +36,12 @@ The following transports are supported (more coming soon):
   Sockets (UDP)
   OFA Verbs (InfiniBand and RoCE)
   Cray GNI (Gemini)
-  Cray Portals (SeaStar)
+  Linux Ethernet (raw Ethernet)
 
 
 = Current Limitations ==========================================================
 
 The current CCI prototype has the following limitations:
-
-  The OS handle for blocking is not yet functional
 
   Multicast connections are not implemented
 

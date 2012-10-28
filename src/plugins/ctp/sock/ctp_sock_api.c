@@ -98,15 +98,15 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 			const struct iovec *data, uint32_t iovcnt,
 			const void *context, int flags);
 static int ctp_sock_rma_register(cci_endpoint_t * endpoint,
-				void *start, uint64_t length,
-				int flags, uint64_t * rma_handle);
+			     void *start, uint64_t length,
+			     int flags, cci_rma_handle_t ** rma_handle);
 static int ctp_sock_rma_deregister(cci_endpoint_t * endpoint,
-								uint64_t rma_handle);
+					cci_rma_handle_t * rma_handle);
 static int ctp_sock_rma(cci_connection_t * connection,
-			const void *header_ptr, uint32_t header_len,
-			uint64_t local_handle, uint64_t local_offset,
-			uint64_t remote_handle, uint64_t remote_offset,
-			uint64_t data_len, const void *context, int flags);
+		    const void *header_ptr, uint32_t header_len,
+		    cci_rma_handle_t * local_handle, uint64_t local_offset,
+		    cci_rma_handle_t * remote_handle, uint64_t remote_offset,
+		    uint64_t data_len, const void *context, int flags);
 
 static uint8_t sock_ip_hash(in_addr_t ip, uint16_t port);
 static void sock_progress_sends(cci__ep_t * ep);
@@ -2553,8 +2553,8 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 }
 
 static int ctp_sock_rma_register(cci_endpoint_t * endpoint,
-				void *start, uint64_t length,
-				int flags, uint64_t * rma_handle)
+			     void *start, uint64_t length,
+			     int flags, cci_rma_handle_t ** rma_handle)
 {
 	cci__ep_t *ep = NULL;
 	sock_ep_t *sep = NULL;
@@ -2582,13 +2582,14 @@ static int ctp_sock_rma_register(cci_endpoint_t * endpoint,
 	handle->ep = ep;
 	handle->length = length;
 	handle->start = start;
+	*((uint64_t *)&handle->rma_handle.stuff[0]) = (uintptr_t)handle;
 	handle->refcnt = 1;
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&sep->handles, handle, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-	*rma_handle = (uint64_t) ((uintptr_t) handle);
+	*rma_handle = &handle->rma_handle;
 
 	CCI_EXIT;
 
@@ -2596,11 +2597,10 @@ static int ctp_sock_rma_register(cci_endpoint_t * endpoint,
 }
 
 static int
-ctp_sock_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
+ctp_sock_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * rma_handle)
 {
 	int ret = CCI_EINVAL;
-	sock_rma_handle_t *handle =
-		(sock_rma_handle_t *) ((uintptr_t) rma_handle);
+	sock_rma_handle_t *handle = container_of(rma_handle, sock_rma_handle_t, rma_handle);
 	cci__ep_t *ep = NULL;
 	sock_ep_t *sep = NULL;
 	sock_rma_handle_t *h = NULL;
@@ -2642,17 +2642,17 @@ ctp_sock_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
 }
 
 static int ctp_sock_rma(cci_connection_t * connection,
-			const void *msg_ptr, uint32_t msg_len,
-			uint64_t local_handle, uint64_t local_offset,
-			uint64_t remote_handle, uint64_t remote_offset,
-			uint64_t data_len, const void *context, int flags)
+		    const void *msg_ptr, uint32_t msg_len,
+		    cci_rma_handle_t * local_handle, uint64_t local_offset,
+		    cci_rma_handle_t * remote_handle, uint64_t remote_offset,
+		    uint64_t data_len, const void *context, int flags)
 {
 	int ret = CCI_ERR_NOT_IMPLEMENTED;
 	cci__ep_t *ep = NULL;
 	cci__conn_t *conn = NULL;
 	sock_ep_t *sep = NULL;
 	sock_conn_t *sconn = NULL;
-	sock_rma_handle_t *local = (sock_rma_handle_t *)((uintptr_t) local_handle);
+	sock_rma_handle_t *local = container_of(local_handle, sock_rma_handle_t, rma_handle);
 	sock_rma_handle_t *h = NULL;
 	sock_rma_op_t *rma_op = NULL;
 	size_t max_send_size;
@@ -2805,9 +2805,9 @@ static int ctp_sock_rma(cci_connection_t * connection,
 				tx->rma_len = tx->len;
 				tx->msg_type = SOCK_MSG_RMA_WRITE;
 				sock_pack_rma_write(rma_hdr, tx->len, sconn->peer_id,
-									tx->seq, 0, local_handle,
+									tx->seq, 0, local_handle->stuff[0],
 									local_offset + offset,
-									remote_handle,
+									remote_handle->stuff[0],
 									remote_offset + offset);
 				memcpy(rma_hdr->data, tx->rma_ptr, tx->len);
 			} else {
@@ -2815,9 +2815,9 @@ static int ctp_sock_rma(cci_connection_t * connection,
 				debug (CCI_DB_MSG, "%s: Packing RMA_READ_REQUEST msg (seq %u)",
 					   __func__, tx->seq);
 				sock_pack_rma_read_request (rma_hdr, tx->len, sconn->peer_id,
-									tx->seq, 0, local_handle,
+									tx->seq, 0, local_handle->stuff[0],
 									local_offset + offset,
-									remote_handle,
+									remote_handle->stuff[0],
 									remote_offset + offset);
 			}
 			tx->len = sizeof(sock_rma_header_t);
@@ -3301,7 +3301,8 @@ sock_handle_ack(sock_conn_t * sconn,
 		rma_op = tx->rma_op;
 		if (rma_op && rma_op->status == CCI_SUCCESS) {
 			sock_rma_handle_t *local =
-				(sock_rma_handle_t *) ((uintptr_t) rma_op->local_handle);
+				container_of(rma_op->local_handle, sock_rma_handle_t,
+						rma_handle);
 			rma_op->completed++;
 
 			/* progress RMA */
@@ -3358,9 +3359,9 @@ sock_handle_ack(sock_conn_t * sconn,
 				if (tx->flags & CCI_FLAG_WRITE) {
 					sock_pack_rma_write(write, tx->len,
 								sconn->peer_id, tx->seq, 0,
-								rma_op->local_handle,
+								rma_op->local_handle->stuff[0],
 								rma_op->local_offset + offset,
-								rma_op->remote_handle,
+								rma_op->remote_handle->stuff[0],
 								rma_op->remote_offset + offset);
 					memcpy(write->data, local->start + offset, tx->len);
 				} else {
@@ -3369,9 +3370,9 @@ sock_handle_ack(sock_conn_t * sconn,
 					 * the code is correct, only the name is confusing */
 					sock_pack_rma_read_request (write, tx->len, 
 								sconn->peer_id, tx->seq, 0, 
-								rma_op->local_handle,
+								rma_op->local_handle->stuff[0],
 								rma_op->local_offset + offset,
-								rma_op->remote_handle,
+								rma_op->remote_handle->stuff[0],
 								rma_op->remote_offset + offset);
 				}
 
@@ -3890,7 +3891,7 @@ sock_handle_rma_read_reply(sock_conn_t *sconn, sock_rx_t *rx,
 		/* length exceeds local handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
 		debug(CCI_DB_WARN, "%s: local length not valid (%lu/%lu)",
-			  __func__, local_offset + len, local->length);
+			  __func__, (long unsigned int)local_offset + len, (long unsigned int)local->length);
 		goto out;
 	}
 

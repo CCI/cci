@@ -51,6 +51,7 @@ struct timeval start, end;
 int in_flight = MAX_PENDING;
 int blocking = 0;
 cci_os_handle_t fd = 0;
+int ignore_os_handle = 0;
 int nfds = 0;
 fd_set rfds;
 
@@ -72,7 +73,8 @@ void print_usage()
 		"\t-c\tConnection type (UU, RU, or RO) set by client only\n");
 	fprintf(stderr, "\t-t\tTimeout in seconds (default %d)\n", TIMEOUT);
 	fprintf(stderr, "\t-i\tMax number of messages in-flight (default %d)\n", MAX_PENDING);
-	fprintf(stderr, "\t-b\tBlock using the OS handle instead of polling\n\n");
+	fprintf(stderr, "\t-b\tBlock using the OS handle instead of polling\n");
+	fprintf(stderr, "\t-o\tGet OS handle but don't use it\n\n");
 	fprintf(stderr, "Example:\n");
 	fprintf(stderr, "server$ %s -h ip://foo -p 2211 -s\n", name);
 	fprintf(stderr, "client$ %s -h ip://foo -p 2211\n", name);
@@ -94,8 +96,11 @@ static void poll_events(void)
 		FD_ZERO(&rfds);
 		FD_SET(fd, &rfds);
 
+again:
 		ret = select(nfds, &rfds, NULL, NULL, NULL);
-		if (!ret)
+		if (ret == -1 && errno == EINTR)
+			goto again;
+		else if (ret < 1)
 			return;
 	}
 
@@ -311,12 +316,16 @@ int main(int argc, char *argv[])
 {
 	int ret, c;
 	uint32_t caps = 0;
+<<<<<<< HEAD
+=======
+	//cci_os_handle_t ep_fd;
+>>>>>>> master
 	char *uri = NULL;
 	cci_os_handle_t *os_handle = NULL;
 
 	name = argv[0];
 
-	while ((c = getopt(argc, argv, "h:p:sc:t:i:bc:")) != -1) {
+	while ((c = getopt(argc, argv, "h:p:sc:t:i:bc:o")) != -1) {
 		switch (c) {
 		case 'h':
 			server_uri = strdup(optarg);
@@ -352,6 +361,10 @@ int main(int argc, char *argv[])
 			blocking = 1;
 			os_handle = &fd;
 			break;
+		case 'o':
+			ignore_os_handle = 1;
+			os_handle = &fd;
+			break;
 		default:
 			print_usage();
 		}
@@ -359,6 +372,13 @@ int main(int argc, char *argv[])
 
 	if (!is_server && !server_uri) {
 		fprintf(stderr, "Must select -h or -s\n");
+		print_usage();
+	}
+
+	if (blocking && ignore_os_handle) {
+		fprintf(stderr, "-b and -o are not compatible.\n");
+		fprintf(stderr, "-b will block using select() using the OS handle.\n");
+		fprintf(stderr, "-o will obtain the OS handle, but not use it to wait.\n");
 		print_usage();
 	}
 
