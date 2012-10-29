@@ -1171,37 +1171,6 @@ typedef struct sock_globals {
 	cci_device_t const **const devices;
 } sock_globals_t;
 
-/* Macro to initialize the structure of a device */
-#define INIT_CCI_DEVICE_STRUCT(device) {			\
-	device->max_send_size = SOCK_DEFAULT_MSS; 		\
-	device->rate = 10000000000ULL; 					\
-	device->pci.domain = -1;    /* per CCI spec */ 	\
-	device->pci.bus = -1;       /* per CCI spec */ 	\
-	device->pci.dev = -1;       /* per CCI spec */ 	\
-	device->pci.func = -1;      /* per CCI spec */ 	\
-	device->up = 0; 								\
-	} while (0)
-
-#define INIT_CCI__DEV_STRUCT(dev,ret) do { 		\
-	struct cci_device *device; 					\
-	sock_dev_t *sdev; 							\
-	ret = CCI_SUCCESS; 							\
-	dev = calloc(1, sizeof(*dev)); 				\
-	if (!dev) 									\
-		ret = CCI_ENOMEM; 						\
-		dev->priv = calloc(1, sizeof(*sdev)); 	\
-		if (!dev->priv) { 						\
-			free(dev); 							\
-			ret = CCI_ENOMEM; 					\
-		} 										\
-		cci__init_dev(dev); 					\
-		device = &dev->device; 					\
-		INIT_CCI_DEVICE_STRUCT(device); 		\
-		sdev = dev->priv; 						\
-		sdev->bufsize = 0; 						\
-		device->transport = strdup("sock"); 	\
-	} while(0)
-
 /* We try to stay page aligned when we send RMA data */
 #define RMA_PAYLOAD_SIZE(c, max) do { \
 	if ((c->max_send_size - sizeof(sock_rma_header_t)) > (4*1024))          \
