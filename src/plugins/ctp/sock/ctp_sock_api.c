@@ -2091,6 +2091,9 @@ pack_piggyback_ack (cci__ep_t *ep, sock_conn_t *sconn, sock_tx_t *tx)
 
 	UNUSED_PARAM (ep);
 
+    if (!cci_conn_is_reliable(sconn->conn))
+        return CCI_SUCCESS;
+
 	if (!TAILQ_EMPTY(&sconn->acks)) {
 		ack = TAILQ_FIRST(&sconn->acks);
 		if (1 == sock_need_sack(sconn)) {
@@ -2464,7 +2467,6 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 
 	/* if unreliable, try to send */
 	if (!is_reliable) {
-		pack_piggyback_ack (ep, sconn, tx);
 		ret = sock_sendto(sep->sock, tx->buffer, tx->len, tx->rma_ptr,
 						tx->rma_len, sconn->sin);
 		if (ret == tx->len) {
