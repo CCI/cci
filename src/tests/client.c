@@ -68,7 +68,6 @@ int main(int argc, char *argv[])
 	uint32_t caps = 0;
 	char *server_uri = NULL;
 	cci_os_handle_t fd;
-	cci_device_t **devices = NULL;
 	cci_endpoint_t *endpoint = NULL;
 	cci_connection_t *connection = NULL;
 	uint32_t timeout = 30 * 1000000;

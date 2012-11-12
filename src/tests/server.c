@@ -18,10 +18,9 @@
 
 int main(int argc, char *argv[])
 {
-	int ret, done = 0, len = 0;
+	int ret, done = 0;
 	uint32_t caps = 0;
 	char *uri = NULL;
-	cci_device_t **devices = NULL;
 	cci_endpoint_t *endpoint = NULL;
 	cci_os_handle_t ep_fd;
 	cci_connection_t *connection = NULL;
