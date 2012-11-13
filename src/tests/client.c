@@ -67,7 +67,7 @@ int main(int argc, char *argv[])
 	int done = 0, ret, i = 0, c;
 	uint32_t caps = 0;
 	char *server_uri = NULL;
-	cci_os_handle_t fd;
+	cci_os_handle_t *fd = NULL;
 	cci_endpoint_t *endpoint = NULL;
 	cci_connection_t *connection = NULL;
 	uint32_t timeout = 30 * 1000000;
@@ -96,7 +96,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* create an endpoint */
-	ret = cci_create_endpoint(NULL, 0, &endpoint, &fd);
+	ret = cci_create_endpoint(NULL, 0, &endpoint, fd);
 	if (ret) {
 		fprintf(stderr, "cci_create_endpoint() failed with %s\n",
 			cci_strerror(NULL, ret));
