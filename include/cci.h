@@ -1052,7 +1052,9 @@ typedef struct cci_event_accept {
 /*!
   Keepalive timeout event.
 
-  The peer has not sent us anything within the timeout period.
+  We were unable to send a periodic message to the peer. The application
+  can attempt commuincation or disconnect. The connection will continue
+  to consume resources until the application calls cci_disconnect().
 
   The number of fields in this struct is intentionally limited in
   order to reduce costs associated with state storage, caching,
@@ -1253,23 +1255,17 @@ typedef enum cci_opt_name {
 	 */
 	CCI_OPT_ENDPT_SEND_BUF_COUNT,
 
-	/*! The "keepalive" timeout is to prevent a client from connecting
-	   to a server and then the client disappears without the server
-	   noticing.  If the server never sends anything on the connection,
-	   it'll never realize that the client is gone, but the connection
-	   is still consuming resources.  But note that keepalive timers
-	   apply to both clients and servers.
+	/*! Send a periodic message over each reliable connection on the
+	   endpoint.
 
-	   The keepalive timeout is expressed in microseconds.  If the
-	   keepalive timeout value is set:
+	   Disabled by default (timeout is 0), sending keepalive messages can
+	   determine if a peer has silently disconnected. If the peer fails to
+	   reply, the CCI_EVENT_KEEPALIVE_TIMEDOUT event is raised on that
+	   connection. If the peer responds, no event is raised. The messages
+	   are sent internally within CCI and are never visible to the
+	   application either locally or at the peer.
 
-	   - If no traffic at all is received on a connection within the
-	   keepalive timeout, the CCI_EVENT_KEEPALIVE_TIMEOUT event is
-	   raised on that connection.
-
-	   - The CCI implementation will automatically send control
-	   heartbeats across an inactive (but still alive) connection to
-	   reset the peer's keepalive timer before it times out.
+	   The keepalive timeout is expressed in microseconds.
 
 	   If a keepalive event is raised, the keepalive timeout is set to
 	   0 (i.e., it must be "re-armed" before it will timeout again),
