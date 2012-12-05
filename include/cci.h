@@ -836,7 +836,7 @@ typedef enum cci_event_type {
 	CCI_EVENT_ACCEPT,
 
 	/*! This event occurs when the keepalive timeout has expired (see
-	   CCI_OPT_ENDPT_KEEPALIVE_TIMEDOUT for more details). */
+	   CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT for more details). */
 	CCI_EVENT_KEEPALIVE_TIMEDOUT,
 
 	/*! A device on this endpoint has failed.
@@ -1258,20 +1258,29 @@ typedef enum cci_opt_name {
 	/*! Send a periodic message over each reliable connection on the
 	   endpoint.
 
-	   Disabled by default (timeout is 0), sending keepalive messages can
-	   determine if a peer has silently disconnected. If the peer fails to
-	   reply, the CCI_EVENT_KEEPALIVE_TIMEDOUT event is raised on that
-	   connection. If the peer responds, no event is raised. The messages
-	   are sent internally within CCI and are never visible to the
-	   application either locally or at the peer.
+	   Sending keepalive messages can determine if a peer has silently
+	   disconnected. The CCI transport will periodically send a message over
+	   each connection. If the transport determines that the message was
+	   successfully received, it will repeat at the next period.  If the
+	   transport determines that the message was not successfully delivered,
+	   it will raise the CCI_EVENT_KEEPALIVE_TIMEDOUT event on the
+	   connection and the keepalive timeout for that connection is set to 0
+	   (i.e. disabled).
 
-	   The keepalive timeout is expressed in microseconds.
+	   If a keepalive event is raised, the connection is *not* disconnected.
+	   Recovery decisions are up to the application; it may choose to
+	   disconnect the connection, re-arm the keepalive timeout, send a MSG
+	   or RMA, etc. The application may "re-arm" the keepalive timeout for
+	   the connection individually using CCI_OPT_CONN_KEEPALIVE_TIMEOUT or
+	   re-arm all connections with this option.
 
-	   If a keepalive event is raised, the keepalive timeout is set to
-	   0 (i.e., it must be "re-armed" before it will timeout again),
-	   but the connection is *not* disconnected.  Recovery decisions
-	   are up to the application; it may choose to disconnect the
-	   connection, re-arm the keepalive timeout, etc.
+	   The keepalive timeout is expressed in microseconds. The default is 0
+	   (i.e. disabled). Using this option enables the same timeout on all
+	   connections, currently opened and those opened in the future.
+
+	   The messages are sent internally within CCI and are never visible to
+	   the application either locally or at the peer. Using keepalives may
+	   cause spurious wake ups when using the OS handle for blocking.
 
 	   cci_get_opt() and cci_set_opt().
 
@@ -1316,7 +1325,22 @@ typedef enum cci_opt_name {
 
 	   The parameter must point to a uint32_t.
 	 */
-	CCI_OPT_CONN_SEND_TIMEOUT
+	CCI_OPT_CONN_SEND_TIMEOUT,
+
+	/*! Send a periodic message over this reliable connection.
+
+	   This option is similar to CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT except that
+	   it modifies the keepalive timeout on a single connection only. The
+	   application may use it to re-arm a connection that has raised a
+	   CCI_EVENT_KEEPALIVE_TIMEDOUT, to selectively arm only some
+	   connections, or to set a timeout different from the endpoint's
+	   keepalive timeout period.
+
+	   cci_get_opt() and cci_set_opt().
+
+	   The parameter must point to a uint32_t.
+	 */
+	CCI_OPT_CONN_KEEPALIVE_TIMEOUT
 } cci_opt_name_t;
 
 typedef struct cci_alignment {
