@@ -3836,14 +3836,13 @@ static void
 sock_handle_rma_read_reply(sock_conn_t *sconn, sock_rx_t *rx,
 				uint32_t len, uint32_t tx_id)
 {
-	int ret;
+	int ret = 0;
 	cci__conn_t *conn = sconn->conn;
 	cci_endpoint_t *endpoint;
 	cci__ep_t *ep;
 	sock_ep_t *sep;
 	sock_rma_header_t *read = rx->buffer;
-//     uint32_t handle_len = 2 * sizeof(read->local);
-	uint64_t local_handle, local_offset, rma_payload_size;
+	uint64_t local_handle, local_offset;
 	sock_rma_handle_t *local, *h = NULL;
 	void *ptr = NULL;
 	sock_header_r_t *hdr_r;
@@ -3902,7 +3901,7 @@ sock_handle_rma_read_reply(sock_conn_t *sconn, sock_rx_t *rx,
 		  __func__, len);
 
 	ptr = local->start + (uintptr_t) local_offset;
-	memcpy(ptr, &read->data, rma_payload_size);
+	memcpy(ptr, &read->data, len);
 	debug(CCI_DB_INFO, "%s: recv'd data into target buffer", __func__);
 	if (ret)
 		debug(CCI_DB_MSG, "%s: recv'ing RMA READ payload failed with %s",
@@ -4260,6 +4259,7 @@ sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len,
 	endpoint = (&conn->connection)->endpoint;
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 
+    context = malloc (sizeof (uint64_t));
 	memcpy(context, hdr_r->data, sizeof(uint64_t));
 
 	/* get cci__evt_t to hang on ep->events */
