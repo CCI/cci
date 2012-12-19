@@ -262,7 +262,7 @@ void do_client()
 	signal(SIGALRM, handle_alarm);
 
 	/* begin communication with server */
-	for (current_size = 1; current_size <= test_conn->max_send_size;) {
+	for (; current_size <= test_conn->max_send_size;) {
 		int i;
 		double mbs = 0.0;
 
