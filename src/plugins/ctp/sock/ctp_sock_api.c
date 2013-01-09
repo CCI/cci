@@ -1,7 +1,9 @@
+/* vim: set tabstop=8:softtabstop=8:shiftwidth=8:noexpandtab */
+
 /*
 * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
-* Copyright © 2010-2012 UT-Battelle, LLC. All rights reserved.
-* Copyright © 2010-2012 Oak Ridge National Labs.  All rights reserved.
+* Copyright © 2010-2013 UT-Battelle, LLC. All rights reserved.
+* Copyright © 2010-2013 Oak Ridge National Labs.  All rights reserved.
 * Copyright © 2012 inria.  All rights reserved.
 *
 * See COPYING in top-level directory
@@ -1815,6 +1817,11 @@ static int ctp_sock_return_event(cci_event_t * event)
 	return CCI_SUCCESS;
 }
 
+/** Try to put a message on the wire.
+ * @return -1	An error occured, the type of error is available via errno.
+ * @return 	Any return code different than -1 gives the number of bytes
+ *		that were sent.
+ */
 static int sock_sendmsg(cci_os_handle_t sock, struct iovec iov[2],
 			int count, const struct sockaddr_in sin)
 {
@@ -1833,14 +1840,12 @@ static int sock_sendmsg(cci_os_handle_t sock, struct iovec iov[2],
 
 	ret = sendmsg(sock, &msg, 0);
 	if (ret == -1) {
-		ret = errno;
 		debug(CCI_DB_MSG,
-			"%s: sendmsg() returned %d (%s) count %d iov[0] %p:%hu "
-			"iov[1] %p:%hu",
-			__func__, ret, strerror(ret), count,
-			iov[0].iov_base, (int)iov[0].iov_len,
-			iov[1].iov_base, (int)iov[1].iov_len);
-		return -1;
+		      "%s: sendmsg() returned %d (%s) count %d iov[0] %p:%hu "
+		      "iov[1] %p:%hu",
+		      __func__, ret, strerror(ret), count,
+		      iov[0].iov_base, (int)iov[0].iov_len,
+		      iov[1].iov_base, (int)iov[1].iov_len);
 	}
 
 	return ret;
@@ -2226,7 +2231,7 @@ static void sock_progress_queued(cci__ep_t * ep)
 		}
 
 		/* if reliable and ordered, we have to check whether the tx is marked
-		RNR */
+		   RNR */
 		if (is_reliable
 			&& conn->connection.attribute == CCI_CONN_ATTR_RO 
 			&& tx->rnr != 0)
@@ -2245,16 +2250,16 @@ static void sock_progress_queued(cci__ep_t * ep)
 
 		debug(CCI_DB_MSG, "sending %s msg seq %u",
 			sock_msg_type(tx->msg_type), tx->seq);
-        if (tx->msg_type != SOCK_MSG_RMA_READ_REPLY) {
-		    pack_piggyback_ack (ep, sconn, tx);
-        }
+		if (tx->msg_type != SOCK_MSG_RMA_READ_REPLY) 
+			pack_piggyback_ack (ep, sconn, tx);
+
 		ret = sock_sendto(sep->sock, tx->buffer, tx->len, tx->rma_ptr,
-						tx->rma_len, sconn->sin);
+		                  tx->rma_len, sconn->sin);
 		if (ret == -1) {
 			switch (errno) {
 			default:
 				debug((CCI_DB_MSG | CCI_DB_INFO),
-					"sendto() failed with %s",
+					"sendto() failed with %s\n",
 					strerror(errno));
 				/* fall through */
 			case EINTR:
@@ -2363,7 +2368,9 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 {
 	int ret, is_reliable = 0, data_len = 0;
 	uint32_t i;
+#if CCI_DEBUG
 	char *func = iovcnt < 2 ? "send" : "sendv";
+#endif
 	cci_endpoint_t *endpoint = connection->endpoint;
 	cci__ep_t *ep;
 	cci__conn_t *conn;
@@ -2496,7 +2503,10 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 			return CCI_SUCCESS;
 		}
 
-		/* if error, fall through */
+		/* if error, fall through. If in debug mode, display a warning
+		   help tracing things. */
+		if (ret == -1)
+			debug (CCI_DB_WARN, "Send failed");
 	}
 
 	/* insert at tail of sock device's queued list */
@@ -4066,6 +4076,7 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	sock_parse_rma_handle_offset(&read->local, &local_handle, &local_offset);
 	sock_parse_rma_handle_offset(&read->remote, &remote_handle, &remote_offset);
 	remote = (sock_rma_handle_t *) (uintptr_t) remote_handle;
+	assert (remote);
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_FOREACH(h, &sep->handles, entry) {
@@ -4317,15 +4328,17 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 	CCI_ENTER;
 
 	sep = ep->priv;
-	if (!sep || sep->closing)
+	if (!sep)
 		return 0;
 
 	pthread_mutex_lock(&ep->lock);
+#if 0
 	if (ep->closing) {
 		pthread_mutex_unlock(&ep->lock);
 		CCI_EXIT;
 		return 0;
 	}
+#endif
 	
 	if (!TAILQ_EMPTY(&sep->idle_rxs)) {
 		rx = TAILQ_FIRST(&sep->idle_rxs);
@@ -4354,7 +4367,7 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		sock_header_t *hdr = NULL;
 
 		debug(CCI_DB_INFO,
-			"no rx buffers available on endpoint %d", sep->sock);
+		      "no rx buffers available on endpoint %d", sep->sock);
 
 		/* We do the receive using a temporary buffer so we can get enough
 		data to send a RNR NACK */
@@ -4588,8 +4601,8 @@ out:
 }
 
 /*
-* Check whether a keeplive timeout expired for a given endpoint.
-*/
+ * Check whether a keeplive timeout expired for a given endpoint.
+ */
 static void sock_keepalive(cci__ep_t *ep)
 {
 	cci__conn_t *conn;
@@ -4703,6 +4716,7 @@ static inline int sock_ack_sconn (sock_ep_t *sep, sock_conn_t *sconn)
 		sock_msg_type_t type = SOCK_MSG_ACK_UP_TO;
 		char buffer[SOCK_MAX_HDR_SIZE];
 		int len = 0;
+		int ret;
 
 		count = 1;
 		memset(buffer, 0, sizeof(buffer));
@@ -4765,7 +4779,9 @@ static inline int sock_ack_sconn (sock_ep_t *sep, sock_conn_t *sconn)
 					  acks, count);
 		
 		len = sizeof(*hdr_r) + (count * sizeof(acks[0]));
-		sock_sendto(sep->sock, buffer, len, NULL, 0, sconn->sin);
+		ret = sock_sendto(sep->sock, buffer, len, NULL, 0, sconn->sin);
+		if (ret == -1)
+			debug (CCI_DB_WARN, "ACK send failed");
 		sconn->last_ack_ts = now;
 	}
 	
@@ -4856,11 +4872,15 @@ static void *sock_progress_thread(void *arg)
 	}
 	pthread_mutex_unlock(&ep->lock);
 
-	/* Drain all pending ACKs */
+	/* Because we may have delayed some ACKs for optimization,
+	   we drain all pending ACKs before ending the progress thread */
 	for (i = 0; i < SOCK_EP_HASH_SIZE; i++) {
 		if (!TAILQ_EMPTY(&sep->conn_hash[i])) {
 			TAILQ_FOREACH(sconn, &sep->conn_hash[i], entry) {
-				sconn->last_ack_ts = sconn->last_ack_ts - 2 * ACK_TIMEOUT;
+				/* We trick the timeout value to ensure the ACK
+				   will be sent */
+				sconn->last_ack_ts 
+					= sconn->last_ack_ts - 2 * ACK_TIMEOUT;
 			}
 		}
 	}
