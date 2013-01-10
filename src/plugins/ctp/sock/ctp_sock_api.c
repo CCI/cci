@@ -251,6 +251,8 @@ out:
 
 static inline int sock_terminate_threads (sock_ep_t *sep)
 {
+	CCI_ENTER;
+
 	assert (sep);
 
 	pthread_mutex_lock(&sep->progress_mutex);
@@ -259,6 +261,8 @@ static inline int sock_terminate_threads (sock_ep_t *sep)
 
 	pthread_join(sep->progress_tid, NULL);
 	pthread_join(sep->recv_tid, NULL);
+
+	CCI_EXIT;
 
 	return CCI_SUCCESS;
 }
@@ -1667,20 +1671,49 @@ static int ctp_sock_set_opt(cci_opt_handle_t * handle,
 static int ctp_sock_get_opt(cci_opt_handle_t * handle,
 			cci_opt_name_t name, void *val)
 {
-	CCI_ENTER;
+	int ret 			= CCI_SUCCESS;
+	cci_endpoint_t *endpoint	= NULL;
+	cci__ep_t *ep 			= NULL;
 
-	UNUSED_PARAM (handle);
-	UNUSED_PARAM (name);
-	UNUSED_PARAM (val);
+	CCI_ENTER;
 
 	if (!sglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
 
+	endpoint = handle;
+	ep = container_of(endpoint, cci__ep_t, endpoint);
+	assert (ep);
+	
+
+	switch (name) {
+		case CCI_OPT_ENDPT_RECV_BUF_COUNT:
+			{
+				uint32_t *cnt = val;
+				*cnt = ep->rx_buf_cnt;
+				break;
+			}
+		case CCI_OPT_ENDPT_SEND_BUF_COUNT:
+			{
+				uint32_t *cnt = val;
+				*cnt = ep->tx_buf_cnt;
+				break;
+			}
+		case CCI_OPT_ENDPT_KEEPALIVE_TIMEOUT:
+			{
+				uint32_t *timeout = val;
+				*timeout = ep->keepalive_timeout;
+				break;
+			}
+		default:
+			/* Invalid opt name */
+			ret = CCI_EINVAL;
+	}
+
 	CCI_EXIT;
 
-	return CCI_EINVAL;
+	return ret;
 }
 
 static int ctp_sock_arm_os_handle(cci_endpoint_t * endpoint, int flags)
@@ -2337,9 +2370,11 @@ static void sock_progress_queued(cci__ep_t * ep)
 
 static void sock_progress_sends(cci__ep_t * ep)
 {
+	CCI_ENTER;
 	sock_progress_pending (ep);
 	sock_ack_conns(ep);
 	sock_progress_queued (ep);
+	CCI_EXIT;
 
 	return;
 }
@@ -2506,7 +2541,7 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 		/* if error, fall through. If in debug mode, display a warning
 		   help tracing things. */
 		if (ret == -1)
-			debug (CCI_DB_WARN, "Send failed");
+			debug (CCI_DB_WARN, "Send failed (%s)", strerror (errno));
 	}
 
 	/* insert at tail of sock device's queued list */
@@ -4864,9 +4899,14 @@ static void *sock_progress_thread(void *arg)
 		sock_keepalive (ep);
 		sock_progress_sends (ep);
 
-		pthread_mutex_lock(&sep->progress_mutex);
-		pthread_cond_wait(&sep->wait_condition, &sep->progress_mutex);
-		pthread_mutex_unlock(&sep->progress_mutex);
+		/* If the endpoint is in the process of closing, we just move
+		   on, otherwise, we wait for a signal to wake up and do progress */
+		if (!sep->closing) {
+			pthread_mutex_lock(&sep->progress_mutex);
+			pthread_cond_wait(&sep->wait_condition,
+			                  &sep->progress_mutex);
+			pthread_mutex_unlock(&sep->progress_mutex);
+		}
 
 		pthread_mutex_lock(&ep->lock);
 	}
