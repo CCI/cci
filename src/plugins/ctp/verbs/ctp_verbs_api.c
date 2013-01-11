@@ -288,7 +288,7 @@ verbs_find_rdma_devices(struct ibv_context **contexts, int count,
 	ret = getifaddrs(&ifa);
 	if (ret) {
 		ret = errno;
-		debug(CCI_DB_DRVR, "%s: getifaddrs() returned %s",
+		debug(CCI_DB_CTP, "%s: getifaddrs() returned %s",
 				__func__, strerror(ret));
 		goto out;
 	}
@@ -459,7 +459,7 @@ static int ctp_verbs_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver, uint32_t 
 	vglobals->contexts = rdma_get_devices(&count);
 	if (!vglobals->contexts) {
 		ret = errno;
-		debug(CCI_DB_DRVR, "%s: no RDMA devices found (%s)",
+		debug(CCI_DB_CTP, "%s: no RDMA devices found (%s)",
 				__func__, strerror(ret));
 		goto out;
 	}
@@ -469,7 +469,7 @@ static int ctp_verbs_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver, uint32_t 
 	ret = verbs_find_rdma_devices(vglobals->contexts, count, &ifaddrs);
 	if (ret) {
 		ret = errno;
-		debug(CCI_DB_DRVR, "%s: no RDMA devices with ifaddrs (%s)",
+		debug(CCI_DB_CTP, "%s: no RDMA devices with ifaddrs (%s)",
 				__func__, strerror(ret));
 		ret = CCI_ENODEV;
 		goto out;

@@ -224,7 +224,7 @@ extern int cci__debug;
 #define CCI_DB_FUNC   (1 << 5)	/* enterling/leaving functions */
 #define CCI_DB_INFO   (1 << 6)	/* just informational */
 #define CCI_DB_WARN   (1 << 7)	/* non-fatal error */
-#define CCI_DB_DRVR   (1 << 8)	/* transport function returned error */
+#define CCI_DB_CTP    (1 << 8)	/* transport function returned error */
 #define CCI_DB_EP     (1 << 9)	/* endpoint handling */
 
 #define CCI_DB_ALL    (~0)	/* print everything */

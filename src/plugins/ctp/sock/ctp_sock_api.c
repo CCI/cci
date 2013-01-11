@@ -680,7 +680,7 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 				  &sndbuf_size, &optlen);
 		if (ret == -1)
 			debug (CCI_DB_WARN, "Cannot get send buffer size");
-		debug (CCI_DB_DRVR, "Send buffer size: %d bytes (you may also "
+		debug (CCI_DB_CTP, "Send buffer size: %d bytes (you may also "
 		       "want to check the value of net.core.wmem_max using "
 		       "sysctl)", sndbuf_size);
 
@@ -688,7 +688,7 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 		                  &rcvbuf_size, &optlen);
 		if (ret == -1)
 			debug (CCI_DB_WARN, "Cannot get recv buffer size");
-		debug (CCI_DB_DRVR, "Receive buffer size: %d bytes (you may also "
+		debug (CCI_DB_CTP, "Receive buffer size: %d bytes (you may also "
                        "want to check the value of net.core.rmem_max using "
                        "sysctl)", rcvbuf_size);
 	}
