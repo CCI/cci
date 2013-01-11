@@ -660,17 +660,39 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 
 	if (sndbuf_size > 0) {
 		ret = setsockopt (sep->sock, SOL_SOCKET, SO_SNDBUF,
-						  &sndbuf_size, sizeof (sndbuf_size));
+		                  &sndbuf_size, sizeof (sndbuf_size));
 		if (ret == -1)
 			debug (CCI_DB_WARN, "Cannot set send buffer size");
 	}
 
 	if (rcvbuf_size > 0) {
 		ret = setsockopt (sep->sock, SOL_SOCKET, SO_RCVBUF,
-						  &rcvbuf_size, sizeof (rcvbuf_size));
+		                  &rcvbuf_size, sizeof (rcvbuf_size));
 		if (ret == -1)
 			debug (CCI_DB_WARN, "Cannot set recv buffer size");
 	}
+
+#if CCI_DEBUG
+	{
+		socklen_t optlen;
+
+		ret = getsockopt (sep->sock, SOL_SOCKET, SO_SNDBUF,
+				  &sndbuf_size, &optlen);
+		if (ret == -1)
+			debug (CCI_DB_WARN, "Cannot get send buffer size");
+		debug (CCI_DB_DRVR, "Send buffer size: %d bytes (you may also "
+		       "want to check the value of net.core.wmem_max using "
+		       "sysctl)", sndbuf_size);
+
+		ret = getsockopt (sep->sock, SOL_SOCKET, SO_RCVBUF,
+		                  &rcvbuf_size, &optlen);
+		if (ret == -1)
+			debug (CCI_DB_WARN, "Cannot get recv buffer size");
+		debug (CCI_DB_DRVR, "Receive buffer size: %d bytes (you may also "
+                       "want to check the value of net.core.rmem_max using "
+                       "sysctl)", rcvbuf_size);
+	}
+#endif
 
 	/* bind socket to device */
 	memset(&sin, 0, sizeof(sin));
