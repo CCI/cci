@@ -842,11 +842,9 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	return CCI_SUCCESS;
 
 out:
-	pthread_mutex_lock(&dev->lock);
-	if (!TAILQ_EMPTY(&dev->eps)) {
-		TAILQ_REMOVE(&dev->eps, ep, entry);
-	}
-	pthread_mutex_unlock(&dev->lock);
+	/* Note that there is no need to remove the ep even in the context of
+	   a failure because the ep is added to the list of active endpoints
+	   by cci_create_endpoint(), AFTER the call to this function. */
 	if (sep) {
 		while (!TAILQ_EMPTY(&sep->txs)) {
 			sock_tx_t *tx;
