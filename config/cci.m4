@@ -10,7 +10,7 @@ AC_DEFUN([CCI_DEFINE_ARGS],[
     AC_ARG_ENABLE([picky],
         [AC_HELP_STRING([--enable-picky],
                         [Turn on maintainer-level compiler pickyness])])
-    AS_IF([test -d $srcdir/.hg -o -d $srcdir/.svn],
+    AS_IF([test -d $srcdir/.hg -o -d $srcdir/.svn -o -d $srcdir/.git],
           [CCI_DEVEL_BUILD=yes
            AS_IF([test "$enable_picky" = ""],
                  [AC_MSG_WARN([Developer build: enabling pickyness by default])
