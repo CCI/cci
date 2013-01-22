@@ -1375,7 +1375,7 @@ CCI_DECLSPEC int cci_set_opt(cci_opt_handle_t * handle,
   Get an endpoint or connection option value.
 
   \param[in] handle Endpoint or connection handle.
-  \param[in] name   Which option to set the value of.
+  \param[in] name   Which option to get the value of.
   \param[in] val    Pointer to the output value. The type of the value
                     must match the option name.
 

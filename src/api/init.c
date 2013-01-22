@@ -81,8 +81,8 @@ static inline void cci__get_debug_env(void)
 			mask |= CCI_DB_INFO;
 		} else if (0 == strncmp(debug, "warn", 4)) {
 			mask |= CCI_DB_WARN;
-		} else if (0 == strncmp(debug, "drvr", 4)) {
-			mask |= CCI_DB_DRVR;
+		} else if (0 == strncmp(debug, "ctp", 4)) {
+			mask |= CCI_DB_CTP;
 		} else if (0 == strncmp(debug, "ep", 2)) {
 			mask |= CCI_DB_EP;
 		} else if (0 == strncmp(debug, "all", 3)) {
@@ -150,7 +150,7 @@ static int cci__free_configfile_devs(const char *reason)
 		dev = TAILQ_FIRST(&globals->configfile_devs);
 		TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
 		if (reason)
-			debug(CCI_DB_DRVR,
+			debug(CCI_DB_CTP,
 			      "destroying device [%s] (transport %s), %s",
 			      dev->device.name, dev->device.transport, reason);
 		cci__free_dev(dev);
@@ -185,7 +185,7 @@ void cci__add_dev(cci__dev_t * dev)
 
 	assert(NULL != dev->plugin);
 
-	debug(CCI_DB_DRVR,
+	debug(CCI_DB_CTP,
 	      "adding device [%s] (transport %s)",
 	      dev->device.name, dev->device.transport);
 
@@ -372,7 +372,7 @@ int cci__parse_config(const char *path)
 				}
 				if (transport == 1) {
 					TAILQ_INSERT_TAIL(&globals->configfile_devs, dev, entry);
-					debug(CCI_DB_DRVR,
+					debug(CCI_DB_CTP,
 					      "read device [%s] (transport %s) from config file",
 					      d->name, d->transport);
 					i++;
@@ -515,7 +515,7 @@ int cci__parse_config(const char *path)
 		}
 		if (transport == 1) {
 			TAILQ_INSERT_TAIL(&globals->configfile_devs, dev, entry);
-			debug(CCI_DB_DRVR,
+			debug(CCI_DB_CTP,
 			      "read device [%s] (transport %s) from config file",
 			      d->name, d->transport);
 			i++;
@@ -644,7 +644,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
 		/* list ready devices */
 		TAILQ_FOREACH(dev, &globals->devs, entry) {
-			debug(CCI_DB_DRVR,
+			debug(CCI_DB_CTP,
 			      "device [%s] (transport %s, default %d, priority %d, up %d) is ready",
 			      dev->device.name, dev->device.transport,
 			      dev->is_default, dev->priority, dev->device.up);

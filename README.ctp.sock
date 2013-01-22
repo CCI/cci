@@ -25,6 +25,21 @@
   The sock transport will then set the endpoint->max_send_size to this size
   less what it needs for headers.
 
+    bufsize = 20971520
+
+  The sock transport will then set the socket buffers (both send and receive)
+  to the specified size. Note that you need to ensure that the system
+  configuration allows the specified size. On Linux, this means that you must
+  check the value of net.core.rmem_max and net.core.wmem_max using sysctl
+  (e.g., systctl -n net.core.rmem_max) and eventually increase the value (e.g.,
+  sudo sysctl -w net.core.rmem_max=30000000).
+  If the socket send/receive buffers are not big enough, the transport may not
+  be able to send/receive messages. In the context of a send, if CCI debugging
+  is turned on and if a message cannot be sent because of a lack of system
+  buffers, users will see an error message with unordered/unreliable
+  connections, saying that a sent failed because the resources was temporarily
+  unavailable. 
+
 = Run-time notes ===============================================================
 
   1. Most devices that support transports other than sock will also provide an
@@ -44,7 +59,7 @@ Not implemented:
   RO connections may not be ordered (i.e. RU)
 
 
-= Performance Tuning ===========================================================
+= CCI Performance Tuning =======================================================
 
 SOCK_DEFAULT_MSS
     The default Maximum Segment Size is the default amount of data that is sent
@@ -75,3 +90,11 @@ ACK_TIMEOUT
 
 PENDING_ACK_THRESHOLD
     Maximum number of messages waiting for acknowledgment.
+
+= System Performance Tuning ====================================================
+
+  If the system parameters are not tuned for high-performance communications,
+  the transport may not be able to send/receive messages using some of the
+  latest networking hardware. The following page provides a good reference for
+  system tuning (TCP tuning proved to improve performance also for the
+  transport): http://fasterdata.es.net/host-tuning/linux/

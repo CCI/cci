@@ -28,6 +28,7 @@ BEGIN_C_DECLS
 #define SOCK_MAX_HDR_SIZE       (52)	/* max sock header size (RMA) */
 #define SOCK_MAX_HDRS           (SOCK_MAX_HDR_SIZE + 20 + 8)	/* IP + UDP */
 #define SOCK_DEFAULT_MSS        (SOCK_UDP_MAX - SOCK_MAX_HDR_SIZE)	/* assume jumbo frames */
+#define SOCK_DEFAULT_RMA_MSS	(SOCK_DEFAULT_MSS - 20)
 #define SOCK_MIN_MSS            (1500 - SOCK_MAX_HDR_SIZE)
 #define SOCK_MAX_SACK           (4)	/* pairs of start/end acks */
 #define SOCK_ACK_DELAY          (1)	/* send an ack after every Nth send */
@@ -49,6 +50,19 @@ BEGIN_C_DECLS
 #define ACK_TIMEOUT             (100) /* Timeout associated to ACK blocks */
 #define PENDING_ACK_THRESHOLD   (SOCK_RMA_DEPTH/4) /* Maximum size of a ACK block */
 #define SOCK_EP_NUM_EVTS        (64)
+
+/*
+ * System Parameters
+ */
+
+/* System send buffer size. Set to 0 for the default system size */
+#define SOCK_SNDBUF_SIZE        (0) 
+#define SOCK_RCVBUF_SIZE        (0)
+
+/* Macro used to avoid warnings from compilers when a parameter is not used */
+#define UNUSED_PARAM(p) do {	\
+	(void)(p);					\
+	} while (0);
 
 static inline uint64_t sock_tv_to_usecs(struct timeval tv)
 {
@@ -471,6 +485,8 @@ static inline void
 sock_parse_nack(sock_header_r_t * header_r, sock_msg_type_t type)
 {
 	/* Nothing to do? */
+	UNUSED_PARAM (header_r);
+	UNUSED_PARAM (type);
 }
 
 /* ack header and ack(s):
@@ -717,24 +733,39 @@ sock_pack_rma_write(sock_rma_header_t * write, uint16_t data_len,
  */
 
 static inline void
-sock_pack_rma_read(sock_rma_header_t * read, uint64_t data_len,
-		   uint32_t peer_id, uint32_t seq, uint32_t ts,
-		   uint64_t local_handle, uint64_t local_offset,
-		   uint64_t remote_handle, uint64_t remote_offset)
+sock_pack_rma_read_request(sock_rma_header_t * read, uint64_t data_len,
+						   uint32_t peer_id, uint32_t seq, uint32_t ts,
+						   uint64_t local_handle, uint64_t local_offset,
+						   uint64_t remote_handle, uint64_t remote_offset)
 {
 	sock_pack_header(&read->header_r.header, SOCK_MSG_RMA_READ_REQUEST,
 			 0, data_len, peer_id);
 	sock_pack_seq_ts(&read->header_r.seq_ts, seq, ts);
 	sock_pack_rma_handle_offset(&read->local, local_handle, local_offset);
-	sock_pack_rma_handle_offset(&read->remote, remote_handle,
-				    remote_offset);
+	sock_pack_rma_handle_offset(&read->remote, remote_handle, remote_offset);
 }
+
+
+static inline void
+sock_pack_rma_read_reply (sock_rma_header_t * read, uint64_t data_len,
+		uint32_t peer_id, uint32_t seq, uint32_t ts,
+		uint64_t local_handle, uint64_t local_offset,
+		uint64_t remote_handle, uint64_t remote_offset)
+{
+	sock_pack_header(&read->header_r.header, SOCK_MSG_RMA_READ_REPLY, 0,
+					data_len, peer_id);
+	sock_pack_seq_ts(&read->header_r.seq_ts, seq, ts);
+	sock_pack_rma_handle_offset(&read->local, local_handle, local_offset);
+	sock_pack_rma_handle_offset(&read->remote, remote_handle, remote_offset);
+}
+
+
 
 /* RMA WRITE DONE message
     <---------- 32 bits ---------->
     <- 8 -> <- 8 -> <---- 16 ----->
    +-------+-----------------------+
-   | type  |   a   |  context_id   |
+   | type  |   a   |    context    |
    +-------+-----------------------+
    |            peer id            |
    +-------------------------------+
@@ -1096,12 +1127,6 @@ typedef struct sock_conn {
 
 	/*! Flag to know if the receiver is ready or not */
 	uint32_t rnr;
-
-	/*! Array of RMA contextes (used for RMA reads) */
-	const void **rma_contexts;
-
-	/*! Current size of the array of RMA contexts */
-	uint32_t max_rma_contexts;
 } sock_conn_t;
 
 /* Only call if holding the ep->lock and sconn->acks is not empty
@@ -1118,8 +1143,11 @@ typedef struct sock_dev {
 	/*! Our IP address in network order */
 	in_addr_t ip;
 
-    /*! Our port in network byte order */
-    in_port_t port;
+	/*! Our port in network byte order */
+	in_port_t port;
+
+	/*! Set socket buffers sizes */
+	uint32_t bufsize;
 } sock_dev_t;
 
 typedef enum sock_fd_type {
@@ -1143,35 +1171,14 @@ typedef struct sock_globals {
 	cci_device_t const **const devices;
 } sock_globals_t;
 
-/* Macro to initialize the structure of a device */
-#define INIT_CCI_DEVICE_STRUCT(device) { \
-        device->max_send_size = SOCK_DEFAULT_MSS; \
-        device->rate = 10000000000ULL; \
-        device->pci.domain = -1;    /* per CCI spec */ \
-        device->pci.bus = -1;       /* per CCI spec */ \
-        device->pci.dev = -1;       /* per CCI spec */ \
-        device->pci.func = -1;      /* per CCI spec */ \
-        device->up = 0; \
-    } while (0)
-
-#define INIT_CCI__DEV_STRUCT(dev,ret) do { \
-        struct cci_device *device; \
-        sock_dev_t *sdev; \
-        ret = CCI_SUCCESS; \
-        dev = calloc(1, sizeof(*dev)); \
-        if (!dev) \
-            ret = CCI_ENOMEM; \
-        dev->priv = calloc(1, sizeof(*sdev)); \
-        if (!dev->priv) { \
-            free(dev); \
-            ret = CCI_ENOMEM; \
-        } \
-        cci__init_dev(dev); \
-        device = &dev->device; \
-        INIT_CCI_DEVICE_STRUCT(device); \
-        sdev = dev->priv; \
-        device->transport = strdup("sock"); \
-    } while(0)
+/* We try to stay page aligned when we send RMA data */
+#define RMA_PAYLOAD_SIZE(c, max) do { \
+	if ((c->max_send_size - sizeof(sock_rma_header_t)) > (4*1024))          \
+		max = (c->max_send_size - sizeof(sock_rma_header_t))                \
+			- ((c->max_send_size - sizeof(sock_rma_header_t)) % (4*1024));  \
+	else                                                                    \
+		max = c->max_send_size - sizeof(sock_rma_header_t);                 \
+	} while(0)
 
 typedef enum device_state {
 	IFACE_IS_DOWN = 0,

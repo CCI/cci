@@ -127,12 +127,14 @@ again:
 					fprintf(stderr,
 						"%s: send returned %s\n",
 						__func__, cci_strerror(endpoint, ret));
-				} else
+				} else 
 					send++;
 
 				LOCK;
 			}
 			UNLOCK;
+			if (event->send.context == (void*)0xdeadbeef)
+				done = 1;
 		}
 		break;
 	case CCI_EVENT_RECV:
@@ -262,7 +264,7 @@ void do_client()
 	signal(SIGALRM, handle_alarm);
 
 	/* begin communication with server */
-	for (current_size = 1; current_size <= test_conn->max_send_size;) {
+	for (; current_size <= test_conn->max_send_size;) {
 		int i;
 		double mbs = 0.0;
 
@@ -299,7 +301,10 @@ void do_client()
 
 		current_size *= 2;
 	}
-	cci_send(control_conn, "bye", 3, NULL, 0);
+	cci_send(control_conn, "bye", 3, (void*)0xdeadbeef, 0);
+
+	while (!done)
+		poll_events ();
 
 	return;
 }

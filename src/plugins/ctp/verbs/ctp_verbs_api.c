@@ -288,7 +288,7 @@ verbs_find_rdma_devices(struct ibv_context **contexts, int count,
 	ret = getifaddrs(&ifa);
 	if (ret) {
 		ret = errno;
-		debug(CCI_DB_DRVR, "%s: getifaddrs() returned %s",
+		debug(CCI_DB_CTP, "%s: getifaddrs() returned %s",
 				__func__, strerror(ret));
 		goto out;
 	}
@@ -459,7 +459,7 @@ static int ctp_verbs_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver, uint32_t 
 	vglobals->contexts = rdma_get_devices(&count);
 	if (!vglobals->contexts) {
 		ret = errno;
-		debug(CCI_DB_DRVR, "%s: no RDMA devices found (%s)",
+		debug(CCI_DB_CTP, "%s: no RDMA devices found (%s)",
 				__func__, strerror(ret));
 		goto out;
 	}
@@ -469,7 +469,7 @@ static int ctp_verbs_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver, uint32_t 
 	ret = verbs_find_rdma_devices(vglobals->contexts, count, &ifaddrs);
 	if (ret) {
 		ret = errno;
-		debug(CCI_DB_DRVR, "%s: no RDMA devices with ifaddrs (%s)",
+		debug(CCI_DB_CTP, "%s: no RDMA devices with ifaddrs (%s)",
 				__func__, strerror(ret));
 		ret = CCI_ENODEV;
 		goto out;
@@ -1444,6 +1444,24 @@ static int ctp_verbs_destroy_endpoint(cci_endpoint_t * endpoint)
 		ctp_verbs_disconnect(&conn->connection);
 	}
 
+	while (!TAILQ_EMPTY(&vep->active)) {
+		cci__conn_t *conn = NULL;
+		verbs_conn_t *vconn = NULL;
+
+		vconn = TAILQ_FIRST(&vep->active);
+		conn = vconn->conn;
+		ctp_verbs_disconnect(&conn->connection);
+	}
+
+	while (!TAILQ_EMPTY(&vep->passive)) {
+		cci__conn_t *conn = NULL;
+		verbs_conn_t *vconn = NULL;
+
+		vconn = TAILQ_FIRST(&vep->passive);
+		conn = vconn->conn;
+		ctp_verbs_disconnect(&conn->connection);
+	}
+
 	if (vep->srq) {
 		do {
 			ret = ibv_destroy_srq(vep->srq);
@@ -2238,6 +2256,8 @@ out:
 	return ret;
 }
 
+static const char *verbs_conn_state_str(verbs_conn_state_t state);
+
 static int ctp_verbs_disconnect(cci_connection_t * connection)
 {
 	int ret = CCI_SUCCESS;
@@ -2254,7 +2274,16 @@ static int ctp_verbs_disconnect(cci_connection_t * connection)
 	pthread_rwlock_unlock(&vep->conn_tree_lock);
 
 	pthread_mutex_lock(&ep->lock);
-	TAILQ_REMOVE(&vep->conns, vconn, entry);
+	if (vconn->state == VERBS_CONN_ESTABLISHED ||
+		vconn->state == VERBS_CONN_CLOSED)
+		TAILQ_REMOVE(&vep->conns, vconn, entry);
+	else if (vconn->state == VERBS_CONN_ACTIVE)
+		TAILQ_REMOVE(&vep->active, vconn, temp);
+	else if (vconn->state == VERBS_CONN_PASSIVE)
+		TAILQ_REMOVE(&vep->passive, vconn, temp);
+	else
+		debug(CCI_DB_CONN, "%s: disconnecting conn in %s",
+			__func__, verbs_conn_state_str(vconn->state));
 	pthread_mutex_unlock(&ep->lock);
 
 	if (vconn->conn_req) {

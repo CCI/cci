@@ -57,12 +57,12 @@ static int ctp_eth_sendv(cci_connection_t * connection,
 			 const void *context, int flags);
 static int ctp_eth_rma_register(cci_endpoint_t * endpoint,
 				void *start, uint64_t length,
-				int flags, uint64_t * rma_handle);
-static int ctp_eth_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
+				int flags, cci_rma_handle_t ** rma_handle);
+static int ctp_eth_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t *rma_handle);
 static int ctp_eth_rma(cci_connection_t * connection,
 		       const void *msg_ptr, uint32_t msg_len,
-		       uint64_t local_handle, uint64_t local_offset,
-		       uint64_t remote_handle, uint64_t remote_offset,
+		       cci_rma_handle_t * local_handle, uint64_t local_offset,
+		       cci_rma_handle_t * remote_handle, uint64_t remote_offset,
 		       uint64_t data_len, const void *context, int flags);
 
 /*
@@ -1029,13 +1029,13 @@ out:
 
 static int ctp_eth_rma_register(cci_endpoint_t * endpoint,
 				void *start, uint64_t length,
-				int flags, uint64_t * rma_handle)
+				int flags, cci_rma_handle_t ** rma_handle)
 {
 	printf("In eth_rma_register\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
-static int ctp_eth_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
+static int ctp_eth_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * rma_handle)
 {
 	printf("In eth_rma_deregister\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
@@ -1043,8 +1043,8 @@ static int ctp_eth_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle
 
 static int ctp_eth_rma(cci_connection_t * connection,
 		       const void *msg_ptr, uint32_t msg_len,
-		       uint64_t local_handle, uint64_t local_offset,
-		       uint64_t remote_handle, uint64_t remote_offset,
+		       cci_rma_handle_t * local_handle, uint64_t local_offset,
+		       cci_rma_handle_t * remote_handle, uint64_t remote_offset,
 		       uint64_t data_len, const void *context, int flags)
 {
 	printf("In eth_rma\n");
