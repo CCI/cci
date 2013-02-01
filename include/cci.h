@@ -119,7 +119,9 @@ CCI_DECLSPEC int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps);
   This is the last CCI function that must be called; no other
   CCI functions can be invoked after this function.
 
-   \return CCI_SUCCESS  CCI has been properly finalized.
+  \return CCI_SUCCESS  CCI has been properly finalized.
+  \return CCI_ERROR    CCI was not initialized when cci_finalize()
+                       was called.
 
   If cci_init was invoked multiple times, cci_finalize() should be
   called as many times, and only the last one will not be a no-op.
@@ -514,6 +516,7 @@ typedef int cci_os_handle_t;
   \return CCI_SUCCESS   The endpoint is ready for use.
   \return CCI_EINVAL    Endpoint or fd is NULL.
   \return CCI_ENODEV    Device is not "up".
+  \return CCI_ENODEV    Device is NULL and no CCI device is available.
   \return CCI_ENOMEM    Unable to allocate enough memory.
   \return Each transport may have additional error codes.
 
@@ -561,9 +564,10 @@ CCI_DECLSPEC int cci_create_endpoint(cci_device_t * device,
    \return Each transport may have additional error codes.
 
    Successful completion of this function makes all data structures
-   and state associated with the endpoint (including the OS handle)
-   stale.  All open connections are closed immediately -- it is exactly
-   as if cci_disconnect() was invoked on every open connection on this
+   and state associated with the endpoint stale (including the OS
+   handle, connections, events, event buffers, and RMA registrations).
+   All open connections are closed immediately -- it is exactly as if
+   cci_disconnect() was invoked on every open connection on this
    endpoint.
 
   \ingroup endpoints
@@ -1371,7 +1375,7 @@ CCI_DECLSPEC int cci_set_opt(cci_opt_handle_t * handle,
   Get an endpoint or connection option value.
 
   \param[in] handle Endpoint or connection handle.
-  \param[in] name   Which option to set the value of.
+  \param[in] name   Which option to get the value of.
   \param[in] val    Pointer to the output value. The type of the value
                     must match the option name.
 
@@ -1514,6 +1518,18 @@ CCI_DECLSPEC int cci_sendv(cci_connection_t * connection,
 /* RMA Area operations */
 
 /*!
+  Opaque RMA handle for use with cci_rma().
+
+  The RMA handle contains all information that a transport will need to
+  initiate a remote RMA operation. The contents should not be inspected
+  or modified by the application. The contents are serialized and ready
+  for sending to peers.
+*/
+typedef const struct cci_rma_handle {
+	uint64_t stuff[4];
+} cci_rma_handle_t;
+
+/*!
   Register memory for RMA operations.
 
   Prior to accessing memory using RMA, the application must register
@@ -1544,7 +1560,7 @@ CCI_DECLSPEC int cci_sendv(cci_connection_t * connection,
 CCI_DECLSPEC int cci_rma_register(cci_endpoint_t * endpoint,
 				  void *start, uint64_t length,
 				  int flags,
-				  uint64_t * rma_handle);
+				  cci_rma_handle_t ** rma_handle);
 
 /*!
   Deregister memory.
@@ -1563,7 +1579,7 @@ CCI_DECLSPEC int cci_rma_register(cci_endpoint_t * endpoint,
   \ingroup communications
  */
 CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
-				    uint64_t rma_handle);
+				    cci_rma_handle_t * rma_handle);
 
 /*!
   Perform a RMA operation between local and remote memory.
@@ -1629,8 +1645,8 @@ CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
 */
 CCI_DECLSPEC int cci_rma(cci_connection_t * connection,
 			 const void *msg_ptr, uint32_t msg_len,
-			 uint64_t local_handle, uint64_t local_offset,
-			 uint64_t remote_handle, uint64_t remote_offset,
+			 cci_rma_handle_t * local_handle, uint64_t local_offset,
+			 cci_rma_handle_t * remote_handle, uint64_t remote_offset,
 			 uint64_t data_len, const void *context, int flags);
 
 #endif				/* CCI_H */

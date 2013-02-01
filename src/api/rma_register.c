@@ -19,7 +19,7 @@
 
 int cci_rma_register(cci_endpoint_t * endpoint,
 		     void *start, uint64_t length,
-		     int flags, uint64_t * rma_handle)
+		     int flags, cci_rma_handle_t ** rma_handle)
 {
 	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
 

@@ -18,12 +18,11 @@
 
 int main(int argc, char *argv[])
 {
-	int ret, done = 0, len = 0;
+	int ret, done = 0;
 	uint32_t caps = 0;
 	char *uri = NULL;
-	cci_device_t **devices = NULL;
 	cci_endpoint_t *endpoint = NULL;
-	cci_os_handle_t ep_fd;
+	cci_os_handle_t *ep_fd = NULL;
 	cci_connection_t *connection = NULL;
 
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
@@ -34,7 +33,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* create an endpoint */
-	ret = cci_create_endpoint(NULL, 0, &endpoint, &ep_fd);
+	ret = cci_create_endpoint(NULL, 0, &endpoint, ep_fd);
 	if (ret) {
 		fprintf(stderr, "cci_create_endpoint() failed with %s\n",
 			cci_strerror(NULL, ret));

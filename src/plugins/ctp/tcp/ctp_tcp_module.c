@@ -21,13 +21,13 @@
 int cci_ctp_tcp_post_load(cci_plugin_t * me)
 {
 	assert(me);
-	debug(CCI_DB_DRVR, "In tcp post_load");
+	debug(CCI_DB_CTP, "In tcp post_load");
 	return CCI_SUCCESS;
 }
 
 int cci_ctp_tcp_pre_unload(cci_plugin_t * me)
 {
 	assert(me);
-	debug(CCI_DB_DRVR, "In tcp pre_unload");
+	debug(CCI_DB_CTP, "In tcp pre_unload");
 	return CCI_SUCCESS;
 }

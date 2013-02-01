@@ -608,6 +608,9 @@ typedef struct tcp_rma_handle {
 	/*! Application memory */
 	void *start;
 
+	/*! CCI RMA handle */
+	cci_rma_handle_t rma_handle;
+
 	/*! Access flags */
 	uint32_t flags;
 
@@ -625,9 +628,9 @@ typedef struct tcp_rma_op {
 	/*! Entry to hang on sconn->rmas */
 	TAILQ_ENTRY(tcp_rma_op) rmas;
 
-	uint64_t local_handle;
+	cci_rma_handle_t * local_handle;
 	uint64_t local_offset;
-	uint64_t remote_handle;
+	cci_rma_handle_t * remote_handle;
 	uint64_t remote_offset;
 
 	uint64_t data_len;
@@ -826,7 +829,7 @@ typedef struct tcp_dev {
 
 typedef enum tcp_fd_type {
 	TCP_FD_UNUSED = 0,
-	TCP_FD_EP,
+	TCP_FD_EP
 } tcp_fd_type_t;
 
 typedef struct tcp_fd_idx {

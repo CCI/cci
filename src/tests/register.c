@@ -57,7 +57,7 @@ int main(int argc, char *argv[])
 	cci_endpoint_t *endpoint;
 	void *base, *ptr;
 	uint64_t length;
-	uint64_t *handles = NULL;
+	cci_rma_handle_t **handles = NULL;
 	struct timeval start, end;
 	uint64_t usecs = 0;
 

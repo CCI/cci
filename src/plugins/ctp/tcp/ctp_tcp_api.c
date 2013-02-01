@@ -79,12 +79,12 @@ static int ctp_tcp_sendv(cci_connection_t * connection,
 		      const void *context, int flags);
 static int ctp_tcp_rma_register(cci_endpoint_t * endpoint,
 			     void *start, uint64_t length,
-			     int flags, uint64_t * rma_handle);
-static int ctp_tcp_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle);
+			     int flags, cci_rma_handle_t ** rma_handle);
+static int ctp_tcp_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * rma_handle);
 static int ctp_tcp_rma(cci_connection_t * connection,
 		    const void *header_ptr, uint32_t header_len,
-		    uint64_t local_handle, uint64_t local_offset,
-		    uint64_t remote_handle, uint64_t remote_offset,
+		    cci_rma_handle_t * local_handle, uint64_t local_offset,
+		    cci_rma_handle_t * remote_handle, uint64_t remote_offset,
 		    uint64_t data_len, const void *context, int flags);
 
 static void tcp_progress_sends(cci__ep_t * ep);
@@ -531,6 +531,17 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 	if (!tglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
+	}
+
+	/* TODO support blocking mode
+	 * in the meantime, fail if the fd is requested */
+	if (fd) {
+		debug(CCI_DB_WARN, "%s: The TCP transport does not yet support"
+			"blocking mode via the OS handle.\n", __func__);
+		debug(CCI_DB_WARN, "%s: Either choose another transport or set "
+			"the OS handle to NULL\n", __func__);
+		CCI_EXIT;
+		return CCI_ERR_NOT_IMPLEMENTED;
 	}
 
 	dev = container_of(device, cci__dev_t, device);
@@ -2012,7 +2023,7 @@ static int ctp_tcp_sendv(cci_connection_t * connection,
 
 static int ctp_tcp_rma_register(cci_endpoint_t * endpoint,
 			     void *start, uint64_t length,
-			     int flags, uint64_t * rma_handle)
+			     int flags, cci_rma_handle_t ** rma_handle)
 {
 	cci__ep_t *ep = NULL;
 	tcp_ep_t *tep = NULL;
@@ -2037,6 +2048,7 @@ static int ctp_tcp_rma_register(cci_endpoint_t * endpoint,
 	handle->ep = ep;
 	handle->length = length;
 	handle->start = start;
+	*((uint64_t*)&handle->rma_handle.stuff[0]) = (uintptr_t) handle;
 	handle->flags = flags;
 	handle->refcnt = 1;
 
@@ -2044,18 +2056,18 @@ static int ctp_tcp_rma_register(cci_endpoint_t * endpoint,
 	TAILQ_INSERT_TAIL(&tep->handles, handle, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-	*rma_handle = (uint64_t) ((uintptr_t) handle);
+	*rma_handle = &handle->rma_handle;
 
 	CCI_EXIT;
 
 	return CCI_SUCCESS;
 }
 
-static int ctp_tcp_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle)
+static int ctp_tcp_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * rma_handle)
 {
 	int ret = CCI_EINVAL;
 	tcp_rma_handle_t *handle =
-	    (tcp_rma_handle_t *) ((uintptr_t) rma_handle);
+		container_of(rma_handle, tcp_rma_handle_t, rma_handle);
 	cci__ep_t *ep = NULL;
 	tcp_ep_t *tep = NULL;
 	tcp_rma_handle_t *h = NULL;
@@ -2096,8 +2108,8 @@ static int ctp_tcp_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_handle
 
 static int ctp_tcp_rma(cci_connection_t * connection,
 		    const void *msg_ptr, uint32_t msg_len,
-		    uint64_t local_handle, uint64_t local_offset,
-		    uint64_t remote_handle, uint64_t remote_offset,
+		    cci_rma_handle_t * local_handle, uint64_t local_offset,
+		    cci_rma_handle_t * remote_handle, uint64_t remote_offset,
 		    uint64_t data_len, const void *context, int flags)
 {
 	int ret = CCI_SUCCESS, i, cnt, err = 0;
@@ -2106,7 +2118,7 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	tcp_ep_t *tep = NULL;
 	tcp_conn_t *tconn = NULL;
 	tcp_rma_handle_t *local =
-	    (tcp_rma_handle_t *) ((uintptr_t) local_handle);
+		container_of(local_handle, tcp_rma_handle_t, rma_handle);
 	tcp_rma_handle_t *h = NULL;
 	tcp_rma_op_t *rma_op = NULL;
 	tcp_tx_t **txs = NULL;
@@ -2262,15 +2274,15 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 
 		if (msg_type == TCP_MSG_RMA_WRITE) {
 			tcp_pack_rma_write(rma_hdr, tx->rma_len, tx->id,
-						local_handle,
+						local_handle->stuff[0],
 						local_offset + offset,
-						remote_handle,
+						remote_handle->stuff[0],
 						remote_offset + offset);
 		} else {
 			tcp_pack_rma_read_request(rma_hdr, tx->rma_len, tx->id,
-						local_handle,
+						local_handle->stuff[0],
 						local_offset + offset,
-						remote_handle,
+						remote_handle->stuff[0],
 						remote_offset + offset);
 			tx->rma_ptr = NULL;
 			tx->rma_len = 0;
@@ -2932,15 +2944,15 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 
 		if (msg_type == TCP_MSG_RMA_WRITE) {
 			tcp_pack_rma_write(rma_hdr, tx->rma_len, tx->id,
-					rma_op->local_handle,
+					rma_op->local_handle->stuff[0],
 					rma_op->local_offset + offset,
-					rma_op->remote_handle,
+					rma_op->remote_handle->stuff[0],
 					rma_op->remote_offset + offset);
 		} else {
 			tcp_pack_rma_read_request(rma_hdr, tx->rma_len, tx->id,
-					rma_op->local_handle,
+					rma_op->local_handle->stuff[0],
 					rma_op->local_offset + offset,
-					rma_op->remote_handle,
+					rma_op->remote_handle->stuff[0],
 					rma_op->remote_offset + offset);
 			tx->rma_ptr = NULL;
 			tx->rma_len = 0;
