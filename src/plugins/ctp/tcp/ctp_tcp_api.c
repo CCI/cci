@@ -536,7 +536,7 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 	/* TODO support blocking mode
 	 * in the meantime, fail if the fd is requested */
 	if (fd) {
-		debug(CCI_DB_WARN, "%s: The TCP transport does not yet support"
+		debug(CCI_DB_WARN, "%s: The TCP transport does not yet support "
 			"blocking mode via the OS handle.\n", __func__);
 		debug(CCI_DB_WARN, "%s: Either choose another transport or set "
 			"the OS handle to NULL\n", __func__);
@@ -1720,6 +1720,9 @@ tcp_progress_conn_sends(cci__conn_t *conn)
 		debug(CCI_DB_MSG, "%s: sending %s to conn %p",
 			__func__, tcp_msg_type(tx->msg_type), conn);
 
+		debug(CCI_DB_MSG, "%s: buffer %p len %u rma_ptr %p rma_len %u offset %"PRIuPTR"",
+			__func__, tx->buffer, tx->len, tx->rma_ptr, tx->rma_len, tx->offset);
+
 		ret = tcp_sendto(tconn->fd, tx->buffer, tx->len,
 				tx->rma_ptr, tx->rma_len, &tx->offset);
 		if (ret) {
@@ -1730,9 +1733,9 @@ tcp_progress_conn_sends(cci__conn_t *conn)
 				break;
 			} else {
 				/* close connection? */
-				debug(CCI_DB_CONN, "%s: send() returned %s - "
+				debug(CCI_DB_CONN, "%s: send() returned %s (%d) - "
 					"do we need to close the connection?",
-					__func__, strerror(ret));
+					__func__, strerror(ret), ret);
 			}
 		} else {
 			debug(CCI_DB_MSG, "%s: sent %u bytes to conn %p (offset %u off %u)",
@@ -2919,7 +2922,7 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 		tcp_rma_header_t *rma_hdr =
 			(tcp_rma_header_t *) tx->buffer;
 		tcp_rma_handle_t *local =
-			(tcp_rma_handle_t *) ((uintptr_t) rma_op->local_handle);
+			container_of(rma_op->local_handle, tcp_rma_handle_t, rma_handle);
 
 		tx->state = TCP_TX_QUEUED;
 		tx->rma_len = TCP_RMA_FRAG_SIZE; /* for now */
