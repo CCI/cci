@@ -533,6 +533,17 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 		return CCI_ENODEV;
 	}
 
+	/* TODO support blocking mode
+	 * in the meantime, fail if the fd is requested */
+	if (fd) {
+		debug(CCI_DB_WARN, "%s: The TCP transport does not yet support"
+			"blocking mode via the OS handle.\n", __func__);
+		debug(CCI_DB_WARN, "%s: Either choose another transport or set "
+			"the OS handle to NULL\n", __func__);
+		CCI_EXIT;
+		return CCI_ERR_NOT_IMPLEMENTED;
+	}
+
 	dev = container_of(device, cci__dev_t, device);
 	if (0 != strcmp("tcp", device->transport)) {
 		ret = CCI_EINVAL;
