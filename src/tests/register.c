@@ -48,7 +48,7 @@ void usage(char *name)
 
 int main(int argc, char *argv[])
 {
-	int c, ret, fd;
+	int c, ret;
 	int dereg = 0, prefault = 0;
 	uint32_t pagesize = 0, offset = 0;
 	uint64_t regsize = REGSIZE, totalsize = TOTALSIZE, count, i;
@@ -122,7 +122,7 @@ int main(int argc, char *argv[])
 	ret = cci_get_devices(&devices);
 	check_return(NULL, "cci_get_devices", ret);
 
-	ret = cci_create_endpoint(NULL, 0, &endpoint, &fd);
+	ret = cci_create_endpoint(NULL, 0, &endpoint, NULL);
 	check_return(NULL, "cci_create_endpoint", ret);
 
 	/* register */
