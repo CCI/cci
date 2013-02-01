@@ -829,7 +829,7 @@ typedef struct tcp_dev {
 
 typedef enum tcp_fd_type {
 	TCP_FD_UNUSED = 0,
-	TCP_FD_EP,
+	TCP_FD_EP
 } tcp_fd_type_t;
 
 typedef struct tcp_fd_idx {
