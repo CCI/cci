@@ -1,41 +1,41 @@
 = Configuration ================================================================
 
-  The sock CTP is enabled by default.
+  The tcp CTP is enabled by default.
 
 = Endpoint naming ==============================================================
 
-  Sock endpoint URIs are host and port where host is a hostname or IPv4 address:
+  TCP endpoint URIs are host and port where host is a hostname or IPv4 address:
 
-    sock://foo.com:5555
-    sock://1.2.3.4:5555
+    tcp://foo.com:5555
+    tcp://1.2.3.4:5555
 
 = Config file options ==========================================================
 
-  Sock devices _must_ have these two items in the config file:
+  TCP devices _must_ have these two items in the config file:
 
-    transport = sock
+    transport = tcp
     ip = 1.2.3.4
 
   where 1.2.3.4 is the valid IPv4 address of the device to bind to _or_
   they _must_ have these two items in the config file:
 
-    transport = sock
+    transport = tcp
     interface = ethN
 
   where ethN is the name of the interface to use. It is allowable to have
   both ip= and interface=, however, if they disagree, the IP address will
   be used.
 
-  Sock devices may have the following items in the config file:
+  TCP devices may have the following items in the config file:
 
     mtu = 9000
 
-  The sock transport will then set the endpoint->max_send_size to this size
+  The tcp transport will then set the endpoint->max_send_size to this size
   less what it needs for headers.
 
     bufsize = 20971520
 
-  The sock transport will then set the socket buffers (both send and receive)
+  The tcp transport will then set the socket buffers (both send and receive)
   to the specified size. Note that you need to ensure that the system
   configuration allows the specified size. On Linux, this means that you must
   check the value of net.core.rmem_max and net.core.wmem_max using sysctl
@@ -50,54 +50,39 @@
 
 = Run-time notes ===============================================================
 
-  1. Most devices that support transports other than sock will also provide an
+  1. Most devices that support transports other than tcp will also provide an
   Ethernet interface. Generally, you will want to use the native transport and
-  not sock for these devices.
-
-  2. If you do not use a config file, the sock driver will start progress
-  threads even if you do not open a sock endpoint. We will fix this, but in the
-  meantime, use a config file and do not sepcify a sock device unless you want
-  one.
+  not tcp for these devices.
 
 = Known limitations ============================================================
 
 Not implemented:
 
+  Create endpoint cannot return an OS handle (i.e. no blocking support)
   Fence
-  RO connections may not be ordered (i.e. RU)
 
 
 = CCI Performance Tuning =======================================================
 
-SOCK_DEFAULT_MSS
+TCP_DEFAULT_MSS
     The default Maximum Segment Size is the default amount of data that is sent
-    in a message. This does not include the size of the header and should not
-    big bigger than the maximum size of a UDP packet. A given communication
-    pattern may require a small or big MSS to be efficient
+    in a message. This does not include the size of the header. Larger messages
+    make the endpoint's send and receive buffers larger.
 
-SOCK_EP_RX_CNT
-    Number of buffers used to receive messages. Directly impact the memory
+TCP_EP_RX_CNT
+    Number of buffers used to receive messages. Directly impacts the memory
     footprint of the CCI transport.
 
-SOCK_EP_TX_CNT
-    Number of buffers used to send messages. Directly impact the memory
+TCP_EP_TX_CNT
+    Number of buffers used to send messages. Directly impacts the memory
     footprint of the CCI transport.
 
-SOCK_PROG_TIME_US
-    Specify the amount of time in microseconds to make progress (the thread
-    will make up every N microseconds). A low progress timeout decrease the
-    latency but increase the CPU consumption.
+TCP_RMA_FRAG_SIZE
+    The tcp transport breaks RMA transfer into chunks of this size rather
+    than trying to send an entire RMA at once and filling the socket buffer.
 
-SOCK_RMA_DEPTH
-    Number of in-flight RMA message.
-
-ACK_TIMEOUT
-    The transport can acknowledge messages by blocks. The ACK timeout is
-    triggered when not enough ACKs are pending within a given period of
-    time.
-
-PENDING_ACK_THRESHOLD
-    Maximum number of messages waiting for acknowledgment.
+TCP_RMA_DEPTH
+    Number of in-flight RMA fragments.
 
 = System Performance Tuning ====================================================
 
