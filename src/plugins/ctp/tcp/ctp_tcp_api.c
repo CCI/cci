@@ -322,6 +322,7 @@ static int ctp_tcp_init(cci_plugin_ctp_t *plugin,
 		TAILQ_FOREACH_SAFE(dev, &globals->configfile_devs, entry, ndev) {
 		if (0 == strcmp("tcp", dev->device.transport)) {
 			const char * const *arg;
+			const char *interface = NULL;
 			struct cci_device *device;
 			tcp_dev_t *tdev;
 			uint32_t mtu = (uint32_t) -1;
@@ -372,9 +373,11 @@ static int ctp_tcp_init(cci_plugin_ctp_t *plugin,
 				} else if (0 == strncmp("bufsize=", *arg, 8)) {
 					const char *size_str = *arg + 8;
 					tdev->bufsize = strtol(size_str, NULL, 0);
+				} else if (0 == strncmp("interface=", *arg, 10)) {
+					interface = *arg + 10;
 				}
 			}
-			if (tdev->ip != 0) {
+			if (tdev->ip != 0 || interface) {
 				/* try to get the actual values now */
 #ifdef HAVE_GETIFADDRS
 				if (addrs) {
@@ -387,6 +390,10 @@ static int ctp_tcp_init(cci_plugin_ctp_t *plugin,
 						sin = (struct sockaddr_in *) addr->ifa_addr;
 						if (!memcmp(&tdev->ip, &sin->sin_addr, sizeof(tdev->ip)))
 							break;
+						if (!strcmp(interface, addr->ifa_name)) {
+							memcpy(&tdev->ip, &sin->sin_addr, sizeof(tdev->ip));
+							break;
+						}
 					}
 					if (!addr)
 						/* no such device, don't initialize it */
