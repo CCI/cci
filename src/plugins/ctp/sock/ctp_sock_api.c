@@ -676,6 +676,7 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	{
 		socklen_t optlen;
 
+                optlen = sizeof (sndbuf_size);
 		ret = getsockopt (sep->sock, SOL_SOCKET, SO_SNDBUF,
 				  &sndbuf_size, &optlen);
 		if (ret == -1)
@@ -684,6 +685,7 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 		       "want to check the value of net.core.wmem_max using "
 		       "sysctl)", sndbuf_size);
 
+                optlen = sizeof (rcvbuf_size);
 		ret = getsockopt (sep->sock, SOL_SOCKET, SO_RCVBUF,
 		                  &rcvbuf_size, &optlen);
 		if (ret == -1)
