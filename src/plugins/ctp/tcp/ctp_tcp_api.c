@@ -744,6 +744,9 @@ out:
 	return ret;
 }
 
+static inline void
+tcp_ignore_fd_locked(tcp_ep_t *tep, tcp_conn_t *tconn);
+
 static void
 tcp_disconnect_locked(cci__ep_t *ep, cci__conn_t *conn)
 {
@@ -756,10 +759,7 @@ tcp_disconnect_locked(cci__ep_t *ep, cci__conn_t *conn)
 
 	//tcp_remove_conn(tep, tconn);
 
-	/* TODO remove tconn from tep->c and tep->fds
-	 *      move last fd to our spot and decrement nfds
-	 *      move last conn to tep->c[our index]
-	 */
+	tcp_ignore_fd_locked(tep, tconn);
 
 	free(tconn);
 	free(conn);
@@ -1263,10 +1263,29 @@ tcp_monitor_fd(cci__ep_t *ep, cci__conn_t *conn, int events)
 	tep->c[tconn->index] = conn;
 	pthread_mutex_unlock(&ep->lock);
 
-	debug(CCI_DB_CONN, "%s: tconn->index = %u", __func__, tconn->index);
+	debug(CCI_DB_CONN, "%s: tconn->index = %u tep->nfds = %u",
+		__func__, tconn->index, tep->nfds);
 
 out:
 	return ret;
+}
+
+static inline void
+tcp_ignore_fd_locked(tcp_ep_t *tep, tcp_conn_t *tconn)
+{
+	uint32_t index = tconn->index, nfds = tep->nfds--;
+
+	if (index != (nfds - 1)) {
+		tep->fds[index].fd = tep->fds[nfds].fd;
+		tep->fds[index].events = tep->fds[nfds].events;
+		tep->c[index] = tep->c[nfds];
+	} else {
+		tep->fds[index].fd = 0;
+		tep->fds[index].events = 0;
+		tep->c[index] = NULL;
+	}
+
+	return;
 }
 
 static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
@@ -3240,9 +3259,32 @@ tcp_poll_events(cci__ep_t *ep)
 			found++;
 		}
 		if (revents & POLLHUP) {
+			tcp_conn_status_t old_status = tconn->status;
+			cci__evt_t *evt = NULL;
+			tcp_tx_t *tx = NULL;
+
 			/* handle disconnect */
 			debug(CCI_DB_CONN, "%s: got POLLHUP on conn %p",
 				__func__, conn);
+
+			switch (old_status) {
+			case TCP_CONN_ACTIVE1:
+				tconn->status = TCP_CONN_CLOSED;
+				pthread_mutex_lock(&tconn->slock);
+				evt = TAILQ_FIRST(&tconn->queued);
+				TAILQ_REMOVE(&tconn->queued, evt, entry);
+				evt->event.connect.status = CCI_ETIMEDOUT;
+				tx = container_of(evt, tcp_tx_t, evt);
+				tx->state = TCP_TX_COMPLETED;
+				tcp_ignore_fd_locked(tep, tconn);
+				TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+				pthread_mutex_unlock(&ep->lock);
+				break;
+			default:
+				debug(CCI_DB_CONN, "%s: connection status was %s",
+					__func__, tcp_conn_status_str(tconn->status));
+			}
+
 			found++;
 		}
 		if (revents & POLLERR) {

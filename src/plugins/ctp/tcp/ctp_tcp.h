@@ -775,6 +775,32 @@ typedef enum tcp_conn_status {
 	TCP_CONN_READY
 } tcp_conn_status_t;
 
+static char *
+tcp_conn_status_str(tcp_conn_status_t status)
+{
+	switch (status) {
+	case TCP_CONN_CLOSED:
+		return "TCP_CONN_CLOSED";
+	case TCP_CONN_CLOSING:
+		return "TCP_CONN_CLOSING";
+	case TCP_CONN_INIT:
+		return "TCP_CONN_INIT";
+	case TCP_CONN_ACTIVE1:
+		return "TCP_CONN_ACTIVE1";
+	case TCP_CONN_ACTIVE2:
+		return "TCP_CONN_ACTIVE2";
+	case TCP_CONN_PASSIVE1:
+		return "TCP_CONN_PASSIVE1";
+	case TCP_CONN_PASSIVE2:
+		return "TCP_CONN_PASSIVE2";
+	case TCP_CONN_READY:
+		return "TCP_CONN_READY";
+	}
+
+	/* Never reached */
+	return NULL;
+}
+
 typedef struct tcp_conn {
 	/*! Owning conn */
 	cci__conn_t *conn;
