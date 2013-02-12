@@ -3285,15 +3285,17 @@ tcp_poll_events(cci__ep_t *ep)
 				pthread_mutex_lock(&tconn->slock);
 				evt = TAILQ_FIRST(&tconn->queued);
 				TAILQ_REMOVE(&tconn->queued, evt, entry);
+				pthread_mutex_unlock(&tconn->slock);
 				evt->event.connect.status = CCI_ETIMEDOUT;
 				tx = container_of(evt, tcp_tx_t, evt);
 				tx->state = TCP_TX_COMPLETED;
+				pthread_mutex_lock(&ep->lock);
 				tcp_ignore_fd_locked(tep, tconn);
 				TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
 				pthread_mutex_unlock(&ep->lock);
 				break;
 			case TCP_CONN_CLOSING:
-				pthread_mutex_lock(&tconn->slock);
+				pthread_mutex_lock(&ep->lock);
 				tcp_ignore_fd_locked(tep, tconn);
 				/* TODO drain queues, complete with errors */
 				pthread_mutex_unlock(&ep->lock);
