@@ -261,7 +261,7 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 	if (ioctl(sockfd, SIOCETHTOOL, &ifr) < 0) {
 		if (errno == EPERM) {
 			debug(CCI_DB_INFO,
-			      " ethtool get settings returned EPERM, falling back to custom ioctl");
+			      "%s", "ethtool get settings returned EPERM, falling back to custom ioctl");
 			goto out_with_sockfd;
 		}
 		if (errno != ENODEV && errno != EOPNOTSUPP) {
@@ -270,7 +270,7 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 		}
 		/* we won't get link rate anyhow */
 		debug(CCI_DB_INFO,
-		      " ethtool get settings not supported, cannot retrieve link rate");
+		      "%s", "ethtool get settings not supported, cannot retrieve link rate");
 	} else {
 		unsigned speed;
 		CCI_VALGRIND_MEMORY_MAKE_READABLE(&ecmd, sizeof(ecmd));
@@ -292,7 +292,7 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 		}
 		/* we won't get bus info anyhow */
 		debug(CCI_DB_INFO,
-		      " ethtool get drvinfo not supported, cannot retrieve pci id");
+		      "%s", "ethtool get drvinfo not supported, cannot retrieve pci id");
 	} else {
 		/* try to parse. if it fails, the device is not pci */
 		CCI_VALGRIND_MEMORY_MAKE_READABLE(&edi, sizeof(edi));
@@ -389,7 +389,7 @@ int cci__parse_config(const char *path)
 
 			if (i == CCI_MAX_DEVICES) {
 				debug(CCI_DB_WARN,
-				      "too many devices in CCI_CONFIG file");
+				      "%s", "too many devices in CCI_CONFIG file");
 				break;
 			}
 
