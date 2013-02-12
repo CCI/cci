@@ -279,7 +279,7 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 #else
 		speed = ecmd.speed;
 #endif
-		device->rate = speed == -1 ? 0 : speed * 1000000ULL;
+		device->rate = (speed == (unsigned)-1) ? 0 : speed * 1000000ULL;
 	}
 
 	/* try to get the bus id now */
