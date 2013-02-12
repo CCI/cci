@@ -252,7 +252,7 @@ extern int cci__debug;
         debug(CCI_DB_FUNC, "exiting  %s", __func__);                            \
   } while (0);
 
-#if HAVE_DECL_VALGRIND_MAKE_MEM_NOACCESS
+#if (defined HAVE_DECL_VALGRIND_MAKE_MEM_NOACCESS) && HAVE_DECL_VALGRIND_MAKE_MEM_NOACCESS
 #include <valgrind/memcheck.h>
 #define CCI_VALGRIND_MEMORY_MAKE_NOACCESS(p, s) VALGRIND_MAKE_MEM_NOACCESS(p, s)
 #define CCI_VALGRIND_MEMORY_MAKE_WRITABLE(p, s) VALGRIND_MAKE_MEM_UNDEFINED(p, s)
