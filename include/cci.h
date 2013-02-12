@@ -43,21 +43,11 @@
 
 #include "cci/config.h"
 
-#ifdef HAVE_ERRNO_H
 #include <errno.h>
-#endif
-#ifdef HAVE_STDINT_H
-#include <stdint.h>
-#endif
-#ifdef HAVE_SYS_TYPES_H
+#include <stdint.h> /* may need to be fixed for windows */
 #include <sys/types.h>
-#endif
-#ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
-#endif
-#ifdef HAVE_SYS_UIO_H
 #include <sys/uio.h>
-#endif
 
 /* ================================================================== */
 /*                                                                    */
