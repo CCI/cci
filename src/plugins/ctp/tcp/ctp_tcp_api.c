@@ -442,7 +442,7 @@ static int ctp_tcp_init(cci_plugin_ctp_t *plugin,
 out:
 	if (devices) {
 		int i = 0;
-		cci_device_t const *device;
+		cci_device_t *device;
 		cci__dev_t *my_dev;
 
 		while (devices[i] != NULL) {
@@ -651,14 +651,14 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 	}
 
 	/* alloc txs */
-	for (i = 0; i < ep->tx_buf_cnt; i++) {
+	for (i = 0; i < (int) ep->tx_buf_cnt; i++) {
 		tcp_tx_t *tx = &tep->txs[i];
 
 		tx->id = i;
 
 		tx->evt.event.type = CCI_EVENT_SEND;
 		tx->evt.ep = ep;
-		tx->buffer = tep->tx_buf + (i * ep->buffer_len);
+		tx->buffer = (void*)((uintptr_t)tep->tx_buf + (i * ep->buffer_len));
 		tx->len = 0;
 		TAILQ_INSERT_TAIL(&tep->idle_txs, &tx->evt, entry);
 	}
@@ -676,14 +676,14 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 	}
 
 	/* alloc rxs */
-	for (i = 0; i < ep->rx_buf_cnt; i++) {
+	for (i = 0; i < (int) ep->rx_buf_cnt; i++) {
 		tcp_rx_t *rx = &tep->rxs[i];
 
 		rx->id = i;
 
 		rx->evt.event.type = CCI_EVENT_RECV;
 		rx->evt.ep = ep;
-		rx->buffer = tep->rx_buf + (i * ep->buffer_len);
+		rx->buffer = (void*)((uintptr_t)tep->rx_buf + (i * ep->buffer_len));
 		rx->len = 0;
 		TAILQ_INSERT_TAIL(&tep->idle_rxs, &rx->evt, entry);
 	}
@@ -757,7 +757,7 @@ tcp_disconnect_locked(cci__ep_t *ep, cci__conn_t *conn)
 
 	TAILQ_REMOVE(&tep->conns, tconn, entry);
 
-	//tcp_remove_conn(tep, tconn);
+	/* tcp_remove_conn(tep, tconn); */
 
 	tcp_ignore_fd_locked(tep, tconn);
 
@@ -858,7 +858,7 @@ tcp_get_tx_locked(tcp_ep_t *tep)
 		tx->rma_op = NULL;
 		tx->rma_id = 0;
 		tx->evt.conn = NULL;
-		debug(CCI_DB_MSG, "%s: getting tx %p", __func__, tx);
+		debug(CCI_DB_MSG, "%s: getting tx %p", __func__, (void*)tx);
 	}
 	return tx;
 }
@@ -888,7 +888,7 @@ tcp_get_tx(cci__ep_t *ep, int allocate)
 static inline void
 tcp_put_tx_locked(tcp_ep_t *tep, tcp_tx_t *tx)
 {
-	debug(CCI_DB_MSG, "%s: putting tx %p", __func__, tx);
+	debug(CCI_DB_MSG, "%s: putting tx %p", __func__, (void*)tx);
 	TAILQ_INSERT_HEAD(&tep->idle_txs, &tx->evt, entry);
 
 	return;
@@ -1010,7 +1010,7 @@ static int ctp_tcp_accept(cci_event_t *event, const void *context)
 
 	conn->connection.context = (void *)context;
 
-	debug(CCI_DB_CONN, "%s: accepting conn %p", __func__, conn);
+	debug(CCI_DB_CONN, "%s: accepting conn %p", __func__, (void*)conn);
 
 	/* prepare conn_reply */
 
@@ -1028,7 +1028,7 @@ static int ctp_tcp_accept(cci_event_t *event, const void *context)
 
 	hdr = (tcp_header_t *) tx->buffer;
 	tcp_pack_conn_reply(hdr, CCI_SUCCESS, tx->id);
-	hs = (tcp_handshake_t *) (tx->buffer + sizeof(*hdr));
+	hs = (tcp_handshake_t *) ((uintptr_t)tx->buffer + sizeof(*hdr));
 	tcp_pack_handshake(hs, ep->rx_buf_cnt,
 			   conn->connection.max_send_size, 0, tx->id);
 
@@ -1427,7 +1427,7 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 			    conn->connection.max_send_size, keepalive, 0);
 
 	tx->len += sizeof(*hs);
-	ptr = tx->buffer + tx->len;
+	ptr = (void*)((uintptr_t)tx->buffer + tx->len);
 
 	tx->rma_op = NULL;
 
@@ -1698,8 +1698,8 @@ static int tcp_sendto(cci_os_handle_t sock, void *buf, int len,
 	int ret = CCI_SUCCESS;
 	uintptr_t off = *offset;
 
-	if (off < len) {
-		ret = send(sock, buf + off, len - off, 0);
+	if (off < (uintptr_t) len) {
+		ret = send(sock, (void*)((uintptr_t)buf + off), (int)((uintptr_t)len - off), 0);
 		if (ret != -1) {
 			off += ret;
 			*offset += ret;
@@ -1709,9 +1709,9 @@ static int tcp_sendto(cci_os_handle_t sock, void *buf, int len,
 			goto out;
 		}
 	}
-	if (rma_ptr && off >= len) {
+	if (rma_ptr && (off >= (uintptr_t)len)) {
 		off -= len;
-		ret = send(sock, rma_ptr + off, rma_len - off, 0);
+		ret = send(sock, (void*)((uintptr_t)rma_ptr + off), rma_len - off, 0);
 		if (ret != -1) {
 			*offset += ret;
 			ret = CCI_SUCCESS;
@@ -1756,10 +1756,10 @@ tcp_progress_conn_sends(cci__conn_t *conn)
 		}
 
 		debug(CCI_DB_MSG, "%s: sending %s to conn %p",
-			__func__, tcp_msg_type(tx->msg_type), conn);
+			__func__, tcp_msg_type(tx->msg_type), (void*)conn);
 
 		debug(CCI_DB_MSG, "%s: buffer %p len %u rma_ptr %p rma_len %u offset %"PRIuPTR"",
-			__func__, tx->buffer, tx->len, tx->rma_ptr, tx->rma_len, tx->offset);
+			__func__, (void*)tx->buffer, tx->len, (void*)tx->rma_ptr, tx->rma_len, tx->offset);
 
 		ret = tcp_sendto(tconn->fd, tx->buffer, tx->len,
 				tx->rma_ptr, tx->rma_len, &tx->offset);
@@ -1777,10 +1777,10 @@ tcp_progress_conn_sends(cci__conn_t *conn)
 			}
 		} else {
 			debug(CCI_DB_MSG, "%s: sent %u bytes to conn %p (offset %u off %u)",
-				__func__, (int) tx->offset - off, conn, (int) tx->offset, off);
+				__func__, (int) tx->offset - off, (void*)conn, (int) tx->offset, off);
 			if (tx->offset == (tx->len + tx->rma_len)) {
 				debug(CCI_DB_MSG, "%s: completed %s send to conn %p",
-					__func__, tcp_msg_type(tx->msg_type), conn);
+					__func__, tcp_msg_type(tx->msg_type), (void*)conn);
 				TAILQ_REMOVE(&tconn->queued, evt, entry);
 				switch (tx->msg_type) {
 				default:
@@ -1792,7 +1792,7 @@ tcp_progress_conn_sends(cci__conn_t *conn)
 				case TCP_MSG_ACK:
 					if (!tx->evt.ep) {
 						debug(CCI_DB_MSG, "%s: freeing "
-							"tx %p", __func__, tx);
+							"tx %p", __func__, (void*)tx);
 						free(tx->buffer);
 						free(tx);
 					} else {
@@ -1897,7 +1897,7 @@ static int tcp_send_common(cci_connection_t * connection,
 		return CCI_ENODEV;
 	}
 
-	for (i = 0; i < iovcnt; i++)
+	for (i = 0; i < (int) iovcnt; i++)
 		data_len += data[i].iov_len;
 
 	ep = container_of(endpoint, cci__ep_t, endpoint);
@@ -1946,20 +1946,20 @@ static int tcp_send_common(cci_connection_t * connection,
 	tcp_pack_send(hdr, data_len, tx->id);
 	tx->len = sizeof(*hdr);
 
-	ptr = tx->buffer + tx->len;
+	ptr = (void*)((uintptr_t)tx->buffer + tx->len);
 
 	/* copy user data to buffer
 	 * NOTE: ignore CCI_FLAG_NO_COPY because we need to
 	 send the entire packet in one shot. We could
 	 use sendmsg() with an iovec. */
 
-	for (i = 0; i < iovcnt; i++) {
+	for (i = 0; i < (int) iovcnt; i++) {
 		if (!(rma_op && rma_op->tx)) {
 			/* don't copy - the data is already in place
 			 * from the rma() call */
 			memcpy(ptr, data[i].iov_base, data[i].iov_len);
 		}
-		ptr += data[i].iov_len;
+		ptr = (void*)((uintptr_t)ptr + data[i].iov_len);
 		tx->len += data[i].iov_len;
 	}
 
@@ -1987,7 +1987,7 @@ static int tcp_send_common(cci_connection_t * connection,
 
 	/* insert at tail of sock device's queued list */
 
-	debug(CCI_DB_MSG, "%s: queuing MSG %p to conn %p", __func__, tx, conn);
+	debug(CCI_DB_MSG, "%s: queuing MSG %p to conn %p", __func__, (void*)tx, (void*)conn);
 
 	tx->state = TCP_TX_QUEUED;
 	tcp_queue_tx(tep, tconn, evt);
@@ -2300,12 +2300,12 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 		tx->evt.event.send.connection = connection;
 		tx->evt.conn = conn;
 
-		if (i == (rma_op->num_msgs - 1)) {
+		if (i == (int)(rma_op->num_msgs - 1)) {
 			if (data_len % TCP_RMA_FRAG_SIZE)
 				tx->rma_len = data_len % TCP_RMA_FRAG_SIZE;
 		}
 
-		tx->rma_ptr = local->start + local_offset + offset;
+		tx->rma_ptr = (void*)((uintptr_t)local->start + local_offset + offset);
 
 		debug(CCI_DB_MSG, "%s: %s local offset %"PRIu64" "
 			"remote offset %"PRIu64" length %u", __func__,
@@ -2441,7 +2441,7 @@ tcp_recv_msg(int fd, void *ptr, uint32_t len)
 
 again:
 	do {
-		ret = recv(fd, ptr + offset, len - offset, 0);
+		ret = recv(fd, (void*)((uintptr_t)ptr + offset), len - offset, 0);
 		if (ret < 0) {
 			ret = errno;
 			if ((count++ & 0xFFFF) == 0xFFFF)
@@ -2471,7 +2471,7 @@ tcp_handle_conn_request(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx, uint32_t
 	tcp_ep_t *tep = ep->priv;
 	tcp_conn_t *tconn = conn->priv;
 	tcp_header_t *hdr = rx->buffer;
-	tcp_handshake_t *hs = rx->buffer + sizeof(*hdr);
+	tcp_handshake_t *hs = (void*)((uintptr_t)rx->buffer + sizeof(*hdr));
 	cci_conn_attribute_t attr = a & 0xF;
 	uint32_t len = (a >> 4) & 0xFFFF;
 	uint32_t total = len + sizeof(*hs);
@@ -2508,7 +2508,7 @@ tcp_handle_conn_request(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx, uint32_t
 
 	/* queue event on endpoint's completed event queue */
 
-	debug(CCI_DB_CONN, "%s: recv'd conn request on conn %p", __func__, conn);
+	debug(CCI_DB_CONN, "%s: recv'd conn request on conn %p", __func__, (void*)conn);
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
@@ -2527,7 +2527,7 @@ out:
 	TAILQ_REMOVE(&tep->passive, tconn, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-	//tcp_remove_conn(tep, tconn);
+	/* tcp_remove_conn(tep, tconn); */
 
 	free(tconn);
 	free(conn);
@@ -2544,7 +2544,7 @@ tcp_handle_conn_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 	tcp_ep_t *tep = ep->priv;
 	tcp_conn_t *tconn = conn->priv;
 	tcp_header_t *hdr = rx->buffer;
-	tcp_handshake_t *hs = rx->buffer + sizeof(*hdr);
+	tcp_handshake_t *hs = (void*)((uintptr_t)rx->buffer + sizeof(*hdr));
 	int reply = a & 0xFF;
 	uint32_t total = sizeof(*hs);
 	uint32_t rx_cnt, mss, ka, server_tx_id;
@@ -2556,7 +2556,7 @@ tcp_handle_conn_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		goto out;
 	}
 
-	debug(CCI_DB_CONN, "%s: conn %p is %s", __func__, conn,
+	debug(CCI_DB_CONN, "%s: conn %p is %s", __func__, (void*)conn,
 		reply ? "rejected" : "ready");
 
 	tconn->status = TCP_CONN_READY;
@@ -2616,7 +2616,7 @@ out:
 	TAILQ_REMOVE(&tep->active, tconn, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-	//tcp_remove_conn(tep, tconn);
+	/* tcp_remove_conn(tep, tconn); */
 
 	free(tconn);
 	free((void *)conn->uri);
@@ -2634,7 +2634,7 @@ tcp_handle_conn_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx, uint32_t tx_
 	tcp_tx_t *tx = &tep->txs[tx_id];
 
 	debug(CCI_DB_CONN, "%s: recv'd conn_ack from conn %p",
-		__func__, conn);
+		__func__, (void*)conn);
 
 	pthread_mutex_lock(&tconn->slock);
 	TAILQ_REMOVE(&tconn->pending, &tx->evt, entry);
@@ -2647,7 +2647,7 @@ tcp_handle_conn_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx, uint32_t tx_
 	TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-	debug(CCI_DB_CONN, "%s: conn %p ready", __func__, conn);
+	debug(CCI_DB_CONN, "%s: conn %p ready", __func__, (void*)conn);
 
 	return;
 }
@@ -2720,7 +2720,7 @@ tcp_handle_rma_write(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 	void *ptr = NULL;
 
 	debug(CCI_DB_MSG, "%s: recv'ing RMA_WRITE on conn %p with len %u",
-		__func__, conn, len);
+		__func__, (void*)conn, len);
 
 	ret = tcp_recv_msg(tconn->fd, rma_header->header.data, handle_len);
 	if (ret) {
@@ -2759,7 +2759,7 @@ tcp_handle_rma_write(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 
 	/* valid remote handle, copy the data */
 	debug(CCI_DB_INFO, "%s: recv'ing data into target buffer", __func__);
-	ptr = remote->start + (uintptr_t) remote_offset;
+	ptr = (void*)((uintptr_t)remote->start + (uintptr_t) remote_offset);
 	ret = tcp_recv_msg(tconn->fd, ptr, len);
 	debug(CCI_DB_MSG, "%s: recv'd data into target buffer", __func__);
 	if (ret)
@@ -2796,7 +2796,7 @@ tcp_handle_rma_read_request(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 	tcp_rma_handle_t *remote, *h = NULL;
 
 	debug(CCI_DB_MSG, "%s: recv'ing RMA_READ_REQUEST on conn %p with len %u",
-		__func__, conn, len);
+		__func__, (void*)conn, len);
 
 	ret = tcp_recv_msg(tconn->fd, read_request->header.data, handle_len);
 	if (ret) {
@@ -2846,7 +2846,7 @@ tcp_handle_rma_read_request(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 	tx->state = TCP_TX_QUEUED;
 	tx->len = sizeof(*read_reply);
 	tx->rma_op = NULL;
-	tx->rma_ptr = remote->start + (uintptr_t) remote_offset;
+	tx->rma_ptr = (void*)((uintptr_t)remote->start + (uintptr_t) remote_offset);
 	tx->rma_len = len;
 
 	tx->evt.event.type = CCI_EVENT_SEND;
@@ -2951,7 +2951,7 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 		free(rma_op);
 	} else if (rma_op->next == rma_op->num_msgs) {
 		/* no more fragments, we don't need this tx anymore */
-		debug(CCI_DB_MSG, "%s: releasing tx %p", __func__, tx);
+		debug(CCI_DB_MSG, "%s: releasing tx %p", __func__, (void*)tx);
 		tcp_put_tx(tx);
 	} else {
 		/* send next fragment (or read fragment request) */
@@ -2971,12 +2971,12 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 		debug(CCI_DB_MSG, "%s: sending fragment %d at offset %"PRIu64,
 			__func__, i, offset);
 
-		if (i == (rma_op->num_msgs - 1)) {
+		if (i == (int)(rma_op->num_msgs - 1)) {
 			if (rma_op->data_len % TCP_RMA_FRAG_SIZE)
 				tx->rma_len = rma_op->data_len % TCP_RMA_FRAG_SIZE;
 		}
 
-		tx->rma_ptr = (void*)(uintptr_t)(local->start + rma_op->local_offset + offset);
+		tx->rma_ptr = (void*)((uintptr_t)local->start + rma_op->local_offset + offset);
 
 		debug(CCI_DB_MSG, "%s: %s local offset %"PRIu64" "
 			"remote offset %"PRIu64" length %u", __func__,
@@ -3023,7 +3023,7 @@ tcp_handle_rma_read_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 	tcp_tx_t *tx = &tep->txs[tx_id];
 
 	debug(CCI_DB_MSG, "%s: recv'ing RMA_READ_REPLY on conn %p with len %u",
-		__func__, conn, len);
+		__func__, (void*)conn, len);
 
 	ret = tcp_recv_msg(tconn->fd, rma_header->header.data, handle_len);
 	if (ret) {
@@ -3064,7 +3064,7 @@ tcp_handle_rma_read_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 
 	/* valid local handle, copy the data */
 	debug(CCI_DB_INFO, "%s: recv'ing data into target buffer", __func__);
-	ptr = local->start + (uintptr_t) local_offset;
+	ptr = (void*)((uintptr_t)local->start + (uintptr_t) local_offset);
 	ret = tcp_recv_msg(tconn->fd, ptr, len);
 	debug(CCI_DB_MSG, "%s: recv'd data into target buffer", __func__);
 	if (ret)
@@ -3089,7 +3089,7 @@ tcp_handle_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 	uint32_t status = a & 0xFF;
 
 	debug(CCI_DB_MSG, "%s: conn %p acked tx %p (%s) with status %u",
-		__func__, conn, tx, tcp_msg_type(tx->msg_type), status);
+		__func__, (void*)conn, (void*)tx, tcp_msg_type(tx->msg_type), status);
 
 	switch (tx->msg_type) {
 	case TCP_MSG_SEND:
@@ -3113,7 +3113,7 @@ tcp_handle_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		break;
 	default:
 		debug(CCI_DB_MSG, "%s: peer acked tx %p with type %s",
-			__func__, tx, tcp_msg_type(tx->msg_type));
+			__func__, (void*)tx, tcp_msg_type(tx->msg_type));
 	}
 
 	return;
@@ -3131,7 +3131,7 @@ tcp_handle_recv(cci__ep_t *ep, cci__conn_t *conn)
 	uint32_t a, b;
 	uint32_t q_rx = 0;
 
-	debug(CCI_DB_MSG, "%s: conn %p recv'd message", __func__, conn);
+	debug(CCI_DB_MSG, "%s: conn %p recv'd message", __func__, (void*)conn);
 
 	rx = tcp_get_rx(ep);
 	if (!rx) {
@@ -3277,7 +3277,7 @@ tcp_poll_events(cci__ep_t *ep)
 
 			/* handle disconnect */
 			debug(CCI_DB_CONN, "%s: got POLLHUP on conn %p (%s)",
-				__func__, conn, tcp_conn_status_str(tconn->status));
+				__func__, (void*)conn, tcp_conn_status_str(tconn->status));
 
 			switch (old_status) {
 			case TCP_CONN_ACTIVE1:
@@ -3310,7 +3310,7 @@ tcp_poll_events(cci__ep_t *ep)
 		if (revents & POLLERR) {
 			/* handle error */
 			debug(CCI_DB_CONN, "%s: got POLLERR on conn %p",
-				__func__, conn);
+				__func__, (void*)conn);
 			found++;
 		}
 		if (!found && revents)
@@ -3321,7 +3321,7 @@ tcp_poll_events(cci__ep_t *ep)
 increment:
 		i++;
 
-		if (count == tep->nfds)
+		if (count == (int)tep->nfds)
 			break; /* because OSX returns the wrong count from poll */
 	} while (count);
 

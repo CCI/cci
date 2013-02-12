@@ -775,7 +775,7 @@ typedef enum tcp_conn_status {
 	TCP_CONN_READY
 } tcp_conn_status_t;
 
-static char *
+static inline char *
 tcp_conn_status_str(tcp_conn_status_t status)
 {
 	switch (status) {
@@ -871,7 +871,7 @@ typedef struct tcp_globals {
 	int count;
 
 	/*! Array of sock devices */
-	cci_device_t const **const devices;
+	cci_device_t **devices;
 } tcp_globals_t;
 
 /* Macro to initialize the structure of a device */
