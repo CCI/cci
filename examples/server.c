@@ -17,10 +17,9 @@
 
 int main(int argc, char *argv[])
 {
-	int ret, len = 0;;
+	int ret;
 	uint32_t caps = 0;
 	char *uri = NULL;
-	cci_device_t **devices = NULL;
 	cci_endpoint_t *endpoint = NULL;
 	cci_os_handle_t ep_fd;
 	cci_connection_t *connection = NULL;
@@ -29,7 +28,7 @@ int main(int argc, char *argv[])
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
 	if (ret) {
 		fprintf(stderr, "cci_init() failed with %s\n",
-			cci_strerror(ret));
+			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
 
@@ -37,14 +36,14 @@ int main(int argc, char *argv[])
 	ret = cci_create_endpoint(NULL, 0, &endpoint, &ep_fd);
 	if (ret) {
 		fprintf(stderr, "cci_create_endpoint() failed with %s\n",
-			cci_strerror(ret));
+			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
 
 	ret = cci_get_opt(endpoint,
 			  CCI_OPT_ENDPT_URI, &uri);
 	if (ret) {
-		fprintf(stderr, "cci_get_opt() failed with %s\n", cci_strerror(NULL, ret));
+		fprintf(stderr, "cci_get_opt() failed with %s\n", cci_strerror(endpoint, ret));
 		exit(EXIT_FAILURE);
 	}
 	printf("Opened %s\n", uri);
@@ -53,11 +52,11 @@ int main(int argc, char *argv[])
 		char *buffer;
 		cci_event_t *event;
 
-		ret = cci_get_event(endpoint, &event, 0);
+		ret = cci_get_event(endpoint, &event);
 		if (ret != CCI_SUCCESS) {
 			if (ret != CCI_EAGAIN) {
 				fprintf(stderr, "cci_get_event() returned %s",
-					cci_strerror(ret));
+					cci_strerror(endpoint, ret));
 			}
 			continue;
 		}
@@ -76,7 +75,7 @@ int main(int argc, char *argv[])
 				if (ret != CCI_SUCCESS)
 					fprintf(stderr,
 						"send returned %s\n",
-						cci_strerror(ret));
+						cci_strerror(endpoint, ret));
 				break;
 			}
 		case CCI_EVENT_SEND:
@@ -91,11 +90,11 @@ int main(int argc, char *argv[])
 					if (ret != CCI_SUCCESS) {
 						fprintf(stderr,
 							"cci_accept() returned %s",
-							cci_strerror(ret));
+							cci_strerror(endpoint, ret));
 					}
 
 				} else {
-					cci_reject(conn_req);
+					cci_reject(event);
 				}
 			}
 			break;
@@ -110,7 +109,7 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "unexpected event %d", event->type);
 			break;
 		}
-		cci_return_event(endpoint, event);
+		cci_return_event(event);
 	}
 
 	/* clean up */

@@ -8,18 +8,18 @@ int main(int argc, char *argv[])
 {
 	int ret, i = 0;
 	uint32_t caps;
-	cci_device_t const **const devices, **d;
+	cci_device_t * const * devices, * const * d;
 
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
 	if (ret != CCI_SUCCESS) {
-		fprintf(stderr, "cci_init() returned %s\n", cci_strerror(ret));
+		fprintf(stderr, "cci_init() returned %s\n", cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
 
-	ret = cci_get_devices((cci_device_t const ***const)&devices);
+	ret = cci_get_devices(&devices);
 	if (ret != CCI_SUCCESS) {
 		fprintf(stderr, "cci_get_devices() returned %s\n",
-			cci_strerror(ret));
+			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
 

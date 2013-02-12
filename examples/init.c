@@ -10,7 +10,7 @@ int main(int argc, char *argv[])
 
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
 	if (ret != CCI_SUCCESS)
-		fprintf(stderr, "cci_init() returned %s\n", cci_strerror(ret));
+		fprintf(stderr, "cci_init() returned %s\n", cci_strerror(NULL, ret));
 
 	return 0;
 }

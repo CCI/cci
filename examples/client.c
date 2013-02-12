@@ -16,7 +16,7 @@
 
 char *proc_name = NULL;
 
-void usage(void)
+static void usage(void)
 {
 	fprintf(stderr, "usage: %s -h <server_uri>\n", proc_name);
 	fprintf(stderr, "where server_uri is a valid CCI uri\n");
@@ -32,13 +32,13 @@ poll_events(cci_endpoint_t * endpoint, cci_connection_t ** connection,
 	char buffer[8192];
 	cci_event_t *event;
 
-	ret = cci_get_event(endpoint, &event, 0);
+	ret = cci_get_event(endpoint, &event);
 	if (ret == CCI_SUCCESS) {
 		switch (event->type) {
 		case CCI_EVENT_SEND:
 			printf("send %d completed with %s\n",
 			       (int)((uintptr_t) event->send.context),
-			       cci_strerror(event->send.status));
+			       cci_strerror(endpoint, event->send.status));
 			break;
 		case CCI_EVENT_RECV:
 			memcpy(buffer, event->recv.ptr, event->recv.len);
@@ -57,18 +57,17 @@ poll_events(cci_endpoint_t * endpoint, cci_connection_t ** connection,
 			fprintf(stderr, "ignoring event type %d\n",
 				event->type);
 		}
-		cci_return_event(endpoint, event);
+		cci_return_event(event);
 	}
 }
 
 int main(int argc, char *argv[])
 {
-	int done = 0, ret, i = 0, c, len;
+	int done = 0, ret, i = 0, c;
 	uint32_t caps = 0;
 	char *server_uri = NULL;	/* ip://1.2.3.4 */
 	char *uri = NULL;
 	cci_os_handle_t fd;
-	cci_device_t **devices = NULL;
 	cci_endpoint_t *endpoint = NULL;
 	cci_connection_t *connection = NULL;
 	uint32_t timeout_us = 30 * 1000000;	/* microseconds */
@@ -88,7 +87,7 @@ int main(int argc, char *argv[])
 	/* init */
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
 	if (ret) {
-		fprintf(stderr, "cci_init() returned %s\n", cci_strerror(ret));
+		fprintf(stderr, "cci_init() returned %s\n", cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
 
@@ -96,14 +95,14 @@ int main(int argc, char *argv[])
 	ret = cci_create_endpoint(NULL, 0, &endpoint, &fd);
 	if (ret) {
 		fprintf(stderr, "cci_create_endpoint() returned %s\n",
-			cci_strerror(ret));
+			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
 
 	ret = cci_get_opt(endpoint,
 			  CCI_OPT_ENDPT_URI, &uri);
 	if (ret) {
-		fprintf(stderr, "cci_get_opt() failed with %s\n", cci_strerror(NULL, ret));
+		fprintf(stderr, "cci_get_opt() failed with %s\n", cci_strerror(endpoint, ret));
 		exit(EXIT_FAILURE);
 	}
 	printf("Opened %s\n", uri);
@@ -113,7 +112,7 @@ int main(int argc, char *argv[])
 		    &timeout_us);
 	if (ret) {
 		fprintf(stderr, "cci_set_opt() returned %s\n",
-			cci_strerror(ret));
+			cci_strerror(endpoint, ret));
 		exit(EXIT_FAILURE);
 	}
 
@@ -122,7 +121,7 @@ int main(int argc, char *argv[])
 			  CCI_CONN_ATTR_UU, NULL, 0, NULL);
 	if (ret) {
 		fprintf(stderr, "cci_connect() returned %s\n",
-			cci_strerror(ret));
+			cci_strerror(endpoint, ret));
 		exit(EXIT_FAILURE);
 	}
 
@@ -145,7 +144,7 @@ int main(int argc, char *argv[])
 			       (void *)(uintptr_t) i, 0);
 		if (ret)
 			fprintf(stderr, "send %d returned %s\n", i,
-				cci_strerror(ret));
+				cci_strerror(endpoint, ret));
 
 		done = 0;
 		while (!done)
@@ -156,13 +155,13 @@ int main(int argc, char *argv[])
 	ret = cci_disconnect(connection);
 	if (ret) {
 		fprintf(stderr, "cci_disconnect() returned %s\n",
-			cci_strerror(ret));
+			cci_strerror(endpoint, ret));
 		exit(EXIT_FAILURE);
 	}
 	ret = cci_destroy_endpoint(endpoint);
 	if (ret) {
 		fprintf(stderr, "cci_destroy_endpoint() returned %s\n",
-			cci_strerror(ret));
+			cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
 	/* add cci_finalize() here */
