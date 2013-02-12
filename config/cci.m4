@@ -90,7 +90,8 @@ AC_DEFUN([CCI_SETUP_CTP],[
           [cci_add="-Wall -Wundef -Wsign-compare"
            cci_add="$cci_add -Wmissing-prototypes -Wstrict-prototypes"
            cci_add="$cci_add -Wcomment -pedantic"
-           cci_add="$cci_add -Werror-implicit-function-declaration "
+           cci_add="$cci_add -Werror-implicit-function-declaration"
+           cci_add="$cci_add -Wno-variadic-macros -Wno-long-long"
            CFLAGS="$CFLAGS $cci_add"
 	   CCI_UNIQ(CFLAGS)
            AC_MSG_WARN([$cci_add has been added to CFLAGS (--enable-picky)])
