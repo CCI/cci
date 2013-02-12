@@ -456,7 +456,8 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 						sai = (struct sockaddr_in *) addr->ifa_addr;
 						if (!memcmp(&sdev->ip, &sai->sin_addr, sizeof(sdev->ip)))
 							break;
-						if (!strcmp(interface, addr->ifa_name)) {
+						if (interface &&
+							!strcmp(interface, addr->ifa_name)) {
 							memcpy(&sdev->ip, &sai->sin_addr, sizeof(sdev->ip));
 							break;
 						}
