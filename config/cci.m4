@@ -170,6 +170,8 @@ AC_DEFUN([CCI_SETUP_CTP],[
     AC_CONFIG_FILES(cci_config_prefix[src/util/Makefile])
     AC_CONFIG_FILES(cci_config_prefix[src/tests/Makefile])
 
+    AC_CONFIG_FILES(cci_config_prefix[examples/Makefile])
+
     # Setup the plugins
     m4_include([config/autogen_found_items.m4])
     CCI_PLUGINS

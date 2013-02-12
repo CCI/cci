@@ -7,7 +7,7 @@
 # via AC_CONFIG_MACRO_DIR in configure.ac.
 ACLOCAL_AMFLAGS = -I ./config
 
-SUBDIRS = include src
+SUBDIRS = include src examples
 
 #
 # "make distcheck" requires that tarballs are able to be able to "make
