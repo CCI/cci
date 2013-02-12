@@ -10,7 +10,7 @@
  *
  */
 
-#include "cci/config.h"
+#include "cci/private_config.h"
 
 #include <stdio.h>
 #include <stdlib.h>

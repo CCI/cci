@@ -9,9 +9,9 @@
 #ifndef CCI_PLUGINS_BASE_PUBLIC_H
 #define CCI_PLUGINS_BASE_PUBLIC_H
 
-#include "cci/config.h"
-
+#include "cci/private_config.h"
 #include "cci.h"
+
 #include "ltdl.h"
 #include "plugins/plugins.h"
 

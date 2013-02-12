@@ -41,13 +41,17 @@
 #ifndef CCI_H
 #define CCI_H
 
-#include "cci/config.h"
+#include "cci/public_config.h"
 
 #include <errno.h>
 #include <stdint.h> /* may need to be fixed for windows */
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/uio.h>
+
+#ifndef CCI_DECLSPEC
+#define CCI_DECLSPEC
+#endif
 
 /* ================================================================== */
 /*                                                                    */

@@ -13,7 +13,8 @@
 #pragma warning(disable:2259)
 #endif				//   __INTEL_COMPILER
 
-#include "cci/config.h"
+#include "cci/private_config.h"
+
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>

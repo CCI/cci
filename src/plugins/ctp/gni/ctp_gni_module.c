@@ -3,7 +3,7 @@
  * $COPYRIGHT$
  */
 
-#include "cci/config.h"
+#include "cci/private_config.h"
 #include "cci.h"
 #include "plugins/ctp/ctp.h"
 #include "ctp_gni.h"

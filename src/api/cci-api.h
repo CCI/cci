@@ -1,3 +1,5 @@
+#include <cci/private_config.h>
+
 /* This is where the private functions are prototyped. */
 
 void cci__free_dev(cci__dev_t * dev);

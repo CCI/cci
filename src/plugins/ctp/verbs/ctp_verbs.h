@@ -8,9 +8,9 @@
 #ifndef CCI_CTP_VERBS_H
 #define CCI_CTP_VERBS_H
 
-#include "cci/config.h"
-#include <sys/epoll.h>
+#include "cci/private_config.h"
 
+#include <sys/epoll.h>
 #include <assert.h>
 #include <rdma/rdma_cma.h>
 

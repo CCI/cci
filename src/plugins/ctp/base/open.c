@@ -4,6 +4,7 @@
  * $COPYRIGHT$
  */
 
+#include "cci/private_config.h"
 #include "cci.h"
 
 #include "plugins/base/public.h"

@@ -8,6 +8,7 @@
 #ifndef PLUGINS_CTP_BASE_PUBLIC_H
 #define PLUGINS_CTP_BASE_PUBLIC_H
 
+#include "cci/private_config.h"
 #include "cci.h"
 
 BEGIN_C_DECLS

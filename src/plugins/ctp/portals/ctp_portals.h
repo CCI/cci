@@ -7,9 +7,10 @@
 #ifndef CCI_CTP_PORTALS_H
 #define CCI_CTP_PORTALS_H
 
+#include "cci/private_config.h"
+
 #include <assert.h>
 #include <portals/portals3.h>
-#include "cci/config.h"
 
 extern const char *ptl_err_str[];
 extern const char *ptl_event_str[];

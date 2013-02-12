@@ -8,9 +8,9 @@
 #ifndef CCI_PLUGINS_BASE_PRIVATE_H
 #define CCI_PLUGINS_BASE_PRIVATE_H
 
-#include "cci/config.h"
-
+#include "cci/private_config.h"
 #include "cci.h"
+
 #include "ltdl.h"
 
 BEGIN_C_DECLS
