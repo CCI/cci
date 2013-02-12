@@ -793,8 +793,8 @@ static int ctp_tcp_destroy_endpoint(cci_endpoint_t * endpoint)
 
 		ep->closing = 1;
 
-		pthread_mutex_unlock(&dev->lock);
 		pthread_mutex_unlock(&ep->lock);
+		pthread_mutex_unlock(&dev->lock);
 		tcp_terminate_threads (tep);
 		pthread_mutex_lock(&dev->lock);
 		pthread_mutex_lock(&ep->lock);
