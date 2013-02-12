@@ -390,7 +390,8 @@ static int ctp_tcp_init(cci_plugin_ctp_t *plugin,
 						sin = (struct sockaddr_in *) addr->ifa_addr;
 						if (!memcmp(&tdev->ip, &sin->sin_addr, sizeof(tdev->ip)))
 							break;
-						if (!strcmp(interface, addr->ifa_name)) {
+						if (interface &&
+							!strcmp(interface, addr->ifa_name)) {
 							memcpy(&tdev->ip, &sin->sin_addr, sizeof(tdev->ip));
 							break;
 						}
