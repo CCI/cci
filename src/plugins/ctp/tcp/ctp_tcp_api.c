@@ -1187,12 +1187,20 @@ static int tcp_getaddrinfo(const char *uri, in_addr_t * in, uint16_t * port)
 	return CCI_SUCCESS;
 }
 
+#define DEBUG_LOCK 0
+
 static inline int
 tcp_new_conn(cci__ep_t *ep, struct sockaddr_in sin, int fd, cci__conn_t **connp)
 {
 	int ret = CCI_SUCCESS;
 	cci__conn_t *conn = NULL;
 	tcp_conn_t *tconn = NULL;
+	pthread_mutexattr_t attr;
+
+	pthread_mutexattr_init(&attr);
+#if DEBUG_LOCK
+	pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ERRORCHECK);
+#endif
 
 	/* allocate a new connection */
 	conn = calloc(1, sizeof(*conn));
@@ -1219,11 +1227,11 @@ tcp_new_conn(cci__ep_t *ep, struct sockaddr_in sin, int fd, cci__conn_t **connp)
 
 	memcpy(&tconn->sin, &sin, sizeof(sin));
 
-	ret = pthread_mutex_init(&tconn->rlock, NULL);
+	ret = pthread_mutex_init(&tconn->rlock, &attr);
 	if (ret)
 		goto out_with_tconn;
 
-	ret = pthread_mutex_init(&tconn->slock, NULL);
+	ret = pthread_mutex_init(&tconn->slock, &attr);
 	if (ret)
 		goto out_with_rlock;
 
