@@ -7,6 +7,7 @@
 #include "cci/config.h"
 
 #include <stdio.h>
+#include <unistd.h>
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <sys/ioctl.h>
@@ -15,10 +16,11 @@
 #include <string.h>
 #include <assert.h>
 
-#include "ccieth_io.h"
-
 #include "cci.h"
+#include "cci_lib_types.h"
+#include "cci-api.h"
 #include "plugins/ctp/ctp.h"
+#include "ccieth_io.h"
 #include "ctp_eth.h"
 
 #define ETH_BUILD_ASSERT(condition) ((void)sizeof(char[1 - 2*!(condition)]))
@@ -167,14 +169,14 @@ fallback_ioctl:
 	device->pci.func = ioctl_arg.pci_func;
 
 	/* up flag is easy */
-	device->up = (addr->ifa_flags & IFF_UP != 0);
+	device->up = ((addr->ifa_flags) & IFF_UP != 0);
 
 done:
 	/* normalize what cci__get_dev_ifaddrs_info() returned */
 	device->max_send_size = ccieth_max_send_size(device->max_send_size);
 
 	debug(CCI_DB_INFO, "max %d rate %lld pci %04x:%02x:%02x.%01x",
-	      device->max_send_size, device->rate,
+	      device->max_send_size, (unsigned long long) device->rate,
 	      device->pci.domain, device->pci.bus, device->pci.dev,
 	      device->pci.func);
 
@@ -190,12 +192,10 @@ static int eth__get_devices(cci_plugin_ctp_t *plugin)
 {
 	int ret;
 	cci__dev_t *_dev, *_ndev;
-	unsigned count = 0;
 	struct cci_device *device;
 	eth__dev_t *edev;
 	struct ifaddrs *addrs = NULL, *addr;
 	struct sockaddr_ll *lladdr;
-	int no_default;
 
 	CCI_ENTER;
 
@@ -447,7 +447,6 @@ static int ctp_eth_create_endpoint(cci_device_t * device,
 	struct cci_endpoint *endpoint = (struct cci_endpoint *) *endpointp;
 	cci__ep_t *_ep;
 	eth__ep_t *eep;
-	int eid;
 	char *uri;
 	int fd;
 	int ret;
@@ -482,7 +481,6 @@ static int ctp_eth_create_endpoint(cci_device_t * device,
 		goto out_with_fd;
 	}
 	CCI_VALGRIND_MEMORY_MAKE_READABLE(&arg.id, sizeof(arg.id));
-	eid = arg.id;
 
 	ccieth_uri_sprintf(uri, (const uint8_t *)&edev->addr.sll_addr, arg.id);
 	_ep->uri = uri;
