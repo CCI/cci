@@ -169,7 +169,7 @@ fallback_ioctl:
 	device->pci.func = ioctl_arg.pci_func;
 
 	/* up flag is easy */
-	device->up = ((addr->ifa_flags) & IFF_UP != 0);
+	device->up = ((addr->ifa_flags & IFF_UP) != 0);
 
 done:
 	/* normalize what cci__get_dev_ifaddrs_info() returned */
@@ -283,11 +283,16 @@ static int eth__get_devices(cci_plugin_ctp_t *plugin)
 				     *arg != NULL; arg++) {
 					if (0 == strncmp(*arg, "interface=", 10)) {
 						gotifname = (*arg) + 10;
-					} else if (6 == sscanf(*arg,
-							       "mac=%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
-							       &mac[0], &mac[1], &mac[2],
-							       &mac[3], &mac[4], &mac[5])) {
-						gotmac = 1;
+					} else {
+						unsigned x[6];
+						if (6 == sscanf(*arg,
+							       "mac=%02x:%02x:%02x:%02x:%02x:%02x",
+							       &x[0], &x[1], &x[2], &x[3], &x[4], &x[5])) {
+							unsigned i;
+							for(i=0; i<6; i++)
+								mac[i] = x[i];
+							gotmac = 1;
+						}
 					}
 				}
 
@@ -431,9 +436,12 @@ static void ccieth_uri_sprintf(char *uri, const uint8_t * addr, uint32_t id)
 
 static int ccieth_uri_sscanf(const char *uri, uint8_t * addr, uint32_t * id)
 {
-	return sscanf(uri, "eth://%02x:%02x:%02x:%02x:%02x:%02x:%08x",
-		      &addr[0], &addr[1], &addr[2], &addr[3], &addr[4],
-		      &addr[5], id) == 7 ? 0 : -1;
+	unsigned a, b, c, d, e, f;
+	if (sscanf(uri, "eth://%02x:%02x:%02x:%02x:%02x:%02x:%08x",
+		   &a, &b, &c, &d, &e, &f, id) != 7)
+		return -1;
+	addr[0] = a; addr[1] = b; addr[2] = c; addr[3] = d; addr[4] = e; addr[5] = f;
+	return 0;
 }
 
 static int ctp_eth_create_endpoint(cci_device_t * device,
@@ -673,7 +681,7 @@ static int ctp_eth_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	arg.attribute = attribute;
 	arg.flags = flags;
 	arg.user_conn_id = (uintptr_t) econn;
-	arg.timeout_sec = timeout ? timeout->tv_sec : -1ULL;
+	arg.timeout_sec = timeout ? timeout->tv_sec : (__time_t) -1ULL;
 	arg.timeout_usec = timeout ? timeout->tv_usec : -1;
 	ret = ioctl(eep->fd, CCIETH_IOCTL_CONNECT_REQUEST, &arg);
 	if (ret < 0) {
@@ -996,7 +1004,7 @@ static int ctp_eth_sendv(cci_connection_t * connection,
 			 const struct iovec *iov_ptr, uint32_t iov_len,
 			 const void *context, int flags)
 {
-	void *buffer;
+	char *buffer;
 	size_t length, offset;
 	unsigned i;
 	int ret;
