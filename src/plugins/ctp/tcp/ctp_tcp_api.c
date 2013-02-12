@@ -1285,6 +1285,9 @@ tcp_ignore_fd_locked(tcp_ep_t *tep, tcp_conn_t *tconn)
 		tep->c[index] = NULL;
 	}
 
+	close(tconn->fd);
+	tconn->fd = -1;
+
 	return;
 }
 
@@ -2442,6 +2445,7 @@ again:
 		} else if (ret == 0) {
 			debug(CCI_DB_MSG, "%s: recv() failed - peer closed "
 				"connection", __func__);
+			ret = CCI_ERROR;
 			goto out;
 		}
 		offset += ret;
@@ -3264,8 +3268,8 @@ tcp_poll_events(cci__ep_t *ep)
 			tcp_tx_t *tx = NULL;
 
 			/* handle disconnect */
-			debug(CCI_DB_CONN, "%s: got POLLHUP on conn %p",
-				__func__, conn);
+			debug(CCI_DB_CONN, "%s: got POLLHUP on conn %p (%s)",
+				__func__, conn, tcp_conn_status_str(tconn->status));
 
 			switch (old_status) {
 			case TCP_CONN_ACTIVE1:
@@ -3278,6 +3282,12 @@ tcp_poll_events(cci__ep_t *ep)
 				tx->state = TCP_TX_COMPLETED;
 				tcp_ignore_fd_locked(tep, tconn);
 				TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+				pthread_mutex_unlock(&ep->lock);
+				break;
+			case TCP_CONN_CLOSING:
+				pthread_mutex_lock(&tconn->slock);
+				tcp_ignore_fd_locked(tep, tconn);
+				/* TODO drain queues, complete with errors */
 				pthread_mutex_unlock(&ep->lock);
 				break;
 			default:
