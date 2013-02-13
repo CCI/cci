@@ -4,7 +4,10 @@
 #
 
 include_HEADERS = \
-        cci.h \
+        cci.h
+
+include_ccidir = $(includedir)/cci
+include_cci_HEADERS = \
         cci/public_config.h
 
 noinst_HEADERS = \
