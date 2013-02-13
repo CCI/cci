@@ -1272,7 +1272,7 @@ tcp_monitor_fd(cci__ep_t *ep, cci__conn_t *conn, int events)
 	pthread_mutex_unlock(&ep->lock);
 
 	debug(CCI_DB_CONN, "%s: tconn->index = %u tep->nfds = %u",
-		__func__, tconn->index, tep->nfds);
+		__func__, tconn->index, (unsigned) tep->nfds);
 
 out:
 	return ret;
