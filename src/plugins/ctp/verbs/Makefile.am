@@ -5,6 +5,7 @@
 
 pkglib_LTLIBRARIES = cci_ctp_verbs.la
 
+AM_CPPFLAGS = $(ctp_verbs_CPPFLAGS)
 cci_ctp_verbs_la_LDFLAGS = -module -avoid-version $(ctp_verbs_LDFLAGS)
 cci_ctp_verbs_la_SOURCES = \
         ctp_verbs.h \
