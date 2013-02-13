@@ -49,7 +49,7 @@ BEGIN_C_DECLS
 	VERBS_MSG_KEEPALIVE,
 	VERBS_MSG_RDMA_MSG_ACK,
 	VERBS_MSG_RMA,
-	VERBS_MSG_TYPE_MAX,
+	VERBS_MSG_TYPE_MAX
 } verbs_msg_type_t;
 
 #define VERBS_EP_RMSG_CONNS	(16)
@@ -359,7 +359,7 @@ typedef enum verbs_conn_state {
 	VERBS_CONN_INIT = 0,
 	VERBS_CONN_ACTIVE,
 	VERBS_CONN_PASSIVE,
-	VERBS_CONN_ESTABLISHED,
+	VERBS_CONN_ESTABLISHED
 } verbs_conn_state_t;
 
 typedef struct verbs_conn_request {
