@@ -27,6 +27,8 @@
 #include <asm/types.h>
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
+#else
+#define __linux__ 0
 #endif
 
 #include "cci.h"
@@ -237,7 +239,7 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 	      "querying interface %s info with socket ioctls and ethtool...",
 	      ifaddr->ifa_name);
 
-#ifdef __linux__
+#if __linux__
 	/* identify the target interface for following socket ioctls */
 	memset(&ifr, 0, sizeof(ifr));
 	strncpy(ifr.ifr_name, ifaddr->ifa_name, IFNAMSIZ);
