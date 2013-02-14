@@ -4183,7 +4183,8 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	tx->len = sizeof(sock_rma_header_t);
 	tx->rma_op = NULL;
 	tx->rma_ptr = remote->start + (uintptr_t) remote_offset;
-	tx->rma_len = (uint16_t)remote->length;
+	/*tx->rma_len = (uint16_t)remote->length;*/
+        tx->rma_len = len;
 	tx->seq = ++(sconn->seq);
 
 	tx->evt.event.type = CCI_EVENT_SEND;
