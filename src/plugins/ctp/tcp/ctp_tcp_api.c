@@ -1078,15 +1078,15 @@ static int ctp_tcp_reject(cci_event_t *event)
 		return CCI_ENODEV;
 	}
 
-	hdr = (void *)event->request.data_ptr;
-	tcp_parse_header(hdr, &type, &a, &unused);
-
 	evt = container_of(event, cci__evt_t, event);
 	ep = evt->ep;
 	tep = ep->priv;
 	conn = evt->conn;
 	tconn = conn->priv;
 	rx = container_of(evt, tcp_rx_t, evt);
+
+	hdr = rx->buffer;
+	tcp_parse_header(hdr, &type, &a, &unused);
 
 	/* get a tx */
 	tx = tcp_get_tx(ep, 0);
