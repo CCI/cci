@@ -1036,9 +1036,6 @@ typedef struct cci_event_connect_request {
   The ordering of fields in this struct is intended to reduce memory
   holes between fields.
 
-  This event should be passed to either cci_accept() or cci_reject()
-  before being returned with cci_return_event().
-
   \ingroup events
 */
 typedef struct cci_event_accept {
