@@ -2693,6 +2693,7 @@ tcp_handle_send(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 	else
 		rx->evt.event.recv.ptr = NULL;
 	rx->evt.event.recv.len = len;
+	rx->evt.event.recv.connection = &conn->connection;
 
 	/* queue event on endpoint's completed event queue */
 
