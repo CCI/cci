@@ -615,6 +615,7 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 	TAILQ_INIT(&tep->conns);
 	TAILQ_INIT(&tep->active);
 	TAILQ_INIT(&tep->passive);
+	TAILQ_INIT(&tep->closing);
 
 	TAILQ_INIT(&tep->idle_txs);
 	TAILQ_INIT(&tep->idle_rxs);
@@ -807,12 +808,36 @@ static int ctp_tcp_destroy_endpoint(cci_endpoint_t * endpoint)
 		while (!TAILQ_EMPTY(&tep->conns)) {
 			tconn = TAILQ_FIRST(&tep->conns);
 			conn = tconn->conn;
-			tcp_disconnect_locked(ep, conn);
+			TAILQ_REMOVE(&tep->conns, tconn, entry);
+			free((char*)conn->uri);
+			free(tconn);
+			free(conn);
 		}
 		while (!TAILQ_EMPTY(&tep->active)) {
 			tconn = TAILQ_FIRST(&tep->active);
 			conn = tconn->conn;
-			tcp_disconnect_locked(ep, conn);
+			TAILQ_REMOVE(&tep->active, tconn, entry);
+			free((char*)conn->uri);
+			free(tconn);
+			free(conn);
+		}
+		while (!TAILQ_EMPTY(&tep->passive)) {
+			tconn = TAILQ_FIRST(&tep->passive);
+			conn = tconn->conn;
+			TAILQ_REMOVE(&tep->passive, tconn, entry);
+			free((char*)conn->uri);
+			free(tconn);
+			free(conn);
+		}
+		while (!TAILQ_EMPTY(&tep->closing)) {
+			tconn = TAILQ_FIRST(&tep->closing);
+			TAILQ_REMOVE(&tep->closing, tconn, entry);
+			conn = tconn->conn;
+			debug(CCI_DB_CONN, "%s: free conn %p tconn %p",
+				__func__, (void*)conn, (void*)tconn);
+			free((char*)conn->uri);
+			free(conn->priv);
+			free(conn);
 		}
 		free(tep->txs);
 		free(tep->tx_buf);

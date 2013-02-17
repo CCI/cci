@@ -749,6 +749,9 @@ typedef struct tcp_ep {
 	/*! List of passive connections awaiting requests and acks */
 	TAILQ_HEAD(s_passive, tcp_conn) passive;
 
+	/*! List of closing connections */
+	TAILQ_HEAD(ss_conns, tcp_conn) closing;
+
 	/*! List of RMA registrations */
 	TAILQ_HEAD(s_handles, tcp_rma_handle) handles;
 
