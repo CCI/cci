@@ -915,7 +915,7 @@ tcp_get_tx(cci__ep_t *ep, int allocate)
 	pthread_mutex_unlock(&ep->lock);
 
 	if (!tx && allocate) {
-		debug(CCI_DB_WARN, "%s: allocating a tx ***", __func__);
+		debug(CCI_DB_MSG, "%s: allocating a tx ***", __func__);
 		do {
 			tx = calloc(1, sizeof(*tx));
 		} while (!tx);
@@ -1347,7 +1347,7 @@ tcp_ignore_fd_locked(tcp_ep_t *tep, tcp_conn_t *tconn)
 
 	nfds = --tep->nfds;
 
-	debug(CCI_DB_ALL, "%s: conn=%p tconn=%p tconn->index=%u nfds=%u",
+	debug(CCI_DB_CONN, "%s: conn=%p tconn=%p tconn->index=%u nfds=%u",
 		__func__, (void*)conn, (void*)tconn, index, nfds);
 
 	if (index != nfds) {
@@ -1438,11 +1438,11 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 			__func__, bufsize);
 
 		ret = setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &bufsize, opt_len);
-		if (ret) debug(CCI_DB_ALL, "%s: unable to set SO_SNDBUF (%s)",
+		if (ret) debug(CCI_DB_EP, "%s: unable to set SO_SNDBUF (%s)",
 				__func__, strerror(errno));
 
 		ret = setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bufsize, opt_len);
-		if (ret) debug(CCI_DB_ALL, "%s: unable to set SO_RCVBUF (%s)",
+		if (ret) debug(CCI_DB_EP, "%s: unable to set SO_RCVBUF (%s)",
 				__func__, strerror(errno));
 	}
 
