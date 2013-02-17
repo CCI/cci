@@ -532,10 +532,18 @@ typedef enum tcp_tx_state_t {
 	TCP_TX_COMPLETED
 } tcp_tx_state_t;
 
+typedef enum tcp_ctx {
+	TCP_CTX_TX,
+	TCP_CTX_RX
+} tcp_ctx_t;
+
 /*! Send message context.
 *
 * \ingroup messages */
 typedef struct tcp_tx {
+	/*! Must be TCP_CTX_TX */
+	tcp_ctx_t ctx;
+
 	/*! Associated event (includes public cci_event_t) */
 	cci__evt_t evt;
 
@@ -583,6 +591,9 @@ typedef struct tcp_tx {
  *
  * \ingroup messages */
 typedef struct tcp_rx {
+	/*! Must be TCP_CTX_RX */
+	tcp_ctx_t ctx;
+
 	/*! Associated event (includes public cci_event_t) */
 	cci__evt_t evt;
 

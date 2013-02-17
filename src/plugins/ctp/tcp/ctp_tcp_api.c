@@ -655,6 +655,7 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 		tcp_tx_t *tx = &tep->txs[i];
 
 		tx->id = i;
+		tx->ctx = TCP_CTX_TX;
 
 		tx->evt.event.type = CCI_EVENT_SEND;
 		tx->evt.ep = ep;
@@ -680,6 +681,7 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 		tcp_rx_t *rx = &tep->rxs[i];
 
 		rx->id = i;
+		rx->ctx = TCP_CTX_RX;
 
 		rx->evt.event.type = CCI_EVENT_RECV;
 		rx->evt.ep = ep;
@@ -888,7 +890,9 @@ tcp_get_tx(cci__ep_t *ep, int allocate)
 static inline void
 tcp_put_tx_locked(tcp_ep_t *tep, tcp_tx_t *tx)
 {
-	debug(CCI_DB_MSG, "%s: putting tx %p", __func__, (void*)tx);
+	assert(tx->ctx == TCP_CTX_TX);
+	debug(CCI_DB_MSG, "%s: putting tx %p buffer %p",
+		__func__, (void*)tx, (void*)tx->buffer);
 	TAILQ_INSERT_HEAD(&tep->idle_txs, &tx->evt, entry);
 
 	return;
@@ -936,6 +940,7 @@ tcp_get_rx(cci__ep_t *ep)
 static inline void
 tcp_put_rx_locked(tcp_ep_t *tep, tcp_rx_t *rx)
 {
+	assert(rx->ctx == TCP_CTX_RX);
 	TAILQ_INSERT_HEAD(&tep->idle_rxs, &rx->evt, entry);
 
 	return;
