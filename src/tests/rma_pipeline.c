@@ -455,6 +455,13 @@ int main(int argc, char *argv[])
 			iters = pipeline_depth * 2;
 	}
 
+	if (pipeline_depth > iters) {
+		fprintf(stderr,
+		        "The number of iteration should be higher than the pipeline depth "
+		        "(iters: %u; pipeline_depth: %u)\n", iters, pipeline_depth);
+		        exit (EXIT_FAILURE);
+	}
+
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
 	if (ret) {
 		fprintf(stderr, "cci_init() failed with %s\n",
