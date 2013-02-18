@@ -70,7 +70,7 @@ typedef struct options {
 
 options_t opts;
 
-void print_usage()
+static void print_usage(void)
 {
 	fprintf(stderr, "usage: %s -h <server_uri> [-s] [-i <iters>] "
 		"[-W <window>] [-c <type>] [-n] "
@@ -95,7 +95,7 @@ void print_usage()
 	exit(EXIT_FAILURE);
 }
 
-void check_return(cci_endpoint_t * endpoint, char *func, int ret, int need_exit)
+static void check_return(cci_endpoint_t * endpoint, char *func, int ret, int need_exit)
 {
 	if (ret) {
 		fprintf(stderr, "%s() returned %s\n", func, cci_strerror(endpoint, ret));
@@ -172,17 +172,16 @@ static void poll_events(void)
 	return;
 }
 
-double usecs(struct timeval start, struct timeval end)
+static double usecs(struct timeval start, struct timeval end)
 {
 	return ((double)(end.tv_sec - start.tv_sec)) * 1000000.0 +
 	    ((double)(end.tv_usec - start.tv_usec));
 }
 
-void do_client()
+static void do_client(void)
 {
 	int ret;
 	uint32_t min = 0, max;
-	//struct timeval start, end;
 	char *func;
 	char *header = "Done";
 
@@ -230,7 +229,7 @@ void do_client()
 		ret = cci_rma_register(endpoint, buffer, max, flags,
 							   &local_rma_handle);
 		check_return(endpoint, "cci_rma_register", ret, 1);
-		fprintf(stderr, "local_rma_handle is %p\n", local_rma_handle);
+		fprintf(stderr, "local_rma_handle is %p\n", (void*)local_rma_handle);
 		min = 1;
 		if (opts.method == RMA_WRITE)
 			opts.flags |= CCI_FLAG_WRITE;
@@ -270,7 +269,7 @@ void do_client()
 		lat = usecs(start, end)/count;
 		bw = (double)current_size / lat;
 
-		printf("%8d\t%8.2lf us\t\t%8.2lf MB/s\t%8u %8u\n", current_size, lat,
+		printf("%8d\t%8.2f us\t\t%8.2f MB/s\t%8u %8u\n", current_size, lat,
 				bw, pipeline_depth, iters);
 
 		current_size *= 2;
@@ -297,7 +296,7 @@ void do_client()
 	return;
 }
 
-void do_server()
+static void do_server(void)
 {
 	int ret, len;
 
@@ -366,7 +365,6 @@ void do_server()
 		poll_events();
 
 	printf("server done\n");
-	//sleep(1);
 
 	return;
 }
