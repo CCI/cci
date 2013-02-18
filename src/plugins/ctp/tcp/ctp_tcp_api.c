@@ -1943,11 +1943,11 @@ static void tcp_progress_queued(cci__ep_t * ep)
 	if (!tep)
 		return;
 
-	pthread_mutex_lock(&ep->lock);
+	/* pthread_mutex_lock(&ep->lock); */
 	TAILQ_FOREACH_SAFE(tconn, &tep->conns, entry, tmp) {
 		tcp_progress_conn_sends(tconn->conn);
 	}
-	pthread_mutex_unlock(&ep->lock);
+	/* pthread_mutex_unlock(&ep->lock); */
 
 	CCI_EXIT;
 
@@ -2548,7 +2548,7 @@ tcp_recv_msg(int fd, void *ptr, uint32_t len)
 	if (!len)
 		goto out;
 
-/* again: */
+again:
 	do {
 		ret = recv(fd, (void*)((uintptr_t)ptr + offset), len - offset, 0);
 		if (ret < 0) {
@@ -2557,10 +2557,8 @@ tcp_recv_msg(int fd, void *ptr, uint32_t len)
 				debug(CCI_DB_MSG, "%s: recv() failed with %s (%u of %u bytes) "
 					"ptr=%p", __func__, strerror(ret), offset, len,
 					(void*)ptr);
-#if 0
 			if (ret == EAGAIN)
 				goto again;
-#endif
 			goto out;
 		} else if (ret == 0) {
 			debug(CCI_DB_MSG, "%s: recv() failed - peer closed "
