@@ -2199,7 +2199,8 @@ static void sock_progress_queued(cci__ep_t * ep)
 
 	CCI_ENTER;
 	
-	TAILQ_HEAD(s_idle_txs, sock_tx) idle_txs = TAILQ_HEAD_INITIALIZER(idle_txs);
+	TAILQ_HEAD(s_idle_txs, sock_tx) idle_txs
+		= TAILQ_HEAD_INITIALIZER(idle_txs);
 	TAILQ_HEAD(s_evts, cci__evt) evts = TAILQ_HEAD_INITIALIZER(evts);
 	TAILQ_INIT(&idle_txs);
 	TAILQ_INIT(&evts);
@@ -2219,63 +2220,75 @@ static void sock_progress_queued(cci__ep_t * ep)
 
 		/* try to send it */
 
-		if (tx->last_attempt_us == 0ULL) {
-			timeout =
-				conn->tx_timeout ? conn->tx_timeout : ep->tx_timeout;
-			tx->timeout_us = now + (uint64_t) timeout;
-		}
+		/* RMA READ REPLY is a special case, it acts as a ACK */
+                if (tx->msg_type != SOCK_MSG_RMA_READ_REPLY) {
+			if (tx->last_attempt_us == 0ULL) {
+				timeout =
+					conn->tx_timeout ? conn->tx_timeout :
+				        ep->tx_timeout;
+				tx->timeout_us = now + (uint64_t) timeout;
+			}
 
-		if (SOCK_U64_LT(tx->timeout_us, now)) {
+			if (SOCK_U64_LT(tx->timeout_us, now)) {
 
-			/* set status and add to completed events */
-			switch (tx->msg_type) {
-			case SOCK_MSG_SEND:
-				if (tx->rnr != 0) {
-					event->send.status = CCI_ERR_RNR;
-				} else {
-					event->send.status = CCI_ETIMEDOUT;
+				/* set status and add to completed events */
+				switch (tx->msg_type) {
+				case SOCK_MSG_SEND:
+					if (tx->rnr != 0) {
+						event->send.status
+							= CCI_ERR_RNR;
+					} else {
+						event->send.status
+							= CCI_ETIMEDOUT;
+					}
+					break;
+				case SOCK_MSG_CONN_REQUEST:
+					/* FIXME only CONN_REQUEST gets an
+					 * event the other two need to
+					 * disconnect the conn */
+					event->connect.status = CCI_ETIMEDOUT;
+					event->connect.connection = NULL;
+					break;
+				case SOCK_MSG_RMA_WRITE:
+					tx->rma_op->pending--;
+					tx->rma_op->status = CCI_ETIMEDOUT;
+					break;
+				case SOCK_MSG_CONN_REPLY:
+				case SOCK_MSG_CONN_ACK:
+				default:
+					/* TODO */
+					debug(CCI_DB_WARN,
+					      "%s: timeout of %s msg",
+					      __func__,
+					      sock_msg_type(tx->msg_type));
+					CCI_EXIT;
+					return;
 				}
-				break;
-			case SOCK_MSG_CONN_REQUEST:
-				/* FIXME only CONN_REQUEST gets an event
-				* the other two need to disconnect the conn */
-				event->connect.status = CCI_ETIMEDOUT;
-				event->connect.connection = NULL;
-				break;
-			case SOCK_MSG_RMA_WRITE:
-				tx->rma_op->pending--;
-				tx->rma_op->status = CCI_ETIMEDOUT;
-				break;
-			case SOCK_MSG_CONN_REPLY:
-			case SOCK_MSG_CONN_ACK:
-			default:
-				/* TODO */
-				debug(CCI_DB_WARN, "%s: timeout of %s msg",
-					__func__, sock_msg_type(tx->msg_type));
-				CCI_EXIT;
-				return;
-			}
-			TAILQ_REMOVE(&sep->queued, evt, entry);
+				TAILQ_REMOVE(&sep->queued, evt, entry);
 
-			/* if SILENT, put idle tx */
-			if (tx->flags & CCI_FLAG_SILENT &&
-				(tx->msg_type == SOCK_MSG_SEND ||
-				tx->msg_type == SOCK_MSG_RMA_WRITE)) {
-
-				tx->state = SOCK_TX_IDLE;
-				/* store locally until we can drop the dev->lock */
-				TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
-			} else {
-				tx->state = SOCK_TX_COMPLETED;
-				/* store locally until we can drop the dev->lock */
-				TAILQ_INSERT_TAIL(&evts, evt, entry);
-			}
-			continue;
-		} /* end timeout case */
-
-		if ((tx->last_attempt_us + (SOCK_RESEND_TIME_SEC * 1000000)) >
-			now)
-			continue;
+				/* if SILENT, put idle tx */
+				if (tx->flags & CCI_FLAG_SILENT &&
+				    (tx->msg_type == SOCK_MSG_SEND ||
+				     tx->msg_type == SOCK_MSG_RMA_WRITE))
+				{
+					tx->state = SOCK_TX_IDLE;
+					/* store locally until we can drop the
+					 * dev->lock */
+					TAILQ_INSERT_HEAD(&idle_txs,
+					                  tx, dentry);
+				} else {
+					tx->state = SOCK_TX_COMPLETED;
+					/* store locally until we can drop the
+					 * dev->lock */
+					TAILQ_INSERT_TAIL(&evts, evt, entry);
+				}
+				continue;
+			} /* end timeout case */
+	
+			if ((tx->last_attempt_us + 
+			    (SOCK_RESEND_TIME_SEC * 1000000)) > now)
+				continue;
+		}
 
 #if 0
 		if (sconn->pending > sconn->cwnd &&
