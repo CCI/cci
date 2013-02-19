@@ -93,8 +93,7 @@ static int tcp_progress_ep(cci__ep_t *ep);
 static int tcp_poll_events(cci__ep_t *ep);
 static int tcp_sendto(cci_os_handle_t sock, void *buf, int len,
 			void *rma_ptr, uint32_t rma_len, uintptr_t *offset);
-static inline void tcp_progress_conn_sends(cci__conn_t *conn, int ep_locked);
-
+static inline void tcp_progress_conn_sends(cci__conn_t *conn);
 
 /*
  * Public plugin structure.
@@ -1090,7 +1089,7 @@ static int ctp_tcp_accept(cci_event_t *event, const void *context)
 
 	/* try to progress txs */
 
-	tcp_progress_conn_sends(conn, 0);
+	tcp_progress_conn_sends(conn);
 
 	CCI_EXIT;
 
@@ -1170,7 +1169,7 @@ static int ctp_tcp_reject(cci_event_t *event)
 
 	/* try to progress txs */
 
-	tcp_progress_conn_sends(conn, 0);
+	tcp_progress_conn_sends(conn);
 
 	memset(name, 0, sizeof(name));
 	tcp_sin_to_name(tconn->sin, name, sizeof(name));
@@ -1556,7 +1555,7 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 
 	/* try to progress txs */
 
-	tcp_progress_conn_sends(conn, 0);
+	tcp_progress_conn_sends(conn);
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -1832,7 +1831,7 @@ static void tcp_progress_pending(cci__ep_t * ep)
 }
 
 static inline void
-tcp_progress_conn_sends(cci__conn_t *conn, int ep_locked)
+tcp_progress_conn_sends(cci__conn_t *conn)
 {
 	int ret, is_reliable = 0;
 	tcp_conn_t *tconn = conn->priv;
@@ -1906,17 +1905,12 @@ tcp_progress_conn_sends(cci__conn_t *conn, int ep_locked)
 						free(tx->buffer);
 						free(tx);
 					} else {
-						cci_endpoint_t *endpoint =
-							conn->connection.endpoint;
-						cci__ep_t *ep =
-							container_of(endpoint, cci__ep_t,
-									endpoint);
-						tcp_ep_t *tep = ep->priv;
-
-						if (ep_locked)
-							tcp_put_tx_locked(tep, tx);
-						else
-							tcp_put_tx(tx);
+						/* FIXME locking violation
+						 * queue the tx locally, then
+						 * move it to the endpoint
+						 * after dropping this lock
+						 */
+						tcp_put_tx(tx);
 					}
 					break;
 				}
@@ -1933,17 +1927,8 @@ tcp_progress_conn_sends(cci__conn_t *conn, int ep_locked)
 	}
 	pthread_mutex_unlock(&tconn->slock);
 
-	if (put_tx) {
-		if (ep_locked) {
-			cci_endpoint_t *endpoint = conn->connection.endpoint;
-			cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
-			tcp_ep_t *tep = ep->priv;
-
-			tcp_put_tx_locked(tep, put_tx);
-		} else {
-			tcp_put_tx(put_tx);
-		}
-	}
+	if (put_tx)
+		tcp_put_tx(put_tx);
 
 	return;
 }
@@ -1960,7 +1945,7 @@ static void tcp_progress_queued(cci__ep_t * ep)
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_FOREACH_SAFE(tconn, &tep->conns, entry, tmp) {
-		tcp_progress_conn_sends(tconn->conn, 1);
+		tcp_progress_conn_sends(tconn->conn);
 	}
 	pthread_mutex_unlock(&ep->lock);
 
@@ -2120,7 +2105,7 @@ static int tcp_send_common(cci_connection_t * connection,
 
 	/* try to progress txs */
 
-	tcp_progress_conn_sends(conn, 0);
+	tcp_progress_conn_sends(conn);
 
 	/* if unreliable, we are done since it is buffered internally */
 	if (!is_reliable) {
@@ -2471,7 +2456,7 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 
 	ret = CCI_SUCCESS;
 
-	tcp_progress_conn_sends(conn, 0);
+	tcp_progress_conn_sends(conn);
 
 out:
 	if (ret) {
@@ -2563,7 +2548,7 @@ tcp_recv_msg(int fd, void *ptr, uint32_t len)
 	if (!len)
 		goto out;
 
-again:
+/* again: */
 	do {
 		ret = recv(fd, (void*)((uintptr_t)ptr + offset), len - offset, 0);
 		if (ret < 0) {
@@ -2572,8 +2557,10 @@ again:
 				debug(CCI_DB_MSG, "%s: recv() failed with %s (%u of %u bytes) "
 					"ptr=%p", __func__, strerror(ret), offset, len,
 					(void*)ptr);
+#if 0
 			if (ret == EAGAIN)
 				goto again;
+#endif
 			goto out;
 		} else if (ret == 0) {
 			debug(CCI_DB_MSG, "%s: recv() failed - peer closed "
@@ -2730,7 +2717,7 @@ tcp_handle_conn_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		pthread_mutex_unlock(&tconn->slock);
 
 		/* try to progress txs */
-		tcp_progress_conn_sends(conn, 0);
+		tcp_progress_conn_sends(conn);
 	} else {
 		tcp_put_tx(tx);
 	}
@@ -3462,7 +3449,7 @@ tcp_poll_events(cci__ep_t *ep)
 				tconn->status = TCP_CONN_ACTIVE2;
 				tep->fds[i].events = POLLIN | POLLOUT;
 			}
-			tcp_progress_conn_sends(conn, 0);
+			tcp_progress_conn_sends(conn);
 			found++;
 		}
 		if (revents & POLLERR) {
