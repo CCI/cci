@@ -267,5 +267,66 @@ extern int cci__debug;
 #define CCI_VALGRIND_CHECK_WRITABLE(p, s) /* nothing */
 #endif /* !HAVE_DECL_VALGRIND_MAKE_MEM_NOACCESS */
 
+#ifdef MUTEX_ERRORCHECK && MUTEX_ERRORCHECK == 1
+#define CCI_LOCK_INIT(x)			\
+do {						\
+	int ret = 0;				\
+	pthread_mutexattr_t attr;		\
+	ret = pthread_mutexattr_init(&attr);	\
+	if (ret) {				\
+		debug(CCI_DB_ERR, "%s: pthread_mutexattr_init() failed with %s", \
+				__func__, strerror(ret)); \
+		abort();			\
+	}					\
+	ret = pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ERRORCHECK); \
+	if (ret) {				\
+		debug(CCI_DB_ERR, "%s: pthread_mutexattr_settype() failed with %s", \
+				__func__, strerror(ret)); \
+		abort();			\
+	}					\
+	ret = pthread_mutex_init((x), &attr);	\
+	if (ret) {				\
+		debug(CCI_DB_ERR, "%s: pthread_mutex_init() failed with %s", \
+				__func__, strerror(ret)); \
+		abort();			\
+	}					\
+} while(0)
+#define CCI_LOCK_DESTROY(x)			\
+do {						\
+	int ret = 0;				\
+	ret = pthread_mutex_destroy((x));	\
+	if (ret) {				\
+		debug(CCI_DB_ERR, "%s: pthread_mutex_destroy() failed with %s", \
+				__func__, strerror(ret)); \
+		abort();			\
+	}					\
+} while(0)
+#define CCI_LOCK(x)				\
+do {						\
+	int ret = 0;				\
+	ret = pthread_mutex_lock((x));		\
+	if (ret) {				\
+		debug(CCI_DB_ERR, "%s: pthread_mutex_lock() failed with %s", \
+				__func__, strerror(ret)); \
+		abort();			\
+	}					\
+} while(0)
+#define CCI_UNLOCK(x)				\
+do {						\
+	int ret = 0;				\
+	ret = pthread_mutex_unlock((x));	\
+	if (ret) {				\
+		debug(CCI_DB_ERR, "%s: pthread_mutex_unlock() failed with %s", \
+				__func__, strerror(ret)); \
+		abort();			\
+	}					\
+} while(0)
+#else
+#define CCI_LOCK_INIT(x)	pthread_mutex_init((x), NULL)
+#define CCI_LOCK_DESTROY(x)	pthread_mutex_destroy((x))
+#define CCI_LOCK(x)		pthread_mutex_lock((x))
+#define CCI_UNLOCK(x)		pthread_mutex_unlock((x))
+#endif /* PTHREAD_MUTEX_RECURSIVE */
+
 END_C_DECLS
 #endif /* CCI_LIB_TYPES_H */

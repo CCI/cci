@@ -100,6 +100,12 @@ AC_DEFUN([CCI_SETUP_CTP],[
           [AC_MSG_WARN([-g has been added to CFLAGS (developer build)])
            CFLAGS="$CFLAGS -g"])
 
+    # Look for mutex-errorcheck
+    AC_ARG_ENABLE(mutex-errorcheck,
+                  AC_HELP_STRING(--mutex-errorcheck, enable mutex error checking),
+                  AC_DEFINE([MUTEX_ERRORCHECK], [1],
+		            [Define to enable mutex error checking]))
+
     # Look for valgrind
     AC_ARG_ENABLE(valgrind,
                   AC_HELP_STRING(--enable-valgrind, enable Valgrind hooks),

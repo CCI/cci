@@ -168,7 +168,7 @@ void cci__init_dev(cci__dev_t *dev)
 	dev->priority = -1; /* tell the transport it must initialize it if we didn't */
 	dev->is_default = 0;
 	TAILQ_INIT(&dev->eps);
-	pthread_mutex_init(&dev->lock, NULL);
+	CCI_LOCK_INIT(&dev->lock);
 	device->up = 0;
 
 	device->rate = 0;		/* unknown */
@@ -539,7 +539,7 @@ int cci__parse_config(const char *path)
 
 static void cci_lock_init(void)
 {
-	pthread_mutex_init(&init_lock, NULL);
+	CCI_LOCK_INIT(&init_lock);
 	return;
 }
 
@@ -560,7 +560,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		return CCI_EINVAL;
 
 	pthread_once(&once, cci_lock_init);
-	pthread_mutex_lock(&init_lock);
+	CCI_LOCK(&init_lock);
 
 	if (0 == initialized) {
 		cci__dev_t *dev;
@@ -579,12 +579,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		globals->configfile = 0;
 		TAILQ_INIT(&globals->configfile_devs);
 
-		ret = pthread_mutex_init(&globals->lock, NULL);
-		if (ret) {
-			perror("pthread_mutex_init failed:");
-			ret = errno;
-			goto out_with_globals;
-		}
+		CCI_LOCK_INIT(&globals->lock);
 
 		if (CCI_SUCCESS != (ret = cci_plugins_init())) {
 			goto out_with_globals;
@@ -599,7 +594,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		}
 
 		/* lock the device list while initializing CTPs and devices */
-		pthread_mutex_lock(&globals->lock);
+		CCI_LOCK(&globals->lock);
 
 		str = getenv("CCI_CONFIG");
 		if (str && str[0] != '\0') {
@@ -653,7 +648,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 			globals->devices[i++] = &dev->device;
 		}
 
-		pthread_mutex_unlock(&globals->lock);
+		CCI_UNLOCK(&globals->lock);
 
 		/* success */
 		initialized++;
@@ -674,7 +669,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		}
 	}
 
-	pthread_mutex_unlock(&init_lock);
+	CCI_UNLOCK(&init_lock);
 	return CCI_SUCCESS;
 
 out_with_plugins:
@@ -688,7 +683,7 @@ out_with_plugins:
 out_with_config_file:
 	/* FIXME? */
 out_with_glock:
-	pthread_mutex_unlock(&globals->lock);
+	CCI_UNLOCK(&globals->lock);
 out_with_plugins_ctp_open:
 	cci_plugins_ctp_close();
 out_with_plugins_init:
@@ -696,6 +691,6 @@ out_with_plugins_init:
 out_with_globals:
 	free(globals);
 out:
-	pthread_mutex_unlock(&init_lock);
+	CCI_UNLOCK(&init_lock);
 	return ret;
 }

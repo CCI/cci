@@ -26,7 +26,7 @@ int cci_finalize(void)
 	cci__dev_t *dev = NULL;
 	int i;
 
-	pthread_mutex_lock(&init_lock);
+	CCI_LOCK(&init_lock);
 
 	if (!initialized) {
 		/* not initialized */
@@ -41,7 +41,7 @@ int cci_finalize(void)
 	}
 
 	/* lock the device list while destroying devices and finalizing CTPs */
-	pthread_mutex_lock(&globals->lock);
+	CCI_LOCK(&globals->lock);
 
 	/* for each device
 	 *     for each endpoint
@@ -49,14 +49,14 @@ int cci_finalize(void)
 	 */
 
 	TAILQ_FOREACH(dev, &globals->devs, entry) {
-		pthread_mutex_lock(&dev->lock);
+		CCI_LOCK(&dev->lock);
 		while (!TAILQ_EMPTY(&dev->eps)) {
 			cci__ep_t *ep = TAILQ_FIRST(&dev->eps);
-			pthread_mutex_unlock(&dev->lock);
+			CCI_UNLOCK(&dev->lock);
 			cci_destroy_endpoint(&ep->endpoint);
-			pthread_mutex_lock(&dev->lock);
+			CCI_LOCK(&dev->lock);
 		}
-		pthread_mutex_unlock(&dev->lock);
+		CCI_UNLOCK(&dev->lock);
 	}
 
 	/* let the transport clean up the private device */
@@ -77,7 +77,7 @@ int cci_finalize(void)
 	free(globals->devices);
 	globals->devices = NULL;
 
-	pthread_mutex_unlock(&globals->lock);
+	CCI_UNLOCK(&globals->lock);
 
 	/* free globals */
 	free(globals);
@@ -86,6 +86,6 @@ int cci_finalize(void)
 	cci_plugins_finalize();
 
 out:
-	pthread_mutex_unlock(&init_lock);
+	CCI_UNLOCK(&init_lock);
 	return ret;
 }

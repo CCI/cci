@@ -27,7 +27,7 @@ int cci_create_endpoint(cci_device_t * device,
 	cci__ep_t *ep;
 	cci__dev_t *dev;
 
-	pthread_mutex_lock(&globals->lock);
+	CCI_LOCK(&globals->lock);
 
 	if (NULL == device) {
 		/* walk list of devs to find default device */
@@ -62,7 +62,7 @@ int cci_create_endpoint(cci_device_t * device,
 	}
 
 	TAILQ_INIT(&ep->evts);
-	pthread_mutex_init(&ep->lock, NULL);
+	CCI_LOCK_INIT(&ep->lock);
 	ep->dev = dev;
 	ep->endpoint.device = &dev->device;
 	*endpoint = &ep->endpoint;
@@ -70,16 +70,16 @@ int cci_create_endpoint(cci_device_t * device,
 	ret = dev->plugin->create_endpoint(device, flags, endpoint, fd);
 
 	ep->plugin = dev->plugin;
-	pthread_mutex_unlock(&globals->lock);
+	CCI_UNLOCK(&globals->lock);
 
-	pthread_mutex_lock(&dev->lock);
+	CCI_LOCK(&dev->lock);
 	/* TODO check dev's state */
 	TAILQ_INSERT_TAIL(&dev->eps, ep, entry);
-	pthread_mutex_unlock(&dev->lock);
+	CCI_UNLOCK(&dev->lock);
 
 	return ret;
 
 out:
-	pthread_mutex_unlock(&globals->lock);
+	CCI_UNLOCK(&globals->lock);
 	return ret;
 }
