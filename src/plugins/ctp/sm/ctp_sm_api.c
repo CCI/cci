@@ -6,10 +6,14 @@
 #include "cci/private_config.h"
 
 #include <stdio.h>
+#include <unistd.h>
+#include <sys/mman.h>
 
 #include "cci.h"
 #include "plugins/ctp/ctp.h"
 #include "ctp_sm.h"
+
+sm_globals_t *sglobals = NULL;
 
 /*
  * Local functions
@@ -73,7 +77,7 @@ cci_plugin_ctp_t cci_ctp_sm_plugin = {
 	 CCI_CTP_API_VERSION,
 	 "sm",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
-	 30, /* same as sock and tcp */
+	 20, /* less than sock and tcp */
 
 	 /* Bootstrap function pointers */
 	 cci_ctp_sm_post_load,
@@ -104,12 +108,72 @@ cci_plugin_ctp_t cci_ctp_sm_plugin = {
 
 static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
+	int ret = CCI_SUCCESS;
+	cci__dev_t *dev, *ndev;
+	cci_device_t *devices;
+	pid_t pid;
+
 	CCI_ENTER;
 
-	debug(CCI_DB_INFO, "%s", "In sm_init\n");
+	pid = getpid();
 
+	sglobals = calloc(1, sizeof(*sglobals));
+	if (!sglobals) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	devices = calloc(CCI_MAX_DEVICES, sizeof(*sglobals->devices));
+	if (!devices) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	if (!globals->configfile) {
+		struct cci_device *device = NULL;
+		sm_dev_t *sdev = NULL;
+		uint32_t mtu = (uint32_t) -1;
+		struct sockaddr_un *sun;
+		char name[16];
+
+		dev = calloc(1, sizeof(*dev));
+		if (!dev) {
+			ret = CCI_ENOMEM;
+			goto out;
+		}
+		dev->priv = calloc(1, sizeof(*sdev));
+		if (!dev->priv) {
+			free(dev);
+			ret = CCI_ENOMEM;
+			goto out;
+		}
+		sdev = dev->priv;
+
+		cci__init_dev(dev);
+		dev->plugin = plugin;
+		dev->priority = plugin->base.priority;
+
+		device = &dev->device;
+		device->transport = strdup("sm");
+		memset(name, 0, sizeof(name));
+		sprintf(name, "%d", pid);
+		device->name = strdup(name);
+	} else {
+	}
+
+out:
+	if (ret) {
+		if (devices) {
+		}
+		free((void*)devices);
+
+		if (sglobals) {
+			free(sglobals);
+			sglobals = NULL;
+		}
+	}
 	CCI_EXIT;
-	return CCI_SUCCESS;
+	return ret;
 }
 
 static int ctp_sm_finalize(cci_plugin_ctp_t * plugin)
