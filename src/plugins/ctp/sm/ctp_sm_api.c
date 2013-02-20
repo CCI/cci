@@ -328,12 +328,24 @@ out:
 
 static int ctp_sm_finalize(cci_plugin_ctp_t * plugin)
 {
+	cci__dev_t *dev = NULL;
+
 	CCI_ENTER;
 
-	debug(CCI_DB_INFO, "%s", "In sm_free_devices\n");
+	if (!sglobals) {
+		CCI_EXIT;
+		return CCI_ENODEV;
+	}
+
+	TAILQ_FOREACH(dev, &globals->devs, entry)
+		if (!strcmp(dev->device.transport, "sm"))
+			free(dev->priv);
+
+	free(sglobals->devices);
+	free((void*)sglobals);
 
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return CCI_SUCCESS;
 }
 
 static const char *ctp_sm_strerror(cci_endpoint_t * endpoint, enum cci_status status)
