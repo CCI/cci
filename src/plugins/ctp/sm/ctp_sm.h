@@ -34,7 +34,23 @@ BEGIN_C_DECLS
 
 /* Valid URI include:
  *
- * sm://pid:ep_id	# Process id and endpoint id
+ * sm://pid/id		# Process id and endpoint id
+ *
+ * or
+ *
+ * sm://<path/>pid/id	# Directory path, process id and endpoint id
+ *
+ *                        The path may be relative from the process' working
+ *                        directory or absolute. The process must have read,
+ *                        write, and execute permissions for the directory to
+ *                        create an endpoint and read and execute to connect
+ *                        to an endpoint.
+ *
+ *                        On init(), a device will create a subdirectory with
+ *                        their pid.
+ *
+ *                        When creating a new endpoint, the device will create
+ *                        a file with the new endpoint's id.
  */
 
 /* A sm device needs the following items in the config file:
@@ -43,18 +59,21 @@ BEGIN_C_DECLS
  *
  * A sm device may have these items:
  *
- * mtu = 128		# MTU less headers will become max_send_size
+ * mtu = 128		# MTU less headers will become max_send_size.
+ *                        The default it 1 KB.
  *
- * id = 32		# base ep_id for this process
+ * id = 32		# Base ep_id for this process. The default is 0.
  *
  * path = /tmp/cci	# Path to the base directory holding the UNIX Domain
 			  Socket names. The endpoint URI will be stored as
 			  pid/ep_id where pid is the process id and the ep_id
 			  is the endpoint's id.
 
-			  For example, sm://1234:1 would bind to:
+			  For example, sm:///tmp/cci/1234/1 would be bound to:
 
 			  /tmp/cci/1234/1
+
+			  The default path is /tmp/tmp.
  */
 
 typedef enum sm_msg_type {
@@ -332,8 +351,8 @@ typedef struct sm_conn {
 } sm_conn_t;
 
 typedef struct sm_dev {
-	char			base_path;	/* Path to URI base */
-	uint32_t		base_id;	/* Starting endpoint id */
+	char			path;		/* Path to URI base */
+	uint32_t		id;		/* Starting endpoint id */
 } sm_dev_t;
 
 typedef struct sm_globals {
