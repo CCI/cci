@@ -113,6 +113,7 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 	cci_device_t **devices;
 	struct cci_device *device = NULL;
 	sm_dev_t *sdev = NULL;
+	char dname[104];
 	pid_t pid;
 
 	CCI_ENTER;
@@ -157,7 +158,14 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 		sprintf(name, "sm%d", pid);
 		device->name = strdup(name);
 
-		sdev->path = strdup(SM_DEFAULT_PATH);
+		memset(dname, 0, sizeof(dname));
+		snprintf(dname, sizeof(dname), "%s/%u", SM_DEFAULT_PATH, pid);
+		sdev->path = strdup(dname);
+		if (!sdev->path) {
+			ret = CCI_ENOMEM;
+			goto out;
+		}
+
 		sdev->id = 0;
 
 		device->up = 1;
@@ -218,7 +226,10 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 						ret = CCI_EINVAL;
 						goto out;
 					}
-					sdev->path = strdup(path);
+
+					memset(dname, 0, sizeof(dname));
+					snprintf(dname, sizeof(dname), "%s/%u", path, pid);
+					sdev->path = strdup(dname);
 					if (!sdev->path) {
 						ret = CCI_ENOMEM;
 						goto out;
@@ -252,6 +263,15 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 						goto out;
 					}
 					device->max_send_size = mtu - SM_HDR_LEN;
+				}
+			}
+			if (sdev->path == NULL) {
+				memset(dname, 0, sizeof(dname));
+				snprintf(dname, sizeof(dname), "%s/%u", SM_DEFAULT_PATH, pid);
+				sdev->path = strdup(dname);
+				if (!sdev->path) {
+					ret = CCI_ENOMEM;
+					goto out;
 				}
 			}
 			if (device->max_send_size == 0)

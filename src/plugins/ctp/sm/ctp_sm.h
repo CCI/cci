@@ -32,7 +32,7 @@ BEGIN_C_DECLS
 
 #define SM_EP_MAX_CONNS		(1024)		/* Number of cores? */
 
-#define SM_DEFAULT_PATH		"/tmp/cci"
+#define SM_DEFAULT_PATH		"/tmp/cci/sm"
 
 /* Valid URI include:
  *
@@ -75,7 +75,7 @@ BEGIN_C_DECLS
 
 			  /tmp/cci/1234/1
 
-			  The default path is /tmp/tmp.
+			  The default path is /tmp/cci/sm.
  */
 
 typedef enum sm_msg_type {
