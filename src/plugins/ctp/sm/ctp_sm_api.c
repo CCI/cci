@@ -110,7 +110,9 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 {
 	int ret = CCI_SUCCESS;
 	cci__dev_t *dev, *ndev;
-	cci_device_t *devices;
+	cci_device_t **devices;
+	struct cci_device *device = NULL;
+	sm_dev_t *sdev = NULL;
 	pid_t pid;
 
 	CCI_ENTER;
@@ -130,10 +132,6 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 	}
 
 	if (!globals->configfile) {
-		struct cci_device *device = NULL;
-		sm_dev_t *sdev = NULL;
-		uint32_t mtu = (uint32_t) -1;
-		struct sockaddr_un *sun;
 		char name[16];
 
 		dev = calloc(1, sizeof(*dev));
@@ -156,14 +154,146 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 		device = &dev->device;
 		device->transport = strdup("sm");
 		memset(name, 0, sizeof(name));
-		sprintf(name, "%d", pid);
+		sprintf(name, "sm%d", pid);
 		device->name = strdup(name);
+
+		sdev->path = strdup(SM_DEFAULT_PATH);
+		sdev->id = 0;
+
+		device->up = 1;
+		device->rate = 0;
+		device->pci.domain = -1;	/* per CCI spec */
+		device->pci.bus = -1;		/* per CCI spec */
+		device->pci.dev = -1;		/* per CCI spec */
+		device->pci.func = -1;		/* per CCI spec */
+
+		device->max_send_size = SM_DEFAULT_MSS - SM_HDR_LEN;
+
+		debug(CCI_DB_INFO, "%s: device %s path is %s", __func__,
+			device->name, sdev->path);
+		debug(CCI_DB_INFO, "%s: device %s base id is %u",
+			__func__, device->name, sdev->id);
+		debug(CCI_DB_INFO, "%s: device %s max_send_size is %u",
+			__func__, device->name, device->max_send_size);
+
+		cci__add_dev(dev);
+		devices[sglobals->count++] = device;
 	} else {
+		/* find devices that we own */
+		TAILQ_FOREACH_SAFE(dev, &globals->configfile_devs, entry, ndev) {
+		if (0 == strcmp("sm", dev->device.transport)) {
+			const char * const *arg;
+
+			dev->plugin = plugin;
+			if (dev->priority == -1)
+				dev->priority = plugin->base.priority;
+			device = &dev->device;
+
+			dev->priv = calloc(1, sizeof(*sdev));
+			if (!dev->priv) {
+				ret = CCI_ENOMEM;
+				goto out;
+			}
+			sdev = dev->priv;
+
+			device->up = 1;
+			device->rate = 0;
+			device->pci.domain = -1;	/* per CCI spec */
+			device->pci.bus = -1;		/* per CCI spec */
+			device->pci.dev = -1;		/* per CCI spec */
+			device->pci.func = -1;		/* per CCI spec */
+
+			/* parse conf_argv */
+			for (arg = device->conf_argv; *arg != NULL; arg++) {
+				if (0 == strncmp("path=", *arg, 5)) {
+					const char *path = *arg + 5;
+
+					if (sdev->path) {
+						debug(CCI_DB_WARN,
+							"%s: device %s already "
+							"has a path %s and the "
+							"configfile also has %s",
+							__func__, device->name,
+							sdev->path, path);
+						ret = CCI_EINVAL;
+						goto out;
+					}
+					sdev->path = strdup(path);
+					if (!sdev->path) {
+						ret = CCI_ENOMEM;
+						goto out;
+					}
+				} else if (0 == strncmp("id=", *arg, 3)) {
+					const char *id_str = *arg + 3;
+					uint32_t id = strtoul(id_str, NULL, 0);
+					if (sdev->id) {
+						debug(CCI_DB_WARN,
+							"%s: device %s already "
+							"has an id %u and the "
+							"configfile also has %u",
+							__func__, device->name,
+							sdev->id, id);
+						ret = CCI_EINVAL;
+						goto out;
+					}
+					sdev->id = id;
+				} else if (0 == strncmp("mtu=", *arg, 4)) {
+					const char *mtu_str = *arg + 4;
+					uint32_t mtu = strtoul(mtu_str, NULL, 0);
+					if (device->max_send_size) {
+						debug(CCI_DB_WARN,
+							"%s: device %s already "
+							"has a max_send_size %u "
+							"and the configfile also "
+							"has %u", __func__,
+							device->name,
+							device->max_send_size, mtu);
+						ret = CCI_EINVAL;
+						goto out;
+					}
+					device->max_send_size = mtu - SM_HDR_LEN;
+				}
+			}
+			if (device->max_send_size == 0)
+				device->max_send_size = SM_DEFAULT_MSS - SM_HDR_LEN;
+
+			debug(CCI_DB_INFO, "%s: device %s path is %s", __func__,
+				device->name, sdev->path);
+			debug(CCI_DB_INFO, "%s: device %s base id is %u",
+				__func__, device->name, sdev->id);
+			debug(CCI_DB_INFO, "%s: device %s max_send_size is %u",
+				__func__, device->name, device->max_send_size);
+
+			/* queue to the main device list now */
+			TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
+			cci__add_dev(dev);
+			devices[sglobals->count++] = device;
+		}
+		}
 	}
+
+	devices =
+		realloc(devices, (sglobals->count + 1) * sizeof(cci_device_t *));
+	devices[sglobals->count + 1] = NULL;
+
+	*((cci_device_t ***)&sglobals->devices) = devices;
 
 out:
 	if (ret) {
 		if (devices) {
+			int i = 0;
+			cci_device_t *device = NULL;
+			cci__dev_t *dev = NULL;
+
+			while (devices[i] != NULL) {
+				device = devices[i];
+				dev = container_of(device, cci__dev_t, device);
+				if (dev->priv) {
+					sm_dev_t *sdev = dev->priv;
+					free(sdev->path);
+					free(sdev);
+				}
+			}
 		}
 		free((void*)devices);
 

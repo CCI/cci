@@ -32,6 +32,8 @@ BEGIN_C_DECLS
 
 #define SM_EP_MAX_CONNS		(1024)		/* Number of cores? */
 
+#define SM_DEFAULT_PATH		"/tmp/cci"
+
 /* Valid URI include:
  *
  * sm://pid/id		# Process id and endpoint id
@@ -351,7 +353,7 @@ typedef struct sm_conn {
 } sm_conn_t;
 
 typedef struct sm_dev {
-	char			path;		/* Path to URI base */
+	char			*path;		/* Path to URI base */
 	uint32_t		id;		/* Starting endpoint id */
 } sm_dev_t;
 
