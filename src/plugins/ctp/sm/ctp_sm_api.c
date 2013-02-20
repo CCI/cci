@@ -350,12 +350,7 @@ static int ctp_sm_finalize(cci_plugin_ctp_t * plugin)
 
 static const char *ctp_sm_strerror(cci_endpoint_t * endpoint, enum cci_status status)
 {
-	CCI_ENTER;
-
-	debug(CCI_DB_INFO, "%s", "In sm_sterrror\n");
-
-	CCI_EXIT;
-	return NULL;
+	return strerror(status);
 }
 
 static int ctp_sm_create_endpoint(cci_device_t * device,
