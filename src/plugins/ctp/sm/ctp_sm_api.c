@@ -8,6 +8,8 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
+#include <assert.h>
 
 #include "cci.h"
 #include "plugins/ctp/ctp.h"
@@ -23,7 +25,7 @@ static int ctp_sm_finalize(cci_plugin_ctp_t * plugin);
 static const char *ctp_sm_strerror(cci_endpoint_t * endpoint, enum cci_status status);
 static int ctp_sm_create_endpoint(cci_device_t * device,
 				    int flags,
-				    cci_endpoint_t ** endpoint,
+				    cci_endpoint_t ** endpointp,
 				    cci_os_handle_t * fd);
 static int ctp_sm_destroy_endpoint(cci_endpoint_t * endpoint);
 static int ctp_sm_accept(cci_event_t *event, const void *context);
@@ -166,6 +168,8 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 			goto out;
 		}
 
+		/* TODO make directory for sdev->path */
+
 		sdev->id = 0;
 
 		device->up = 1;
@@ -281,6 +285,8 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 					goto out;
 				}
 			}
+			/* TODO make directory for sdev->path */
+
 			if (device->max_send_size == 0)
 				device->max_send_size = SM_DEFAULT_MSS - SM_HDR_LEN;
 
@@ -451,15 +457,80 @@ sm_put_ep_id(cci__dev_t *dev, uint32_t id)
 
 static int ctp_sm_create_endpoint(cci_device_t * device,
 				    int flags,
-				    cci_endpoint_t ** endpoint,
+				    cci_endpoint_t ** endpointp,
 				    cci_os_handle_t * fd)
 {
+	int ret = CCI_SUCCESS;
+	cci__dev_t *dev = NULL;
+	cci__ep_t *ep = NULL;
+	sm_ep_t *sep = NULL;
+	struct cci_endpoint *endpoint = (struct cci_endpoint *) *endpointp;
+	sm_dev_t *sdev = NULL;
+	struct sockaddr_un sun;
+	char name[104]; /* max UNIX domain socket name */
+
 	CCI_ENTER;
 
-	debug(CCI_DB_INFO, "%s", "In sm_create_endpoint\n");
+	if (!sglobals) {
+		CCI_EXIT;
+		return CCI_ENODEV;
+	}
 
+	/* TODO support blocking mode
+	 * in the meantime, fail if the fd is requested */
+	if (fd) {
+		debug(CCI_DB_WARN, "%s: The SM transport does not yet "
+			"support blocking mode via the OS handle. "
+			"Either choose another transport or set the "
+			"OS handle to NULL\n", __func__);
+		CCI_EXIT;
+		return CCI_ERR_NOT_IMPLEMENTED;
+	}
+
+	dev = container_of(device, cci__dev_t, device);
+	if (0 != strcmp("sm", device->transport)) {
+		CCI_EXIT;
+		return CCI_EINVAL;
+	}
+
+	ep = container_of(endpoint, cci__ep_t, endpoint);
+	ep->priv = calloc(1, sizeof(*sep));
+	if (!ep->priv) {
+		CCI_EXIT;
+		return CCI_ENOMEM;
+	}
+
+	ep->rx_buf_cnt = SM_EP_RX_CNT;
+	ep->tx_buf_cnt = SM_EP_TX_CNT;
+	ep->buffer_len = dev->device.max_send_size + SM_HDR_LEN;
+	ep->tx_timeout = 0;
+
+	sep = ep->priv;
+	sep->sock = socket(PF_LOCAL, SOCK_STREAM, 0);
+	if (sep->sock == -1) {
+		ret = errno;
+		goto out;
+	}
+
+	ret = sm_get_ep_id(dev, &sep->id);
+	if (ret) goto out;
+
+	memset(name, 0, sizeof(name));
+	snprintf(name, sizeof(name), "%s/%u", sdev->path, sep->id);
+
+	sdev = dev->priv;
+	memset(&sun, 0, sizeof(sun));
+	sun.sun_family = AF_UNIX;
+
+out:
+	if (ret) {
+		if (ep->priv) {
+			sep = ep->priv;
+			sm_put_ep_id(dev, sep->id);
+		}
+	}
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 static int ctp_sm_destroy_endpoint(cci_endpoint_t * endpoint)
