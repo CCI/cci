@@ -1620,9 +1620,9 @@ CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
     - CCI_FLAG_BLOCKING:    Blocking call (see cci_send() for details).
     - CCI_FLAG_READ:        Move data from remote to local memory.
     - CCI_FLAG_WRITE:       Move data from local to remote memory
-    - CCI_FLAG_FENCE:       All previous operations are guaranteed to
-                            complete remotely prior to this operation
-                            and all subsequent operations.
+    - CCI_FLAG_FENCE:       All previous operations on the same connection
+                            are guaranteed to complete remotely prior to
+                            this operation and all subsequent operations.
     - CCI_FLAG_SILENT:      Generates no local completion event (see cci_send()
                             for details).
 
