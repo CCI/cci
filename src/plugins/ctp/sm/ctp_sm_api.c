@@ -204,6 +204,13 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 			}
 			sdev = dev->priv;
 
+			sdev->ids = calloc(SM_NUM_BLOCKS, sizeof(*sdev->ids));
+			if (!sdev->ids) {
+				ret = CCI_ENOMEM;
+				goto out;
+			}
+			sdev->num_blocks = 1;
+
 			device->up = 1;
 			device->rate = 0;
 			device->pci.domain = -1;	/* per CCI spec */
@@ -311,6 +318,7 @@ out:
 				if (dev->priv) {
 					sm_dev_t *sdev = dev->priv;
 					free(sdev->path);
+					free(sdev->ids);
 					free(sdev);
 				}
 			}
@@ -337,9 +345,16 @@ static int ctp_sm_finalize(cci_plugin_ctp_t * plugin)
 		return CCI_ENODEV;
 	}
 
-	TAILQ_FOREACH(dev, &globals->devs, entry)
-		if (!strcmp(dev->device.transport, "sm"))
+	TAILQ_FOREACH(dev, &globals->devs, entry) {
+		if (!strcmp(dev->device.transport, "sm")) {
+			if (dev->priv) {
+				sm_dev_t *sdev = dev->priv;
+				free(sdev->path);
+				free(sdev->ids);
+			}
 			free(dev->priv);
+		}
+	}
 
 	free(sglobals->devices);
 	free((void*)sglobals);
@@ -351,6 +366,87 @@ static int ctp_sm_finalize(cci_plugin_ctp_t * plugin)
 static const char *ctp_sm_strerror(cci_endpoint_t * endpoint, enum cci_status status)
 {
 	return strerror(status);
+}
+
+/* Get the first available endpoint id.
+ * Available ids do not have a bit set.
+ * If none are available, allocate a new block.
+ */
+static int
+sm_get_ep_id(cci__dev_t *dev, uint32_t *id)
+{
+	int ret = CCI_SUCCESS, i = 0, found = 0;
+	uint32_t shift = 0;
+	uint64_t *b = NULL, inverted = 0;
+	sm_dev_t *sdev = dev->priv;
+
+	pthread_mutex_lock(&dev->lock);
+	for (i = 0; i < (int) sdev->num_blocks; i++) {
+		b = &sdev->ids[i];
+		if (*b != ~((uint64_t)0)) {
+			/* There is a bit available in this block.
+			 * We will use find-first-set-long (ffsl) since
+			 * there is no first-first-zero so we need to
+			 * invert the block. */
+			inverted = ~(*b);
+			shift = (uint32_t) ffsl(inverted);
+			assert(shift);	/* it must find a bit */
+			shift--;
+			assert((*b & ((uint64_t)1 << shift)) == 0);
+			*b |= (((uint64_t)1) << shift);
+			found = 1;
+			break;
+		}
+	}
+	if (!found) {
+		uint64_t *new = NULL;
+
+		/* allocate a new block */
+		sdev->num_blocks++;
+		new = realloc(sdev->ids, sdev->num_blocks * sizeof(*sdev->ids));
+		if (!new) {
+			ret = CCI_ENOMEM;
+			sdev->num_blocks--;
+			goto out;
+		}
+		sdev->ids = new;
+		shift = 0;
+		b = &sdev->ids[sdev->num_blocks - 1];
+		*b |= (uint64_t)1;
+	}
+out:
+	pthread_mutex_unlock(&dev->lock);
+
+	if (!ret)
+		*id = shift + sdev->id;
+
+	return ret;
+}
+
+static int
+sm_put_ep_id(cci__dev_t *dev, uint32_t id)
+{
+	int ret = CCI_SUCCESS, i = 0;
+	uint32_t shift = 0;
+	uint64_t *b = NULL;
+	sm_dev_t *sdev = dev->priv;
+
+	/* Subtract the base id */
+	id -= sdev->id;
+
+	/* Determine which block */
+	i = id / SM_BLOCK_SIZE;
+
+	/* determine the shift */
+	shift = (id % SM_BLOCK_SIZE);
+
+	pthread_mutex_lock(&dev->lock);
+	b = &sdev->ids[i];
+	assert(*b & ((uintptr_t)1 << shift));
+	*b &= ~((uint64_t)1 << shift);
+	pthread_mutex_unlock(&dev->lock);
+
+	return ret;
 }
 
 static int ctp_sm_create_endpoint(cci_device_t * device,

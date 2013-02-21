@@ -17,6 +17,9 @@
 #include "cci-api.h"
 
 BEGIN_C_DECLS
+#define SM_BLOCK_SIZE		(64)		/* uint64_t sized ep id blocks */
+#define SM_NUM_BLOCKS		(1)		/* start with one block for 64 ep ids */
+
 #define SM_DEFAULT_MSS		(1024)
 #define SM_MIN_MSS		(128)		/* cache line size */
 #define SM_MAX_MSS		(4096)		/* page size */
@@ -287,8 +290,9 @@ typedef struct sm_ep {
 	cci_os_handle_t		sock;		/* For listen socket */
 	uint32_t		is_polling;	/* Serialize accept to sockets
 						   and polling strctures */
-	struct pollfd		*fds;		/* For UNIX sockets */
+	uint32_t		id;		/* Endpoint id */
 	nfds_t			nfds;		/* Numbder of pollfds */
+	struct pollfd		*fds;		/* For UNIX sockets */
 	cci__conn_t		**c;		/* Array of conns indexed by fds */
 
 	void			*tx_buf;	/* TX common buffer */
@@ -354,7 +358,9 @@ typedef struct sm_conn {
 
 typedef struct sm_dev {
 	char			*path;		/* Path to URI base */
+	uint64_t		*ids;		/* Bit mask of ids starting at sdev->id */
 	uint32_t		id;		/* Starting endpoint id */
+	uint32_t		num_blocks;	/* Number of ids blocks */
 } sm_dev_t;
 
 typedef struct sm_globals {
