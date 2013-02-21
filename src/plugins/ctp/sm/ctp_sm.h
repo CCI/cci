@@ -32,15 +32,11 @@ BEGIN_C_DECLS
 
 #define SM_EP_MAX_CONNS		(1024)		/* Number of cores? */
 
-#define SM_DEFAULT_PATH		"/tmp/cci/sm"
+#define SM_DEFAULT_PATH		"/var/run/cci/sm"
 
 /* Valid URI include:
  *
- * sm://pid/id		# Process id and endpoint id
- *
- * or
- *
- * sm://<path/>pid/id	# Directory path, process id and endpoint id
+ * sm://path/pid/id	# Directory path, process id and endpoint id
  *
  *                        The path may be relative from the process' working
  *                        directory or absolute. The process must have read,
@@ -71,11 +67,15 @@ BEGIN_C_DECLS
 			  pid/ep_id where pid is the process id and the ep_id
 			  is the endpoint's id.
 
+			  If the path does not exist, the SM transport will
+			  try to create it. If not succesful, the transport
+			  will not load.
+
 			  For example, sm:///tmp/cci/1234/1 would be bound to:
 
 			  /tmp/cci/1234/1
 
-			  The default path is /tmp/cci/sm.
+			  The default path is /var/run/cci/sm.
  */
 
 typedef enum sm_msg_type {
