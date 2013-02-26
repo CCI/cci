@@ -760,6 +760,9 @@ tcp_conn_set_closing_locked(cci__ep_t *ep, cci__conn_t *conn)
 	tcp_ep_t *tep = ep->priv;
 	tcp_conn_t *tconn = conn->priv;
 
+	if (tconn->status < TCP_CONN_INIT)
+		return;
+
 	tcp_ignore_fd_locked(tep, tconn);
 
 	if (tconn->status == TCP_CONN_READY)
@@ -775,6 +778,8 @@ tcp_conn_set_closing_locked(cci__ep_t *ep, cci__conn_t *conn)
 				(void*)conn,
 				tcp_conn_status_str(tconn->status));
 
+	debug(CCI_DB_CONN, "%s: closing conn %p tconn %p status %s",
+		__func__, (void*)conn, (void*)tconn, tcp_conn_status_str(tconn->status));
 	tconn->status = TCP_CONN_CLOSING;
 	TAILQ_INSERT_TAIL(&tep->closing, tconn, entry);
 
