@@ -479,9 +479,6 @@ typedef enum cci_endpoint_flags {
 typedef const struct cci_endpoint {
 	/*! Device that runs this endpoint. */
 	cci_device_t *device;
-
-	/*! Application-provided, private context. */
-	void *context;
 } cci_endpoint_t;
 
 /*! OS-native handles
