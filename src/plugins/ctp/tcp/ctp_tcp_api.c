@@ -2008,7 +2008,7 @@ static int tcp_send_common(cci_connection_t * connection,
 		      const void *context, int flags,
 		      tcp_rma_op_t *rma_op)
 {
-	int i, ret, is_reliable = 0, data_len = 0;
+	int i, ret = CCI_SUCCESS, is_reliable = 0, data_len = 0;
 	char *func = iovcnt < 2 ? "send" : "sendv";
 	cci_endpoint_t *endpoint = connection->endpoint;
 	cci__ep_t *ep;
