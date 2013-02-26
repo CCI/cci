@@ -2072,6 +2072,15 @@ static int tcp_send_common(cci_connection_t * connection,
 	event->send.context = (void *)context;
 	event->send.status = CCI_SUCCESS;	/* for now */
 
+	if (tconn->status < TCP_CONN_INIT) {
+		tx->state = TCP_TX_COMPLETED;
+		event->send.status = CCI_ERR_DISCONNECTED;
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+		pthread_mutex_unlock(&ep->lock);
+		goto out;
+	}
+
 	/* pack buffer */
 	hdr = (tcp_header_t *) tx->buffer;
 	tcp_pack_send(hdr, data_len, tx->id);
@@ -2154,6 +2163,7 @@ static int tcp_send_common(cci_connection_t * connection,
 		pthread_mutex_unlock(&ep->lock);
 	}
 
+out:
 	debug(CCI_DB_FUNC, "exiting %s", func);
 	return ret;
 }
@@ -2532,9 +2542,8 @@ tcp_handle_listen_socket(cci__ep_t *ep)
 	if (ret)
 		goto out;
 
-	tconn->status = TCP_CONN_PASSIVE1;
-
 	pthread_mutex_lock(&ep->lock);
+	tconn->status = TCP_CONN_PASSIVE1;
 	TAILQ_INSERT_TAIL(&tep->passive, tconn, entry);
 	pthread_mutex_unlock(&ep->lock);
 
@@ -2673,9 +2682,7 @@ tcp_handle_conn_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 	debug(CCI_DB_CONN, "%s: conn %p is %s (a=%u)", __func__, (void*)conn,
 		accepted ? "accepted" : "rejected", a);
 
-	if (accepted) {
-		tconn->status = TCP_CONN_READY;
-	} else {
+	if (!accepted) {
 		pthread_mutex_lock(&ep->lock);
 		tcp_conn_set_closing_locked(ep, conn);
 		pthread_mutex_unlock(&ep->lock);
@@ -2731,6 +2738,7 @@ tcp_handle_conn_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
 
 		TAILQ_REMOVE(&tep->active, tconn, entry);
+		tconn->status = TCP_CONN_READY;
 		TAILQ_INSERT_TAIL(&tep->conns, tconn, entry);
 		pthread_mutex_unlock(&tconn->slock);
 
