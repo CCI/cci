@@ -2217,13 +2217,14 @@ static void sock_progress_queued(cci__ep_t * ep)
 		tx->send_count = 1;
 
 		if (is_reliable &&
-			!(tx->msg_type == SOCK_MSG_CONN_REQUEST ||
-			tx->msg_type == SOCK_MSG_CONN_REPLY)) {
+		    !(tx->msg_type == SOCK_MSG_CONN_REQUEST ||
+		      tx->msg_type == SOCK_MSG_CONN_REPLY))
+		{
 			TAILQ_INSERT_TAIL(&sconn->tx_seqs, tx, tx_seq);
 		}
 
 		/* if reliable and ordered, we have to check whether the tx is marked
-		RNR */
+		   RNR */
 		if (is_reliable
 			&& conn->connection.attribute == CCI_CONN_ATTR_RO 
 			&& tx->rnr != 0)
@@ -2241,10 +2242,10 @@ static void sock_progress_queued(cci__ep_t * ep)
 		/* need to send it */
 
 		debug(CCI_DB_MSG, "sending %s msg seq %u",
-			sock_msg_type(tx->msg_type), tx->seq);
-        if (tx->msg_type != SOCK_MSG_RMA_READ_REPLY) {
-		    pack_piggyback_ack (ep, sconn, tx);
-        }
+		      sock_msg_type(tx->msg_type), tx->seq);
+		if (tx->msg_type != SOCK_MSG_RMA_READ_REPLY) {
+			pack_piggyback_ack (ep, sconn, tx);
+		}
 		ret = sock_sendto(sep->sock, tx->buffer, tx->len, tx->rma_ptr,
 						tx->rma_len, sconn->sin);
 		if (ret == -1) {
@@ -2259,8 +2260,9 @@ static void sock_progress_queued(cci__ep_t * ep)
 			case ENOMEM:
 			case ENOBUFS:
 				if (is_reliable &&
-					!(tx->msg_type == SOCK_MSG_CONN_REQUEST ||
-					tx->msg_type == SOCK_MSG_CONN_REPLY)) {
+				    !(tx->msg_type == SOCK_MSG_CONN_REQUEST ||
+				      tx->msg_type == SOCK_MSG_CONN_REPLY))
+				{
 					TAILQ_REMOVE(&sconn->tx_seqs, tx, tx_seq);
 				}
 				continue;
@@ -3907,8 +3909,14 @@ sock_handle_rma_read_reply(sock_conn_t *sconn, sock_rx_t *rx,
 			__func__, strerror(ret));
 out:
 	if (ret) {
+		debug(CCI_DB_MSG, "%s: recv'ing RMA READ payload failed with %s",
+                        __func__, strerror(ret));
 		/* TODO we need to drain the message from the fd */
 	}
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
+	pthread_mutex_unlock(&ep->lock);
 
 	CCI_EXIT;
 
