@@ -3,6 +3,9 @@
 # $COPYRIGHT$
 #
 
+pkgconfigdir = $(libdir)/pkgconfig
+pkgconfig_DATA = cci.pc
+
 CCIETH_DRIVER_DIR = contrib/driver/ccieth/linux
 
 # Note that the -I directory must *exactly* match what was specified
