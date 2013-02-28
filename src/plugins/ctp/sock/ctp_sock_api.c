@@ -1999,9 +1999,10 @@ static void sock_progress_pending(cci__ep_t * ep)
 		/* is it time to resend? */
 
 		if ((tx->last_attempt_us +
-			((1 << tx->send_count) * SOCK_RESEND_TIME_SEC * 1000000)) >
-			now)
+		    ((1 << tx->send_count) * SOCK_RESEND_TIME_SEC * 1000000)) >
+		     now) {
 			continue;
+		}
 
 		/* need to resend it */
 
@@ -2025,12 +2026,8 @@ static void sock_progress_pending(cci__ep_t * ep)
 		debug(CCI_DB_MSG, "re-sending %s msg seq %u count %u",
 			sock_msg_type(tx->msg_type), tx->seq, tx->send_count);
 		pack_piggyback_ack (ep, sconn, tx);
-		ret = sock_sendto(sep->sock,
-						tx->buffer,
-						tx->len,
-						tx->rma_ptr,
-						tx->rma_len,
-						sconn->sin);
+		ret = sock_sendto(sep->sock, tx->buffer, tx->len, tx->rma_ptr,
+		                  tx->rma_len, sconn->sin);
 		if (tx->rma_ptr == NULL && ret != tx->len) {
 			debug((CCI_DB_MSG | CCI_DB_INFO),
 				  "+++ sendto() failed with %s (%d/%d)",
@@ -2148,63 +2145,76 @@ static void sock_progress_queued(cci__ep_t * ep)
 
 		/* try to send it */
 
-		if (tx->last_attempt_us == 0ULL) {
-			timeout =
-				conn->tx_timeout ? conn->tx_timeout : ep->tx_timeout;
-			tx->timeout_us = now + (uint64_t) timeout;
-		}
+		/* RMA_READ_REPLY message are a special case: they act as an
+		   ACK. For this reason, we do not handle any kind of timeout
+		   for RMA_READ_REPLY messages */
+		if (tx->msg_type != SOCK_MSG_RMA_READ_REPLY) {
+			if (tx->last_attempt_us == 0ULL) {
+				timeout =
+					conn->tx_timeout ? conn->tx_timeout
+				                         : ep->tx_timeout;
+				tx->timeout_us = now + (uint64_t) timeout;
+			}
 
-		if (SOCK_U64_LT(tx->timeout_us, now)) {
+			if (SOCK_U64_LT(tx->timeout_us, now)) {
 
-			/* set status and add to completed events */
-			switch (tx->msg_type) {
-			case SOCK_MSG_SEND:
-				if (tx->rnr != 0) {
-					event->send.status = CCI_ERR_RNR;
-				} else {
-					event->send.status = CCI_ETIMEDOUT;
+				/* set status and add to completed events */
+				switch (tx->msg_type) {
+				case SOCK_MSG_SEND:
+					if (tx->rnr != 0) {
+						event->send.status
+							= CCI_ERR_RNR;
+					} else {
+						event->send.status
+							= CCI_ETIMEDOUT;
+					}
+					break;
+				case SOCK_MSG_CONN_REQUEST:
+					/* FIXME only CONN_REQUEST gets an
+					   event the other two need to
+					   disconnect the conn */
+					event->connect.status = CCI_ETIMEDOUT;
+					event->connect.connection = NULL;
+					break;
+				case SOCK_MSG_RMA_WRITE:
+					tx->rma_op->pending--;
+					tx->rma_op->status = CCI_ETIMEDOUT;
+					break;
+				case SOCK_MSG_CONN_REPLY:
+				case SOCK_MSG_CONN_ACK:
+				default:
+					/* TODO */
+					debug(CCI_DB_WARN,
+					      "%s: timeout of %s msg",
+					      __func__,
+					      sock_msg_type(tx->msg_type));
+					CCI_EXIT;
+					return;
 				}
-				break;
-			case SOCK_MSG_CONN_REQUEST:
-				/* FIXME only CONN_REQUEST gets an event
-				* the other two need to disconnect the conn */
-				event->connect.status = CCI_ETIMEDOUT;
-				event->connect.connection = NULL;
-				break;
-			case SOCK_MSG_RMA_WRITE:
-				tx->rma_op->pending--;
-				tx->rma_op->status = CCI_ETIMEDOUT;
-				break;
-			case SOCK_MSG_CONN_REPLY:
-			case SOCK_MSG_CONN_ACK:
-			default:
-				/* TODO */
-				debug(CCI_DB_WARN, "%s: timeout of %s msg",
-					__func__, sock_msg_type(tx->msg_type));
-				CCI_EXIT;
-				return;
+				TAILQ_REMOVE(&sep->queued, evt, entry);
+	
+				/* if SILENT, put idle tx */
+				if (tx->flags & CCI_FLAG_SILENT &&
+				    (tx->msg_type == SOCK_MSG_SEND ||
+				     tx->msg_type == SOCK_MSG_RMA_WRITE))
+				{
+					tx->state = SOCK_TX_IDLE;
+					/* store locally until we can drop the dev->lock */
+					TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
+				} else {
+					tx->state = SOCK_TX_COMPLETED;
+					/* store locally until we can drop the dev->lock */
+					TAILQ_INSERT_TAIL(&evts, evt, entry);
+				}
+				continue;
+			} /* end timeout case */
+	
+			if (tx->msg_type != SOCK_MSG_RMA_READ_REQUEST &&
+			    (tx->last_attempt_us + 
+			     (SOCK_RESEND_TIME_SEC * 1000000)) > now) {
+				continue;
 			}
-			TAILQ_REMOVE(&sep->queued, evt, entry);
-
-			/* if SILENT, put idle tx */
-			if (tx->flags & CCI_FLAG_SILENT &&
-				(tx->msg_type == SOCK_MSG_SEND ||
-				tx->msg_type == SOCK_MSG_RMA_WRITE)) {
-
-				tx->state = SOCK_TX_IDLE;
-				/* store locally until we can drop the dev->lock */
-				TAILQ_INSERT_HEAD(&idle_txs, tx, dentry);
-			} else {
-				tx->state = SOCK_TX_COMPLETED;
-				/* store locally until we can drop the dev->lock */
-				TAILQ_INSERT_TAIL(&evts, evt, entry);
-			}
-			continue;
-		} /* end timeout case */
-
-		if ((tx->last_attempt_us + (SOCK_RESEND_TIME_SEC * 1000000)) >
-			now)
-			continue;
+		}
 
 #if 0
 		if (sconn->pending > sconn->cwnd &&
@@ -3867,6 +3877,7 @@ sock_handle_rma_read_reply(sock_conn_t *sconn, sock_rx_t *rx,
 
 	sock_parse_rma_handle_offset(&read->local, &local_handle, &local_offset);
 	local = (sock_rma_handle_t *) (uintptr_t) local_handle;
+	assert (local);
 
 	endpoint = (&conn->connection)->endpoint;
 	ep = container_of (endpoint, cci__ep_t, endpoint);
@@ -3893,7 +3904,8 @@ sock_handle_rma_read_reply(sock_conn_t *sconn, sock_rx_t *rx,
 		/* length exceeds local handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
 		debug(CCI_DB_WARN, "%s: local length not valid (%lu/%lu)",
-			  __func__, (long unsigned int)local_offset + len, (long unsigned int)local->length);
+		      __func__, (long unsigned int)local_offset + len,
+		      (long unsigned int)local->length);
 		goto out;
 	}
 
@@ -3902,13 +3914,11 @@ sock_handle_rma_read_reply(sock_conn_t *sconn, sock_rx_t *rx,
 		  __func__, len);
 
 	ptr = local->start + (uintptr_t) local_offset;
-	memcpy(ptr, &read->data, rma_payload_size);
-	debug(CCI_DB_INFO, "%s: recv'd data into target buffer", __func__);
-	if (ret)
-		debug(CCI_DB_MSG, "%s: recv'ing RMA READ payload failed with %s",
-			__func__, strerror(ret));
+	memcpy(ptr, &read->data, len);
+	debug(CCI_DB_MSG, "%s: recv'd data into target buffer", __func__);
+
 out:
-	if (ret) {
+	if (ret < 0) {
 		debug(CCI_DB_MSG, "%s: recv'ing RMA READ payload failed with %s",
                         __func__, strerror(ret));
 		/* TODO we need to drain the message from the fd */
@@ -3919,7 +3929,6 @@ out:
 	pthread_mutex_unlock(&ep->lock);
 
 	CCI_EXIT;
-
 return;
 }
 
