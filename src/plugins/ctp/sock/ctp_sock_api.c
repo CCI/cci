@@ -4446,9 +4446,8 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		ka = 1;
 
 	if (!request)
-		sconn =
-			sock_find_conn(sep, sin.sin_addr.s_addr, sin.sin_port, id,
-				type);
+		sconn = sock_find_conn(sep, sin.sin_addr.s_addr, sin.sin_port,
+		                       id, type);
 
 	{
 		char name[32];
@@ -4473,14 +4472,15 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 	}
 
 	if (sconn && cci_conn_is_reliable(sconn->conn) &&
-		!(type == SOCK_MSG_CONN_REPLY)) {
+		!(type == SOCK_MSG_CONN_REPLY))
+	{
+		sock_header_r_t *hdr_r = rx->buffer;
+		sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
 
-        sock_header_r_t *hdr_r = rx->buffer;
-        sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
+		if (!(type == SOCK_MSG_RMA_READ_REQUEST)) {
+			sock_handle_seq(sconn, seq);
+		}
 
-        if (!(type == SOCK_MSG_RMA_READ_REQUEST)) {
-		    sock_handle_seq(sconn, seq);
-        }
 		if (hdr_r->pb_ack != 0)
 			sock_handle_ack (sconn, type, rx, 1, id);
 	}
