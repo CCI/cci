@@ -654,14 +654,14 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 
 	if (sndbuf_size > 0) {
 		ret = setsockopt (sep->sock, SOL_SOCKET, SO_SNDBUF,
-						  &sndbuf_size, sizeof (sndbuf_size));
+		                  &sndbuf_size, sizeof (sndbuf_size));
 		if (ret == -1)
 			debug (CCI_DB_WARN, "Cannot set send buffer size");
 	}
 
 	if (rcvbuf_size > 0) {
 		ret = setsockopt (sep->sock, SOL_SOCKET, SO_RCVBUF,
-						  &rcvbuf_size, sizeof (rcvbuf_size));
+		                  &rcvbuf_size, sizeof (rcvbuf_size));
 		if (ret == -1)
 			debug (CCI_DB_WARN, "Cannot set recv buffer size");
 	}
@@ -2025,6 +2025,8 @@ static void sock_progress_pending(cci__ep_t * ep)
 
 		debug(CCI_DB_MSG, "re-sending %s msg seq %u count %u",
 			sock_msg_type(tx->msg_type), tx->seq, tx->send_count);
+		printf ("re-sending %s msg seq %u count %u\n",
+                        sock_msg_type(tx->msg_type), tx->seq, tx->send_count);
 		pack_piggyback_ack (ep, sconn, tx);
 		ret = sock_sendto(sep->sock, tx->buffer, tx->len, tx->rma_ptr,
 		                  tx->rma_len, sconn->sin);
@@ -3123,11 +3125,12 @@ sock_handle_ack(sock_conn_t * sconn,
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_FOREACH_SAFE(tx, &sconn->tx_seqs, tx_seq, tmp) {
 		/* Note that type of msgs can include a piggybacked ACK */
-		if (type == SOCK_MSG_ACK_ONLY || type == SOCK_MSG_SEND 
-									|| type == SOCK_MSG_RMA_WRITE
-									|| type == SOCK_MSG_RMA_READ_REQUEST
-									|| type == SOCK_MSG_RMA_WRITE_DONE
-                                    || type == SOCK_MSG_RMA_READ_REPLY)
+		if (type == SOCK_MSG_ACK_ONLY
+		    || type == SOCK_MSG_SEND 
+		    || type == SOCK_MSG_RMA_WRITE
+		    || type == SOCK_MSG_RMA_READ_REQUEST
+		    || type == SOCK_MSG_RMA_WRITE_DONE
+		    || type == SOCK_MSG_RMA_READ_REPLY)
 		{
 			if (tx->seq == acks[0]) {
 				if (tx->state == SOCK_TX_PENDING) {
@@ -4491,7 +4494,7 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 			&& sconn->rnr != 0 && seq > sconn->rnr) {
 			/* We just drop the message */
 			debug(CCI_DB_MSG,
-				"RNR connection, dropping msg (seq: %u)", seq);
+			      "RNR connection, dropping msg (seq: %u)", seq);
 			drop_msg = 1;
 			goto out;
 		}
@@ -4505,7 +4508,6 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 	/* TODO handle types */
 
 	switch (type) {
-    printf ("New message received: %d\n", type);
 	case SOCK_MSG_CONN_REQUEST:
 		sock_handle_conn_request(rx, a, b, sin, ep);
 		break;
@@ -4545,7 +4547,7 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		sock_handle_rma_read_request(sconn, rx, b, id);
 		break;
 	case SOCK_MSG_RMA_READ_REPLY:
-        sock_handle_rma_read_reply(sconn, rx, b, id);
+		sock_handle_rma_read_reply(sconn, rx, b, id);
 		break;
 	default:
 		debug(CCI_DB_MSG, "unknown active message with type %u",
@@ -4566,13 +4568,14 @@ out:
 			sock_header_r_t *hdr_r = NULL;
 
 			/* 
-			Getting here, we are in the new RNR context on the receiver side.
-			Note that we already got the TS and SEQ from the message header 
+			  Getting here, we are in the new RNR context on the
+			  receiver side. Note that we already got the TS and
+			  SEQ from the message header 
 			*/
 
-			/* Receiver side and reliable-ordered connections: we store the seq
-			 of the msg for which we were RNR so we can drop all other
-			 following messages. */
+			/* Receiver side and reliable-ordered connections: we
+			   store the seq of the msg for which we were RNR so
+			   we can drop all other following messages. */
 			if (conn->connection.attribute == CCI_CONN_ATTR_RO
 				&& sconn->rnr == 0)
 				sconn->rnr = seq;
