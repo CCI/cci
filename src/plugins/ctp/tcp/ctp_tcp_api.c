@@ -2031,6 +2031,13 @@ static int tcp_send_common(cci_connection_t * connection,
 	for (i = 0; i < (int) iovcnt; i++)
 		data_len += data[i].iov_len;
 
+	if (connection->max_send_size < (uint32_t) data_len) {
+		debug(CCI_DB_MSG, "%s: total send length (%d) larger than "
+			"max_send_size (%u)", func, data_len, connection->max_send_size);
+		CCI_EXIT;
+		return CCI_EINVAL;
+	}
+
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 	tep = ep->priv;
 	conn = container_of(connection, cci__conn_t, connection);
