@@ -4477,7 +4477,15 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		sock_header_r_t *hdr_r = rx->buffer;
 		sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
 
-		if (!(type == SOCK_MSG_RMA_READ_REQUEST)) {
+		/* We do not want to implicitely ack RMA_READ_REQUEST and
+		   RMA_READ_REPLY message:
+		   - RMA_READ_REQUEST are acked with the corresponding
+		     RMA_READ_REPLY message
+		   - RMA_READ_REPLY message are not acked since they act as an
+		     ACK (not ack of acks). */
+		if (!(type == SOCK_MSG_RMA_READ_REQUEST)
+		    && !(type == SOCK_MSG_RMA_READ_REPLY))
+		{
 			sock_handle_seq(sconn, seq);
 		}
 
