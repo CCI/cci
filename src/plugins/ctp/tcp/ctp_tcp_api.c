@@ -2255,8 +2255,8 @@ static int ctp_tcp_rma_register(cci_endpoint_t * endpoint,
 static int ctp_tcp_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * rma_handle)
 {
 	int ret = CCI_EINVAL;
-	tcp_rma_handle_t *handle =
-		container_of(rma_handle, tcp_rma_handle_t, rma_handle);
+	const struct cci_rma_handle *lh = rma_handle;
+	tcp_rma_handle_t *handle = (void*)((uintptr_t)lh->stuff[0]);
 	cci__ep_t *ep = NULL;
 	tcp_ep_t *tep = NULL;
 	tcp_rma_handle_t *h = NULL;
@@ -2306,8 +2306,8 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	cci__conn_t *conn = NULL;
 	tcp_ep_t *tep = NULL;
 	tcp_conn_t *tconn = NULL;
-	tcp_rma_handle_t *local =
-		container_of(local_handle, tcp_rma_handle_t, rma_handle);
+	const struct cci_rma_handle *lh = local_handle;
+	tcp_rma_handle_t *local = (tcp_rma_handle_t *)((uintptr_t)lh->stuff[0]);
 	tcp_rma_handle_t *h = NULL;
 	tcp_rma_op_t *rma_op = NULL;
 	tcp_tx_t **txs = NULL;
@@ -2325,12 +2325,6 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	tconn = conn->priv;
 	ep = container_of(connection->endpoint, cci__ep_t, endpoint);
 	tep = ep->priv;
-
-	if (!local) {
-		debug(CCI_DB_INFO, "%s: invalid local RMA handle", __func__);
-		CCI_EXIT;
-		return CCI_EINVAL;
-	}
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_FOREACH(h, &tep->handles, entry) {
@@ -3111,8 +3105,8 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 		    (uint64_t) i * (uint64_t) TCP_RMA_FRAG_SIZE;
 		tcp_rma_header_t *rma_hdr =
 			(tcp_rma_header_t *) tx->buffer;
-		tcp_rma_handle_t *local =
-			container_of(rma_op->local_handle, tcp_rma_handle_t, rma_handle);
+		const struct cci_rma_handle *ch = rma_op->local_handle;
+		tcp_rma_handle_t *local = (void*)((uintptr_t)ch->stuff[0]);
 
 		tx->state = TCP_TX_QUEUED;
 		tx->rma_len = TCP_RMA_FRAG_SIZE; /* for now */
