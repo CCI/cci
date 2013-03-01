@@ -4082,6 +4082,7 @@ ctp_verbs_rma_register(cci_endpoint_t * endpoint,
 		verbs_htonll((uintptr_t)handle->mr->addr);
 	*((uint64_t*)&handle->rma_handle.stuff[1]) =
 		verbs_htonll((uint64_t)handle->mr->rkey);
+	*((uint64_t*)&handle->rma_handle.stuff[2]) = (uintptr_t)handle;
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&vep->handles, handle, entry);
@@ -4096,7 +4097,7 @@ ctp_verbs_rma_register(cci_endpoint_t * endpoint,
 static int ctp_verbs_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * rma_handle)
 {
 	int ret = CCI_SUCCESS;
-	verbs_rma_handle_t *handle = container_of(rma_handle, verbs_rma_handle_t, rma_handle);
+	verbs_rma_handle_t *handle = (void*)((uintptr_t)rma_handle->stuff[2]);
 	cci__ep_t *ep = handle->ep;
 	verbs_ep_t *vep = ep->priv;
 
@@ -4124,8 +4125,7 @@ static int verbs_post_rma(verbs_rma_op_t * rma_op)
 	int ret = CCI_SUCCESS;
 	cci__conn_t *conn = rma_op->evt.conn;
 	verbs_conn_t *vconn = conn->priv;
-	verbs_rma_handle_t *local =
-		container_of(rma_op->local_handle, verbs_rma_handle_t, rma_handle);
+	verbs_rma_handle_t *local = (void*)((uintptr_t)rma_op->local_handle->stuff[2]);
 	struct ibv_sge list;
 	struct ibv_send_wr wr, *bad_wr;
 
@@ -4173,7 +4173,7 @@ ctp_verbs_rma(cci_connection_t * connection,
 	cci__ep_t *ep = NULL;
 	cci__conn_t *conn = NULL;
 	verbs_ep_t *vep = NULL;
-	verbs_rma_handle_t *local = container_of(local_handle, verbs_rma_handle_t, rma_handle);
+	verbs_rma_handle_t *local = (void*)((uintptr_t) local_handle->stuff[2]);
 	verbs_rma_op_t *rma_op = NULL;
 
 	CCI_ENTER;
