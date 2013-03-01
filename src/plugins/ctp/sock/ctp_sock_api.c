@@ -1819,7 +1819,7 @@ ctp_sock_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
 	*event = &ev->event;
 
 	/* We read on the fd to block again */
-	if (sep->event_fd) {
+	if (ev && sep->event_fd) {
 		char a[1];
 		int rc;
 
