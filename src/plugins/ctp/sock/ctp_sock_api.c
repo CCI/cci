@@ -2248,8 +2248,9 @@ static void sock_progress_queued(cci__ep_t * ep)
 		if (tx->msg_type == SOCK_MSG_RMA_WRITE ||
 		    tx->msg_type == SOCK_MSG_RMA_READ_REQUEST)
 		{
-			if (tx->rma_op->pending >= SOCK_RMA_DEPTH)
+			if (tx->rma_op->pending >= SOCK_RMA_DEPTH) {
 				continue;
+			}
 		}
 
 		/* need to send it */
@@ -3071,7 +3072,10 @@ Check the device pending list for the matching tx
 */
 static void
 sock_handle_ack(sock_conn_t * sconn,
-		sock_msg_type_t type, sock_rx_t * rx, uint32_t count, uint32_t id)
+                sock_msg_type_t type,
+                sock_rx_t * rx,
+                uint32_t count,
+                uint32_t id)
 {
 	uint32_t i = 0;
 	int found = 0;
@@ -3098,10 +3102,10 @@ sock_handle_ack(sock_conn_t * sconn,
 
 	if (count == 1) {
 		assert(type == SOCK_MSG_ACK_ONLY || type == SOCK_MSG_ACK_UP_TO
-			|| type == SOCK_MSG_SEND || type == SOCK_MSG_RMA_WRITE
-			|| type == SOCK_MSG_RMA_READ_REQUEST
-			|| type == SOCK_MSG_RMA_WRITE_DONE
-            || type == SOCK_MSG_RMA_READ_REPLY);
+		       || type == SOCK_MSG_SEND || type == SOCK_MSG_RMA_WRITE
+		       || type == SOCK_MSG_RMA_READ_REQUEST
+		       || type == SOCK_MSG_RMA_WRITE_DONE
+                       || type == SOCK_MSG_RMA_READ_REPLY);
 	} else {
 		assert(type == SOCK_MSG_SACK);
 	}
@@ -3113,19 +3117,32 @@ sock_handle_ack(sock_conn_t * sconn,
 	} else if (type == SOCK_MSG_ACK_UP_TO) {
 		sconn->seq_pending = acks[0];
 	} else if (type == SOCK_MSG_SEND
-			   || type == SOCK_MSG_RMA_WRITE
-			   || type == SOCK_MSG_RMA_WRITE_DONE
-			   || type == SOCK_MSG_RMA_READ_REQUEST
-               || type == SOCK_MSG_RMA_READ_REPLY) {
+	           || type == SOCK_MSG_RMA_WRITE
+	           || type == SOCK_MSG_RMA_WRITE_DONE
+	           || type == SOCK_MSG_RMA_READ_REQUEST
+	           || type == SOCK_MSG_RMA_READ_REPLY)
+	{
 		/* Piggybacked ACK */
 		acks[0] = hdr_r->pb_ack;
+		/* Reset hdr_r->pb_ack so we cannot do this again later */
+		hdr_r->pb_ack = 0;
 		if (sconn->seq_pending == acks[0] - 1)
 			sconn->seq_pending = acks[0];
 	}
 
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
-	pthread_mutex_unlock(&ep->lock);
+	/*
+	   If this is an explicit ACK message, we "extracted" all the info we
+	   need, we can return the RX buffer. If it is NOT an explicit ACK
+	   (for instance in the context of a piggybacked ACK, the RX buffer
+	   is returned by the function handling the specific type of messages
+	*/
+	if (type == SOCK_MSG_ACK_ONLY || type == SOCK_MSG_ACK_UP_TO
+	                              || type == SOCK_MSG_SACK)
+	{
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
+		pthread_mutex_unlock(&ep->lock);
+	}
 
 	pthread_mutex_lock(&dev->lock);
 	pthread_mutex_lock(&ep->lock);
@@ -3310,7 +3327,7 @@ sock_handle_ack(sock_conn_t * sconn,
 	pthread_mutex_unlock(&dev->lock);
 
 	debug(CCI_DB_MSG, "%s acked %d msgs (%s %u)", __func__, found,
-		sock_msg_type(type), acks[0]);
+	      sock_msg_type(type), acks[0]);
 
 	pthread_mutex_lock(&ep->lock);
 	/* transfer txs to sock ep's list */
@@ -3323,8 +3340,9 @@ sock_handle_ack(sock_conn_t * sconn,
 		rma_op = tx->rma_op;
 		if (rma_op && rma_op->status == CCI_SUCCESS) {
 			sock_rma_handle_t *local =
-				container_of(rma_op->local_handle, sock_rma_handle_t,
-						rma_handle);
+				container_of(rma_op->local_handle,
+				             sock_rma_handle_t,
+				             rma_handle);
 			rma_op->completed++;
 
 			/* progress RMA */
@@ -3877,12 +3895,9 @@ sock_handle_rma_read_reply(sock_conn_t *sconn, sock_rx_t *rx,
 	hdr_r = (sock_header_r_t *) rx->buffer;
 	rma_read_seq = hdr_r->pb_ack;
 	sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
-	if (rma_read_seq != 0)
-		sock_handle_ack (sconn, SOCK_MSG_RMA_READ_REPLY, rx, 1, tx_id);
 
 	debug(CCI_DB_MSG, 
-		"%s: recv'ing RMA_READ_REPLY on conn %p with len %u (answer to "
-		"RMA_READ_REQUEST seq %u)",
+		"%s: recv'ing RMA_READ_REPLY on conn %p with len %u",
 		__func__, conn, len, rma_read_seq);
 
 	sock_parse_rma_handle_offset(&read->local, &local_handle, &local_offset);
@@ -4128,6 +4143,7 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	pthread_mutex_unlock(&ep->lock);
 
 	/* Prepare the TX buffer */
+	tx->seq = 0;
 	tx->msg_type = SOCK_MSG_RMA_READ_REPLY;
 	tx->flags = CCI_FLAG_SILENT;
 	tx->state = SOCK_TX_QUEUED;
@@ -4147,11 +4163,9 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	                         tx->seq, 0,
 	                         local_handle, local_offset,
 	                         remote_handle, remote_offset);
-	/* FIXME: no need to copy the data we use an iovec later on
 	debug (CCI_DB_MSG,
 	       "%s: Copying %d bytes in RMA_READ_REPLY msg",
 	       __func__, len);
-	*/
 	memcpy(rma_hdr->data, tx->rma_ptr, len);
 	/* We piggyback the seq of the initial READ REUQEST so it can act as an ACK */
 	hdr_r = (sock_header_r_t*) tx->buffer;
@@ -4164,7 +4178,7 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	       " with %u bytes",
 	       __func__, seq, tx->rma_len);
 	sock_sendto(sep->sock, tx->buffer, tx->len, tx->rma_ptr,
-	            tx->rma_len, sconn->sin);
+	                  tx->rma_len, sconn->sin);
 
 	/* Emit an event */
 	tx->state = SOCK_TX_COMPLETED;
@@ -4501,8 +4515,13 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 			sock_handle_seq(sconn, seq);
 		}
 
-		if (hdr_r->pb_ack != 0)
+		if (hdr_r->pb_ack != 0) {
+			printf ("Piggybacked ACK for %u\n", hdr_r->pb_ack);
 			sock_handle_ack (sconn, type, rx, 1, id);
+			/* Reset the value of pb_ack to make sure we won't try
+			   to do it again */
+			hdr_r->pb_ack = 0;
+		}
 	}
 
 	/* Make sure the connection is already established */
