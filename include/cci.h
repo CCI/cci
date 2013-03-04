@@ -1053,7 +1053,7 @@ typedef struct cci_event_accept {
   Keepalive timeout event.
 
   We were unable to send a periodic message to the peer. The application
-  can attempt commuincation or disconnect. The connection will continue
+  can attempt communication or disconnect. The connection will continue
   to consume resources until the application calls cci_disconnect().
 
   The number of fields in this struct is intentionally limited in
