@@ -1926,15 +1926,16 @@ static void sock_progress_pending(cci__ep_t * ep)
 				event->send.status = CCI_ETIMEDOUT;
 				if (tx->rnr != 0) {
 					event->send.status = CCI_ERR_RNR;
-					/* If a message that is already marked RNR times out,
-					and if the connection is reliable and ordered, we
-					mark all following messages as RNR */
+					/* If a message that is already marked
+					   RNR times out, and if the connection
+					   is reliable and ordered, we mark all
+					   following messages as RNR */
 					if (conn->connection.attribute == CCI_CONN_ATTR_RO) {
 						sock_tx_t *my_temp_tx;
 						TAILQ_FOREACH_SAFE(my_temp_evt,
-										&sep->pending,
-										entry,
-										tmp)
+						                   &sep->pending,
+						                   entry,
+						                   tmp)
 						{
 							my_temp_tx = container_of (my_temp_evt, sock_tx_t, evt);
 							if (my_temp_tx->seq > tx->seq)
@@ -2025,8 +2026,6 @@ static void sock_progress_pending(cci__ep_t * ep)
 
 		debug(CCI_DB_MSG, "re-sending %s msg seq %u count %u",
 			sock_msg_type(tx->msg_type), tx->seq, tx->send_count);
-		printf ("re-sending %s msg seq %u count %u\n",
-                        sock_msg_type(tx->msg_type), tx->seq, tx->send_count);
 		pack_piggyback_ack (ep, sconn, tx);
 		ret = sock_sendto(sep->sock, tx->buffer, tx->len, tx->rma_ptr,
 		                  tx->rma_len, sconn->sin);
@@ -2244,9 +2243,11 @@ static void sock_progress_queued(cci__ep_t * ep)
 			event->send.status = CCI_ERR_RNR;
 		}
 
-		/* For RMA Writes, we only allow a given number of messages to be
-		in fly */
-		if (tx->msg_type == SOCK_MSG_RMA_WRITE) {
+		/* For RMA Writes and RMA read request, we only allow a given
+		   number of messages to be in fly */
+		if (tx->msg_type == SOCK_MSG_RMA_WRITE ||
+		    tx->msg_type == SOCK_MSG_RMA_READ_REQUEST)
+		{
 			if (tx->rma_op->pending >= SOCK_RMA_DEPTH)
 				continue;
 		}
@@ -2297,7 +2298,8 @@ static void sock_progress_queued(cci__ep_t * ep)
 				debug((CCI_DB_CONN | CCI_DB_MSG),
 					  "moving queued %s tx to pending",
 					  sock_msg_type(tx->msg_type));
-				if (tx->msg_type == SOCK_MSG_RMA_WRITE)
+				if (tx->msg_type == SOCK_MSG_RMA_WRITE ||
+				    tx->msg_type == SOCK_MSG_RMA_READ_REQUEST)
 					tx->rma_op->pending++;
 			} else {
 				tx->state = SOCK_TX_COMPLETED;
@@ -2815,24 +2817,28 @@ static int ctp_sock_rma(cci_connection_t * connection,
 			tx->rma_len = 0;
 
 			if (flags & CCI_FLAG_WRITE) {
-				tx->rma_ptr = (void*)(uintptr_t)(local->start + local_offset + offset);
 				tx->rma_len = tx->len;
+				tx->rma_ptr = (void*)(uintptr_t)(local->start + local_offset + offset);
 				tx->msg_type = SOCK_MSG_RMA_WRITE;
-				sock_pack_rma_write(rma_hdr, tx->len, sconn->peer_id,
-									tx->seq, 0, local_handle->stuff[0],
-									local_offset + offset,
-									remote_handle->stuff[0],
-									remote_offset + offset);
+				sock_pack_rma_write(rma_hdr, tx->len,
+				        sconn->peer_id,
+				        tx->seq, 0, local_handle->stuff[0],
+				        local_offset + offset,
+				        remote_handle->stuff[0],
+				        remote_offset + offset);
 				memcpy(rma_hdr->data, tx->rma_ptr, tx->len);
 			} else {
 				tx->msg_type = SOCK_MSG_RMA_READ_REQUEST;
-				debug (CCI_DB_MSG, "%s: Packing RMA_READ_REQUEST msg (seq %u)",
-					   __func__, tx->seq);
-				sock_pack_rma_read_request (rma_hdr, tx->len, sconn->peer_id,
-									tx->seq, 0, local_handle->stuff[0],
-									local_offset + offset,
-									remote_handle->stuff[0],
-									remote_offset + offset);
+				debug (CCI_DB_MSG,
+				       "%s: pack RMA_READ_REQUEST (seq %u)",
+				       __func__, tx->seq);
+				sock_pack_rma_read_request (rma_hdr, tx->len,
+				        sconn->peer_id,
+				        tx->seq, 0,
+				        local_handle->stuff[0],
+				        local_offset + offset,
+				        remote_handle->stuff[0],
+				        remote_offset + offset);
 			}
 			tx->len = sizeof(sock_rma_header_t);
 		}
@@ -3139,7 +3145,8 @@ sock_handle_ack(sock_conn_t * sconn,
 						acks[0]);
 					TAILQ_REMOVE(&sep->pending, &tx->evt, entry);
 					TAILQ_REMOVE(&sconn->tx_seqs, tx, tx_seq);
-					if (tx->msg_type == SOCK_MSG_RMA_WRITE)
+					if (tx->msg_type == SOCK_MSG_RMA_WRITE
+					    || tx->msg_type == SOCK_MSG_RMA_READ_REQUEST)
 						tx->rma_op->pending--;
 					if (tx->msg_type == SOCK_MSG_SEND) {
 						sconn->pending--;
@@ -3339,8 +3346,8 @@ sock_handle_ack(sock_conn_t * sconn,
 					continue;
 				}
 			}
-			/* they acked a data segment,
-			* do we need to send more or send the remote completion? */
+			/* they acked a data segment, do we need to send more
+			 * or send the remote completion? */
 			if (rma_op->next < rma_op->num_msgs) {
 				sock_rma_header_t *write = (sock_rma_header_t *) tx->buffer;
 				uint64_t offset = 0ULL;
@@ -3914,7 +3921,7 @@ sock_handle_rma_read_reply(sock_conn_t *sconn, sock_rx_t *rx,
 
 	/* valid local handle, copy the data */
 	debug(CCI_DB_MSG, "%s: recv'ing data into target buffer (%u bytes)",
-		  __func__, len);
+	      __func__, len);
 
 	ptr = local->start + (uintptr_t) local_offset;
 	memcpy(ptr, &read->data, len);
@@ -3922,8 +3929,9 @@ sock_handle_rma_read_reply(sock_conn_t *sconn, sock_rx_t *rx,
 
 out:
 	if (ret < 0) {
-		debug(CCI_DB_MSG, "%s: recv'ing RMA READ payload failed with %s",
-                        __func__, strerror(ret));
+		debug(CCI_DB_MSG,
+		      "%s: recv'ing RMA READ payload failed with %s",
+                      __func__, strerror(ret));
 		/* TODO we need to drain the message from the fd */
 	}
 
@@ -4042,17 +4050,17 @@ sock_handle_conn_ack(sock_conn_t * sconn,
 }
 
 /*
-* Function called to handle RMA_READ_REQUEST messages. This will do the
-* following:
-* 1/ Initiate the corresponding rma_write (rma_reads are implemented via
-*    rma_write).
-* 2/ Send a RMA_WRITE_DONE message to notify the remote peer that the rma_write
-*    succeeded. This message is used on the remote node to trigger completion
-*    at the application level.
-*/
+ * Function called to handle RMA_READ_REQUEST messages. This will do the
+ * following:
+ * 1/ Initiate the corresponding rma_write (rma_reads are implemented via
+ *    rma_write).
+ * 2/ Send a RMA_WRITE_DONE message to notify the remote peer that the
+ *    rma_write succeeded. This message is used on the remote node to trigger
+ *    completion at the application level.
+ */
 static int
 sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
-							 uint16_t len, uint32_t id)
+                             uint16_t len, uint32_t id)
 {
 	cci__ep_t *ep = NULL;
 	cci__conn_t *conn = sconn->conn;
@@ -4126,8 +4134,7 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	tx->len = sizeof(sock_rma_header_t);
 	tx->rma_op = NULL;
 	tx->rma_ptr = remote->start + (uintptr_t) remote_offset;
-	tx->rma_len = (uint16_t)remote->length;
-	tx->seq = ++(sconn->seq);
+	tx->rma_len = len;
 
 	tx->evt.event.type = CCI_EVENT_SEND;
 	tx->evt.event.send.status = CCI_SUCCESS; /* for now */
@@ -4137,14 +4144,14 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 
 	rma_hdr = (sock_rma_header_t*)tx->buffer;
 	sock_pack_rma_read_reply(rma_hdr, (uint16_t)len, sconn->peer_id,
-							tx->seq, 0,
-							local_handle,
-							local_offset,
-							remote_handle,
-							remote_offset);
+	                         tx->seq, 0,
+	                         local_handle, local_offset,
+	                         remote_handle, remote_offset);
+	/* FIXME: no need to copy the data we use an iovec later on
 	debug (CCI_DB_MSG,
-		   "%s: Copying %d bytes in RMA_READ_REPLY msg",
-		   __func__, len);
+	       "%s: Copying %d bytes in RMA_READ_REPLY msg",
+	       __func__, len);
+	*/
 	memcpy(rma_hdr->data, tx->rma_ptr, len);
 	/* We piggyback the seq of the initial READ REUQEST so it can act as an ACK */
 	hdr_r = (sock_header_r_t*) tx->buffer;
@@ -4153,10 +4160,11 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	/* Send the message: we try to send the RMA_READ_REPLY directly, like an
 	   ACK */
 	debug (CCI_DB_MSG,
-		   "%s: Sending RMA_READ_REPLY is response of RMA_READ_REQUEST seq %u",
-		   __func__, seq);
+	       "%s: Send RMA_READ_REPLY, response to RMA_READ_REQUEST seq %u"
+	       " with %u bytes",
+	       __func__, seq, tx->rma_len);
 	sock_sendto(sep->sock, tx->buffer, tx->len, tx->rma_ptr,
-				tx->rma_len, sconn->sin);
+	            tx->rma_len, sconn->sin);
 
 	/* Emit an event */
 	tx->state = SOCK_TX_COMPLETED;
@@ -4296,7 +4304,7 @@ sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len,
 	pthread_mutex_unlock(&ep->lock);
 
 	/* waking up the app thread if it is blocking on a OS handle */
-    sep = ep->priv;
+	sep = ep->priv;
 	if (sep->event_fd) {
 		int rc;
 		rc = write (sep->fd[1], "a", 1);
@@ -4374,30 +4382,29 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		debug(CCI_DB_INFO,
 			"no rx buffers available on endpoint %d", sep->sock);
 
-		/* We do the receive using a temporary buffer so we can get enough
-		data to send a RNR NACK */
+		/* We do the receive using a temporary buffer so we can get
+		   enough data to send a RNR NACK */
 		ret = recvfrom(sep->sock, (void *)tmp_buff, SOCK_UDP_MAX,
 				0, (struct sockaddr *)&sin, &sin_len);
 		if (ret < (int)sizeof(sock_header_t)) {
 			debug(CCI_DB_INFO,
-				"Did not receive enough data to get the msg header");
+			      "Did not receive enough data to get the header");
 			CCI_EXIT;
 			return 0;
 		}
 
-		/* Now we get the header and parse it so we can know if we are in the
-		context of a reliable connection */
+		/* Now we get the header and parse it so we can know if we are
+		   in the context of a reliable connection */
 		hdr = (sock_header_t *) tmp_buff;
 		sock_parse_header(hdr, &type, &a, &b, &id);
-		sconn =
-			sock_find_conn(sep, sin.sin_addr.s_addr, sin.sin_port, id,
-				type);
+		sconn = sock_find_conn(sep, sin.sin_addr.s_addr, sin.sin_port,
+		                       id, type);
 		conn = sconn->conn;
 		if (sconn == NULL) {
-			/* If the connection is not already established, we just drop the
-			message */
+			/* If the connection is not already established, we
+			   just drop the message */
 			debug(CCI_DB_INFO,
-				"Connection not established, dropping msg\n");
+			      "Connection not established, dropping msg\n");
 			CCI_EXIT;
 			return 0;
 		}
@@ -4406,11 +4413,12 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		if (cci_conn_is_reliable(sconn->conn)) {
 			sock_header_r_t *header_r = NULL;
 
-			/* We do the receive using a temporary buffer so we can get enough
-			data to send a RNR NACK */
+			/* We do the receive using a temporary buffer so we can
+			   get enough data to send a RNR NACK */
 
-			/* From the buffer, we get the TS and SEQ from the header (this is
-			the only we need to deal with RNR) and will be used later on */
+			/* From the buffer, we get the TS and SEQ from the
+			   header (this is the only we need to deal with RNR)
+			   and will be used later on */
 			header_r = (sock_header_r_t *) tmp_buff;
 			sock_parse_seq_ts(&header_r->seq_ts, &seq, &ts);
 			sconn->rnr = seq;
@@ -4424,7 +4432,7 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 	}
 
 	ret = recvfrom(sep->sock, rx->buffer, ep->buffer_len,
-				0, (struct sockaddr *)&sin, &sin_len);
+	               0, (struct sockaddr *)&sin, &sin_len);
 	if (ret < (int)sizeof(sock_header_t)) {
 		q_rx = 1;
 		goto out;
@@ -4455,18 +4463,22 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		if (CCI_DB_MSG & cci__debug) {
 			memset(name, 0, sizeof(name));
 			sock_sin_to_name(sin, name, sizeof(name));
+			
+			/* Note that in the context of RMA_READ_REQUEST
+			   messages the length of the message is actually the
+			   size of the data to send back */
 			debug((CCI_DB_MSG),
-				"ep %d recv'd %s msg from %s with %d bytes",
-				sep->sock, sock_msg_type(type), name, a + b);
+			      "ep %d recv'd %s msg from %s with %d bytes",
+			      sep->sock, sock_msg_type(type), name, a + b);
 		}
 	}
 
 	/* if no conn, drop msg, requeue rx */
 	if (!ka && !sconn && !reply && !request) {
 		debug((CCI_DB_CONN | CCI_DB_MSG),
-			"no sconn for incoming %s msg " "from %s:%d",
-			sock_msg_type(type), inet_ntoa(sin.sin_addr),
-			ntohs(sin.sin_port));
+		      "no sconn for incoming %s msg " "from %s:%d",
+		      sock_msg_type(type), inet_ntoa(sin.sin_addr),
+		      ntohs(sin.sin_port));
 		q_rx = 1;
 		goto out;
 	}
