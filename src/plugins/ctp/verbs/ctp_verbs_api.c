@@ -1955,6 +1955,33 @@ verbs_compare_u32(const void *pa, const void *pb)
 	return 0;
 }
 
+static void
+print_tree(const void *nodep, const VISIT which, const int depth)
+{
+	uint32_t *q = NULL;
+	verbs_conn_t *vconn = NULL;
+
+	switch (which) {
+		case preorder:
+			break;
+		case postorder:
+			q = *(uint32_t**)nodep;
+			vconn = container_of(q, verbs_conn_t, qp_num);
+			debug(CCI_DB_CONN, "%s: conn %p qp_num %u", __func__,
+				(void*)vconn->conn, vconn->qp_num);
+			break;
+		case endorder:
+			break;
+		case leaf:
+			q = *(uint32_t**)nodep;
+			vconn = container_of(q, verbs_conn_t, qp_num);
+			debug(CCI_DB_CONN, "%s: conn %p qp_num %u", __func__,
+				(void*)vconn->conn, vconn->qp_num);
+			break;
+	}
+	return;
+}
+
 static int
 verbs_find_conn(cci__ep_t *ep, uint32_t qp_num, cci__conn_t **conn)
 {
@@ -1979,7 +2006,9 @@ verbs_find_conn(cci__ep_t *ep, uint32_t qp_num, cci__conn_t **conn)
 		debug((CCI_DB_CONN|CCI_DB_MSG), "%s [%s]: found conn %p qp_num %u",
 			__func__, ep->uri, (void*)*conn, qp_num);
 	} else {
-		debug(CCI_DB_CONN, "%s: unable to find qp_num %u", __func__, qp_num);
+		debug(CCI_DB_CONN, "%s [%s]: unable to find qp_num %u", __func__,
+			ep->uri, qp_num);
+		twalk(&vep->conn_tree, print_tree);
 	}
 
 	CCI_EXIT;
