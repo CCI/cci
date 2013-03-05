@@ -159,7 +159,7 @@ AC_DEFUN([CCI_SETUP_CTP],[
     _CCI_CHECK_VISIBILITY
 
     # Setup output files
-    AM_CONFIG_HEADER(cci_config_prefix[include/cci/configure_output.h])
+    AC_CONFIG_HEADERS(cci_config_prefix[include/cci/configure_output.h])
 
     AC_CONFIG_FILES(cci_config_prefix[Makefile])
     AC_CONFIG_FILES(cci_config_prefix[include/Makefile])
