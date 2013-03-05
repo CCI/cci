@@ -3434,10 +3434,7 @@ static int verbs_handle_send_completion(cci__ep_t * ep, struct ibv_wc wc)
 			if (vconn->state == VERBS_CONN_CLOSED) {
 				debug(CCI_DB_CONN, "%s [%s]: destroying conn %p qp_num %u",
 					__func__, ep->uri, (void*)conn, vconn->qp_num);
-				rdma_disconnect(vconn->id);
-				rdma_destroy_ep(vconn->id);
-				free(vconn);
-				free(conn);
+				ctp_verbs_disconnect(&conn->connection);
 			} else {
 				queue_tx = 0;
 				verbs_queue_evt(ep, &tx->evt);
@@ -3798,10 +3795,7 @@ static int ctp_verbs_return_event(cci_event_t * event)
 				/* TODO if RDMA MSGs requested, clean up as well */
 				debug(CCI_DB_CONN, "%s [%s]: destroying conn %p qp_num %u",
 					__func__, ep->uri, (void*)conn, vconn->qp_num);
-				rdma_disconnect(vconn->id);
-				rdma_destroy_ep(vconn->id);
-				free(vconn);
-				free(conn);
+				ctp_verbs_disconnect(&conn->connection);
 			}
 
 			ret = verbs_post_rx(ep, rx);
