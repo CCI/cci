@@ -1838,7 +1838,7 @@ static int ctp_verbs_accept(cci_event_t * event, const void *context)
 	header = VERBS_MSG_CONN_REPLY;
 	header |= (CCI_SUCCESS << 4);
 	if (vconn->num_slots)
-		header |= (1 << 8);	/* magic number */
+		header |= (1 << 12);	/* magic number */
 
 	vconn->state = VERBS_CONN_ESTABLISHED;
 
@@ -3012,7 +3012,8 @@ out:
 static int verbs_handle_conn_reply(cci__ep_t * ep, struct ibv_wc wc)
 {
 	int ret = CCI_SUCCESS;
-	uint32_t header = 0;
+	uint32_t header = ntohl(wc.imm_data);
+	int reply = (header >> 4) & 0xFF;
 	cci__conn_t *conn = NULL;
 	verbs_conn_t *vconn = NULL;
 	verbs_conn_t *vc = NULL;
@@ -3045,15 +3046,17 @@ static int verbs_handle_conn_reply(cci__ep_t * ep, struct ibv_wc wc)
 		goto out;
 	}
 
-	header = ntohl(wc.imm_data);
+	debug(CCI_DB_CONN, "%s [%s]: conn %p qp_num %u header 0x%x %s (%s)", __func__,
+		ep->uri, (void*)conn, vconn->qp_num, header,
+		reply == 0 ? "accepted" : "rejected", strerror(reply));
 
 	rx = (verbs_rx_t *) (uintptr_t) wc.wr_id;
 	rx->evt.event.type = CCI_EVENT_CONNECT;
-	rx->evt.event.connect.status = (header >> 4) & 0xF;	/* magic number */
+	rx->evt.event.connect.status = reply;
 	rx->evt.event.connect.context = conn->connection.context;
 	rx->evt.conn = conn;
 	if (rx->evt.event.connect.status == CCI_SUCCESS) {
-		int use_rdma = (header >> 8) & 0x1;
+		int use_rdma = (header >> 12) & 0x1;
 		struct ibv_qp_attr attr;
 		struct ibv_qp_init_attr init;
 
@@ -3191,8 +3194,9 @@ static int verbs_handle_msg(cci__ep_t * ep, struct ibv_wc wc)
 	ret = verbs_find_conn(ep, wc.qp_num, &conn);
 	if (ret) {
 		debug(CCI_DB_WARN,
-		      "%s [%s]: no conn found for RDMA ack message from qp_num %u", __func__,
-		      ep->uri, wc.qp_num);
+		      "%s [%s]: no conn found for message with header 0x%x from qp_num %u "
+		      "with status %s", __func__, ep->uri, ntohl(wc.imm_data), wc.qp_num,
+		      ibv_wc_status_str(wc.status));
 		goto out;
 	}
 	vconn = conn->priv;
