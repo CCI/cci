@@ -2737,7 +2737,8 @@ static int verbs_conn_est_active(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 		goto out;
 	}
 
-	tx->msg_type = VERBS_MSG_INVALID;
+	/* tx->msg_type = VERBS_MSG_INVALID; */
+	tx->msg_type = VERBS_MSG_CONN_PAYLOAD;
 	tx->evt.event.type = CCI_EVENT_NONE;	/* never hand to application */
 	tx->evt.conn = conn;
 
@@ -3279,9 +3280,8 @@ static int verbs_handle_rdma_msg_ack(cci__ep_t * ep, struct ibv_wc wc)
 	ret = verbs_find_conn(ep, wc.qp_num, &conn);
 	if (ret) {
 		debug(CCI_DB_WARN,
-		      "%s [%s]: no conn found for message with header 0x%x from qp_num %u "
-		      "with status %s", __func__, ep->uri, ntohl(wc.imm_data), wc.qp_num,
-		      ibv_wc_status_str(wc.status));
+		      "%s [%s]: no conn found for RDMA ack message from qp_num %u", __func__,
+		      ep->uri, wc.qp_num);
 		goto out;
 	}
 	vconn = conn->priv;
