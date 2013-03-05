@@ -4516,7 +4516,6 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		}
 
 		if (hdr_r->pb_ack != 0) {
-			printf ("Piggybacked ACK for %u\n", hdr_r->pb_ack);
 			sock_handle_ack (sconn, type, rx, 1, id);
 			/* Reset the value of pb_ack to make sure we won't try
 			   to do it again */
