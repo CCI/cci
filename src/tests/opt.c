@@ -32,7 +32,7 @@ char *uri = NULL;
 
 cci_opt_handle_t *handle;
 
-void check_return(char *func, cci_endpoint_t *endpoint, int ret)
+static void check_return(char *func, cci_endpoint_t *endpoint, int ret)
 {
 	if (ret) {
 		fprintf(stderr, "%s() returned %s\n", func, cci_strerror(endpoint, ret));
@@ -41,7 +41,7 @@ void check_return(char *func, cci_endpoint_t *endpoint, int ret)
 	return;
 }
 
-void usage(void)
+static void usage(void)
 {
 	printf("usage: %s [-G | -S] [-t[<usecs>]] [-r[<count>]] [-s[<count>]] "
 	       "[-k[<usecs>]] [-a]\n", proc_name);
@@ -60,7 +60,7 @@ void usage(void)
 	exit(EXIT_FAILURE);
 }
 
-void test(cci_endpoint_t *endpoint, cci_opt_name_t name)
+static void test(cci_endpoint_t *endpoint, cci_opt_name_t name)
 {
 	int ret;
 	uint32_t tmpval;

@@ -18,7 +18,7 @@
  * $HEADER$
  */
 
-#include "cci/config.h"
+#include "cci/private_config.h"
 
 #ifdef HAVE_STDLIB_H
 #include <stdlib.h>

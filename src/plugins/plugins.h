@@ -8,7 +8,7 @@
 #ifndef CCI_PLUGINS_H
 #define CCI_PLUGINS_H
 
-#include "cci/config.h"
+#include "cci/private_config.h"
 #include "cci.h"
 
 BEGIN_C_DECLS

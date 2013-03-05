@@ -20,7 +20,7 @@
 #define REGSIZE		(1024*1024)
 #define TOTALSIZE	(512*1024*1024)
 
-void check_return(cci_endpoint_t *endpoint, char *func, int ret)
+static void check_return(cci_endpoint_t *endpoint, char *func, int ret)
 {
 	if (ret) {
 		fprintf(stderr, "%s() returned %s\n", func, cci_strerror(endpoint, ret));
@@ -29,7 +29,7 @@ void check_return(cci_endpoint_t *endpoint, char *func, int ret)
 	return;
 }
 
-void usage(char *name)
+static void usage(char *name)
 {
 	printf
 	    ("usage: %s [-d] [-f] [-o <offset>] [-s <size>] [-t <total_allocation>]\n",
@@ -48,7 +48,7 @@ void usage(char *name)
 
 int main(int argc, char *argv[])
 {
-	int c, ret, fd;
+	int c, ret;
 	int dereg = 0, prefault = 0;
 	uint32_t pagesize = 0, offset = 0;
 	uint64_t regsize = REGSIZE, totalsize = TOTALSIZE, count, i;
@@ -103,7 +103,7 @@ int main(int argc, char *argv[])
 	ret = posix_memalign(&base, pagesize, totalsize + offset);
 	check_return(NULL, "posix_memalign", ret);
 
-	ptr = base + (uintptr_t) offset;
+	ptr = (void*)((uintptr_t)base + (uintptr_t) offset);
 	length = regsize;
 
 	handles = calloc(count, sizeof(*handles));
@@ -122,7 +122,7 @@ int main(int argc, char *argv[])
 	ret = cci_get_devices(&devices);
 	check_return(NULL, "cci_get_devices", ret);
 
-	ret = cci_create_endpoint(NULL, 0, &endpoint, &fd);
+	ret = cci_create_endpoint(NULL, 0, &endpoint, NULL);
 	check_return(NULL, "cci_create_endpoint", ret);
 
 	/* register */
@@ -130,7 +130,7 @@ int main(int argc, char *argv[])
 		gettimeofday(&start, NULL);
 
 	for (i = 0; i < count; i++) {
-		void *p = ptr + (uintptr_t) i;
+		void *p = (void*)((uintptr_t)ptr + (uintptr_t) i);
 
 		ret = cci_rma_register(endpoint, p, length, CCI_FLAG_READ|CCI_FLAG_WRITE, &handles[i]);
 		check_return(endpoint, "cci_rma_register", ret);
@@ -154,7 +154,7 @@ int main(int argc, char *argv[])
 	usecs = (end.tv_sec - start.tv_sec) * 1000000 +
 	    end.tv_usec - start.tv_usec;
 	printf("%10s%10s%10s%10s\n", "RegSize", "Count", "usecs", "us/page");
-	printf("%10" PRIu64 "%10" PRIu64 "%10" PRIu64 "%10.2lf\n",
+	printf("%10" PRIu64 "%10" PRIu64 "%10" PRIu64 "%10.2f\n",
 	       regsize, count, usecs, (double)usecs / (double)count);
 
 	ret = cci_destroy_endpoint(endpoint);

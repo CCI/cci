@@ -63,7 +63,7 @@ fd_set rfds;
 #define UNLOCK pthread_mutex_unlock(&lock);
 #endif
 
-void print_usage()
+static void print_usage(void)
 {
 	fprintf(stderr, "usage: %s -h <server_uri> [-s] [-c <type>]\n", name);
 	fprintf(stderr, "where:\n");
@@ -81,7 +81,7 @@ void print_usage()
 	exit(EXIT_FAILURE);
 }
 
-double usecs(struct timeval start, struct timeval end)
+static double usecs(struct timeval start, struct timeval end)
 {
 	return ((double)(end.tv_sec - start.tv_sec)) * 1000000.0 +
 	    ((double)(end.tv_usec - start.tv_usec));
@@ -127,12 +127,14 @@ again:
 					fprintf(stderr,
 						"%s: send returned %s\n",
 						__func__, cci_strerror(endpoint, ret));
-				} else
+				} else 
 					send++;
 
 				LOCK;
 			}
 			UNLOCK;
+			if (event->send.context == (void*)0xdeadbeef)
+				done = 1;
 		}
 		break;
 	case CCI_EVENT_RECV:
@@ -153,7 +155,7 @@ again:
 						mbs = (double)recv * (double)current_size
 							* 8.0 / usecs(start, end);
 						printf
-						    ("recv: %7d\t%12d\t%8.2lf Mb/s\t%8.2lf MB/s\n",
+						    ("recv: %7d\t%12d\t%8.2f Mb/s\t%8.2f MB/s\n",
 						     current_size, recv,
 						     mbs, mbs / 8.0);
 						current_size = event->recv.len;
@@ -205,7 +207,7 @@ again:
 	return;
 }
 
-void handle_alarm(int sig)
+static void handle_alarm(int sig)
 {
 	LOCK;
 	running = 0;
@@ -213,7 +215,7 @@ void handle_alarm(int sig)
 	return;
 }
 
-void do_client()
+static void do_client(void)
 {
 	int ret;
 	int control = 1;
@@ -262,7 +264,7 @@ void do_client()
 	signal(SIGALRM, handle_alarm);
 
 	/* begin communication with server */
-	for (current_size = 1; current_size <= test_conn->max_send_size;) {
+	for (; current_size <= test_conn->max_send_size;) {
 		int i;
 		double mbs = 0.0;
 
@@ -293,18 +295,21 @@ void do_client()
 
 		mbs = (double)send * (double)current_size * 8.0 / usecs(start, end);
 
-		printf("sent: %7d\t%12d\t%8.2lf Mb/s\t%8.2lf MB/s\n",
+		printf("sent: %7d\t%12d\t%8.2f Mb/s\t%8.2f MB/s\n",
 		       current_size, send,
 		       mbs, mbs / 8.0);
 
 		current_size *= 2;
 	}
-	cci_send(control_conn, "bye", 3, NULL, 0);
+	cci_send(control_conn, "bye", 3, (void*)0xdeadbeef, 0);
+
+	while (!done)
+		poll_events ();
 
 	return;
 }
 
-void do_server()
+static void do_server(void)
 {
 	while (!done)
 		poll_events();
@@ -316,7 +321,6 @@ int main(int argc, char *argv[])
 {
 	int ret, c;
 	uint32_t caps = 0;
-	//cci_os_handle_t ep_fd;
 	char *uri = NULL;
 	cci_os_handle_t *os_handle = NULL;
 

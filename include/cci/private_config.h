@@ -12,30 +12,17 @@
  * Copyright (c) 2009      Sun Microsystems, Inc.  All rights reserved.
  * Copyright (c) 2009-2010 Cisco Systems, Inc.  All rights reserved.
  * $COPYRIGHT$
- *
- * Types for CCI.
  */
 
-#ifndef CCI_CONFIG_H
-#define CCI_CONFIG_H
+#ifndef CCI_PRIVATE_CONFIG_H
+#define CCI_PRIVATE_CONFIG_H
+
+#ifdef CCI_H
+#error cci/private_config.h must be included before cci.h
+#endif
 
 /* Include all the output from configure */
 #include "cci/configure_output.h"
-
-/*
- * BEGIN_C_DECLS should be used at the beginning of your declarations,
- * so that C++ compilers don't mangle their names.  Use END_C_DECLS at
- * the end of C declarations.
- */
-#undef BEGIN_C_DECLS
-#undef END_C_DECLS
-#if defined(c_plusplus) || defined(__cplusplus)
-#define BEGIN_C_DECLS extern "C" {
-#define END_C_DECLS }
-#else
-#define BEGIN_C_DECLS		/* empty */
-#define END_C_DECLS		/* empty */
-#endif
 
 /**
  * The attribute definition should be included before any potential
@@ -159,25 +146,4 @@
 #define __cci_attribute_weak_alias__(a)
 #endif
 
-/* Shortcut to see if we're on any flavor of Windows */
-#if !defined(__WINDOWS__)
-#if defined(_WIN32) || defined(WIN32) || defined(WIN64)
-#define __WINDOWS__
-#endif
-#endif /* !defined(__WINDOWS__) */
-
-#if defined(__WINDOWS__)
-#if defined(_USRDLL)		/* building shared libraries (.DLL) */
-#define CCI_DECLSPEC        __declspec(dllexport)
-#else /* building static library */
-#define CCI_DECLSPEC        __declspec(dllimport)
-#endif /* defined(_USRDLL) */
-#else
-#if CCI_HAVE_VISIBILITY
-#define CCI_DECLSPEC           __cci_attribute_visibility__("default")
-#else
-#define CCI_DECLSPEC
-#endif
-#endif /* defined(__WINDOWS__) */
-
-#endif /* CCI_CONFIG_H */
+#endif /* CCI_PRIVATE_CONFIG_H */

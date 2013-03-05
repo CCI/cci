@@ -7,7 +7,7 @@
 #ifndef CCI_CTP_ETH_H
 #define CCI_CTP_ETH_H
 
-#include "cci/config.h"
+#include "cci/private_config.h"
 #include "ccieth_io.h"
 
 #include "bsd/queue.h"

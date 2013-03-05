@@ -1,0 +1,93 @@
+= Configuration ================================================================
+
+  The tcp CTP is enabled by default.
+
+= Endpoint naming ==============================================================
+
+  TCP endpoint URIs are host and port where host is a hostname or IPv4 address:
+
+    tcp://foo.com:5555
+    tcp://1.2.3.4:5555
+
+= Config file options ==========================================================
+
+  TCP devices _must_ have these two items in the config file:
+
+    transport = tcp
+    ip = 1.2.3.4
+
+  where 1.2.3.4 is the valid IPv4 address of the device to bind to _or_
+  they _must_ have these two items in the config file:
+
+    transport = tcp
+    interface = ethN
+
+  where ethN is the name of the interface to use. It is allowable to have
+  both ip= and interface=, however, if they disagree, the IP address will
+  be used.
+
+  TCP devices may have the following items in the config file:
+
+    mtu = 9000
+
+  The tcp transport will then set the endpoint->max_send_size to this size
+  less what it needs for headers.
+
+    bufsize = 20971520
+
+  The tcp transport will then set the socket buffers (both send and receive)
+  to the specified size. Note that you need to ensure that the system
+  configuration allows the specified size. On Linux, this means that you must
+  check the value of net.core.rmem_max and net.core.wmem_max using sysctl
+  (e.g., systctl -n net.core.rmem_max) and eventually increase the value (e.g.,
+  sudo sysctl -w net.core.rmem_max=30000000).
+  If the socket send/receive buffers are not big enough, the transport may not
+  be able to send/receive messages. In the context of a send, if CCI debugging
+  is turned on and if a message cannot be sent because of a lack of system
+  buffers, users will see an error message with unordered/unreliable
+  connections, saying that a sent failed because the resources was temporarily
+  unavailable.
+
+= Run-time notes ===============================================================
+
+  1. Most devices that support transports other than tcp will also provide an
+  Ethernet interface. Generally, you will want to use the native transport and
+  not tcp for these devices.
+
+= Known limitations ============================================================
+
+Not implemented:
+
+  Create endpoint cannot return an OS handle (i.e. no blocking support)
+  Fence
+
+
+= CCI Performance Tuning =======================================================
+
+TCP_DEFAULT_MSS
+    The default Maximum Segment Size is the default amount of data that is sent
+    in a message. This does not include the size of the header. Larger messages
+    make the endpoint's send and receive buffers larger.
+
+TCP_EP_RX_CNT
+    Number of buffers used to receive messages. Directly impacts the memory
+    footprint of the CCI transport.
+
+TCP_EP_TX_CNT
+    Number of buffers used to send messages. Directly impacts the memory
+    footprint of the CCI transport.
+
+TCP_RMA_FRAG_SIZE
+    The tcp transport breaks RMA transfer into chunks of this size rather
+    than trying to send an entire RMA at once and filling the socket buffer.
+
+TCP_RMA_DEPTH
+    Number of in-flight RMA fragments.
+
+= System Performance Tuning ====================================================
+
+  If the system parameters are not tuned for high-performance communications,
+  the transport may not be able to send/receive messages using some of the
+  latest networking hardware. The following page provides a good reference for
+  system tuning (TCP tuning proved to improve performance also for the
+  transport): http://fasterdata.es.net/host-tuning/linux/

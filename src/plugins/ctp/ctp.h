@@ -11,7 +11,7 @@
 #ifndef CCI_PLUGINS_CTP_H
 #define CCI_PLUGINS_CTP_H
 
-#include "cci/config.h"
+#include "cci/private_config.h"
 #include "cci.h"
 #include "cci_lib_types.h"
 #include "plugins/plugins.h"

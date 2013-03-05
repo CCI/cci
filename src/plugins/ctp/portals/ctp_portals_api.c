@@ -13,7 +13,8 @@
 #pragma warning(disable:2259)
 #endif				//   __INTEL_COMPILER
 
-#include "cci/config.h"
+#include "cci/private_config.h"
+
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -819,7 +820,7 @@ static void portals_free_orphan_ams(portals_ep_t * pep)
 				if (iRC == PTL_OK || iRC == PTL_ME_INVALID) {
 					am->meh = PTL_HANDLE_NONE;
 				} else {
-					debug(CCI_DB_DRVR,
+					debug(CCI_DB_CTP,
 					      "PtlMEUnlink() returned %s",
 					      ptl_err_str[iRC]);
 				}
@@ -993,7 +994,7 @@ static int ctp_portals_create_endpoint(cci_device_t * device,
 				if (am->state == PORTALS_AM_ACTIVE) {
 					iRC = PtlMEUnlink(am->meh);
 					if (iRC != PTL_OK)
-						debug(CCI_DB_DRVR,
+						debug(CCI_DB_CTP,
 						      "PtlMEUnlink() returned %s",
 						      ptl_err_str[iRC]);
 				}
@@ -1064,7 +1065,7 @@ static int ctp_portals_destroy_endpoint(cci_endpoint_t * endpoint)
 		if (pep->eqh != PTL_EQ_NONE) {
 			iRC = PtlEQFree(pep->eqh);
 			if (iRC != PTL_OK)
-				debug(CCI_DB_DRVR, "PtlEQFree() returned %s",
+				debug(CCI_DB_CTP, "PtlEQFree() returned %s",
 				      ptl_err_str[iRC]);
 		}
 
@@ -1080,7 +1081,7 @@ static int ctp_portals_destroy_endpoint(cci_endpoint_t * endpoint)
 							am->meh =
 							    PTL_HANDLE_NONE;
 						} else {
-							debug(CCI_DB_DRVR,
+							debug(CCI_DB_CTP,
 							      "PtlMEUnlink() returned %s",
 							      ptl_err_str[iRC]);
 						}
@@ -2406,7 +2407,7 @@ static int ctp_portals_rma_deregister(cci_endpoint_t * endpoint, uint64_t rma_ha
 				if (ret == PTL_OK)
 					handle->meh = PTL_HANDLE_NONE;
 				else
-					debug(CCI_DB_DRVR,
+					debug(CCI_DB_CTP,
 					      "Could not unlink RMA from match list");
 			}
 			portals_rma_handle_decref(handle);

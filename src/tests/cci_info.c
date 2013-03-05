@@ -46,10 +46,10 @@ int main(int argc, char *argv[])
 		if (!device)
 			break;
 
-		if (device->pci.domain != -1
-		    && device->pci.bus != -1
-		    && device->pci.dev != -1
-		    && device->pci.func != -1)
+		if (device->pci.domain != (unsigned) -1
+		    && device->pci.bus != (unsigned) -1
+		    && device->pci.dev != (unsigned) -1
+		    && device->pci.func != (unsigned) -1)
 			snprintf(pcibusid, sizeof(pcibusid), " %04x:%02x:%02x.%01x",
 				 device->pci.domain, device->pci.bus,
 				 device->pci.dev, device->pci.func);

@@ -3,7 +3,7 @@
  * $COPYRIGHT$
  */
 
-#include "cci/config.h"
+#include "cci/private_config.h"
 
 #include <stdio.h>
 
@@ -14,12 +14,12 @@
 
 int cci_ctp_mx_post_load(cci_plugin_t * me)
 {
-	debug(CCI_DB_DRVR, "In mx post_load");
+	debug(CCI_DB_CTP, "%s", "In mx post_load");
 	return CCI_SUCCESS;
 }
 
 int cci_ctp_mx_pre_unload(cci_plugin_t * me)
 {
-	debug(CCI_DB_DRVR, "In mx pre_unload");
+	debug(CCI_DB_CTP, "%s", "In mx pre_unload");
 	return CCI_SUCCESS;
 }

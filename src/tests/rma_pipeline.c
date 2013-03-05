@@ -46,7 +46,8 @@ cci_device_t **devices = NULL;
 cci_endpoint_t *endpoint = NULL;
 cci_connection_t *connection = NULL;
 cci_conn_attribute_t attr = CCI_CONN_ATTR_RU;
-uint64_t local_rma_handle = 0ULL;
+cci_rma_handle_t *local_rma_handle;
+cci_rma_handle_t *server_rma_handle;
 int remote_completion = 0;
 void *rmt_comp_msg = NULL;
 uint32_t rmt_comp_len = 0;
@@ -58,7 +59,7 @@ struct timeval start, end;
 uint32_t min_size = MIN_RMA_SIZE;
 
 typedef struct options {
-	uint64_t server_rma_handle;
+	struct cci_rma_handle rma_handle;
 	uint32_t max_rma_size;
 #define RMA_WRITE 1
 #define RMA_READ  2
@@ -67,9 +68,9 @@ typedef struct options {
 	int pad;
 } options_t;
 
-options_t opts = { 0ULL, 0, RMA_WRITE, 0, 0 };
+options_t opts;
 
-void print_usage()
+static void print_usage(void)
 {
 	fprintf(stderr, "usage: %s -h <server_uri> [-s] [-i <iters>] "
 		"[-W <window>] [-c <type>] [-n] "
@@ -94,7 +95,7 @@ void print_usage()
 	exit(EXIT_FAILURE);
 }
 
-void check_return(cci_endpoint_t * endpoint, char *func, int ret, int need_exit)
+static void check_return(cci_endpoint_t * endpoint, char *func, int ret, int need_exit)
 {
 	if (ret) {
 		fprintf(stderr, "%s() returned %s\n", func, cci_strerror(endpoint, ret));
@@ -133,7 +134,7 @@ static void poll_events(void)
 				if (count < iters) {
 					ret = cci_rma(connection, rmt_comp_msg, rmt_comp_len,
 							  local_rma_handle, 0,
-							  opts.server_rma_handle, 0,
+							  &opts.rma_handle, 0,
 							  current_size, (void *)1, opts.flags);
 					check_return(endpoint, func, ret, 1);
 				}
@@ -171,17 +172,16 @@ static void poll_events(void)
 	return;
 }
 
-double usecs(struct timeval start, struct timeval end)
+static double usecs(struct timeval start, struct timeval end)
 {
 	return ((double)(end.tv_sec - start.tv_sec)) * 1000000.0 +
 	    ((double)(end.tv_usec - start.tv_usec));
 }
 
-void do_client()
+static void do_client(void)
 {
 	int ret;
 	uint32_t min = 0, max;
-	//struct timeval start, end;
 	char *func;
 	char *header = "Done";
 
@@ -229,8 +229,7 @@ void do_client()
 		ret = cci_rma_register(endpoint, buffer, max, flags,
 							   &local_rma_handle);
 		check_return(endpoint, "cci_rma_register", ret, 1);
-		fprintf(stderr, "local_rma_handle is 0x%" PRIx64 "\n",
-			local_rma_handle);
+		fprintf(stderr, "local_rma_handle is %p\n", (void*)local_rma_handle);
 		min = 1;
 		if (opts.method == RMA_WRITE)
 			opts.flags |= CCI_FLAG_WRITE;
@@ -257,7 +256,7 @@ void do_client()
 		for (count = 0; count < pipeline_depth; count++) {
 			ret = cci_rma(connection, rmt_comp_msg, rmt_comp_len,
 					local_rma_handle, 0,
-					opts.server_rma_handle, 0,
+					&opts.rma_handle, 0,
 					current_size, (void *)1, opts.flags);
 			check_return(endpoint, func, ret, 1);
 		}
@@ -270,7 +269,7 @@ void do_client()
 		lat = usecs(start, end)/count;
 		bw = (double)current_size / lat;
 
-		printf("%8d\t%8.2lf us\t\t%8.2lf MB/s\t%8u %8u\n", current_size, lat,
+		printf("%8d\t%8.2f us\t\t%8.2f MB/s\t%8u %8u\n", current_size, lat,
 				bw, pipeline_depth, iters);
 
 		current_size *= 2;
@@ -297,7 +296,7 @@ void do_client()
 	return;
 }
 
-void do_server()
+static void do_server(void)
 {
 	int ret, len;
 
@@ -341,8 +340,10 @@ void do_server()
 							opts.max_rma_size,
 							opts.method == RMA_WRITE ?
 							CCI_FLAG_WRITE : CCI_FLAG_READ,
-							&opts.server_rma_handle);
+							&server_rma_handle);
 				check_return(endpoint, "cci_rma_register", ret, 1);
+				memcpy (&opts.rma_handle, server_rma_handle,
+						sizeof (*server_rma_handle));
 
 				ret = cci_send(connection, &opts, sizeof(opts), NULL, 0);
 				check_return(endpoint, "cci_send", ret, 1);
@@ -364,7 +365,6 @@ void do_server()
 		poll_events();
 
 	printf("server done\n");
-	//sleep(1);
 
 	return;
 }
@@ -453,6 +453,13 @@ int main(int argc, char *argv[])
 
 		if (iters < pipeline_depth)
 			iters = pipeline_depth * 2;
+	}
+
+	if (pipeline_depth > iters) {
+		fprintf(stderr,
+		        "The number of iteration should be higher than the pipeline depth "
+		        "(iters: %u; pipeline_depth: %u)\n", iters, pipeline_depth);
+		        exit (EXIT_FAILURE);
 	}
 
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);

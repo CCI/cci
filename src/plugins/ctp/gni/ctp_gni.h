@@ -7,8 +7,8 @@
 #ifndef CCI_CTP_GNI_H
 #define CCI_CTP_GNI_H
 
+#include "cci/private_config.h"
 #include "cci.h"
-#include "cci/config.h"
 
 #include <netinet/in.h>	/* struck sockaddr_in */
 #include <assert.h>

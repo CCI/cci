@@ -10,7 +10,7 @@ AC_DEFUN([CCI_DEFINE_ARGS],[
     AC_ARG_ENABLE([picky],
         [AC_HELP_STRING([--enable-picky],
                         [Turn on maintainer-level compiler pickyness])])
-    AS_IF([test -d $srcdir/.hg -o -d $srcdir/.svn],
+    AS_IF([test -d $srcdir/.hg -o -d $srcdir/.svn -o -d $srcdir/.git],
           [CCI_DEVEL_BUILD=yes
            AS_IF([test "$enable_picky" = ""],
                  [AC_MSG_WARN([Developer build: enabling pickyness by default])
@@ -90,8 +90,8 @@ AC_DEFUN([CCI_SETUP_CTP],[
           [cci_add="-Wall -Wundef -Wsign-compare"
            cci_add="$cci_add -Wmissing-prototypes -Wstrict-prototypes"
            cci_add="$cci_add -Wcomment -pedantic"
-           cci_add="$cci_add -Werror-implicit-function-declaration "
-           cci_add="$cci_add -Wstrict-prototypes"
+           cci_add="$cci_add -Werror-implicit-function-declaration"
+           cci_add="$cci_add -Wno-variadic-macros -Wno-long-long"
            CFLAGS="$CFLAGS $cci_add"
 	   CCI_UNIQ(CFLAGS)
            AC_MSG_WARN([$cci_add has been added to CFLAGS (--enable-picky)])
@@ -169,6 +169,8 @@ AC_DEFUN([CCI_SETUP_CTP],[
     AC_CONFIG_FILES(cci_config_prefix[src/plugins/base/Makefile])
     AC_CONFIG_FILES(cci_config_prefix[src/util/Makefile])
     AC_CONFIG_FILES(cci_config_prefix[src/tests/Makefile])
+
+    AC_CONFIG_FILES(cci_config_prefix[examples/Makefile])
 
     # Setup the plugins
     m4_include([config/autogen_found_items.m4])

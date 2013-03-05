@@ -31,7 +31,7 @@
 #ifndef CCI_ARGV_H
 #define CCI_ARGV_H
 
-#include "cci/config.h"
+#include "cci/private_config.h"
 
 #ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>

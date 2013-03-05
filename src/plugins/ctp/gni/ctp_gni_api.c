@@ -5,7 +5,7 @@
  * $COPYRIGHT$
  */
 
-#include "cci/config.h"
+#include "cci/private_config.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -267,7 +267,7 @@ gni_find_gni_device_ids(int **device_ids, int count,
 
 	CCI_ENTER;
 
-	debug(CCI_DB_DRVR, "%s: count %d", __func__, count);
+	debug(CCI_DB_CTP, "%s: count %d", __func__, count);
 
 	addrs = calloc(count + 1, sizeof(*addrs));
 	if (!addrs) {
@@ -299,7 +299,7 @@ gni_find_gni_device_ids(int **device_ids, int count,
 					addrs[i].ifa_broadaddr = calloc(1, len);
 					memcpy(addrs[i].ifa_broadaddr,
 					       tmp->ifa_broadaddr, len);
-					debug(CCI_DB_DRVR, "%s: device[%d] is %s",
+					debug(CCI_DB_CTP, "%s: device[%d] is %s",
 						__func__, i, tmp->ifa_name);
 					break;
 				}
@@ -790,7 +790,7 @@ gni_create_cdm_cqs(cci__dev_t *dev, cci__ep_t *ep, uint32_t port)
 	gni_ep_t *gep = ep->priv;
 	gni_return_t grc = GNI_RC_SUCCESS;
 
-	debug(CCI_DB_DRVR, "%s: creating CDM port=%u ptag=%u cookie=0x%x",
+	debug(CCI_DB_CTP, "%s: creating CDM port=%u ptag=%u cookie=0x%x",
 		__func__, port, gdev->ptag, gdev->cookie);
 
 	grc = GNI_CdmCreate(port, gdev->ptag, gdev->cookie,
@@ -879,7 +879,7 @@ ctp_gni_create_endpoint(cci_device_t * device,
 	CCI_ENTER;
 
 	if (!gglobals) {
-		debug(CCI_DB_DRVR, "%s: no globals?", __func__);
+		debug(CCI_DB_CTP, "%s: no globals?", __func__);
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
@@ -930,7 +930,7 @@ ctp_gni_create_endpoint(cci_device_t * device,
 	ret = bind(gep->sock, (struct sockaddr*)&gep->sin, sizeof(gep->sin));
 	if (ret == -1) {
 		ret = errno;
-		debug(CCI_DB_DRVR, "%s: bind() returned %s", __func__,
+		debug(CCI_DB_CTP, "%s: bind() returned %s", __func__,
 			strerror(ret));
 		goto out;
 	}

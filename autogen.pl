@@ -23,7 +23,7 @@ use Data::Dumper;
 # The m4 file we'll write at the end
 my $m4_output_file = "config/autogen_found_items.m4";
 # Sanity check file
-my $topdir_file = "include/cci/config.h";
+my $topdir_file = "include/cci/private_config.h";
 
 # Data structure to fill up with all the stuff we find
 my $found_items;

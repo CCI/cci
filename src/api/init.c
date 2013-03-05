@@ -10,7 +10,7 @@
  *
  */
 
-#include "cci/config.h"
+#include "cci/private_config.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -27,6 +27,8 @@
 #include <asm/types.h>
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
+#else
+#define __linux__ 0
 #endif
 
 #include "cci.h"
@@ -81,8 +83,8 @@ static inline void cci__get_debug_env(void)
 			mask |= CCI_DB_INFO;
 		} else if (0 == strncmp(debug, "warn", 4)) {
 			mask |= CCI_DB_WARN;
-		} else if (0 == strncmp(debug, "drvr", 4)) {
-			mask |= CCI_DB_DRVR;
+		} else if (0 == strncmp(debug, "ctp", 4)) {
+			mask |= CCI_DB_CTP;
 		} else if (0 == strncmp(debug, "ep", 2)) {
 			mask |= CCI_DB_EP;
 		} else if (0 == strncmp(debug, "all", 3)) {
@@ -150,7 +152,7 @@ static int cci__free_configfile_devs(const char *reason)
 		dev = TAILQ_FIRST(&globals->configfile_devs);
 		TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
 		if (reason)
-			debug(CCI_DB_DRVR,
+			debug(CCI_DB_CTP,
 			      "destroying device [%s] (transport %s), %s",
 			      dev->device.name, dev->device.transport, reason);
 		cci__free_dev(dev);
@@ -185,7 +187,7 @@ void cci__add_dev(cci__dev_t * dev)
 
 	assert(NULL != dev->plugin);
 
-	debug(CCI_DB_DRVR,
+	debug(CCI_DB_CTP,
 	      "adding device [%s] (transport %s)",
 	      dev->device.name, dev->device.transport);
 
@@ -237,7 +239,7 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 	      "querying interface %s info with socket ioctls and ethtool...",
 	      ifaddr->ifa_name);
 
-#ifdef __linux__
+#if __linux__
 	/* identify the target interface for following socket ioctls */
 	memset(&ifr, 0, sizeof(ifr));
 	strncpy(ifr.ifr_name, ifaddr->ifa_name, IFNAMSIZ);
@@ -261,7 +263,7 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 	if (ioctl(sockfd, SIOCETHTOOL, &ifr) < 0) {
 		if (errno == EPERM) {
 			debug(CCI_DB_INFO,
-			      " ethtool get settings returned EPERM, falling back to custom ioctl");
+			      "%s", "ethtool get settings returned EPERM, falling back to custom ioctl");
 			goto out_with_sockfd;
 		}
 		if (errno != ENODEV && errno != EOPNOTSUPP) {
@@ -270,7 +272,7 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 		}
 		/* we won't get link rate anyhow */
 		debug(CCI_DB_INFO,
-		      " ethtool get settings not supported, cannot retrieve link rate");
+		      "%s", "ethtool get settings not supported, cannot retrieve link rate");
 	} else {
 		unsigned speed;
 		CCI_VALGRIND_MEMORY_MAKE_READABLE(&ecmd, sizeof(ecmd));
@@ -279,7 +281,7 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 #else
 		speed = ecmd.speed;
 #endif
-		device->rate = speed == -1 ? 0 : speed * 1000000ULL;
+		device->rate = (speed == (unsigned)-1) ? 0 : speed * 1000000ULL;
 	}
 
 	/* try to get the bus id now */
@@ -292,7 +294,7 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 		}
 		/* we won't get bus info anyhow */
 		debug(CCI_DB_INFO,
-		      " ethtool get drvinfo not supported, cannot retrieve pci id");
+		      "%s", "ethtool get drvinfo not supported, cannot retrieve pci id");
 	} else {
 		/* try to parse. if it fails, the device is not pci */
 		CCI_VALGRIND_MEMORY_MAKE_READABLE(&edi, sizeof(edi));
@@ -372,7 +374,7 @@ int cci__parse_config(const char *path)
 				}
 				if (transport == 1) {
 					TAILQ_INSERT_TAIL(&globals->configfile_devs, dev, entry);
-					debug(CCI_DB_DRVR,
+					debug(CCI_DB_CTP,
 					      "read device [%s] (transport %s) from config file",
 					      d->name, d->transport);
 					i++;
@@ -389,7 +391,7 @@ int cci__parse_config(const char *path)
 
 			if (i == CCI_MAX_DEVICES) {
 				debug(CCI_DB_WARN,
-				      "too many devices in CCI_CONFIG file");
+				      "%s", "too many devices in CCI_CONFIG file");
 				break;
 			}
 
@@ -515,7 +517,7 @@ int cci__parse_config(const char *path)
 		}
 		if (transport == 1) {
 			TAILQ_INSERT_TAIL(&globals->configfile_devs, dev, entry);
-			debug(CCI_DB_DRVR,
+			debug(CCI_DB_CTP,
 			      "read device [%s] (transport %s) from config file",
 			      d->name, d->transport);
 			i++;
@@ -644,7 +646,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 
 		/* list ready devices */
 		TAILQ_FOREACH(dev, &globals->devs, entry) {
-			debug(CCI_DB_DRVR,
+			debug(CCI_DB_CTP,
 			      "device [%s] (transport %s, default %d, priority %d, up %d) is ready",
 			      dev->device.name, dev->device.transport,
 			      dev->is_default, dev->priority, dev->device.up);

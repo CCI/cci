@@ -4,7 +4,7 @@
  * $COPYRIGHT$
  */
 
-#include "cci/config.h"
+#include "cci/private_config.h"
 
 #include <stdio.h>
 
@@ -15,12 +15,12 @@
 
 int cci_ctp_eth_post_load(cci_plugin_t * me)
 {
-	debug(CCI_DB_DRVR, "In eth post_load");
+	debug(CCI_DB_CTP, "%s", "In eth post_load");
 	return CCI_SUCCESS;
 }
 
 int cci_ctp_eth_pre_unload(cci_plugin_t * me)
 {
-	debug(CCI_DB_DRVR, "In eth pre_unload");
+	debug(CCI_DB_CTP, "%s", "In eth pre_unload");
 	return CCI_SUCCESS;
 }

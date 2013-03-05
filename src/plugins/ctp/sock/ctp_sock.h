@@ -13,12 +13,13 @@
 #ifndef CCI_CTP_SOCK_H
 #define CCI_CTP_SOCK_H
 
+#include "cci/private_config.h"
+
 #include <netinet/in.h>
 #include <assert.h>
 #include <arpa/inet.h>
 #include <sys/select.h>
 
-#include "cci/config.h"
 #include "cci.h"
 #include "cci_lib_types.h"
 #include "cci-api.h"

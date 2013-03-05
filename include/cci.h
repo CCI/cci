@@ -41,22 +41,16 @@
 #ifndef CCI_H
 #define CCI_H
 
-#include "cci/config.h"
+#include "cci/public_config.h"
 
-#ifdef HAVE_ERRNO_H
 #include <errno.h>
-#endif
-#ifdef HAVE_STDINT_H
-#include <stdint.h>
-#endif
-#ifdef HAVE_SYS_TYPES_H
+#include <stdint.h> /* may need to be fixed for windows */
 #include <sys/types.h>
-#endif
-#ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
-#endif
-#ifdef HAVE_SYS_UIO_H
 #include <sys/uio.h>
+
+#ifndef CCI_DECLSPEC
+#define CCI_DECLSPEC
 #endif
 
 /* ================================================================== */
@@ -1042,9 +1036,6 @@ typedef struct cci_event_connect_request {
   The ordering of fields in this struct is intended to reduce memory
   holes between fields.
 
-  This event should be passed to either cci_accept() or cci_reject()
-  before being returned with cci_return_event().
-
   \ingroup events
 */
 typedef struct cci_event_accept {
@@ -1375,7 +1366,7 @@ CCI_DECLSPEC int cci_set_opt(cci_opt_handle_t * handle,
   Get an endpoint or connection option value.
 
   \param[in] handle Endpoint or connection handle.
-  \param[in] name   Which option to set the value of.
+  \param[in] name   Which option to get the value of.
   \param[in] val    Pointer to the output value. The type of the value
                     must match the option name.
 

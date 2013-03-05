@@ -140,6 +140,7 @@ CFLAGS_save="$CFLAGS"
 AC_PROG_CC
 AM_PROG_CC_C_O
 CFLAGS="$CFLAGS_save"
+m4_ifdef([AM_PROG_AR], [AM_PROG_AR])
 
 # Define cci's configure arguments
 CCI_DEFINE_ARGS
