@@ -2016,6 +2016,9 @@ verbs_insert_conn(cci__conn_t *conn)
 }
 
 static int
+verbs_handle_conn_request(cci__ep_t * ep, struct rdma_cm_event *cm_evt);
+
+static int
 ctp_verbs_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	      const void *data_ptr, uint32_t data_len,
 	      cci_conn_attribute_t attribute,
@@ -2191,11 +2194,18 @@ ctp_verbs_connect(cci_endpoint_t * endpoint, const char *server_uri,
 				} else if (RDMA_CM_EVENT_ROUTE_RESOLVED ==
 					   event->event) {
 					done = 1;
+				} else if (event->event == RDMA_CM_EVENT_CONNECT_REQUEST) {
+					ret = verbs_handle_conn_request(ep, event);
+					if (ret)
+						debug(CCI_DB_CONN,
+							"%s: verbs_handle_conn_request()"
+							"returned %s", __func__,
+							strerror(ret));
+
 				} else {
-					printf
-					    ("Got %s while solving %s! Give up!!!\n",
-					     rdma_event_str(event->event),
-					     node);
+					debug(CCI_DB_CONN,
+						"Got %s while solving %s! Give up!!!\n",
+						rdma_event_str(event->event), node);
 					ret = CCI_EADDRNOTAVAIL;
 					rdma_ack_cm_event(event);
 					goto out;
