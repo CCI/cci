@@ -1444,24 +1444,6 @@ static int ctp_verbs_destroy_endpoint(cci_endpoint_t * endpoint)
 		ctp_verbs_disconnect(&conn->connection);
 	}
 
-	while (!TAILQ_EMPTY(&vep->active)) {
-		cci__conn_t *conn = NULL;
-		verbs_conn_t *vconn = NULL;
-
-		vconn = TAILQ_FIRST(&vep->active);
-		conn = vconn->conn;
-		ctp_verbs_disconnect(&conn->connection);
-	}
-
-	while (!TAILQ_EMPTY(&vep->passive)) {
-		cci__conn_t *conn = NULL;
-		verbs_conn_t *vconn = NULL;
-
-		vconn = TAILQ_FIRST(&vep->passive);
-		conn = vconn->conn;
-		ctp_verbs_disconnect(&conn->connection);
-	}
-
 	if (vep->srq) {
 		do {
 			ret = ibv_destroy_srq(vep->srq);
@@ -1842,15 +1824,8 @@ static int ctp_verbs_accept(cci_event_t * event, const void *context)
 
 	vconn->state = VERBS_CONN_ESTABLISHED;
 
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_TAIL(&vep->conns, vconn, entry);
-	pthread_mutex_unlock(&ep->lock);
-
 	ret = verbs_post_send(conn, (uintptr_t) tx, ptr, len, header);
 	if (ret) {
-		pthread_mutex_lock(&ep->lock);
-		TAILQ_REMOVE(&vep->conns, vconn, entry);
-		pthread_mutex_unlock(&ep->lock);
 		goto out;
 	}
 
@@ -2030,7 +2005,11 @@ verbs_insert_conn(cci__conn_t *conn)
 		node = tsearch(&vconn->qp_num, &vep->conn_tree, verbs_compare_u32);
 	} while (!node);
 	pthread_rwlock_unlock(&vep->conn_tree_lock);
-	debug(CCI_DB_CONN, "%s: added conn %p qp_num %u", __func__, (void*)conn, vconn->qp_num);
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_TAIL(&vep->conns, vconn, entry);
+	pthread_mutex_unlock(&ep->lock);
+	debug(CCI_DB_CONN, "%s [%s]: added conn %p qp_num %u", __func__,
+		ep->uri, (void*)conn, vconn->qp_num);
 
 	CCI_EXIT;
 	return;
@@ -2313,16 +2292,11 @@ static int ctp_verbs_disconnect(cci_connection_t * connection)
 	pthread_rwlock_unlock(&vep->conn_tree_lock);
 
 	pthread_mutex_lock(&ep->lock);
-	if (vconn->state == VERBS_CONN_ESTABLISHED ||
-		vconn->state == VERBS_CONN_CLOSED)
-		TAILQ_REMOVE(&vep->conns, vconn, entry);
-	else if (vconn->state == VERBS_CONN_ACTIVE)
+	TAILQ_REMOVE(&vep->conns, vconn, entry);
+	if (vconn->state == VERBS_CONN_ACTIVE)
 		TAILQ_REMOVE(&vep->active, vconn, temp);
 	else if (vconn->state == VERBS_CONN_PASSIVE)
 		TAILQ_REMOVE(&vep->passive, vconn, temp);
-	else
-		debug(CCI_DB_CONN, "%s: disconnecting conn in %s",
-			__func__, verbs_conn_state_str(vconn->state));
 	pthread_mutex_unlock(&ep->lock);
 
 	if (vconn->conn_req) {
@@ -3106,10 +3080,6 @@ static int verbs_handle_conn_reply(cci__ep_t * ep, struct ibv_wc wc)
 		ret = ibv_query_qp(vconn->id->qp, &attr, IBV_QP_CAP, &init);
 		if (!ret)
 			vconn->inline_size = init.cap.max_inline_data;
-
-		pthread_mutex_lock(&ep->lock);
-		TAILQ_INSERT_TAIL(&vep->conns, vconn, entry);
-		pthread_mutex_unlock(&ep->lock);
 	} else {
 		rx->evt.event.connect.connection = NULL;
 	}
