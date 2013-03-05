@@ -18,7 +18,7 @@
 #pragma warning(disable:981)
 #pragma warning(disable:1338)
 #pragma warning(disable:2259)
-#endif //   __INTEL_COMPILER
+#endif /*   __INTEL_COMPILER	*/
 
 #include "cci/private_config.h"
 
@@ -125,6 +125,7 @@ static inline int pack_piggyback_ack (cci__ep_t *ep,
 					sock_conn_t *sconn, sock_tx_t *tx);
 static inline int sock_ack_sconn (sock_ep_t *sep, sock_conn_t *sconn);
 static int sock_recvfrom_ep(cci__ep_t * ep);
+int progress_recv (cci__ep_t *ep);
 
 /*
 * Public plugin structure.
@@ -509,7 +510,7 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 out:
 	if (devices) {
 		int i = 0;
-		cci_device_t const *device;
+		cci_device_t *device;
 		cci__dev_t *my_dev;
 
 		while (devices[i] != NULL) {
@@ -670,14 +671,16 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 		ret = setsockopt (sep->sock, SOL_SOCKET, SO_SNDBUF,
 		                  &sndbuf_size, sizeof (sndbuf_size));
 		if (ret == -1)
-			debug (CCI_DB_WARN, "Cannot set send buffer size");
+			debug (CCI_DB_WARN,
+			       "%s: Cannot set send buffer size", __func__);
 	}
 
 	if (rcvbuf_size > 0) {
 		ret = setsockopt (sep->sock, SOL_SOCKET, SO_RCVBUF,
 		                  &rcvbuf_size, sizeof (rcvbuf_size));
 		if (ret == -1)
-			debug (CCI_DB_WARN, "Cannot set recv buffer size");
+			debug (CCI_DB_WARN, "%s: Cannot set recv buffer size",
+			       __func__);
 	}
 
 #if CCI_DEBUG
@@ -688,7 +691,8 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 		ret = getsockopt (sep->sock, SOL_SOCKET, SO_SNDBUF,
 				  &sndbuf_size, &optlen);
 		if (ret == -1)
-			debug (CCI_DB_WARN, "Cannot get send buffer size");
+			debug (CCI_DB_WARN, "%s: Cannot get send buffer size",
+			       __func__);
 		debug (CCI_DB_CTP, "Send buffer size: %d bytes (you may also "
 		       "want to check the value of net.core.wmem_max using "
 		       "sysctl)", sndbuf_size);
@@ -697,7 +701,8 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 		ret = getsockopt (sep->sock, SOL_SOCKET, SO_RCVBUF,
 		                  &rcvbuf_size, &optlen);
 		if (ret == -1)
-			debug (CCI_DB_WARN, "Cannot get recv buffer size");
+			debug (CCI_DB_WARN, "%s: Cannot get recv buffer size",
+			       __func__);
 		debug (CCI_DB_CTP, "Receive buffer size: %d bytes (you may also "
                        "want to check the value of net.core.rmem_max using "
                        "sysctl)", rcvbuf_size);
@@ -1123,10 +1128,11 @@ static int ctp_sock_accept(cci_event_t *event, const void *context)
 	conn->connection.context = (void *)context;
 	conn->connection.max_send_size = dev->device.max_send_size;
 
-	hs = (sock_handshake_t *)(rx->buffer + (uintptr_t) sizeof(sock_header_r_t));
+	hs = (sock_handshake_t *)((uintptr_t)rx->buffer +
+	                          (uintptr_t) sizeof(sock_header_r_t));
 	sock_parse_handshake(hs, &id, &ack, &max_recv_buffer_count, &mss, &ka);
 	if (ka != 0UL) {
-		debug(CCI_DB_CONN, "keepalive timeout: %d", ka);
+		debug(CCI_DB_CONN, "%s: keepalive timeout: %d", __func__, ka);
 		conn->keepalive_timeout = ka;
 	}
 	if (mss < SOCK_MIN_MSS) {
@@ -1187,7 +1193,7 @@ static int ctp_sock_accept(cci_event_t *event, const void *context)
 				sconn->peer_id);
 	sock_pack_seq_ts(&hdr_r->seq_ts, sconn->seq,
 			(uint32_t) sconn->last_ack_ts);
-	hs = (sock_handshake_t *) (tx->buffer + sizeof(*hdr_r));
+	hs = (sock_handshake_t *) ((uintptr_t)tx->buffer + sizeof(*hdr_r));
 	sock_pack_handshake(hs, sconn->id, peer_seq,
 				ep->rx_buf_cnt,
 				conn->connection.max_send_size, 0);
@@ -1196,7 +1202,7 @@ static int ctp_sock_accept(cci_event_t *event, const void *context)
 	tx->seq = sconn->seq;
 
 	debug(CCI_DB_CONN, "queuing conn_reply with seq %u ts %x", 
-		sconn->seq, sconn->ts);	// FIXME
+		sconn->seq, sconn->ts);
 
 	/* insert at tail of device's queued list */
 
@@ -1569,7 +1575,7 @@ static int ctp_sock_connect(cci_endpoint_t * endpoint, const char *server_uri,
 				connection->max_send_size, keepalive);
 
 	tx->len += sizeof(*hs);
-	ptr = tx->buffer + tx->len;
+	ptr = (void*)((uintptr_t)tx->buffer + tx->len);
 
 	debug(CCI_DB_CONN, "queuing conn_request with seq %u ts %x",
 		tx->seq, ts);
@@ -2546,7 +2552,7 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 		sock_pack_seq_ts(&hdr_r->seq_ts, tx->seq, ts);
 		tx->len = sizeof(*hdr_r);
 	}
-	ptr = tx->buffer + tx->len;
+	ptr = (void*)((uintptr_t)tx->buffer + tx->len);
 
 	/* copy user data to buffer
 	* NOTE: ignore CCI_FLAG_NO_COPY because we need to
@@ -2555,7 +2561,7 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 
 	for (i = 0; i < iovcnt; i++) {
 		memcpy(ptr, data[i].iov_base, data[i].iov_len);
-		ptr += data[i].iov_len;
+		ptr = (void*)((uintptr_t)ptr + data[i].iov_len);
 		tx->len += data[i].iov_len;
 	}
 
@@ -2901,7 +2907,7 @@ static int ctp_sock_rma(cci_connection_t * connection,
 
 			if (flags & CCI_FLAG_WRITE) {
 				tx->rma_len = tx->len;
-				tx->rma_ptr = (void*)(uintptr_t)(local->start + local_offset + offset);
+				tx->rma_ptr = (void*)((uintptr_t)local->start + local_offset + offset);
 				tx->msg_type = SOCK_MSG_RMA_WRITE;
 				sock_pack_rma_write(rma_hdr, tx->len,
 				        sconn->peer_id,
@@ -3015,7 +3021,7 @@ static inline void sock_handle_seq(sock_conn_t * sconn, uint32_t seq)
 
 			/* Forcing ACK */
 			if (ack->end - ack->start >= PENDING_ACK_THRESHOLD) {
-				debug(CCI_DB_MSG, "Forcing ACK");
+				debug(CCI_DB_MSG, "%s: Forcing ACK", __func__);
 				pthread_mutex_unlock(&ep->lock);
 				sock_ack_conns (ep);
 				pthread_mutex_lock(&ep->lock);
@@ -3485,7 +3491,9 @@ sock_handle_ack(sock_conn_t * sconn,
 								rma_op->local_offset + offset,
 								rma_op->remote_handle->stuff[0],
 								rma_op->remote_offset + offset);
-					memcpy(write->data, local->start + offset, tx->len);
+					memcpy(write->data,
+					       (void*)((uintptr_t)local->start + offset),
+					       tx->len);
 				} else {
 					tx->msg_type = SOCK_MSG_RMA_READ_REQUEST;
 					/* FIXME: not nice to use a "write" variable here, esp since
@@ -3499,7 +3507,6 @@ sock_handle_ack(sock_conn_t * sconn,
 				}
 
 				/* now include the header */
-				//tx->len += sizeof(sock_rma_header_t);
 				TAILQ_INSERT_TAIL(&queued, tx, dentry);
 				continue;
 			} else if (rma_op->completed == rma_op->num_msgs) {
@@ -3746,9 +3753,10 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,	/* NULL if rejected */
 		uint32_t peer_id, ack, max_recv_buffer_count, mss, keepalive;
 		struct s_active *active_list;
 
-		debug(CCI_DB_CONN, "transition active connection to ready");
+		debug(CCI_DB_CONN, "%s: transition active connection to ready",
+		      __func__);
 
-		hs = (sock_handshake_t *) (rx->buffer + sizeof(*hdr_r));
+		hs = (sock_handshake_t *) ((uintptr_t)rx->buffer + sizeof(*hdr_r));
 		/* With conn_reply, we do not care about the keepalive param */
 		sock_parse_handshake(hs, &peer_id, &ack, &max_recv_buffer_count,
 					&mss, &keepalive);
@@ -3967,19 +3975,17 @@ sock_handle_rma_read_reply(sock_conn_t *sconn, sock_rx_t *rx,
 	void *ptr = NULL;
 	sock_header_r_t *hdr_r;
 	uint32_t seq, ts;
-	uint32_t rma_read_seq;
 
 	CCI_ENTER;
 
 	UNUSED_PARAM (tx_id);
 
 	hdr_r = (sock_header_r_t *) rx->buffer;
-	rma_read_seq = hdr_r->pb_ack;
 	sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
 
 	debug(CCI_DB_MSG, 
-		"%s: recv'ing RMA_READ_REPLY on conn %p with len %u",
-		__func__, conn, len, rma_read_seq);
+	      "%s: recv'ing RMA_READ_REPLY on conn %p with len %u",
+	      __func__, (void*)conn, len);
 
 	sock_parse_rma_handle_offset(&read->local, &local_handle, &local_offset);
 	local = (sock_rma_handle_t *) (uintptr_t) local_handle;
@@ -4019,7 +4025,7 @@ sock_handle_rma_read_reply(sock_conn_t *sconn, sock_rx_t *rx,
 	debug(CCI_DB_MSG, "%s: recv'ing data into target buffer (%u bytes)",
 	      __func__, len);
 
-	ptr = local->start + (uintptr_t) local_offset;
+	ptr = (void*)((uintptr_t)local->start + (uintptr_t) local_offset);
 	memcpy(ptr, &read->data, len);
 	debug(CCI_DB_INFO, "%s: recv'd data into target buffer", __func__);
 	if (ret)
@@ -4174,7 +4180,7 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	sock_rma_header_t *rma_hdr;
 	sock_rma_handle_t *remote, *h;
 	sock_header_r_t *hdr_r;
-	sock_tx_t *tx;
+	sock_tx_t *tx = NULL;
 
 	hdr_r = (sock_header_r_t *) rx->buffer;
 	sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
@@ -4233,7 +4239,8 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	tx->state = SOCK_TX_QUEUED;
 	tx->len = sizeof(sock_rma_header_t);
 	tx->rma_op = NULL;
-	tx->rma_ptr = remote->start + (uintptr_t) remote_offset;
+	tx->rma_ptr
+	    = (void*)((uintptr_t)remote->start + (uintptr_t) remote_offset);
 	tx->rma_len = len;
 
 	tx->evt.event.type = CCI_EVENT_SEND;
@@ -4324,8 +4331,7 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 		//       the ack until we deliver the data.
 
 		goto out;
-	} else if (remote->start + (uintptr_t) remote_offset >
-		remote->start + (uintptr_t) remote->length) {
+	} else if (remote_offset > remote->length) {
 		/* offset exceeds remote handle's range, send nak */
 		debug(CCI_DB_WARN, "%s: remote offset not valid", __func__);
 		// TODO
@@ -4335,8 +4341,7 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 		//       the ack until we deliver the data.
 
 		goto out;
-	} else if (remote->start + (uintptr_t) remote_offset + (uintptr_t) len >
-		remote->start + (uintptr_t) remote->length) {
+	} else if (remote_offset + len > remote->length) {
 		/* length exceeds remote handle's range, send nak */
 		debug(CCI_DB_WARN, "%s: remote length not valid", __func__);
 		// TODO
@@ -4350,7 +4355,8 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 
 	/* valid remote handle, copy the data */
 	debug(CCI_DB_INFO, "%s: copying data into target buffer", __func__);
-	memcpy(remote->start + (uintptr_t) remote_offset, &write->data, len);
+	memcpy((void*)((uintptr_t)remote->start + remote_offset),
+	       &write->data, len);
 
 out:
 	/* We force the ACK */
@@ -4436,8 +4442,8 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 	cci__conn_t *conn = NULL;
 	sock_ep_t *sep;
 	sock_msg_type_t type;
-	uint32_t seq;
-	uint32_t ts;
+	uint32_t seq = 0;
+	uint32_t ts = 0;
 
 	CCI_ENTER;
 
@@ -4489,7 +4495,8 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 				0, (struct sockaddr *)&sin, &sin_len);
 		if (ret < (int)sizeof(sock_header_t)) {
 			debug(CCI_DB_INFO,
-			      "Did not receive enough data to get the header");
+			      "%s: Not enough data to get the header",
+			      __func__);
 			CCI_EXIT;
 			return 0;
 		}
@@ -4505,7 +4512,8 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 			/* If the connection is not already established, we
 			   just drop the message */
 			debug(CCI_DB_INFO,
-			      "Connection not established, dropping msg\n");
+			      "%s: Connection not established, dropping msg",
+			      __func__);
 			CCI_EXIT;
 			return 0;
 		}
@@ -4792,7 +4800,8 @@ static void sock_keepalive(cci__ep_t *ep)
 				int rc;
 				rc = write (sep->fd[1], "a", 1);
 				if (rc != 1) {
-					debug (CCI_DB_WARN, "Write failed");
+					debug (CCI_DB_WARN,
+					       "%s: Write failed", __func__);
 					return;
 				}
 			}
@@ -4867,7 +4876,8 @@ static inline int sock_ack_sconn (sock_ep_t *sep, sock_conn_t *sconn)
 			if (SOCK_U64_LT(now, sconn->last_ack_ts + ACK_TIMEOUT) &&
 				count <= PENDING_ACK_THRESHOLD)
 			{
-				debug (CCI_DB_MSG, "Delaying ACK");
+				debug (CCI_DB_MSG,
+				       "%s: Delaying ACK", __func__);
 				return 0;
 			}
 			
@@ -4889,7 +4899,8 @@ static inline int sock_ack_sconn (sock_ep_t *sep, sock_conn_t *sconn)
 			if (SOCK_U64_LT(now, sconn->last_ack_ts + ACK_TIMEOUT)
 				&& (ack->end - ack->start < PENDING_ACK_THRESHOLD))
 			{
-				debug (CCI_DB_MSG, "Delaying ACK");
+				debug (CCI_DB_MSG,
+				       "%s: Delaying ACK", __func__);
 				return 0;
 			}
 			TAILQ_REMOVE(&sconn->acks, ack, entry);
@@ -4911,7 +4922,7 @@ static inline int sock_ack_sconn (sock_ep_t *sep, sock_conn_t *sconn)
 		len = sizeof(*hdr_r) + (count * sizeof(acks[0]));
 		ret = sock_sendto(sep->sock, buffer, len, NULL, 0, sconn->sin);
 		if (ret == -1)
-			debug (CCI_DB_WARN, "ACK send failed");
+			debug (CCI_DB_WARN, "%s: ACK send failed", __func__);
 		sconn->last_ack_ts = now;
 	}
 	
@@ -5025,7 +5036,8 @@ static void *sock_progress_thread(void *arg)
 	return (NULL);		/* make pgcc happy */
 }
 
-int progress_recv (cci__ep_t *ep) {
+int progress_recv (cci__ep_t *ep)
+{
 	sock_ep_t *sep;
 	int ret = 0;
 	struct timeval tv = { 0, SOCK_PROG_TIME_US };
@@ -5042,7 +5054,9 @@ int progress_recv (cci__ep_t *ep) {
 		if (ret == -1) {
 			switch (errno) {
 			case EBADF:
-				debug(CCI_DB_INFO, "select() failed with %s", strerror(errno));
+				debug(CCI_DB_INFO,
+				      "select() failed with %s",
+				      strerror(errno));
 				break;
 			default:
 				break;
@@ -5064,8 +5078,9 @@ int progress_recv (cci__ep_t *ep) {
 			int count = ret;
 			int i;
 
-			debug(CCI_DB_EP, "%s: epoll_wait() found %d event(s)", __func__, 
-				count);
+			debug(CCI_DB_EP,
+			      "%s: epoll_wait() found %d event(s)", __func__, 
+			      count);
 			for (i = 0; i < count; i++) {
 				int (*func)(cci__ep_t*) = events[i].data.ptr;
 				if ((events[i].events & EPOLLIN)) {
