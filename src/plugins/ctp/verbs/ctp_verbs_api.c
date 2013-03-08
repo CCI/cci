@@ -4221,6 +4221,11 @@ ctp_verbs_rma(cci_connection_t * connection,
 	vep = ep->priv;
 
 	if (!local || local->ep != ep) {
+		if (!local)
+			debug(CCI_DB_MSG, "%s [%s]: local is NULL", __func__, ep->uri);
+		else
+			debug(CCI_DB_MSG, "%s [%s]: local->ep %p != ep %p",
+				__func__, ep->uri, (void*)local->ep, (void*)ep);
 		CCI_EXIT;
 		return CCI_EINVAL;
 	}
