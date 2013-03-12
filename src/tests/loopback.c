@@ -11,6 +11,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <assert.h>
 
 #include "cci.h"
@@ -77,7 +78,7 @@ int main(int argc, char *argv[])
 	assert(event->request.data_len == 13);
 	assert(!strcmp(event->request.data_ptr, "hello world!"));
 	printf("got data len %d data %s\n",
-	       event->request.data_len, event->request.data_ptr);
+	       event->request.data_len, (char*) event->request.data_ptr);
 	assert(event->request.attribute == CCI_CONN_ATTR_RO);
 	printf("got attr %d\n", event->request.attribute);
 	ret = cci_return_event(event);
@@ -115,7 +116,7 @@ int main(int argc, char *argv[])
 	assert(event->request.data_len == 13);
 	assert(!strcmp(event->request.data_ptr, "hello world!"));
 	printf("got data len %d data %s\n",
-	       event->request.data_len, event->request.data_ptr);
+	       event->request.data_len, (char *) event->request.data_ptr);
 	assert(event->request.attribute == CCI_CONN_ATTR_RU);
 	printf("got attr %d\n", event->request.attribute);
 	ret = cci_reject(event);
@@ -160,7 +161,7 @@ int main(int argc, char *argv[])
 	assert(event->request.data_len == 13);
 	assert(!strcmp(event->request.data_ptr, "hello world!"));
 	printf("got data len %d data %s\n",
-	       event->request.data_len, event->request.data_ptr);
+	       event->request.data_len, (char *) event->request.data_ptr);
 	assert(event->request.attribute == CCI_CONN_ATTR_UU);
 	printf("got attr %d\n", event->request.attribute);
 	ret = cci_accept(event, (void *)0xfedcba98);
@@ -183,7 +184,7 @@ int main(int argc, char *argv[])
 			assert(event->connect.connection != NULL);
 			cconn = event->connect.connection;
 			printf("got conn %p attr %d context %p mss %d\n",
-			       cconn, cconn->attribute, cconn->context, cconn->max_send_size);
+			       (void *) cconn, cconn->attribute, cconn->context, cconn->max_send_size);
 			assert(cconn->endpoint == endpoint);
 			assert(cconn->context == (void *)0xdeadbeef);
 			ret = cci_return_event(event);
@@ -197,7 +198,7 @@ int main(int argc, char *argv[])
 			assert(event->connect.connection != NULL);
 			sconn = event->connect.connection;
 			printf("accepted conn %p attr %d mss %d\n",
-			       sconn, sconn->attribute, sconn->max_send_size);
+			       (void *) sconn, sconn->attribute, sconn->max_send_size);
 			assert(sconn->endpoint == endpoint);
 			assert(sconn->context == (void *)0xfedcba98);
 			ret = cci_accept(event, NULL);
@@ -227,7 +228,7 @@ int main(int argc, char *argv[])
 			/* handle send completion */
 			assert(need_events & 1);
 			need_events &= ~1;
-			printf("got send completion context %llx\n", event->send.context);
+			printf("got send completion context %llx\n", (unsigned long long)(uintptr_t) event->send.context);
 			assert(event->send.connection == cconn);
 			assert(event->send.context == (void *)0x012345678);
 			ret = cci_return_event(event);
@@ -238,7 +239,7 @@ int main(int argc, char *argv[])
 			need_events &= ~2;
 			assert(event->recv.len == 11);
 			assert(!strcmp(event->recv.ptr, "bye world!"));
-			printf("got msg len %d data %s\n", event->recv.len, event->recv.ptr);
+			printf("got msg len %d data %s\n", event->recv.len, (char *) event->recv.ptr);
 			assert(event->recv.connection == sconn);
 			ret = cci_return_event(event);
 			assert(ret == CCI_SUCCESS);
@@ -269,7 +270,7 @@ int main(int argc, char *argv[])
 	assert(event->request.data_len == 13);
 	assert(!strcmp(event->request.data_ptr, "hello world!"));
 	printf("got data len %d data %s\n",
-	       event->request.data_len, event->request.data_ptr);
+	       event->request.data_len, (char *) event->request.data_ptr);
 	assert(event->request.attribute == CCI_CONN_ATTR_RO);
 	printf("got attr %d\n", event->request.attribute);
 	ret = cci_accept(event, (void *)0xfedcba98);
@@ -292,7 +293,7 @@ int main(int argc, char *argv[])
 			assert(event->connect.connection != NULL);
 			cconn = event->connect.connection;
 			printf("got conn %p attr %d context %p mss %d\n",
-			       cconn, cconn->attribute, cconn->context, cconn->max_send_size);
+			       (void *) cconn, cconn->attribute, cconn->context, cconn->max_send_size);
 			assert(cconn->endpoint == endpoint);
 			assert(cconn->context == (void *)0xdeadbeef);
 			ret = cci_return_event(event);
@@ -306,7 +307,7 @@ int main(int argc, char *argv[])
 			assert(event->connect.connection != NULL);
 			sconn = event->connect.connection;
 			printf("accepted conn %p attr %d mss %d\n",
-			       sconn, sconn->attribute, sconn->max_send_size);
+			       (void *) sconn, sconn->attribute, sconn->max_send_size);
 			assert(sconn->endpoint == endpoint);
 			assert(sconn->context == (void *)0xfedcba98);
 			ret = cci_accept(event, NULL);
@@ -333,7 +334,7 @@ int main(int argc, char *argv[])
 	assert(event->type == CCI_EVENT_RECV);
 	assert(event->recv.len == 11);
 	assert(!strcmp(event->recv.ptr, "bye world!"));
-	printf("got msg len %d data %s\n", event->recv.len, event->recv.ptr);
+	printf("got msg len %d data %s\n", event->recv.len, (char *) event->recv.ptr);
 	assert(event->recv.connection == sconn);
 	ret = cci_return_event(event);
 	assert(ret == CCI_SUCCESS);
@@ -358,7 +359,7 @@ int main(int argc, char *argv[])
 	assert(event->type == CCI_EVENT_RECV);
 	assert(event->recv.len == 11);
 	assert(!strcmp(event->recv.ptr, "bye world!"));
-	printf("got msg len %d data %s\n", event->recv.len, event->recv.ptr);
+	printf("got msg len %d data %s\n", event->recv.len, (char *) event->recv.ptr);
 	assert(event->recv.connection == sconn);
 	ret = cci_return_event(event);
 	assert(ret == CCI_SUCCESS);
@@ -380,7 +381,7 @@ int main(int argc, char *argv[])
 			/* handle send completion */
 			assert(need_events & 1);
 			need_events &= ~1;
-			printf("got send completion context %llx\n", event->send.context);
+			printf("got send completion context %llx\n", (unsigned long long)(uintptr_t) event->send.context);
 			assert(event->send.connection == cconn);
 			assert(event->send.context == (void *)0x012345678);
 			ret = cci_return_event(event);
@@ -391,7 +392,7 @@ int main(int argc, char *argv[])
 			need_events &= ~2;
 			assert(event->recv.len == 11);
 			assert(!strcmp(event->recv.ptr, "bye world!"));
-			printf("got msg len %d data %s\n", event->recv.len, event->recv.ptr);
+			printf("got msg len %d data %s\n", event->recv.len, (char *) event->recv.ptr);
 			assert(event->recv.connection == sconn);
 			ret = cci_return_event(event);
 			assert(ret == CCI_SUCCESS);
