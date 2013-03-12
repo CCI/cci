@@ -1035,6 +1035,7 @@ static int ctp_eth_rma_register(cci_endpoint_t * endpoint,
 {
 	cci__ep_t *_ep = container_of(endpoint, cci__ep_t, endpoint);
 	eth__ep_t *eep = _ep->priv;
+	eth__rma_handle_t *handle;
 	struct ccieth_ioctl_rma_register arg;
 	int ret;
 
@@ -1045,18 +1046,29 @@ static int ctp_eth_rma_register(cci_endpoint_t * endpoint,
 	arg.buffer_ptr = (uintptr_t) start;
 	arg.buffer_len = length;
 
+	handle = malloc(sizeof(*handle));
+	if (!handle) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
 	ret = ioctl(eep->fd, CCIETH_IOCTL_RMA_REGISTER, &arg);
 	if (ret < 0) {
 		perror("ioctl rma register");
 		ret = errno;
-		goto out;
+		goto out_with_handle;
 	} else {
-		*rma_handle = arg.handle;
+		*((uint64_t*)&handle->rma_handle.stuff[0]) = arg.handle;
+		*((uint64_t*)&handle->rma_handle.stuff[3]) = (uintptr_t) handle; /* not used yet, will need for userspace bookkeeping */
+		*rma_handle = &handle->rma_handle;
 	}
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
 
+
+out_with_handle:
+	free(handle);
 out:
 	CCI_EXIT;
 	return ret;
@@ -1064,6 +1076,7 @@ out:
 
 static int ctp_eth_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * rma_handle)
 {
+	eth__rma_handle_t *handle = (void*)((uintptr_t)rma_handle->stuff[3]);
 	struct ccieth_ioctl_rma_deregister arg;
 	cci__ep_t *_ep = container_of(endpoint, cci__ep_t, endpoint);
 	eth__ep_t *eep = _ep->priv;
@@ -1071,7 +1084,7 @@ static int ctp_eth_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * 
 
 	CCI_ENTER;
 
-	arg.handle = rma_handle;
+	arg.handle = rma_handle->stuff[0];
 
 	ret = ioctl(eep->fd, CCIETH_IOCTL_RMA_DEREGISTER, &arg);
 	if (ret < 0) {
@@ -1079,6 +1092,8 @@ static int ctp_eth_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * 
 		ret = errno;
 		goto out;
 	}
+
+	free(handle);
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -1124,9 +1139,9 @@ static int ctp_eth_rma(cci_connection_t * connection,
 	arg.msg_ptr = (uintptr_t) msg_ptr;
 	arg.msg_len = msg_len;
 	arg.context = (uintptr_t) context;
-	arg.local_handle = local_handle;
+	arg.local_handle = local_handle->stuff[0];
 	arg.local_offset = local_offset;
-	arg.remote_handle = remote_handle;
+	arg.remote_handle = remote_handle->stuff[0];
 	arg.remote_offset = remote_offset;
 	arg.data_len = data_len;
 	arg.flags = flags;
