@@ -1,7 +1,7 @@
 /*
  * CCI over Ethernet
  *
- * Copyright © 2011-2012 Inria.  All rights reserved.
+ * Copyright © 2011-2013 Inria.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -34,7 +34,6 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 {
 	struct ccieth_driver_event *event, *nevent;
 	struct net_device *ifp;
-	int destroyed_conn = 0;
 	int must_put_ifp = 0;
 
 	spin_lock(&ccieth_ep_idr_lock);
@@ -43,11 +42,13 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 
 	/* the network cannot start new receive handlers now, but some may be running */
 	synchronize_net();
-	/* all receive handlers are gone now */
+	/* all receive handlers are gone now.
+	 * but some deferred-works, connection-timers and rcu-callbacks may still be in-flight */
 
-	cancel_work_sync(&ep->deferred_connect_recv_work);
 	skb_queue_purge(&ep->deferred_connect_recv_queue);
-	/* pending network work is gone as well now */
+	cancel_work_sync(&ep->deferred_connect_recv_work);
+	/* pending network work is gone as well now.
+	 * but some connection-timers and rcu-callbacks may still be in-flight */
 
 	/* release the interface, but make sure a netdevice notifier
 	 * isn't already doing it inside a call_rcu */
@@ -57,17 +58,16 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 		must_put_ifp = 1;
 	rcu_read_unlock();
 
-	/* no new users now, but some possible deferred works for connections */
+	/* destroy remaining connections */
+	ccieth_destroy_endpoint_connections(ep);
 
-	idr_for_each(&ep->connection_idr, ccieth_destroy_connection_idrforeach_cb,
-		     &destroyed_conn);
-	dprintk("destroyed %d connections on endpoint destroy\n", destroyed_conn);
-	idr_remove_all(&ep->connection_idr);
-
-	/* some rcu callbacks may be in flight, either users of ep->ifp,
-	 * or because of deferred connection destruction (which may release endpoint events)
+	/* connection-timers are gone.
+	 * some rcu callbacks may be in flight, either users of ep->ifp,
+	 * or because of deferred connection destruction (which may release endpoint events).
 	 */
 	rcu_barrier();
+
+	/* no more rcu callbacks, we may finally release everything else */
 
 	if (must_put_ifp)
 		dev_put(ifp);
@@ -85,7 +85,6 @@ ccieth_destroy_endpoint(struct ccieth_endpoint *ep)
 
 	idr_destroy(&ep->connection_idr);
 #ifdef CONFIG_CCIETH_DEBUGFS
-	/* no that connection debugfs entries are gone, remove the endpoint debugfs dir */
 	if (ep->debugfs_dir)
 		debugfs_remove_recursive(ep->debugfs_dir);
 #endif
