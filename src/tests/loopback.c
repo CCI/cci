@@ -24,10 +24,12 @@ int main(int argc, char *argv[])
 	int fd;
 	cci_connection_t *sconn, *cconn;
 	cci_event_t *event, *ignored_connreq;
+	cci_rma_handle_t *handle;
 	cci_status_t ret;
 	char *uri;
 	struct timeval tv;
 	struct iovec iov[3];
+	char buffer[64];
 	int need_events;
 
 	putenv("CCI_CTP_ETH_ALLOW_LOOPBACK=1");
@@ -405,6 +407,13 @@ int main(int argc, char *argv[])
 	ret = cci_disconnect(cconn);
 	assert(ret == CCI_SUCCESS);
 	ret = cci_disconnect(sconn);
+	assert(ret == CCI_SUCCESS);
+
+	printf("RMA register\n");
+	ret = cci_rma_register(endpoint, buffer, sizeof(buffer), CCI_FLAG_READ, &handle);
+	assert(ret == CCI_SUCCESS);
+	printf("RMA deregister\n");
+	ret = cci_rma_deregister(endpoint, handle);
 	assert(ret == CCI_SUCCESS);
 
 	printf("END\n");
