@@ -155,7 +155,13 @@ static void poll_events(void)
 		assert(event);
 		switch (event->type) {
 		case CCI_EVENT_SEND:
-			assert(event->send.status == CCI_SUCCESS);
+			if (event->send.status != CCI_SUCCESS) {
+				fprintf(stderr, "RMA failed with %s.\n",
+					cci_strerror(endpoint, event->send.status));
+				cci_disconnect(connection);
+				connection = NULL;
+				done = 1;
+			}
 			if (is_server)
 				break;
 			/* Client */
@@ -286,7 +292,7 @@ static void do_client(void)
 				current_size);
 		msg_len = sizeof(msg.check);
 
-		fprintf(stderr, "Testing length %u\n", current_size);
+		fprintf(stderr, "Testing length %9u ... ", current_size);
 
 		ret = cci_rma(connection, &msg, msg_len,
 			      local_rma_handle, local_offset,
@@ -297,7 +303,10 @@ static void do_client(void)
 		while (count < iters)
 			poll_events();
 
-		fprintf(stderr, "Successfully completed size %u\n", current_size);
+		if (connection)
+			fprintf(stderr, "success.\n");
+		else
+			goto out;
 
 		count = 0;
 		current_size *= 2;
@@ -313,7 +322,7 @@ static void do_client(void)
 
 	while (!done)
 		poll_events();
-
+out:
 	ret = cci_rma_deregister(endpoint, local_rma_handle);
 	check_return(endpoint, "cci_rma_deregister", ret, 1);
 
@@ -512,9 +521,9 @@ int main(int argc, char *argv[])
 
 	if (opts.reg_len == length) {
 		if (local_offset || remote_offset) {
-			fprintf(stderr, "RMA registration length == RMA length "
-					"and an offset was requested.\n"
-					"This should cause an error\n.");
+			fprintf(stderr, "*** RMA registration length == RMA length "
+					"and an offset was requested. ***\n"
+					"*** This should cause an error. ***\n");
 		}
 	}
 
