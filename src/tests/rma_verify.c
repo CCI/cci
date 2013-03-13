@@ -40,7 +40,10 @@ uint64_t remote_offset = 0;
 uint64_t length = 0;
 cci_device_t **devices = NULL;
 cci_endpoint_t *endpoint = NULL;
-cci_connection_t *connection = NULL;
+#define CONTROL 1
+#define TEST 2
+cci_connection_t *control = NULL;
+cci_connection_t *test = NULL;
 cci_conn_attribute_t attr = CCI_CONN_ATTR_RU;
 cci_rma_handle_t *local_rma_handle = NULL;
 cci_rma_handle_t remote_rma_handle;
@@ -61,6 +64,7 @@ typedef struct options {
 options_t opts;
 
 typedef enum msg_type {
+	MSG_CONTROL,
 	MSG_CONN_REQ,
 	MSG_CONN_REPLY,
 	MSG_RMA_CHK,
@@ -158,8 +162,8 @@ static void poll_events(void)
 			if (event->send.status != CCI_SUCCESS) {
 				fprintf(stderr, "RMA failed with %s.\n",
 					cci_strerror(endpoint, event->send.status));
-				cci_disconnect(connection);
-				connection = NULL;
+				cci_disconnect(test);
+				test = NULL;
 				done = 1;
 			}
 			if (is_server)
@@ -172,7 +176,7 @@ static void poll_events(void)
 			/* RMA completed */
 			count++;
 			if (count < iters) {
-				ret = cci_rma(connection,
+				ret = cci_rma(test,
 						&msg,
 						msg_len,
 						local_rma_handle,
@@ -223,8 +227,13 @@ static void poll_events(void)
 			}
 			break;
 		case CCI_EVENT_CONNECT:
-			connect_done = 1;
-			connection = event->connect.connection;
+			if ((uintptr_t)event->connect.context == (uintptr_t)CONTROL) {
+				control = event->connect.connection;
+			} else {
+				test = event->connect.connection;
+			}
+			if (control && test)
+				connect_done = 1;
 			break;
 		default:
 			fprintf(stderr, "ignoring event type %d\n",
@@ -242,20 +251,26 @@ static void do_client(void)
 	hdr_t msg;
 	long *r = NULL;
 
+	/* initiate connect */
+	msg.request.type = MSG_CONTROL;
+
+	ret =
+	    cci_connect(endpoint, server_uri, &msg, sizeof(msg.generic), attr,
+			(void*)(uintptr_t)CONTROL, 0, NULL);
+	check_return(endpoint, "cci_connect", ret, 1);
+
 	msg.request.type = MSG_CONN_REQ;
 	msg.request.opts = opts;
 
-	/* initiate connect */
 	ret =
-	    cci_connect(endpoint, server_uri, &msg, sizeof(msg.request), attr, NULL,
-			0, NULL);
+	    cci_connect(endpoint, server_uri, &msg, sizeof(msg.request), attr,
+			(void*)(uintptr_t)TEST, 0, NULL);
 	check_return(endpoint, "cci_connect", ret, 1);
-
 	/* poll for connect completion */
 	while (!connect_done)
 		poll_events();
 
-	if (!connection) {
+	if (!test) {
 		fprintf(stderr, "no connection\n");
 		return;
 	}
@@ -294,7 +309,7 @@ static void do_client(void)
 
 		fprintf(stderr, "Testing length %9u ... ", current_size);
 
-		ret = cci_rma(connection, &msg, msg_len,
+		ret = cci_rma(test, &msg, msg_len,
 			      local_rma_handle, local_offset,
 			      &remote_rma_handle, remote_offset,
 			      current_size, NULL, opts.flags);
@@ -303,7 +318,7 @@ static void do_client(void)
 		while (count < iters)
 			poll_events();
 
-		if (connection)
+		if (test)
 			fprintf(stderr, "success.\n");
 		else
 			goto out;
@@ -317,12 +332,13 @@ static void do_client(void)
 		}
 	}
 
-	ret = cci_send(connection, "bye", 3, (void *)0xdeadbeef, 0);
+out:
+	ret = cci_send(control, "bye", 3, (void *)0xdeadbeef, 0);
 	check_return(endpoint, "cci_send", ret, 0);
 
 	while (!done)
 		poll_events();
-out:
+
 	ret = cci_rma_deregister(endpoint, local_rma_handle);
 	check_return(endpoint, "cci_rma_deregister", ret, 1);
 
@@ -353,19 +369,29 @@ static void do_server(void)
 		if (ret == CCI_SUCCESS) {
 			switch (event->type) {
 			case CCI_EVENT_CONNECT_REQUEST:
+			{
+				int which = 0;
+
 				h = (void*)event->request.data_ptr;
-				opts = h->request.opts;
-				ret = cci_accept(event, NULL);
+				if (h->generic.type == MSG_CONN_REQ) {
+					opts = h->request.opts;
+					which = TEST;
+				} else {
+					which = CONTROL;
+				}
+				ret = cci_accept(event, (void*)((uintptr_t)which));
 				check_return(endpoint, "cci_accept", ret, 1);
 				break;
+			}
 			case CCI_EVENT_ACCEPT:
-				{
+			{
+				if ((uintptr_t)event->accept.context == (uintptr_t)CONTROL) {
+					control = event->accept.connection;
+				} else {
 					int len, rlen, i;
-					hdr_t msg;
 					long *r = NULL;
 
-					ready = 1;
-					connection = event->accept.connection;
+					test = event->accept.connection;
 
 					len = opts.reg_len;
 
@@ -387,15 +413,20 @@ static void do_server(void)
 							     &local_rma_handle);
 					check_return(endpoint, "cci_rma_register",
 							     ret, 1);
+				}
+				if (test && control) {
+					hdr_t msg;
 
+					ready = 1;
 					msg.reply.type = MSG_CONN_REPLY;
 					msg.reply.handle = *local_rma_handle;
 
-					ret = cci_send(connection, &msg,
+					ret = cci_send(test, &msg,
 						     sizeof(msg.reply), NULL, 0);
 					check_return(endpoint, "cci_send", ret, 1);
-					break;
 				}
+				break;
+			}
 			default:
 				fprintf(stderr,
 					"%s: ignoring unexpected event %d\n",
