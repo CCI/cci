@@ -2888,17 +2888,17 @@ tcp_handle_rma_write(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 	if (h != remote) {
 		/* remote is no longer valid, send CCI_ERR_RMA_HANDLE */
 		ret = CCI_ERR_RMA_HANDLE;
-		debug(CCI_DB_WARN, "%s: remote handle not valid", __func__);
+		debug(CCI_DB_MSG, "%s: remote handle not valid", __func__);
 		valid = 0;
 	} else if (remote_offset > remote->length) {
 		/* offset exceeds remote handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
-		debug(CCI_DB_WARN, "%s: remote offset not valid", __func__);
+		debug(CCI_DB_MSG, "%s: remote offset not valid", __func__);
 		valid = 0;
 	} else if ((remote_offset + len) > remote->length) {
 		/* length exceeds remote handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
-		debug(CCI_DB_WARN, "%s: remote length not valid", __func__);
+		debug(CCI_DB_MSG, "%s: remote length not valid", __func__);
 		valid = 0;
 	}
 
@@ -2982,17 +2982,17 @@ tcp_handle_rma_read_request(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 	if (h != remote) {
 		/* remote is no longer valid, send CCI_ERR_RMA_HANDLE */
 		ret = CCI_ERR_RMA_HANDLE;
-		debug(CCI_DB_WARN, "%s: remote handle not valid", __func__);
+		debug(CCI_DB_MSG, "%s: remote handle not valid", __func__);
 		goto out;
 	} else if (remote_offset > remote->length) {
 		/* offset exceeds remote handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
-		debug(CCI_DB_WARN, "%s: remote offset not valid", __func__);
+		debug(CCI_DB_MSG, "%s: remote offset not valid", __func__);
 		goto out;
 	} else if ((remote_offset + len) > remote->length) {
 		/* length exceeds remote handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
-		debug(CCI_DB_WARN, "%s: remote length not valid", __func__);
+		debug(CCI_DB_MSG, "%s: remote length not valid", __func__);
 		goto out;
 	}
 
@@ -3212,17 +3212,17 @@ tcp_handle_rma_read_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 	if (h != local) {
 		/* local is no longer valid, send CCI_ERR_RMA_HANDLE */
 		ret = CCI_ERR_RMA_HANDLE;
-		debug(CCI_DB_WARN, "%s: local handle not valid", __func__);
+		debug(CCI_DB_MSG, "%s: local handle not valid", __func__);
 		goto out;
 	} else if (local_offset > local->length) {
 		/* offset exceeds local handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
-		debug(CCI_DB_WARN, "%s: local offset not valid", __func__);
+		debug(CCI_DB_MSG, "%s: local offset not valid", __func__);
 		goto out;
 	} else if ((local_offset + len) > local->length) {
 		/* length exceeds local handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
-		debug(CCI_DB_WARN, "%s: local length not valid", __func__);
+		debug(CCI_DB_MSG, "%s: local length not valid", __func__);
 		goto out;
 	}
 
