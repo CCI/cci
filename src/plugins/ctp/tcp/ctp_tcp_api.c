@@ -2276,7 +2276,7 @@ static int ctp_tcp_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * 
 	TAILQ_FOREACH_SAFE(h, &tep->handles, entry, tmp) {
 		if (h == handle) {
 			handle->refcnt--;
-			if (handle->refcnt == 1)
+			if (handle->refcnt == 0)
 				TAILQ_REMOVE(&tep->handles, handle, entry);
 			break;
 		}
@@ -2284,7 +2284,7 @@ static int ctp_tcp_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * 
 	pthread_mutex_unlock(&ep->lock);
 
 	if (h == handle) {
-		if (handle->refcnt == 1) {
+		if (handle->refcnt == 0) {
 			memset(handle, 0, sizeof(*handle));
 			free(handle);
 		}
@@ -2853,7 +2853,7 @@ static void
 tcp_handle_rma_write(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 			uint32_t len, uint32_t tx_id)
 {
-	int ret;
+	int ret = 0, valid = 1;
 	tcp_ep_t *tep = ep->priv;
 	tcp_conn_t *tconn = conn->priv;
 	tcp_tx_t *tx = NULL;
@@ -2889,27 +2889,43 @@ tcp_handle_rma_write(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		/* remote is no longer valid, send CCI_ERR_RMA_HANDLE */
 		ret = CCI_ERR_RMA_HANDLE;
 		debug(CCI_DB_WARN, "%s: remote handle not valid", __func__);
-		goto out;
+		valid = 0;
 	} else if (remote_offset > remote->length) {
 		/* offset exceeds remote handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
 		debug(CCI_DB_WARN, "%s: remote offset not valid", __func__);
-		goto out;
+		valid = 0;
 	} else if ((remote_offset + len) > remote->length) {
 		/* length exceeds remote handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
 		debug(CCI_DB_WARN, "%s: remote length not valid", __func__);
-		goto out;
+		valid = 0;
 	}
 
-	/* valid remote handle, copy the data */
-	debug(CCI_DB_INFO, "%s: recv'ing data into target buffer", __func__);
-	ptr = (void*)((uintptr_t)remote->start + (uintptr_t) remote_offset);
-	ret = tcp_recv_msg(tconn->fd, ptr, len);
-	debug(CCI_DB_MSG, "%s: recv'd data into target buffer", __func__);
-	if (ret)
-		debug(CCI_DB_MSG, "%s: recv'ing RMA WRITE payload failed with %s",
-			__func__, strerror(ret));
+	if (valid) {
+		/* valid remote handle, copy the data */
+		debug(CCI_DB_INFO, "%s: recv'ing data into target buffer", __func__);
+		ptr = (void*)((uintptr_t)remote->start + (uintptr_t) remote_offset);
+		ret = tcp_recv_msg(tconn->fd, ptr, len);
+		debug(CCI_DB_MSG, "%s: recv'd data into target buffer", __func__);
+		if (ret)
+			debug(CCI_DB_MSG, "%s: recv'ing RMA WRITE payload failed with %s",
+				__func__, strerror(ret));
+	} else {
+		int l = 0;
+		uint32_t offset = 0;
+		char tmp[32];
+
+		debug(CCI_DB_INFO, "%s: dumping %u bytes", __func__, len);
+		do {
+			l = sizeof(tmp);
+			if (l > (int) (len - offset))
+				l = len - offset;
+
+			tcp_recv_msg(tconn->fd, tmp, l);
+			offset += l;
+		} while (offset < len);
+	}
 out:
 	tx = tcp_get_tx(ep, 1);
 
