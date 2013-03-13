@@ -3048,6 +3048,7 @@ static void
 tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 			tcp_rx_t *rx, uint32_t status, tcp_tx_t *tx)
 {
+	int done = 0;
 	tcp_ep_t *tep = ep->priv;
 	tcp_conn_t *tconn = conn->priv;
 	tcp_rma_op_t *rma_op = tx->rma_op;
@@ -3060,9 +3061,11 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 
 	pthread_mutex_lock(&tconn->slock);
 	TAILQ_REMOVE(&tconn->pending, &tx->evt, entry);
+	if (rma_op->status && rma_op->pending == 0)
+		done = 1;
 	pthread_mutex_unlock(&tconn->slock);
 
-	if (tx->rma_id == (rma_op->num_msgs - 1)) {
+	if ((tx->rma_id == (rma_op->num_msgs - 1)) || done) {
 		int ret;
 
 		/* last segment - complete rma */
@@ -3280,6 +3283,7 @@ tcp_handle_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		pthread_mutex_unlock(&ep->lock);
 		break;
 	case TCP_MSG_RMA_WRITE:
+	case TCP_MSG_RMA_READ_REQUEST:
 		tcp_progress_rma(ep, conn, rx, status, tx);
 		break;
 	default:
