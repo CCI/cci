@@ -2501,16 +2501,6 @@ out:
 }
 
 
-static inline void tcp_drop_msg(cci_os_handle_t sock)
-{
-	char buf[4];
-	struct sockaddr sa;
-	socklen_t slen = sizeof(sa);
-
-	recvfrom(sock, buf, 4, 0, &sa, &slen);
-	return;
-}
-
 static void
 tcp_handle_listen_socket(cci__ep_t *ep)
 {
