@@ -1734,6 +1734,8 @@ static int ctp_tcp_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eve
 
 	if (ev) {
 		TAILQ_REMOVE(&ep->evts, ev, entry);
+		debug(CCI_DB_EP, "%s: found %s on conn %p", __func__,
+			cci_event_type_str(ev->event.type), (void*)ev->conn);
 	} else {
 		ret = CCI_EAGAIN;
 		if (TAILQ_EMPTY(&tep->idle_rxs))
@@ -2778,7 +2780,6 @@ tcp_handle_conn_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx, uint32_t tx_
 	tconn->status = TCP_CONN_READY;
 	TAILQ_REMOVE(&tep->passive, tconn, entry);
 	TAILQ_INSERT_TAIL(&tep->conns, tconn, entry);
-	TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
 	pthread_mutex_unlock(&ep->lock);
 
 	debug(CCI_DB_CONN, "%s: conn %p ready", __func__, (void*)conn);
@@ -2795,6 +2796,9 @@ tcp_handle_send(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 	tcp_header_t *hdr = rx->buffer;
 	uint32_t len = a & 0xFFFF;
 	uint32_t total = len;
+
+	debug(CCI_DB_MSG, "%s: recv'd MSG from conn %p with len %u",
+		__func__, (void*)conn, len);
 
 	ret = tcp_recv_msg(tconn->fd, hdr->data, total);
 	if (ret) {
@@ -3295,6 +3299,7 @@ tcp_handle_recv(cci__ep_t *ep, cci__conn_t *conn)
 	tcp_msg_type_t type;
 	uint32_t a, b;
 	uint32_t q_rx = 0;
+	int dbg = CCI_DB_MSG;
 
 	debug(CCI_DB_MSG, "%s: conn %p recv'd message", __func__, (void*)conn);
 
@@ -3319,6 +3324,14 @@ tcp_handle_recv(cci__ep_t *ep, cci__conn_t *conn)
 	}
 
 	tcp_parse_header(hdr, &type, &a, &b);
+
+	if (type == TCP_MSG_CONN_REQUEST ||
+		type == TCP_MSG_CONN_REPLY ||
+		type == TCP_MSG_CONN_ACK)
+		dbg = CCI_DB_CONN;
+
+	debug(dbg, "%s: msg type %s a=%u b=%u conn=%p",
+		__func__, tcp_msg_type(type), a, b, (void*)conn);
 
 	switch(type) {
 	case TCP_MSG_CONN_REQUEST:
@@ -3350,6 +3363,8 @@ tcp_handle_recv(cci__ep_t *ep, cci__conn_t *conn)
 		tcp_handle_rma_read_reply(ep, conn, rx, a, b);
 		break;
 	case TCP_MSG_RMA_INVALID:
+		debug(CCI_DB_MSG, "%s: recv'd RMA_INVALID msg on conn %p",
+			__func__, (void*)conn);
 		break;
 	default:
 		debug(CCI_DB_MSG, "%s: invalid msg type %d", __func__, type);
