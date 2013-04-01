@@ -43,6 +43,7 @@
 
 #include "cci/public_config.h"
 
+#include <stdio.h> /* for NULL */
 #include <errno.h>
 #include <stdint.h> /* may need to be fixed for windows */
 #include <sys/types.h>
