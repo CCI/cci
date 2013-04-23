@@ -903,6 +903,7 @@ tcp_get_tx_locked(tcp_ep_t *tep)
 		tx->rma_len = 0;
 		tx->rma_op = NULL;
 		tx->rma_id = 0;
+		tx->flags = 0;
 		tx->evt.conn = NULL;
 		debug(CCI_DB_MSG, "%s: getting tx %p buffer %p",
 			__func__, (void*)tx, (void*)tx->buffer);
@@ -937,6 +938,7 @@ static inline void
 tcp_put_tx_locked(tcp_ep_t *tep, tcp_tx_t *tx)
 {
 	assert(tx->ctx == TCP_CTX_TX);
+	tx->state = TCP_TX_IDLE;
 	debug(CCI_DB_MSG, "%s: putting tx %p buffer %p",
 		__func__, (void*)tx, (void*)tx->buffer);
 	TAILQ_INSERT_HEAD(&tep->idle_txs, &tx->evt, entry);
@@ -1776,10 +1778,12 @@ static int ctp_tcp_return_event(cci_event_t * event)
 
 	switch (event->type) {
 	case CCI_EVENT_SEND:
+	case CCI_EVENT_ACCEPT:
 		tx = container_of(evt, tcp_tx_t, evt);
 		tcp_put_tx(tx);
 		break;
 	case CCI_EVENT_RECV:
+	case CCI_EVENT_CONNECT_REQUEST:
 		rx = container_of(evt, tcp_rx_t, evt);
 		tcp_put_rx(rx);
 		break;
@@ -1793,6 +1797,8 @@ static int ctp_tcp_return_event(cci_event_t * event)
 		break;
 	default:
 		/* TODO */
+		debug(CCI_DB_EP, "%s: unhandled %s event", __func__,
+			cci_event_type_str(event->type));
 		break;
 	}
 
@@ -2082,6 +2088,8 @@ static int tcp_send_common(cci_connection_t * connection,
 	event->send.status = CCI_SUCCESS;	/* for now */
 
 	if (tconn->status < TCP_CONN_INIT) {
+		debug(CCI_DB_CONN, "%s: trying to send on conn %p in state %s ***",
+			__func__, (void*)conn, tcp_conn_status_str(tconn->status));
 		tx->state = TCP_TX_COMPLETED;
 		event->send.status = CCI_ERR_DISCONNECTED;
 		pthread_mutex_lock(&ep->lock);
@@ -2780,6 +2788,7 @@ tcp_handle_conn_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx, uint32_t tx_
 	tconn->status = TCP_CONN_READY;
 	TAILQ_REMOVE(&tep->passive, tconn, entry);
 	TAILQ_INSERT_TAIL(&tep->conns, tconn, entry);
+	TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
 	pthread_mutex_unlock(&ep->lock);
 
 	debug(CCI_DB_CONN, "%s: conn %p ready", __func__, (void*)conn);
@@ -3271,6 +3280,7 @@ tcp_handle_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		} else {
 			/* We rejected this conn, clean it up */
 			/* FIXME */
+			/* FIXME do we need to put the tx? */
 			tcp_conn_set_closing_locked(ep, conn);
 		}
 		tcp_put_rx_locked(tep, rx);
@@ -3451,11 +3461,13 @@ tcp_poll_events(cci__ep_t *ep)
 			case TCP_CONN_ACTIVE1:
 			case TCP_CONN_ACTIVE2:
 				pthread_mutex_lock(&tconn->slock);
-				if (old_status == TCP_CONN_ACTIVE1)
+				if (old_status == TCP_CONN_ACTIVE1) {
 					evt = TAILQ_FIRST(&tconn->queued);
-				else
+					TAILQ_REMOVE(&tconn->queued, evt, entry);
+				} else {
 					evt = TAILQ_FIRST(&tconn->pending);
-				TAILQ_REMOVE(&tconn->queued, evt, entry);
+					TAILQ_REMOVE(&tconn->pending, evt, entry);
+				}
 				pthread_mutex_unlock(&tconn->slock);
 
 				evt->event.connect.status = CCI_ETIMEDOUT;
