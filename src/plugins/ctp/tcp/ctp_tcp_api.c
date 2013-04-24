@@ -1111,19 +1111,20 @@ static int ctp_tcp_accept(cci_event_t *event, const void *context)
  */
 static int ctp_tcp_reject(cci_event_t *event)
 {
-	int ret = CCI_SUCCESS, ready = 0;
+	int ready = 0;
 	uint32_t a;
-	uint32_t unused;
+	uint32_t b;
+	uintptr_t offset = 0;
 	cci__evt_t *evt = NULL;
 	cci__ep_t *ep = NULL;
 	cci__conn_t *conn = NULL;
 	tcp_ep_t *tep = NULL;
 	tcp_conn_t *tconn = NULL;
 	tcp_header_t *hdr = NULL;
+	tcp_header_t reject;
 	tcp_msg_type_t type;
 	char name[32];
 	tcp_rx_t *rx = NULL;
-	tcp_tx_t *tx = NULL;
 
 	CCI_ENTER;
 
@@ -1140,44 +1141,17 @@ static int ctp_tcp_reject(cci_event_t *event)
 	rx = container_of(evt, tcp_rx_t, evt);
 
 	hdr = rx->buffer;
-	tcp_parse_header(hdr, &type, &a, &unused);
-
-	/* get a tx */
-	tx = tcp_get_tx(ep, 0);
-	if (!tx) {
-		ret = CCI_ENOBUFS;
-		goto out;
-	}
-
-	tx->rma_ptr = NULL;
-	tx->rma_len = 0;
-
-	/* prep the tx */
-
-	tx->msg_type = TCP_MSG_CONN_REPLY;
-	tx->evt.ep = ep;
-	tx->evt.conn = conn;
-	tx->evt.event.type = CCI_EVENT_NONE;
-	tx->rma_op = NULL;
-	tx->sin = rx->sin;
+	tcp_parse_header(hdr, &type, &a, &b);
 
 	/* prepare conn_reply */
 
-	hdr = (tcp_header_t *) tx->buffer;
-	tcp_pack_conn_reply(hdr, CCI_ECONNREFUSED, tx->id);
+	memset(&reject, 0, sizeof(reject));
+	tcp_pack_conn_reply(&reject, CCI_ECONNREFUSED, b);
 
-	tx->len = sizeof(*hdr);
+	tcp_sendto(tconn->fd, &reject, sizeof(reject),
+			NULL, 0, &offset);
 
 	/* insert at tail of endpoint's queued list */
-
-	tx->state = TCP_TX_QUEUED;
-	pthread_mutex_lock(&tconn->slock);
-	TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
-	pthread_mutex_unlock(&tconn->slock);
-
-	/* try to progress txs */
-
-	tcp_progress_conn_sends(conn, 0);
 
 	memset(name, 0, sizeof(name));
 	tcp_sin_to_name(tconn->sin, name, sizeof(name));
@@ -1198,9 +1172,8 @@ static int ctp_tcp_reject(cci_event_t *event)
 	tep->is_polling--;
 	pthread_mutex_unlock(&ep->lock);
 
-out:
 	CCI_EXIT;
-	return ret;
+	return CCI_SUCCESS;
 }
 
 static int tcp_getaddrinfo(const char *uri, in_addr_t * in, uint16_t * port)
