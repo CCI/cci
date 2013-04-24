@@ -2708,17 +2708,22 @@ tcp_handle_conn_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 
 	if (accepted) {
 		pthread_mutex_lock(&tconn->slock);
-		TAILQ_REMOVE(&tconn->pending, &tx->evt, entry); /* FIXME */
+		TAILQ_REMOVE(&tconn->pending, &tx->evt, entry);
 		TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
-
-		TAILQ_REMOVE(&tep->active, tconn, entry);
 		tconn->status = TCP_CONN_READY;
-		TAILQ_INSERT_TAIL(&tep->conns, tconn, entry);
 		pthread_mutex_unlock(&tconn->slock);
+
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_REMOVE(&tep->active, tconn, entry);
+		TAILQ_INSERT_TAIL(&tep->conns, tconn, entry);
+		pthread_mutex_unlock(&ep->lock);
 
 		/* try to progress txs */
 		tcp_progress_conn_sends(conn, 0);
 	} else {
+		pthread_mutex_lock(&tconn->slock);
+		TAILQ_REMOVE(&tconn->pending, &tx->evt, entry);
+		pthread_mutex_unlock(&tconn->slock);
 		tcp_put_tx(tx);
 	}
 
@@ -2729,10 +2734,6 @@ tcp_handle_conn_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 	return;
 out:
 	close(tconn->fd);
-
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_REMOVE(&tep->active, tconn, entry);
-	pthread_mutex_unlock(&ep->lock);
 
 	free(tconn);
 	free((void *)conn->uri);
