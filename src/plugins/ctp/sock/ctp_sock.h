@@ -988,14 +988,20 @@ typedef struct sock_ep {
 	/*! Array of conn lists hased over IP/port */
 	TAILQ_HEAD(s_conns, sock_conn) conn_hash[SOCK_EP_HASH_SIZE];
 
+	/*! TX common buffer */
+	void *tx_buf;
+
 	/*! List of all txs */
-	TAILQ_HEAD(s_txs, sock_tx) txs;
+	sock_tx_t *txs;
 
 	/*! List of idle txs */
 	TAILQ_HEAD(s_txsi, sock_tx) idle_txs;
 
+	/*! RX common buffer */
+	void *rx_buf;
+
 	/*! List of all rxs */
-	TAILQ_HEAD(s_rxs, sock_rx) rxs;
+	sock_rx_t *rxs;
 
 	/*! List of idle rxs */
 	TAILQ_HEAD(s_rxsi, sock_rx) idle_rxs;
@@ -1003,16 +1009,16 @@ typedef struct sock_ep {
 	/*! Connection id blocks */
 	uint64_t *ids;
 
-    /*! Queued sends */
-    TAILQ_HEAD(s_queued, cci__evt) queued;
+	/*! Queued sends */
+	TAILQ_HEAD(s_queued, cci__evt) queued;
 
-    /*! Pending (in-flight) sends */
-    TAILQ_HEAD(s_pending, cci__evt) pending;
+	/*! Pending (in-flight) sends */
+	TAILQ_HEAD(s_pending, cci__evt) pending;
 
-    /*! List of all connections with keepalive enabled */
-    /* FIXME: revisit the code to use this 
-    TAILQ_HEAD(s_ka, tcp_conn) ka_conns;
-    */
+	/*! List of all connections with keepalive enabled */
+	/* FIXME: revisit the code to use this 
+	TAILQ_HEAD(s_ka, tcp_conn) ka_conns;
+	*/
 
 	/*! List of active connections awaiting replies */
 	TAILQ_HEAD(s_active, sock_conn) active_hash[SOCK_EP_HASH_SIZE];
@@ -1153,7 +1159,7 @@ typedef struct sock_dev {
 
 typedef enum sock_fd_type {
 	SOCK_FD_UNUSED = 0,
-	SOCK_FD_EP,
+	SOCK_FD_EP
 } sock_fd_type_t;
 
 typedef struct sock_fd_idx {

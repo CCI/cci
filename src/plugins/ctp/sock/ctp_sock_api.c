@@ -740,54 +740,58 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 		TAILQ_INIT(&sep->active_hash[i]);
 	}
 
-	TAILQ_INIT(&sep->txs);
 	TAILQ_INIT(&sep->idle_txs);
-	TAILQ_INIT(&sep->rxs);
 	TAILQ_INIT(&sep->idle_rxs);
 	TAILQ_INIT(&sep->handles);
 	TAILQ_INIT(&sep->rma_ops);
 	TAILQ_INIT(&sep->queued);
 	TAILQ_INIT(&sep->pending);
 
+	sep->tx_buf = calloc (1, ep->tx_buf_cnt * sizeof (sock_tx_t));
+	if (!sep->tx_buf) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	sep->txs = calloc (1, ep->tx_buf_cnt * sizeof (sock_tx_t));
+	if (!sep->txs) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
 	/* alloc txs */
 	for (i = 0; i < ep->tx_buf_cnt; i++) {
-		sock_tx_t *tx;
+		sock_tx_t *tx = &sep->txs[i];
 
-		tx = calloc(1, sizeof(*tx));
-		if (!tx) {
-			ret = CCI_ENOMEM;
-			goto out;
-		}
 		tx->evt.event.type = CCI_EVENT_SEND;
 		tx->evt.ep = ep;
-		tx->buffer = calloc(1, ep->buffer_len);
-		if (!tx->buffer) {
-			ret = CCI_ENOMEM;
-			goto out;
-		}
+		tx->buffer = (void*)((uintptr_t)sep->tx_buf
+		                     + (i * ep->buffer_len));
 		tx->len = 0;
-		TAILQ_INSERT_TAIL(&sep->txs, tx, tentry);
 		TAILQ_INSERT_TAIL(&sep->idle_txs, tx, dentry);
+	}
+
+	sep->rx_buf = calloc (1, ep->rx_buf_cnt * sizeof (sock_rx_t));
+	if (!sep->rx_buf) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	sep->rxs = calloc (1, ep->rx_buf_cnt * sizeof (sock_rx_t));
+	if (!sep->rx_buf) {
+		ret = CCI_ENOMEM;
+		goto out;
 	}
 
 	/* alloc rxs */
 	for (i = 0; i < ep->rx_buf_cnt; i++) {
-		sock_rx_t *rx;
+		sock_rx_t *rx = &sep->rxs[i];
 
-		rx = calloc(1, sizeof(*rx));
-		if (!rx) {
-			ret = CCI_ENOMEM;
-			goto out;
-		}
 		rx->evt.event.type = CCI_EVENT_RECV;
 		rx->evt.ep = ep;
-		rx->buffer = calloc(1, ep->buffer_len);
-		if (!rx->buffer) {
-			ret = CCI_ENOMEM;
-			goto out;
-		}
+		rx->buffer = (void*)((uintptr_t)sep->rx_buf
+		                     + (i * ep->buffer_len));
 		rx->len = 0;
-		TAILQ_INSERT_TAIL(&sep->rxs, rx, gentry);
 		TAILQ_INSERT_TAIL(&sep->idle_rxs, rx, entry);
 	}
 
@@ -861,32 +865,26 @@ out:
 	   a failure because the ep is added to the list of active endpoints
 	   by cci_create_endpoint(), AFTER the call to this function. */
 	if (sep) {
-		while (!TAILQ_EMPTY(&sep->txs)) {
-			sock_tx_t *tx;
+		free (sep->txs);
+		if (sep->tx_buf)
+			free (sep->tx_buf);
 
-			tx = TAILQ_FIRST(&sep->txs);
-			TAILQ_REMOVE(&sep->txs, tx, tentry);
-			if (tx->buffer)
-				free(tx->buffer);
-			free(tx);
-		}
-		while (!TAILQ_EMPTY(&sep->rxs)) {
-			sock_rx_t *rx;
+		if (sep->rxs)
+			free (sep->rxs);
+		if (sep->rx_buf)
+			free (sep->rx_buf);
 
-			rx = TAILQ_FIRST(&sep->rxs);
-			TAILQ_REMOVE(&sep->rxs, rx, gentry);
-			if (rx->buffer)
-				free(rx->buffer);
-			free(rx);
-		}
 		if (sep->ids)
 			free(sep->ids);
 		if (sep->sock)
 			sock_close_socket(sep->sock);
 		free(sep);
 	}
-	if (ep)
-		free(ep);
+	if (ep) {
+		if (ep->uri)
+			free (ep->uri);
+		free (ep);
+	}
 	*endpointp = NULL;
 	CCI_EXIT;
 	return ret;
@@ -949,28 +947,13 @@ static int ctp_sock_destroy_endpoint(cci_endpoint_t * endpoint)
 				free(sconn);
 			}
 		}
-		while (!TAILQ_EMPTY(&sep->txs)) {
-			sock_tx_t *tx;
 
-			tx = TAILQ_FIRST(&sep->txs);
-			TAILQ_REMOVE(&sep->txs, tx, tentry);
-			if (tx->state == SOCK_TX_QUEUED)
-				TAILQ_REMOVE(&sep->queued, &tx->evt, entry);
-			else if (tx->state == SOCK_TX_PENDING)
-				TAILQ_REMOVE(&sep->pending, &tx->evt, entry);
-			if (tx->buffer)
-				free(tx->buffer);
-			free(tx);
-		}
-		while (!TAILQ_EMPTY(&sep->rxs)) {
-			sock_rx_t *rx;
+		free (sep->txs);
+		free (sep->tx_buf);
 
-			rx = TAILQ_FIRST(&sep->rxs);
-			TAILQ_REMOVE(&sep->rxs, rx, gentry);
-			if (rx->buffer)
-				free(rx->buffer);
-			free(rx);
-		}
+		free (sep->rxs);
+		free (sep->rx_buf);
+
 		while (!TAILQ_EMPTY(&sep->rma_ops)) {
 			sock_rma_op_t *rma_op = TAILQ_FIRST(&sep->rma_ops);
 			TAILQ_REMOVE(&sep->rma_ops, rma_op, entry);
@@ -3777,7 +3760,8 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,
 
 	/* TODO handle ack */
 
-	sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);	//FIXME do something with ts
+	/*FIXME do something with ts */
+	sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
 
 	/* get cci__evt_t to hang on ep->events */
 	evt = &rx->evt;
@@ -4163,7 +4147,7 @@ sock_handle_conn_ack(sock_conn_t * sconn,
 			 * but we have a sconn */
 			debug((CCI_DB_MSG | CCI_DB_CONN), 
 			      "received conn_ack and no matching tx "
-			      "(seq %u ack %u)", seq, ts);	//FIXME
+			      "(seq %u ack %u)", seq, ts);
 		} else {
 			pthread_mutex_lock(&ep->lock);
 			if (tx->evt.event.accept.connection) {
@@ -4369,31 +4353,31 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 	if (h != remote) {
 		/* remote is no longer valid, send nack */
 		debug(CCI_DB_WARN, "%s: remote handle not valid", __func__);
-		// TODO
-		// Note: we have already handled the seq for this rx
-		//       and we may have acked it. If it was the last
-		//       piece, then we lost the race. We should defer
-		//       the ack until we deliver the data.
+		/* TODO
+		   Note: we have already handled the seq for this rx
+		         and we may have acked it. If it was the last
+		         piece, then we lost the race. We should defer
+		         the ack until we deliver the data. */
 
 		goto out;
 	} else if (remote_offset > remote->length) {
 		/* offset exceeds remote handle's range, send nak */
 		debug(CCI_DB_WARN, "%s: remote offset not valid", __func__);
-		// TODO
-		// Note: we have already handled the seq for this rx
-		//       and we may have acked it. If it was the last
-		//       piece, then we lost the race. We should defer
-		//       the ack until we deliver the data.
+		/* TODO
+		   Note: we have already handled the seq for this rx
+		         and we may have acked it. If it was the last
+		         piece, then we lost the race. We should defer
+		         the ack until we deliver the data. */
 
 		goto out;
 	} else if (remote_offset + len > remote->length) {
 		/* length exceeds remote handle's range, send nak */
 		debug(CCI_DB_WARN, "%s: remote length not valid", __func__);
-		// TODO
-		// Note: we have already handled the seq for this rx
-		//       and we may have acked it. If it was the last
-		//       piece, then we lost the race. We should defer
-		//       the ack until we deliver the data.
+		/* TODO
+		   Note: we have already handled the seq for this rx
+		         and we may have acked it. If it was the last
+		         piece, then we lost the race. We should defer
+		         the ack until we deliver the data. */
 
 		goto out;
 	}
@@ -4405,7 +4389,6 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 
 out:
 	/* We force the ACK */
-	//sconn->last_ack_ts = sconn->last_ack_ts - 2 * ACK_TIMEOUT;
 	pthread_mutex_lock(&ep->lock);
 	sock_ack_sconn (sep, sconn);
 	
@@ -4791,10 +4774,6 @@ out:
 		sock_drop_msg(sep->sock);
 	}
 	
-	/* waking up the app thread if it is blocking on a OS handle */
-// 	if (sep->event_fd)
-// 		write (sep->fd[1], "a", 1);
-	
 	CCI_EXIT;
 
 	return again;
@@ -5149,9 +5128,7 @@ int progress_recv (cci__ep_t *ep)
 					if (func != NULL && ep != NULL) {
 						do {
 							again = (*func)(ep);
-// 							write (sep->fd[1], "a", 1);
 						} while (again == 1);
-						/* We notify the application thread */
 					}
 				}
 			}
@@ -5174,8 +5151,6 @@ int progress_recv (cci__ep_t *ep)
 			for (i = 0; i < 1; i++) {
 				if (fds[i].revents & POLLIN) {
 					sock_recvfrom_ep (ep);
-					/* We notify the application thread */
-// 					write (sep->fd[1], "a", 1);
 				}
 			}
 		}
@@ -5183,9 +5158,11 @@ int progress_recv (cci__ep_t *ep)
 #endif /* HAVE_SYS_EPOLL_H */
 
 wait4signal:
-// 		pthread_mutex_lock(&sep->progress_mutex);
-// 		pthread_cond_signal(&sep->wait_condition);
-// 		pthread_mutex_unlock(&sep->progress_mutex);
+/*
+ 		pthread_mutex_lock(&sep->progress_mutex);
+ 		pthread_cond_signal(&sep->wait_condition);
+ 		pthread_mutex_unlock(&sep->progress_mutex);
+*/
 
 	return CCI_SUCCESS;
 }
