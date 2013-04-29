@@ -766,10 +766,8 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	buf_base        = buf     = calloc (ep->rx_buf_cnt + ep->tx_buf_cnt,
 	                                    len_buf);
 	if (!sock_xx_base || !buf_base) {
-		if (!sock_xx_base) {
-			ret = CCI_ENOMEM;
-			goto out;
-		}
+		ret = CCI_ENOMEM;
+		goto out;
 	}
 
 	/* alloc txs */
