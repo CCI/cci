@@ -323,7 +323,7 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 				if (addr->ifa_addr->sa_family != AF_INET)
 					continue;
 				if (addr->ifa_flags & IFF_LOOPBACK)
-										continue;
+					continue;
 
 				dev = calloc(1, sizeof(*dev));
 				if (!dev) {
@@ -428,7 +428,8 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 				if (0 == strncmp("ip=", *arg, 3)) {
 					const char *ip = *arg + 3;
 
-					sdev->ip = inet_addr(ip);	/* network order */
+					/* network order */
+					sdev->ip = inet_addr(ip);
 				} else if (0 == strncmp("mtu=", *arg, 4)) {
 					const char *mtu_str = *arg + 4;
 					mtu = strtol(mtu_str, NULL, 0);
@@ -439,8 +440,11 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 					sdev->port = htons(port);
 				} else if (0 == strncmp("bufsize=", *arg, 8)) {
 					const char *size_str = *arg + 8;
-					sdev->bufsize = strtol(size_str, NULL, 0);
-				} else if (0 == strncmp("interface=", *arg, 10)) {
+					sdev->bufsize = strtol(size_str,
+					                       NULL, 0);
+				} else if (0 == strncmp("interface=",
+				                        *arg, 10))
+				{
 					interface = *arg + 10;
 				}
 			}
@@ -448,7 +452,10 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 				/* try to get the actual values now */
 #ifdef HAVE_GETIFADDRS
 				if (addrs) {
-					for (addr = addrs; addr != NULL; addr = addr->ifa_next) {
+					for (addr = addrs;
+					     addr != NULL;
+					     addr = addr->ifa_next)
+					{
 						struct sockaddr_in *sai;
 						if (!addr->ifa_addr)
 							continue;
@@ -470,9 +477,11 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 					cci__get_dev_ifaddrs_info(dev, addr);
 				}
 #endif
-				if (mtu == (uint32_t) -1)
+				if (mtu == (uint32_t) -1) {
 					/* if mtu not specified, use the ifaddr one */
 					mtu = device->max_send_size;
+				}
+
 				if (mtu == (uint32_t) -1) {
 					/* if still no mtu, use default */
 					device->max_send_size = SOCK_DEFAULT_MSS;
@@ -495,7 +504,7 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 		}
 
 	devices =
-		realloc(devices, (sglobals->count + 1) * sizeof(cci_device_t *));
+	    realloc(devices, (sglobals->count + 1) * sizeof(cci_device_t *));
 	devices[sglobals->count] = NULL;
 
 	*((cci_device_t ***) & sglobals->devices) = devices;
@@ -620,9 +629,9 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	char *buf 			= NULL;
 	char *buf_base 			= NULL;
 	cci__dev_t *dev 		= NULL;
-        cci__ep_t *ep 			= NULL;
-        sock_ep_t *sep 			= NULL; 
-        struct cci_endpoint *endpoint	= (struct cci_endpoint *) *endpointp;
+	cci__ep_t *ep 			= NULL;
+	sock_ep_t *sep 			= NULL; 
+	struct cci_endpoint *endpoint	= (struct cci_endpoint *) *endpointp;
 	const int cache_line_size	= 64;
 
 	CCI_ENTER;
@@ -695,7 +704,7 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	{
 		socklen_t optlen;
 
-                optlen = sizeof (sndbuf_size);
+		optlen = sizeof (sndbuf_size);
 		ret = getsockopt (sep->sock, SOL_SOCKET, SO_SNDBUF,
 				  &sndbuf_size, &optlen);
 		if (ret == -1)
@@ -705,15 +714,15 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 		       "want to check the value of net.core.wmem_max using "
 		       "sysctl)", sndbuf_size);
 
-                optlen = sizeof (rcvbuf_size);
+		optlen = sizeof (rcvbuf_size);
 		ret = getsockopt (sep->sock, SOL_SOCKET, SO_RCVBUF,
 		                  &rcvbuf_size, &optlen);
 		if (ret == -1)
 			debug (CCI_DB_WARN, "%s: Cannot get recv buffer size",
 			       __func__);
 		debug (CCI_DB_CTP, "Receive buffer size: %d bytes (you may also "
-                       "want to check the value of net.core.rmem_max using "
-                       "sysctl)", rcvbuf_size);
+		                   "want to check the value of net.core.rmem_max using "
+		                   "sysctl)", rcvbuf_size);
 	}
 #endif
 
@@ -877,23 +886,23 @@ out:
 
 	if (sep) {
 		while (!TAILQ_EMPTY(&sep->txs)) {
-                        sock_tx_t *tx;
+			sock_tx_t *tx;
 
-                        tx = TAILQ_FIRST(&sep->txs);
-                        TAILQ_REMOVE(&sep->txs, tx, tentry);
-                        if (tx->buffer)
-                                free(tx->buffer);
-                        free(tx);
-                }
-                while (!TAILQ_EMPTY(&sep->rxs)) {
-                        sock_rx_t *rx;
+			tx = TAILQ_FIRST(&sep->txs);
+			TAILQ_REMOVE(&sep->txs, tx, tentry);
+			if (tx->buffer)
+				free(tx->buffer);
+			free(tx);
+		}
+		while (!TAILQ_EMPTY(&sep->rxs)) {
+			sock_rx_t *rx;
 
-                        rx = TAILQ_FIRST(&sep->rxs);
-                        TAILQ_REMOVE(&sep->rxs, rx, gentry);
-                        if (rx->buffer)
-                                free(rx->buffer);
-                        free(rx);
-                }
+			rx = TAILQ_FIRST(&sep->rxs);
+			TAILQ_REMOVE(&sep->rxs, rx, gentry);
+			if (rx->buffer)
+				free(rx->buffer);
+			free(rx);
+		}
 
 		if (sep->ids)
 			free(sep->ids);
