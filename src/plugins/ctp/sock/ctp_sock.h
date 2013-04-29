@@ -735,12 +735,12 @@ sock_pack_rma_write(sock_rma_header_t * write, uint16_t data_len,
 
 static inline void
 sock_pack_rma_read_request(sock_rma_header_t * read, uint64_t data_len,
-						   uint32_t peer_id, uint32_t seq, uint32_t ts,
-						   uint64_t local_handle, uint64_t local_offset,
-						   uint64_t remote_handle, uint64_t remote_offset)
+                           uint32_t peer_id, uint32_t seq, uint32_t ts,
+                           uint64_t local_handle, uint64_t local_offset,
+                           uint64_t remote_handle, uint64_t remote_offset)
 {
 	sock_pack_header(&read->header_r.header, SOCK_MSG_RMA_READ_REQUEST,
-			 0, data_len, peer_id);
+	                 0, data_len, peer_id);
 	sock_pack_seq_ts(&read->header_r.seq_ts, seq, ts);
 	sock_pack_rma_handle_offset(&read->local, local_handle, local_offset);
 	sock_pack_rma_handle_offset(&read->remote, remote_handle, remote_offset);
@@ -754,7 +754,7 @@ sock_pack_rma_read_reply (sock_rma_header_t * read, uint64_t data_len,
 		uint64_t remote_handle, uint64_t remote_offset)
 {
 	sock_pack_header(&read->header_r.header, SOCK_MSG_RMA_READ_REPLY, 0,
-					data_len, peer_id);
+	                 data_len, peer_id);
 	sock_pack_seq_ts(&read->header_r.seq_ts, seq, ts);
 	sock_pack_rma_handle_offset(&read->local, local_handle, local_offset);
 	sock_pack_rma_handle_offset(&read->remote, remote_handle, remote_offset);
@@ -988,6 +988,9 @@ typedef struct sock_ep {
 	/*! Array of conn lists hased over IP/port */
 	TAILQ_HEAD(s_conns, sock_conn) conn_hash[SOCK_EP_HASH_SIZE];
 
+	/*! Base pointer for the buffers, sock_rx and sock_tx allocated */      
+        char* sock_xx_base, *buf_base;
+
 	/*! List of all txs */
 	TAILQ_HEAD(s_txs, sock_tx) txs;
 
@@ -1003,16 +1006,16 @@ typedef struct sock_ep {
 	/*! Connection id blocks */
 	uint64_t *ids;
 
-    /*! Queued sends */
-    TAILQ_HEAD(s_queued, cci__evt) queued;
+	/*! Queued sends */
+	TAILQ_HEAD(s_queued, cci__evt) queued;
 
-    /*! Pending (in-flight) sends */
-    TAILQ_HEAD(s_pending, cci__evt) pending;
+	/*! Pending (in-flight) sends */
+	TAILQ_HEAD(s_pending, cci__evt) pending;
 
-    /*! List of all connections with keepalive enabled */
-    /* FIXME: revisit the code to use this 
-    TAILQ_HEAD(s_ka, tcp_conn) ka_conns;
-    */
+	/*! List of all connections with keepalive enabled */
+	/* FIXME: revisit the code to use this 
+	TAILQ_HEAD(s_ka, tcp_conn) ka_conns;
+	*/
 
 	/*! List of active connections awaiting replies */
 	TAILQ_HEAD(s_active, sock_conn) active_hash[SOCK_EP_HASH_SIZE];
@@ -1153,7 +1156,7 @@ typedef struct sock_dev {
 
 typedef enum sock_fd_type {
 	SOCK_FD_UNUSED = 0,
-	SOCK_FD_EP,
+	SOCK_FD_EP
 } sock_fd_type_t;
 
 typedef struct sock_fd_idx {
