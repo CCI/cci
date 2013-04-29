@@ -43,6 +43,7 @@
 
 #include "cci/public_config.h"
 
+#include <stdio.h> /* for NULL */
 #include <errno.h>
 #include <stdint.h> /* may need to be fixed for windows */
 #include <sys/types.h>
@@ -847,6 +848,33 @@ typedef enum cci_event_type {
 	   error?  And so on. */
 	CCI_EVENT_ENDPOINT_DEVICE_FAILED
 } cci_event_type_t;
+
+static inline const char *
+cci_event_type_str(cci_event_type_t type)
+{
+	switch (type) {
+	case CCI_EVENT_NONE:
+		return "CCI_EVENT_NONE";
+	case CCI_EVENT_SEND:
+		return "CCI_EVENT_SEND";
+	case CCI_EVENT_RECV:
+		return "CCI_EVENT_RECV";
+	case CCI_EVENT_CONNECT:
+		return "CCI_EVENT_CONNECT";
+	case CCI_EVENT_CONNECT_REQUEST:
+		return "CCI_EVENT_CONNECT_REQUEST";
+	case CCI_EVENT_ACCEPT:
+		return "CCI_EVENT_ACCEPT";
+	case CCI_EVENT_KEEPALIVE_TIMEDOUT:
+		return "CCI_EVENT_KEEPALIVE_TIMEDOUT";
+	case CCI_EVENT_ENDPOINT_DEVICE_FAILED:
+		return "CCI_EVENT_ENDPOINT_DEVICE_FAILED";
+	default:
+		return "Unknown event";
+	}
+	/* Never get here */
+	return NULL;
+}
 
 /*!
   Send event.

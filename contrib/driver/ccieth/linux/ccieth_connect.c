@@ -454,6 +454,16 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	setup_timer(&conn->connect_timer, ccieth_connect_request_timer_hdlr, (unsigned long)conn);
 
 	/* get a connection id (only reserve it) */
+#ifdef CCIETH_HAVE_IDR_PRELOAD
+	idr_preload(GFP_KERNEL);
+	spin_lock(&ep->connection_idr_lock);
+	err = idr_alloc(&ep->connection_idr, NULL, 0, 0, GFP_NOWAIT);
+	spin_unlock(&ep->connection_idr_lock);
+	idr_preload_end();
+	if (err < 0)
+		goto out_with_conn;
+	id = err;
+#else /* CCIETH_HAVE_IDR_PRELOAD */
 retry:
 	spin_lock(&ep->connection_idr_lock);
 	err = idr_get_new(&ep->connection_idr, NULL, &id);
@@ -466,6 +476,7 @@ retry:
 		}
 		goto out_with_conn;
 	}
+#endif /* CCIETH_HAVE_IDR_PRELOAD */
 
 	/* allocate and initialize the skb */
 	skblen = sizeof(*hdr) + arg->data_len;
@@ -682,6 +693,21 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	conn->max_send_size = src_max_send_size < ep->max_send_size ? src_max_send_size : ep->max_send_size;
 
 	/* get a connection id (only reserve it for now) */
+#ifdef CCIETH_HAVE_IDR_PRELOAD
+	idr_preload(GFP_KERNEL);
+	spin_lock(&ep->connection_idr_lock);
+	/* check for duplicates */
+	err = idr_for_each(&ep->connection_idr, ccieth_recv_connect_idrforeach_cb, conn);
+	if (err != -EBUSY)
+		err = idr_alloc(&ep->connection_idr, NULL, 0, 0, GFP_NOWAIT);
+	else
+		need_ack = 1;
+	spin_unlock(&ep->connection_idr_lock);
+	idr_preload_end();
+	if (err < 0)
+		goto out_with_replyskb;
+	id = err;
+#else /* CCIETH_HAVE_IDR_PRELOAD */
 retry:
 	spin_lock(&ep->connection_idr_lock);
 	/* check for duplicates */
@@ -701,6 +727,7 @@ retry:
 		}
 		goto out_with_replyskb;
 	}
+#endif /* CCIETH_HAVE_IDR_PRELOAD */
 
 	/* setup the event */
 	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_REQUEST;
