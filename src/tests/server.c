@@ -13,8 +13,12 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <assert.h>
 
 #include "cci.h"
+
+#define ACCEPT_CONTEXT (void*)0xfeebdaed
+#define SEND_CONTEXT (void*)0xdaedfeeb
 
 int main(int argc, char *argv[])
 {
@@ -66,6 +70,9 @@ int main(int argc, char *argv[])
 				int offset = 0;
 				int len = event->recv.len;
 
+				assert(event->recv.connection == connection);
+				assert(event->recv.connection->context == ACCEPT_CONTEXT);
+
 				if (len == 3) {
 					done = 1;
 					continue;
@@ -78,7 +85,7 @@ int main(int argc, char *argv[])
 				offset += len;
 				fprintf(stderr, "recv'd \"%s\"\n", buf);
 				ret =
-				    cci_send(connection, buf, offset, NULL, 0);
+				    cci_send(connection, buf, offset, SEND_CONTEXT, 0);
 				if (ret)
 					fprintf(stderr, "send returned %s\n",
 						cci_strerror(endpoint, ret));
@@ -86,19 +93,28 @@ int main(int argc, char *argv[])
 			}
 		case CCI_EVENT_SEND:
 			fprintf(stderr, "completed send\n");
+
+			assert(event->send.context == SEND_CONTEXT);
+			assert(event->send.connection == connection);
+			assert(event->send.connection->context == ACCEPT_CONTEXT);
+
 			break;
 		case CCI_EVENT_CONNECT_REQUEST:
 			/* inspect conn_req_t and decide to accept or reject */
 			if (accept) {
 				/* associate this connect request with this endpoint */
-				cci_accept(event, NULL);
+				cci_accept(event, ACCEPT_CONTEXT);
 			} else {
 				cci_reject(event);
 			}
 			break;
 		case CCI_EVENT_ACCEPT:
 			fprintf(stderr, "completed accept\n");
-            connection = event->accept.connection;
+
+			assert(event->accept.connection != NULL);
+			assert(event->accept.connection->context == ACCEPT_CONTEXT);
+
+			connection = event->accept.connection;
 			break;
 		default:
 			printf("event type %d\n", event->type);

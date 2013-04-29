@@ -479,9 +479,6 @@ typedef enum cci_endpoint_flags {
 typedef const struct cci_endpoint {
 	/*! Device that runs this endpoint. */
 	cci_device_t *device;
-
-	/*! Application-provided, private context. */
-	void *context;
 } cci_endpoint_t;
 
 /*! OS-native handles
@@ -1541,6 +1538,9 @@ typedef const struct cci_rma_handle {
     - CCI_FLAG_WRITE:       Local memory may be written by other endpoints.
   \param[out] rma_handle    Handle for use with cci_rma().
 
+  flags may be 0 if this handle will never be accessed by any other
+  endpoint.
+
   \return CCI_SUCCESS   The memory is ready for RMA.
   \return CCI_EINVAL    endpoint, start, or rma_handle is NULL.
   \return CCI_EINVAL    length is 0.
@@ -1577,10 +1577,10 @@ CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
 
   Initiate a remote memory WRITE access (move local memory to remote
   memory) or READ (move remote memory to local memory). Adding the FENCE
-  flag ensures all previous operations are guaranteed to complete
-  remotely prior to this operation and all subsequent operations. Remote
-  completion does not imply a remote completion event, merely a successful
-  RMA operation.
+  flag ensures all previous operations on the same connection are guaranteed
+  to complete remotely prior to this operation and all subsequent operations.
+  Remote completion does not imply a remote completion event, merely a
+  successful RMA operation.
 
   Optionally, send a remote completion event to the target. If msg_ptr
   and msg_len are provided, send a completion event to the target after
@@ -1599,6 +1599,10 @@ CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
   A local completion will be generated. If a completion message is provided,
   then a remote completion will be generated as well.
 
+  remote_handle must have been created with protection flags that match
+  the flags passed in cci_rma() here. local_handles does not need any
+  protection flag since it is only accessed locally here.
+
   \param[in] connection     Connection (destination).
   \param[in] msg_ptr         Pointer to data for the remote completion.
   \param[in] msg_len         Length of data for the remote completion.
@@ -1613,9 +1617,9 @@ CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
     - CCI_FLAG_BLOCKING:    Blocking call (see cci_send() for details).
     - CCI_FLAG_READ:        Move data from remote to local memory.
     - CCI_FLAG_WRITE:       Move data from local to remote memory
-    - CCI_FLAG_FENCE:       All previous operations are guaranteed to
-                            complete remotely prior to this operation
-                            and all subsequent operations.
+    - CCI_FLAG_FENCE:       All previous operations on the same connection
+                            are guaranteed to complete remotely prior to
+                            this operation and all subsequent operations.
     - CCI_FLAG_SILENT:      Generates no local completion event (see cci_send()
                             for details).
 

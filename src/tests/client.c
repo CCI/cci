@@ -14,6 +14,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <assert.h>
 
 int iters = 10;
 int send_done = 0;
@@ -22,6 +23,8 @@ int recv_done = 0;
    connection type via the command line */
 cci_conn_attribute_t attr = CCI_CONN_ATTR_RO;
 
+#define CONNECT_CONTEXT (void*)0xdeadbeef
+
 static void
 poll_events(cci_endpoint_t * endpoint, cci_connection_t ** connection,
 	    int *done)
@@ -29,6 +32,7 @@ poll_events(cci_endpoint_t * endpoint, cci_connection_t ** connection,
 	int ret;
 	char buffer[8192];
 	cci_event_t *event;
+	static int i = 0;
 
 	ret = cci_get_event(endpoint, &event);
 	if (ret == CCI_SUCCESS && event) {
@@ -37,6 +41,12 @@ poll_events(cci_endpoint_t * endpoint, cci_connection_t ** connection,
 			fprintf(stderr, "send %d completed with %d\n",
 				(int)((uintptr_t) event->send.context),
 				event->send.status);
+
+			assert(event->send.context == (void *)(uintptr_t)i);
+			i++;
+			assert(event->send.connection == *connection);
+			assert(event->send.connection->context == CONNECT_CONTEXT);
+
 			if (*done == 0)
 				send_done++;
 			else if (*done == 1)
@@ -44,6 +54,9 @@ poll_events(cci_endpoint_t * endpoint, cci_connection_t ** connection,
 			break;
 		case CCI_EVENT_RECV:{
 				int len = event->recv.len;
+
+				assert(event->recv.connection == *connection);
+				assert(event->recv.connection->context == CONNECT_CONTEXT);
 
 				memcpy(buffer, event->recv.ptr, len);
 				buffer[len] = '\0';
@@ -53,6 +66,10 @@ poll_events(cci_endpoint_t * endpoint, cci_connection_t ** connection,
 			}
 		case CCI_EVENT_CONNECT:
 			*done = 1;
+
+			assert(event->connect.connection != NULL);
+			assert(event->connect.connection->context == CONNECT_CONTEXT);
+
 			*connection = event->connect.connection;
 			break;
 		default:
@@ -131,7 +148,7 @@ int main(int argc, char *argv[])
 	/* initiate connect */
 	ret =
 	    cci_connect(endpoint, server_uri, "Hello World!", 12,
-			attr, NULL, 0, NULL);
+			attr, CONNECT_CONTEXT, 0, NULL);
 	if (ret) {
 		fprintf(stderr, "cci_connect() failed with %s\n",
 			cci_strerror(endpoint, ret));
@@ -163,7 +180,7 @@ int main(int argc, char *argv[])
 	while (!done)
 		poll_events(endpoint, &connection, &done);
 
-	ret = cci_send(connection, "bye", 3, NULL, 0);
+	ret = cci_send(connection, "bye", 3, (void *)(uintptr_t) iters, 0);
 	if (ret)
 		fprintf(stderr, "sending \"bye\" failed with %s\n",
 			cci_strerror(endpoint, ret));
