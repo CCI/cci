@@ -534,6 +534,11 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 	struct sockaddr_in sin;
 	socklen_t slen;
 	char name[256 + 6];	/* POSIX HOST_NAME_MAX + tcp:// */
+	const int cache_line_size = 64;
+	size_t len_xx, len_buf;
+	tcp_rx_t *rx;
+	tcp_tx_t *tx;
+	char *tcp_xx = NULL, *tcp_xx_base = NULL, *buf = NULL, *buf_base = NULL;
 
 	CCI_ENTER;
 
@@ -640,57 +645,53 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 	}
 	/* NOTE: tep->c[0] is the listening socket and not a connection */
 
-	tep->tx_buf = calloc(1, ep->tx_buf_cnt * ep->buffer_len);
-	if (!tep->tx_buf) {
-		ret = CCI_ENOMEM;
-		goto out;
-	}
+	len_xx = sizeof(*tx) < sizeof(*rx) ? sizeof(*rx) : sizeof(*tx);
+	len_xx = (len_xx + (cache_line_size - 1)) ^ (cache_line_size - 1);
+	len_buf = (ep->buffer_len + (cache_line_size - 1)) ^ (cache_line_size - 1);
+	tcp_xx_base = tcp_xx = calloc((size_t)(ep->rx_buf_cnt + ep->tx_buf_cnt), (size_t)len_xx);
+	buf_base = buf = calloc(ep->rx_buf_cnt + ep->tx_buf_cnt, len_buf);
 
-	tep->txs = calloc(1, ep->tx_buf_cnt * sizeof(tcp_tx_t));
-	if (!tep->txs) {
+	if (!tcp_xx_base || !buf_base) {
 		ret = CCI_ENOMEM;
 		goto out;
 	}
 
 	/* alloc txs */
+	tep->txs = (tcp_tx_t*)tcp_xx;
 	for (i = 0; i < (int) ep->tx_buf_cnt; i++) {
-		tcp_tx_t *tx = &tep->txs[i];
+		tx = (tcp_tx_t*)tcp_xx;
 
 		tx->id = i;
 		tx->ctx = TCP_CTX_TX;
 
 		tx->evt.event.type = CCI_EVENT_SEND;
 		tx->evt.ep = ep;
-		tx->buffer = (void*)((uintptr_t)tep->tx_buf + (i * ep->buffer_len));
+		tx->buffer = buf;
 		tx->len = 0;
 		TAILQ_INSERT_TAIL(&tep->idle_txs, &tx->evt, entry);
-	}
-
-	tep->rx_buf = calloc(1, ep->rx_buf_cnt * ep->buffer_len);
-	if (!tep->rx_buf) {
-		ret = CCI_ENOMEM;
-		goto out;
-	}
-
-	tep->rxs = calloc(1, ep->rx_buf_cnt * sizeof(tcp_rx_t));
-	if (!tep->rxs) {
-		ret = CCI_ENOMEM;
-		goto out;
+		tcp_xx += len_xx;
+		buf += len_buf;
 	}
 
 	/* alloc rxs */
+	tep->rxs = (tcp_rx_t*)tcp_xx;
 	for (i = 0; i < (int) ep->rx_buf_cnt; i++) {
-		tcp_rx_t *rx = &tep->rxs[i];
+		rx = (tcp_rx_t*)tcp_xx;
 
 		rx->id = i;
 		rx->ctx = TCP_CTX_RX;
 
 		rx->evt.event.type = CCI_EVENT_RECV;
 		rx->evt.ep = ep;
-		rx->buffer = (void*)((uintptr_t)tep->rx_buf + (i * ep->buffer_len));
+		rx->buffer = buf;
 		rx->len = 0;
 		TAILQ_INSERT_TAIL(&tep->idle_rxs, &rx->evt, entry);
+		tcp_xx += len_xx;
+		buf += len_buf;
 	}
+
+	tep->tcp_xx_base = tcp_xx_base;
+	tep->buf_base = buf_base;
 
 	ret = tcp_set_nonblocking(tep->sock);
 	if (ret)
@@ -719,18 +720,17 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 	return CCI_SUCCESS;
 
 out:
+	if (tcp_xx_base)
+		free (tcp_xx_base);
+	if (buf_base)
+		free (buf_base);
+
 	pthread_mutex_lock(&dev->lock);
 	if (!TAILQ_EMPTY(&dev->eps)) {
 		TAILQ_REMOVE(&dev->eps, ep, entry);
 	}
 	pthread_mutex_unlock(&dev->lock);
 	if (tep) {
-		free(tep->txs);
-		free(tep->tx_buf);
-
-		free(tep->rxs);
-		free(tep->rx_buf);
-
 		free(tep->fds);
 
 		if (tep->ids)
@@ -858,11 +858,12 @@ static int ctp_tcp_destroy_endpoint(cci_endpoint_t * endpoint)
 			free(conn->priv);
 			free(conn);
 		}
-		free(tep->txs);
-		free(tep->tx_buf);
 
-		free(tep->rxs);
-		free(tep->rx_buf);
+		if (tep->tcp_xx_base)
+			free(tep->tcp_xx_base);
+
+		if (tep->buf_base)
+			free(tep->buf_base);
 
 		free(tep->fds);
 		free(tep->c);

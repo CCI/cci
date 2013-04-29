@@ -703,17 +703,14 @@ typedef struct tcp_ep {
 	/*! Array of conns indexed by fds */
 	cci__conn_t **c;
 
-	/*! TX common buffer */
-	void *tx_buf;
+	/*! Base pointer for the buffers, tcp_rx and tcp_tx allocated */
+	char *tcp_xx_base, *buf_base;
 
 	/*! All txs */
 	tcp_tx_t *txs;
 
 	/*! List of idle txs */
 	TAILQ_HEAD(s_itxs, cci__evt) idle_txs;
-
-	/*! RX common buffer */
-	void *rx_buf;
 
 	/*! All rxs */
 	tcp_rx_t *rxs;
