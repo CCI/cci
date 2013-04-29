@@ -3406,7 +3406,7 @@ tcp_poll_events(cci__ep_t *ep)
 		tcp_conn_t *tconn = NULL;
 
 		if (revents) {
-			debug(CCI_DB_CONN, "%s: revents 0x%x",
+			debug(CCI_DB_EP, "%s: revents 0x%x",
 				__func__, revents);
 		} else {
 			goto increment;
