@@ -1178,12 +1178,15 @@ typedef struct sock_globals {
 } sock_globals_t;
 
 /* We try to stay page aligned when we send RMA data */
-#define RMA_PAYLOAD_SIZE(c, max) do { \
-	if ((c->max_send_size - sizeof(sock_rma_header_t)) > (4*1024))          \
-		max = (c->max_send_size - sizeof(sock_rma_header_t))                \
-			- ((c->max_send_size - sizeof(sock_rma_header_t)) % (4*1024));  \
-	else                                                                    \
-		max = c->max_send_size - sizeof(sock_rma_header_t);                 \
+#define RMA_PAYLOAD_SIZE(c, max) do {                                         \
+	const size_t hdr_size = sizeof(sock_rma_header_t) /* CCI header */    \
+	                        + sizeof(struct msghdr) /* Used by sendmsg */ \
+	                        + sizeof(struct sockaddr_in);                 \
+	if ((c->max_send_size - hdr_size) > (4*1024)) {                       \
+		max = (c->max_send_size - hdr_size)                           \
+		      - ((c->max_send_size - hdr_size) % (4*1024));           \
+	} else                                                                  \
+		max = c->max_send_size - hdr_size;                            \
 	} while(0)
 
 typedef enum device_state {
