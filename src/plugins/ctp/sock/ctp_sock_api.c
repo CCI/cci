@@ -1921,7 +1921,7 @@ static int sock_sendmsg(cci_os_handle_t sock, struct iovec iov[2],
 		debug(CCI_DB_MSG,
 		      "%s: sendmsg() returned %d (%s) count %d iov[0] %p:%hu "
 		      "iov[1] %p:%hu",
-		      __func__, ret, strerror(ret), count,
+		      __func__, ret, strerror(errno), count,
 		      iov[0].iov_base, (int)iov[0].iov_len,
 		      iov[1].iov_base, (int)iov[1].iov_len);
 	}
@@ -2745,7 +2745,8 @@ static int ctp_sock_rma_register(cci_endpoint_t * endpoint,
 }
 
 static int
-ctp_sock_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * rma_handle)
+ctp_sock_rma_deregister(cci_endpoint_t * endpoint,
+                        cci_rma_handle_t * rma_handle)
 {
 	int ret = CCI_EINVAL;
 	sock_rma_handle_t *handle = container_of(rma_handle, sock_rma_handle_t, rma_handle);
@@ -2875,9 +2876,7 @@ static int ctp_sock_rma(cci_connection_t * connection,
 		int err = 0;
 		sock_tx_t **txs = NULL;
 		uint64_t old_seq = 0ULL;
-		size_t max_send_size;
 
-		RMA_PAYLOAD_SIZE (connection, max_send_size);
 		cnt = rma_op->num_msgs < SOCK_RMA_DEPTH ?
 			rma_op->num_msgs : SOCK_RMA_DEPTH;
 
