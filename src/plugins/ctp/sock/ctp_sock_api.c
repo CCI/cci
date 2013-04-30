@@ -1967,12 +1967,13 @@ static void sock_progress_pending(cci__ep_t * ep)
 	sock_conn_t *sconn 	= NULL;
 	sock_ep_t *sep 		= ep->priv;
 
-	CCI_ENTER;
-
-	TAILQ_HEAD(s_idle_txs, sock_tx) idle_txs = TAILQ_HEAD_INITIALIZER(idle_txs);
+	TAILQ_HEAD(s_idle_txs, sock_tx) idle_txs
+		= TAILQ_HEAD_INITIALIZER(idle_txs);
 	TAILQ_HEAD(s_evts, cci__evt) evts = TAILQ_HEAD_INITIALIZER(evts);
-	TAILQ_INIT(&idle_txs);
-	TAILQ_INIT(&evts);
+	TAILQ_INIT(&idle_txs);                                                  
+        TAILQ_INIT(&evts);
+
+	CCI_ENTER; 
 
 	now = sock_get_usecs();
 
@@ -3220,7 +3221,8 @@ sock_handle_ack(sock_conn_t * sconn,
 	sock_header_r_t *hdr_r = rx->buffer;
 	uint32_t acks[SOCK_MAX_SACK * 2];
 
-	TAILQ_HEAD(s_idle_txs, sock_tx) idle_txs = TAILQ_HEAD_INITIALIZER(idle_txs);
+	TAILQ_HEAD(s_idle_txs, sock_tx) idle_txs
+		= TAILQ_HEAD_INITIALIZER(idle_txs);
 	TAILQ_HEAD(s_evts, cci__evt) evts = TAILQ_HEAD_INITIALIZER(evts);
 	TAILQ_INIT(&idle_txs);
 	TAILQ_INIT(&evts);
@@ -3813,7 +3815,6 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,
 
 	if (sconn->status == SOCK_CONN_ACTIVE) {
 		uint32_t peer_id, ack, max_recv_buffer_count, mss, keepalive;
-		struct s_active *active_list;
 
 		if (CCI_SUCCESS == reply)
 		{
@@ -4837,8 +4838,9 @@ static void sock_keepalive(cci__ep_t *ep)
 		if (conn->keepalive_timeout == 0ULL)
 			return;
 
-		/* The keepalive is assumed to expire if we did not hear anything from the
-		peer since the last receive + keepalive timeout. */
+		/* The keepalive is assumed to expire if we did not hear
+		   anything from the peer since the last receive + keepalive
+		   timeout. */
 		ka_timeout = sconn->ts + conn->keepalive_timeout;
 
 		if (SOCK_U64_LT(now, ka_timeout)) {
@@ -4855,7 +4857,8 @@ static void sock_keepalive(cci__ep_t *ep)
 			* We generate a keepalive event
 			*/
 
-			TAILQ_HEAD(s_evts, cci__evt) evts = TAILQ_HEAD_INITIALIZER(evts);
+			TAILQ_HEAD(s_evts, cci__evt) evts
+				= TAILQ_HEAD_INITIALIZER(evts);
 			TAILQ_INIT(&evts);
 			evt = TAILQ_FIRST(&evts);
 			event = (cci_event_keepalive_timedout_t *) evt;
@@ -4866,7 +4869,8 @@ static void sock_keepalive(cci__ep_t *ep)
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
 			pthread_mutex_unlock(&ep->lock);
-			/* waking up the app thread if it is blocking on a OS handle */
+			/* waking up the app thread if it is blocking on a OS
+			   handle */
 			if (sep->event_fd) {
 				int rc;
 				rc = write (sep->fd[1], "a", 1);

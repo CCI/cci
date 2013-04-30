@@ -560,9 +560,10 @@ typedef union sock_u64 {
 
 static inline uint64_t sock_ntohll(uint64_t val)
 {
-	sock_u64_t net = {.ull = val };
+	sock_u64_t net;
 	sock_u64_t host;
 
+	net.ull = val;
 	host.ul[0] = ntohl(net.ul[1]);
 	host.ul[1] = ntohl(net.ul[0]);
 
@@ -571,9 +572,10 @@ static inline uint64_t sock_ntohll(uint64_t val)
 
 static inline uint64_t sock_htonll(uint64_t val)
 {
-	sock_u64_t host = {.ull = val };
+	sock_u64_t host;
 	sock_u64_t net;
 
+	host.ull = val;
 	net.ul[0] = htonl(host.ul[1]);
 	net.ul[1] = htonl(host.ul[0]);
 
