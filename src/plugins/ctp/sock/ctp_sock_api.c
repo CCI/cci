@@ -3774,6 +3774,7 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,
 					cci_strerror(&ep->endpoint,
 						(enum cci_status)ret));
 			}
+
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
 			pthread_mutex_unlock(&ep->lock);
@@ -3786,10 +3787,7 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,
 	conn = sconn->conn;
 
 	/* set wire header so we can find user header */
-
 	hdr_r = (sock_header_r_t *) rx->buffer;
-
-	/* TODO handle ack */
 
 	/*FIXME do something with ts */
 	sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
@@ -3798,7 +3796,6 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,
 	evt = &rx->evt;
 
 	/* setup the generic event for the application */
-
 	event = & evt->event;
 	event->type = CCI_EVENT_CONNECT;
 	event->connect.status = reply;
@@ -3904,8 +3901,30 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,
 			memset(name, 0, sizeof(name));
 			sock_sin_to_name(sin, name, sizeof(name));
 			debug((CCI_DB_CONN | CCI_DB_MSG),
-				"ep %d recv'd conn_reply (rejected) from %s"
-				" - closing conn", sep->sock, name);
+			      "ep %d recv'd conn_reply (rejected) from %s"
+			      " - closing conn", sep->sock, name);
+
+			/*
+			 * Implicit ACK of the corresponding conn_req
+			 */
+			debug((CCI_DB_CONN | CCI_DB_MSG),
+			      "Implicitely ACKing conn_req %u", seq);
+			/* get pending conn_req tx, create event, move conn to
+                           conn_hash */
+                        pthread_mutex_lock(&ep->lock);
+                        TAILQ_FOREACH_SAFE(e, &sep->pending, entry, tmp) {
+                                t = container_of (e, sock_tx_t, evt);
+                                if (t->seq == seq) {
+                                        TAILQ_REMOVE(&sep->pending, e, entry);
+                                        tx = t;
+                                        break;
+                                }
+                        }
+                        pthread_mutex_unlock(&ep->lock);
+                        /* Since we remove the pending tx, update the
+                           pending_seq for that given connection */
+                        if (sconn->seq_pending == seq - 1)
+                                sconn->seq_pending = seq;
 
 			/* simply ack this msg and cleanup */
 			memset(&hdr, 0, sizeof(hdr));
