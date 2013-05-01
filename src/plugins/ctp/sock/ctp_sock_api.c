@@ -2344,8 +2344,9 @@ static void sock_progress_queued(cci__ep_t * ep)
 		/* if reliable and ordered, we have to check whether the tx is marked
 		   RNR */
 		if (is_reliable
-			&& conn->connection.attribute == CCI_CONN_ATTR_RO 
-			&& tx->rnr != 0)
+		    && conn
+		    && conn->connection.attribute == CCI_CONN_ATTR_RO 
+		    && tx->rnr != 0)
 		{
 			event->send.status = CCI_ERR_RNR;
 		}
