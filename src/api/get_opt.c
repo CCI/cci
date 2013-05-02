@@ -42,6 +42,7 @@ int cci_get_opt(cci_opt_handle_t * handle,
 		plugin = ep->plugin;
 		break;
 	case CCI_OPT_CONN_SEND_TIMEOUT:
+	case CCI_OPT_CONN_KEEPALIVE_TIMEOUT:
 		conn =
 		    container_of(handle, cci__conn_t, connection);
 		plugin = conn->plugin;
