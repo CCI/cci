@@ -3891,21 +3891,21 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,
 			debug((CCI_DB_CONN | CCI_DB_MSG),
 			      "Implicitely ACKing conn_req %u", seq);
 			/* get pending conn_req tx, create event, move conn to
-                           conn_hash */
-                        pthread_mutex_lock(&ep->lock);
-                        TAILQ_FOREACH_SAFE(e, &sep->pending, entry, tmp) {
-                                t = container_of (e, sock_tx_t, evt);
-                                if (t->seq == seq) {
-                                        TAILQ_REMOVE(&sep->pending, e, entry);
-                                        tx = t;
-                                        break;
-                                }
-                        }
-                        pthread_mutex_unlock(&ep->lock);
-                        /* Since we remove the pending tx, update the
-                           pending_seq for that given connection */
-                        if (sconn->seq_pending == seq - 1)
-                                sconn->seq_pending = seq;
+			   conn_hash */
+			pthread_mutex_lock(&ep->lock);
+			TAILQ_FOREACH_SAFE(e, &sep->pending, entry, tmp) {
+				t = container_of (e, sock_tx_t, evt);
+				if (t->seq == seq) {
+					TAILQ_REMOVE(&sep->pending, e, entry);
+					tx = t;
+					break;
+				}
+			}
+			pthread_mutex_unlock(&ep->lock);
+			/* Since we remove the pending tx, update the
+			   pending_seq for that given connection */
+			if (sconn->seq_pending == seq - 1)
+				sconn->seq_pending = seq;
 
 			/* simply ack this msg and cleanup */
 			memset(&hdr, 0, sizeof(hdr));
