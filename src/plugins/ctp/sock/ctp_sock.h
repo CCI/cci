@@ -1177,7 +1177,7 @@ typedef struct sock_globals {
 	int count;
 
 	/*! Array of sock devices */
-	cci_device_t const **const devices;
+	cci_device_t **devices;
 } sock_globals_t;
 
 /* We try to stay page aligned when we send RMA data */
