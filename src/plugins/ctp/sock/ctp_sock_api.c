@@ -619,20 +619,12 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	struct sockaddr_in sin;
 	socklen_t slen;
 	char name[40];
-	size_t len_xx, len_buf;
-	sock_rx_t *rx;
-	sock_tx_t *tx;
 	unsigned int sndbuf_size 	= SOCK_SNDBUF_SIZE;
 	unsigned int rcvbuf_size 	= SOCK_RCVBUF_SIZE;
-	char *sock_xx 			= NULL;
-	char *sock_xx_base 		= NULL;
-	char *buf 			= NULL;
-	char *buf_base 			= NULL;
 	cci__dev_t *dev 		= NULL;
 	cci__ep_t *ep 			= NULL;
 	sock_ep_t *sep 			= NULL; 
 	struct cci_endpoint *endpoint	= (struct cci_endpoint *) *endpointp;
-	const int cache_line_size	= 64;
 
 	CCI_ENTER;
 
@@ -759,56 +751,58 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 
 	TAILQ_INIT(&sep->idle_txs);
 	TAILQ_INIT(&sep->idle_rxs);
-	TAILQ_INIT(&sep->txs);
-	TAILQ_INIT(&sep->rxs);
 	TAILQ_INIT(&sep->handles);
 	TAILQ_INIT(&sep->rma_ops);
 	TAILQ_INIT(&sep->queued);
 	TAILQ_INIT(&sep->pending);
 
-	len_xx = sizeof (*tx) < sizeof (*rx) ? sizeof (*rx) : sizeof (*tx);
-	len_xx = (len_xx + (cache_line_size - 1)) ^ (cache_line_size - 1);
-	len_buf = (ep->buffer_len + (cache_line_size - 1))
-	          ^ (cache_line_size - 1);
-	sock_xx_base    = sock_xx = calloc (ep->rx_buf_cnt + ep->tx_buf_cnt,
-	                                    len_xx);
-	buf_base        = buf     = calloc (ep->rx_buf_cnt + ep->tx_buf_cnt,
-	                                    len_buf);
-	if (!sock_xx_base || !buf_base) {
+	sep->tx_buf = calloc (1, ep->tx_buf_cnt * sizeof (sock_tx_t));
+	if (!sep->tx_buf) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	sep->txs = calloc (1, ep->tx_buf_cnt * sizeof (sock_tx_t));
+	if (!sep->txs) {
 		ret = CCI_ENOMEM;
 		goto out;
 	}
 
 	/* alloc txs */
 	for (i = 0; i < ep->tx_buf_cnt; i++) {
-		tx = (sock_tx_t*)sock_xx;
+		sock_tx_t *tx = &sep->txs[i];
 
 		tx->evt.event.type = CCI_EVENT_SEND;
 		tx->evt.ep = ep;
-		tx->buffer = buf;
+		tx->buffer = (void*)((uintptr_t)sep->tx_buf
+		                     + (i * ep->buffer_len));
 		tx->len = 0;
-		TAILQ_INSERT_TAIL(&sep->txs, tx, tentry);
 		TAILQ_INSERT_TAIL(&sep->idle_txs, tx, dentry);
-		sock_xx += len_xx;
-		buf += len_buf;
+	}
+
+	sep->rx_buf = calloc (1, ep->rx_buf_cnt * sizeof (sock_rx_t));
+	if (!sep->rx_buf) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	sep->rxs = calloc (1, ep->rx_buf_cnt * sizeof (sock_rx_t));
+	if (!sep->rx_buf) {
+		ret = CCI_ENOMEM;
+		goto out;
 	}
 
 	/* alloc rxs */
 	for (i = 0; i < ep->rx_buf_cnt; i++) {
-		rx = (sock_rx_t*)sock_xx;
+		sock_rx_t *rx = &sep->rxs[i];
 
 		rx->evt.event.type = CCI_EVENT_RECV;
 		rx->evt.ep = ep;
-		rx->buffer = buf;
+		rx->buffer = (void*)((uintptr_t)sep->rx_buf
+		                     + (i * ep->buffer_len));
 		rx->len = 0;
-		TAILQ_INSERT_TAIL(&sep->rxs, rx, gentry);
 		TAILQ_INSERT_TAIL(&sep->idle_rxs, rx, entry);
-		sock_xx += len_xx;
-		buf += len_buf;
 	}
-
-	sep->sock_xx_base = sock_xx_base;
-	sep->buf_base = buf_base;
 
 	ret = sock_set_nonblocking(sep->sock, SOCK_FD_EP, ep);
 	if (ret)
@@ -879,30 +873,16 @@ out:
 	/* Note that there is no need to remove the ep even in the context of
 	   a failure because the ep is added to the list of active endpoints
 	   by cci_create_endpoint(), AFTER the call to this function. */
-	if (sock_xx_base)
-		free (sock_xx_base);
-	if (buf_base)
-		free (buf_base);
-
 	if (sep) {
-		while (!TAILQ_EMPTY(&sep->txs)) {
-			sock_tx_t *tx;
+		if (sep->txs)
+			free (sep->txs);
+		if (sep->tx_buf)
+			free (sep->tx_buf);
 
-			tx = TAILQ_FIRST(&sep->txs);
-			TAILQ_REMOVE(&sep->txs, tx, tentry);
-			if (tx->buffer)
-				free(tx->buffer);
-			free(tx);
-		}
-		while (!TAILQ_EMPTY(&sep->rxs)) {
-			sock_rx_t *rx;
-
-			rx = TAILQ_FIRST(&sep->rxs);
-			TAILQ_REMOVE(&sep->rxs, rx, gentry);
-			if (rx->buffer)
-				free(rx->buffer);
-			free(rx);
-		}
+		if (sep->rxs)
+			free (sep->rxs);
+		if (sep->rx_buf)
+			free (sep->rx_buf);
 
 		if (sep->ids)
 			free(sep->ids);
@@ -978,11 +958,11 @@ static int ctp_sock_destroy_endpoint(cci_endpoint_t * endpoint)
 			}
 		}
 
-		if (sep->sock_xx_base)
-			free (sep->sock_xx_base);
+		free (sep->txs);
+		free (sep->tx_buf);
 
-		if (sep->buf_base);
-			free (sep->buf_base);
+		free (sep->rxs);
+		free (sep->rx_buf);
 
 		while (!TAILQ_EMPTY(&sep->rma_ops)) {
 			sock_rma_op_t *rma_op = TAILQ_FIRST(&sep->rma_ops);
@@ -1266,8 +1246,8 @@ static int ctp_sock_reject(cci_event_t *event)
 	sep = ep->priv;
 	rx = container_of(evt, sock_rx_t, evt);
 	hdr_r = rx->buffer;
-        sock_parse_header(&hdr_r->header, &type, &a, &b, &peer_id);
-        sock_parse_seq_ts(&hdr_r->seq_ts, &peer_seq, &peer_ts);
+	sock_parse_header(&hdr_r->header, &type, &a, &b, &peer_id);
+	sock_parse_seq_ts(&hdr_r->seq_ts, &peer_seq, &peer_ts);
 
 	/* get a tx */
 	pthread_mutex_lock(&ep->lock);

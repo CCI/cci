@@ -990,17 +990,20 @@ typedef struct sock_ep {
 	/*! Array of conn lists hased over IP/port */
 	TAILQ_HEAD(s_conns, sock_conn) conn_hash[SOCK_EP_HASH_SIZE];
 
-	/*! Base pointer for the buffers, sock_rx and sock_tx allocated */      
-        char* sock_xx_base, *buf_base;
+	/*! TX common buffer */
+	void *tx_buf;
 
 	/*! List of all txs */
-	TAILQ_HEAD(s_txs, sock_tx) txs;
+	sock_tx_t *txs;
 
 	/*! List of idle txs */
 	TAILQ_HEAD(s_txsi, sock_tx) idle_txs;
 
+	/*! RX common buffer */
+	void *rx_buf;
+
 	/*! List of all rxs */
-	TAILQ_HEAD(s_rxs, sock_rx) rxs;
+	sock_rx_t *rxs;
 
 	/*! List of idle rxs */
 	TAILQ_HEAD(s_rxsi, sock_rx) idle_rxs;
