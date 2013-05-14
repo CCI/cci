@@ -1020,6 +1020,7 @@ static int ctp_tcp_accept(cci_event_t *event, const void *context)
 	tcp_rx_t *rx = NULL;
 	tcp_handshake_t *hs = NULL;
 	uint32_t client_tx_id = 0;
+	uintptr_t offset = 0;
 
 	CCI_ENTER;
 
@@ -1081,23 +1082,21 @@ static int ctp_tcp_accept(cci_event_t *event, const void *context)
 	/* pack the msg */
 
 	hdr = (tcp_header_t *) tx->buffer;
-	tcp_pack_conn_reply(hdr, CCI_SUCCESS, tx->id);
+	tcp_pack_conn_reply(hdr, CCI_SUCCESS, client_tx_id);
 	hs = (tcp_handshake_t *) ((uintptr_t)tx->buffer + sizeof(*hdr));
 	tcp_pack_handshake(hs, ep->rx_buf_cnt,
 			   conn->connection.max_send_size, 0, tx->id);
 
 	tx->len = sizeof(*hdr) + sizeof(*hs);
 
-	/* insert at tail of tep's queued list */
+	tx->state = TCP_TX_PENDING;
+	tcp_sendto(tconn->fd, tx->buffer, tx->len, NULL, 0, &offset);
 
-	tx->state = TCP_TX_QUEUED;
+	assert((uint32_t)offset == tx->len);
+
 	pthread_mutex_lock(&tconn->slock);
-	TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
+	TAILQ_INSERT_HEAD(&tconn->pending, &tx->evt, entry);
 	pthread_mutex_unlock(&tconn->slock);
-
-	/* try to progress txs */
-
-	tcp_progress_conn_sends(conn, 0);
 
 	CCI_EXIT;
 
@@ -1711,6 +1710,14 @@ static int ctp_tcp_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eve
 		TAILQ_REMOVE(&ep->evts, ev, entry);
 		debug(CCI_DB_EP, "%s: found %s on conn %p", __func__,
 			cci_event_type_str(ev->event.type), (void*)ev->conn);
+		if (ev->event.type == CCI_EVENT_NONE) {
+			tcp_tx_t *tx = container_of(ev, tcp_tx_t, evt);
+
+			debug(CCI_DB_ALL, "%s: tx %s id %u state %u "
+				"len %u flags %d rma_op %p rma_id %u", __func__,
+				tcp_msg_type(tx->msg_type), tx->id, tx->state,
+				tx->len, tx->flags, (void*)tx->rma_op, tx->rma_id);
+		}
 	} else {
 		ret = CCI_EAGAIN;
 		if (TAILQ_EMPTY(&tep->idle_rxs))
