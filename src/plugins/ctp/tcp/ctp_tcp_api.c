@@ -2023,7 +2023,7 @@ static int tcp_send_common(cci_connection_t * connection,
 		debug(CCI_DB_MSG, "%s: total send length (%d) larger than "
 			"max_send_size (%u)", func, data_len, connection->max_send_size);
 		CCI_EXIT;
-		return CCI_EINVAL;
+		return CCI_EMSGSIZE;
 	}
 
 	ep = container_of(endpoint, cci__ep_t, endpoint);
