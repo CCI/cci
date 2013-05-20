@@ -31,7 +31,9 @@
     mtu = 9000
 
   The sock transport will then set the endpoint->max_send_size to this size
-  less what it needs for headers.
+  less what it needs for headers. If the OS supports MTU discovery (i.e.
+  recent Linux), then CCI will use the actual MTU (less headers) and ignore
+  this keyword
 
     bufsize = 20971520
 
@@ -63,7 +65,7 @@
 
 Not implemented:
 
-  Fence
+  RMA Fence
   RO connections may not be ordered (i.e. RU)
 
 

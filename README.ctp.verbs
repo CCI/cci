@@ -105,14 +105,3 @@
   allow RDMA MSGs to function. If you do not intend to use RMDA MSGs, this can
   be turned off (set to 0). There is an upper limit to the amount and if it is
   set too large, bad things may happen. ;-)
-
-  In order to post an RDMA, the Verbs API requires more data than we can pack
-  into the cci_rma_handle_t. Therefore, we must request the information from the
-  peer before posting the RDMA. This extra round-trip adds latency to each RDMA
-  which is noticeable on small RMAs but not on larger RMAs. By default we will
-  cache the most recently RDMA information for each connection. It is controlled
-  by:
-
-  VERBS_RMA_REMOTE_SIZE which sets the limit of cached RDMA data per connection.
-  Setting it to 0 will disable caching and force a rendezvous for each RDMA.
-

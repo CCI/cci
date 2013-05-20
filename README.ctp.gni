@@ -15,6 +15,11 @@
 
     --with-gni-libdir=DIR
 
+  You can compile in the default GNI PTAG and/or COOKIE for the system with:
+
+    --with-gni-ptag=NUM     # set CCI system PTAG
+    --with-gni-cookie=NUM   # set CCI system COOKIE
+
 = Endpoint naming ==============================================================
 
   GNI endpoint URIs are host and port where host is a hostname or IPv4 address:
@@ -47,6 +52,14 @@
 
   Do not use the port option if you intend to use more than one endpoint per
   host. This is mostly useful for running tests with a single endpoint per host.
+
+    ptag = 123
+
+  where 123 is the system-wide CCI ptag.
+
+    cookie = 0xdeadbeef
+
+  where 0xdeadbeef is the system-wide CCI cookie (in hex).
 
 = Run-time notes ===============================================================
 
@@ -98,14 +111,3 @@
 
   The combination above requires about 800 bytes per connection. Given a machine
   can have 300,000+ peer processes, it adds up quickly.
-  
-  In order to post an RDMA, the uGNI API requires more data than we can pack
-  into the cci_rma_handle_t. Therefore, we must request the information from the
-  peer before posting the RDMA. This extra round-trip adds latency to each RDMA
-  which is noticeable on small RMAs but not on larger RMAs. By default we will
-  cache the most recently RDMA information for each connection. It is controlled
-  by:
-
-  GNI_RMA_REMOTE_SIZE which sets the limit of cached RDMA data per connection.
-  Setting it to 0 will disable caching and force a rendezvous for each RDMA.
-
