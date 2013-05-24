@@ -1621,7 +1621,7 @@ CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
 				    cci_rma_handle_t * rma_handle);
 
 /*!
-  Perform a RMA operation between local and remote memory.
+  Perform a RMA operation between local and remote memory on a valid connection.
 
   Initiate a remote memory WRITE access (move local memory to remote
   memory) or READ (move remote memory to local memory). Adding the FENCE
@@ -1651,6 +1651,10 @@ CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
   the flags passed in cci_rma() here. local_handles does not need any
   protection flag since it is only accessed locally here.
 
+  RMA requires a valid connection (i.e. open on both sides). If the remote
+  peer has called disconnect(), any attempt to RMA to that peer using the half
+  closed connection should fail.
+
   \param[in] connection     Connection (destination).
   \param[in] msg_ptr         Pointer to data for the remote completion.
   \param[in] msg_len         Length of data for the remote completion.
@@ -1677,6 +1681,7 @@ CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
   \return CCI_EINVAL    data_len is 0.
   \return CCI_EINVAL    Both READ and WRITE flags are set.
   \return CCI_EINVAL    Neither the READ or WRITE flag is set.
+  \return CCI_ERR_DISCONNECTED  The remote peer has closed the connection.
   \return Each transport may have additional error codes.
 
   \note CCI_FLAG_FENCE only applies to RMA operations for this connection. It does
