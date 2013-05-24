@@ -215,8 +215,8 @@ typedef enum cci_status {
 	/*! Invalid parameter passed to CCI function call */
 	CCI_EINVAL = EINVAL,
 
-	/*! For a reliable send, this error code means that the sender did
-	   not get anything back from the receiver within a timeout (no
+	/*! For a reliable send or rma, this error code means that the sender
+	   did not get anything back from the receiver within a timeout (no
 	   ACK, no NACK, etc.).  It is unknown whether the receiver
 	   actually received the message or not.
 
@@ -821,11 +821,14 @@ typedef enum cci_event_type {
 	/*! Never use - for internal CCI use only. */
 	CCI_EVENT_NONE,
 
-	/*! A send or RMA has completed. */
+	/*! A message has been sent. */
 	CCI_EVENT_SEND,
 
 	/*! A message has been received. */
 	CCI_EVENT_RECV,
+
+	/*! A RMA has completed. */
+	CCI_EVENT_RMA,
 
 	/*! An outgoing connection request has completed. */
 	CCI_EVENT_CONNECT,
@@ -859,6 +862,8 @@ cci_event_type_str(cci_event_type_t type)
 		return "CCI_EVENT_SEND";
 	case CCI_EVENT_RECV:
 		return "CCI_EVENT_RECV";
+	case CCI_EVENT_RMA:
+		return "CCI_EVENT_RMA";
 	case CCI_EVENT_CONNECT:
 		return "CCI_EVENT_CONNECT";
 	case CCI_EVENT_CONNECT_REQUEST:
@@ -951,6 +956,42 @@ typedef struct cci_event_recv {
 	/*! Connection that this message was received on. */
 	cci_connection_t *connection;
 } cci_event_recv_t;
+
+/*!
+  RMA event.
+
+  A completion struct instance is returned for each cci_rma() that
+  requested a completion notification.
+
+  The number of fields in this struct is intentionally limited in
+  order to reduce costs associated with state storage, caching,
+  updating, copying.  For example, there is no field pointing to the
+  endpoint used for the RMA because it can be obtained from the
+  cci_connection, or through the endpoint passed to the
+  cci_get_event() call.
+
+  If it is desirable to match RMA completions with specific RMAs
+  (it usually is), it is the responsibility of the caller to pass a
+  meaningful context value to cci_rma().
+
+  The ordering of fields in this struct is intended to reduce memory
+  holes between fields.
+
+  \ingroup events
+*/
+typedef struct cci_event_rma {
+	/*! Type of event - should equal CCI_EVENT_RMA */
+	cci_event_type_t type;
+
+	/*! Result of the RMA. */
+	cci_status_t status;
+
+	/*! Connection that the RMA was initiated on. */
+	cci_connection_t *connection;
+
+	/*! Context value that was passed to cci_rma() */
+	void *context;
+} cci_event_rma_t;
 
 /*!
   Connect request completion event.
@@ -1140,6 +1181,7 @@ union cci_event {
 	cci_event_type_t type;
 	cci_event_send_t send;
 	cci_event_recv_t recv;
+	cci_event_rma_t rma;
 	cci_event_connect_t connect;
 	cci_event_connect_request_t request;
 	cci_event_accept_t accept;
@@ -1170,7 +1212,7 @@ CCI_DECLSPEC int cci_arm_os_handle(cci_endpoint_t * endpoint, int flags);
   Get the next available CCI event.
 
   This function never blocks; it polls instantly to see if there is
-  any pending event of any type (send completion, receive, connection
+  any pending event of any type (send completion, receive, rma, connection
   request, etc.). If the application wants to block, it should pass the
   OS handle to the OS's native blocking mechanism (e.g., select/poll on
   the POSIX fd).  This also allows the app to busy poll for a while and
@@ -1256,7 +1298,7 @@ CCI_DECLSPEC int cci_return_event(cci_event_t * event);
   \ingroup opts
 */
 typedef enum cci_opt_name {
-	/*! Default send timeout for all new connections.
+	/*! Default send and RMA timeout for all new connections.
 
 	   cci_get_opt() and cci_set_opt().
 
@@ -1347,7 +1389,7 @@ typedef enum cci_opt_name {
         */
 	CCI_OPT_ENDPT_RMA_ALIGN,
 
-	/*! Reliable send timeout in microseconds.
+	/*! Reliable send and RMA timeout in microseconds.
 
 	   cci_get_opt() and cci_set_opt().
 
@@ -1663,7 +1705,7 @@ CCI_DECLSPEC int cci_rma_deregister(cci_endpoint_t * endpoint,
   \param[in] remote_handle  Handle of the remote RMA area.
   \param[in] remote_offset  Offset in the remote RMA area.
   \param[in] data_len       Length of data segment.
-  \param[in] context        Cookie to identify the completion through a Send event
+  \param[in] context        Cookie to identify the completion through a RMA event
                             when non-blocking.
   \param[in] flags          Optional flags:
     - CCI_FLAG_BLOCKING:    Blocking call (see cci_send() for details).
