@@ -215,7 +215,7 @@ typedef enum cci_status {
 	/*! Invalid parameter passed to CCI function call */
 	CCI_EINVAL = EINVAL,
 
-	/*! For a reliable send or rma, this error code means that the sender
+	/*! For a reliable send or RMA, this error code means that the sender
 	   did not get anything back from the receiver within a timeout (no
 	   ACK, no NACK, etc.).  It is unknown whether the receiver
 	   actually received the message or not.
@@ -1212,7 +1212,7 @@ CCI_DECLSPEC int cci_arm_os_handle(cci_endpoint_t * endpoint, int flags);
   Get the next available CCI event.
 
   This function never blocks; it polls instantly to see if there is
-  any pending event of any type (send completion, receive, rma, connection
+  any pending event of any type (send completion, receive, RMA, connection
   request, etc.). If the application wants to block, it should pass the
   OS handle to the OS's native blocking mechanism (e.g., select/poll on
   the POSIX fd).  This also allows the app to busy poll for a while and
