@@ -772,6 +772,7 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	for (i = 0; i < ep->tx_buf_cnt; i++) {
 		sock_tx_t *tx = &sep->txs[i];
 
+		tx->ctx = SOCK_CTX_TX;
 		tx->evt.event.type = CCI_EVENT_SEND;
 		tx->evt.ep = ep;
 		tx->buffer = (void*)((uintptr_t)sep->tx_buf
@@ -796,6 +797,7 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	for (i = 0; i < ep->rx_buf_cnt; i++) {
 		sock_rx_t *rx = &sep->rxs[i];
 
+		rx->ctx = SOCK_CTX_RX;
 		rx->evt.event.type = CCI_EVENT_RECV;
 		rx->evt.ep = ep;
 		rx->buffer = (void*)((uintptr_t)sep->rx_buf
@@ -1835,6 +1837,7 @@ static int ctp_sock_return_event(cci_event_t * event)
 	cci__evt_t *evt;
 	sock_tx_t *tx;
 	sock_rx_t *rx;
+	int ret = CCI_SUCCESS;
 
 	CCI_ENTER;
 
@@ -1852,6 +1855,7 @@ static int ctp_sock_return_event(cci_event_t * event)
 
 	switch (event->type) {
 	case CCI_EVENT_SEND:
+	case CCI_EVENT_ACCEPT:
 		tx = container_of(evt, sock_tx_t, evt);
 		pthread_mutex_lock(&ep->lock);
 		/* insert at head to keep it in cache */
@@ -1859,20 +1863,32 @@ static int ctp_sock_return_event(cci_event_t * event)
 		pthread_mutex_unlock(&ep->lock);
 		break;
 	case CCI_EVENT_RECV:
+	case CCI_EVENT_CONNECT_REQUEST:
 		rx = container_of(evt, sock_rx_t, evt);
 		pthread_mutex_lock(&ep->lock);
 		/* insert at head to keep it in cache */
 		TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
 		pthread_mutex_unlock(&ep->lock);
 		break;
+	case CCI_EVENT_CONNECT:
+		rx = container_of (evt, sock_rx_t, evt);
+		if (rx->ctx == SOCK_CTX_RX) {
+			TAILQ_INSERT_HEAD (&sep->idle_rxs, rx, entry);
+		} else {
+			tx = (sock_tx_t*)rx;
+			TAILQ_INSERT_HEAD (&sep->idle_txs, tx, dentry);
+		}
 	default:
-		/* TODO */
+		debug (CCI_DB_EP,
+		       "%s: unhandled %s event", __func__,
+		       cci_event_type_str(event->type));
+		ret = CCI_ERROR;
 		break;
 	}
 
 	CCI_EXIT;
 
-	return CCI_SUCCESS;
+	return ret;
 }
 
 /** Try to put a message on the wire.
@@ -2584,6 +2600,13 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 	use sendmsg() with an iovec. */
 
 	for (i = 0; i < iovcnt; i++) {
+		if (tx->len + data[i].iov_len > connection->max_send_size) {
+			debug (CCI_DB_CTP,
+			       "Msg too big: %lu/%u\n",
+			       tx->len + data[i].iov_len,
+			       connection->max_send_size);
+			return CCI_EINVAL;
+		}
 		memcpy(ptr, data[i].iov_base, data[i].iov_len);
 		ptr = (void*)((uintptr_t)ptr + data[i].iov_len);
 		tx->len += data[i].iov_len;
@@ -3109,6 +3132,8 @@ sock_handle_active_message(sock_conn_t * sconn,
 	/* get cci__evt_t to hang on ep->events */
 
 	evt = &rx->evt;
+	if (!evt->conn)
+		evt->conn = conn;
 
 	/* set wire header so we can find user header */
 

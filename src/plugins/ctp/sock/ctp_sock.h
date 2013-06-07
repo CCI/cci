@@ -814,10 +814,18 @@ typedef enum sock_tx_state_t {
 	SOCK_TX_COMPLETED
 } sock_tx_state_t;
 
+typedef enum sock_ctx {
+	SOCK_CTX_TX,
+	SOCK_CTX_RX
+} sock_ctx_t;
+
 /*! Send active message context.
 *
 * \ingroup messages */
 typedef struct sock_tx {
+	/*! Must be SOCK_CTX_TX */
+	sock_ctx_t ctx;
+
 	/*! Associated event (includes public cci_event_t) */
 	cci__evt_t evt;
 
@@ -841,9 +849,6 @@ typedef struct sock_tx {
 
 	/*! Entry for hanging on ep->idle_txs, dev->queued, dev->pending */
 	 TAILQ_ENTRY(sock_tx) dentry;
-
-	/*! Entry for hanging on ep->txs */
-	 TAILQ_ENTRY(sock_tx) tentry;
 
 	/*! Entry for sconn->tx_seqs */
 	 TAILQ_ENTRY(sock_tx) tx_seq;
@@ -876,6 +881,9 @@ typedef struct sock_tx {
  *
  * \ingroup messages */
 typedef struct sock_rx {
+	/*! Must be SOCK_CTX_RX */
+	sock_ctx_t ctx;
+
 	/*! Associated event (includes public cci_event_t) */
 	cci__evt_t evt;
 
@@ -886,10 +894,7 @@ typedef struct sock_rx {
 	uint16_t len;
 
 	/*! Entry for hanging on ep->idle_rxs, ep->loaned */
-	 TAILQ_ENTRY(sock_rx) entry;
-
-	/*! Entry for hanging on ep->rxs */
-	 TAILQ_ENTRY(sock_rx) gentry;
+	TAILQ_ENTRY(sock_rx) entry;
 
 	/*! Peer's sockaddr_in for connection requests */
 	struct sockaddr_in sin;
