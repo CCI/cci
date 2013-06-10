@@ -1878,6 +1878,7 @@ static int ctp_sock_return_event(cci_event_t * event)
 			tx = (sock_tx_t*)rx;
 			TAILQ_INSERT_HEAD (&sep->idle_txs, tx, dentry);
 		}
+		break;
 	default:
 		debug (CCI_DB_EP,
 		       "%s: unhandled %s event", __func__,
