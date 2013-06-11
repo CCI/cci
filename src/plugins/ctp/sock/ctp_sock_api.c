@@ -2224,11 +2224,12 @@ static void sock_progress_queued(cci__ep_t * ep)
 	sock_conn_t *sconn;
 	union cci_event *event = NULL;	/* generic CCI event */
 
-	CCI_ENTER;
-	
 	TAILQ_HEAD(s_idle_txs, sock_tx) idle_txs
 		= TAILQ_HEAD_INITIALIZER(idle_txs);
 	TAILQ_HEAD(s_evts, cci__evt) evts = TAILQ_HEAD_INITIALIZER(evts);
+
+	CCI_ENTER;
+
 	TAILQ_INIT(&idle_txs);
 	TAILQ_INIT(&evts);
 
@@ -3246,9 +3247,9 @@ sock_handle_ack(sock_conn_t * sconn,
 	TAILQ_HEAD(s_idle_txs, sock_tx) idle_txs
 		= TAILQ_HEAD_INITIALIZER(idle_txs);
 	TAILQ_HEAD(s_evts, cci__evt) evts = TAILQ_HEAD_INITIALIZER(evts);
-	TAILQ_INIT(&idle_txs);
-	TAILQ_INIT(&evts);
 	TAILQ_HEAD(s_queued, sock_tx) queued = TAILQ_HEAD_INITIALIZER(queued);
+	TAILQ_INIT(&idle_txs);                                                  
+	TAILQ_INIT(&evts);
 	TAILQ_INIT(&queued);
 
 	assert(id == sconn->id);
@@ -3725,28 +3726,31 @@ sock_handle_conn_request(sock_rx_t * rx,
 	return;
 }
 
-/* Possible states and what to do:
-*
-* Recv         send        send        with        complete    switch
-* Success      conn_ack    reliably    seq_ts      event       lists
-* -------------------------------------------------------------------
-* No conn      Error
-* Active conn  Yes         Yes         Yes         Yes         Yes
-* Ready conn   Yes         Yes         Yes         No          No
-* ===================================================================
-* Recv         send        send        with        complete    free
-* Rejected     conn_ack    reliably    seq_ts      event       conn
-* -------------------------------------------------------------------
-* No conn      Yes         No          No          No          No
-* Active conn  Yes         No          No          Yes         Yes
-* Ready conn   Error
-*/
+/**
+ * Possible states and what to do:
+ *
+ * Recv         send        send        with        complete    switch
+ * Success      conn_ack    reliably    seq_ts      event       lists
+ * -------------------------------------------------------------------
+ * No conn      Error
+ * Active conn  Yes         Yes         Yes         Yes         Yes
+ * Ready conn   Yes         Yes         Yes         No          No
+ * ===================================================================
+ * Recv         send        send        with        complete    free
+ * Rejected     conn_ack    reliably    seq_ts      event       conn
+ * -------------------------------------------------------------------
+ * No conn      Yes         No          No          No          No
+ * Active conn  Yes         No          No          Yes         Yes
+ * Ready conn   Error
+ * @param[in]	reply	CCI_SUCCESS or CCI_ECONNREFUSED
+ */
 static void sock_handle_conn_reply(sock_conn_t * sconn,	
-				sock_rx_t * rx,
-				uint8_t reply,	/* CCI_SUCCESS or CCI_ECONNREFUSED */
-				uint16_t unused,
-				uint32_t id,
-				struct sockaddr_in sin, cci__ep_t * ep)
+                                   sock_rx_t * rx,
+                                   uint8_t reply,
+                                   uint16_t unused,
+                                   uint32_t id,
+                                   struct sockaddr_in sin,
+                                   cci__ep_t * ep)
 {
 	int i, ret;
 	cci__evt_t *evt = NULL, *tmp = NULL, *e = NULL;
@@ -3780,23 +3784,23 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,
 
 			memset(from, 0, sizeof(from));
 			sock_sin_to_name(sin, from, sizeof(from));
-			debug((CCI_DB_CONN | CCI_DB_MSG),
-			      "%s: ep %d recv'd conn_reply (%s) from %s"
-			      " with no matching conn",
-			      __func__, sep->sock,
-			      reply == CCI_SUCCESS ? "success" : "rejected",
-			      from);
+			debug_ep(ep, (CCI_DB_CONN | CCI_DB_MSG),
+			         "%s: recv'd conn_reply (%s) from %s"
+			         " with no matching conn",
+			         __func__,
+			         reply == CCI_SUCCESS ? "success" : "rejected",
+			         from);
 
 			/* simply ack this msg and cleanup */
 			memset(&hdr, 0, sizeof(hdr));
 			sock_pack_conn_ack(&hdr.header, id);
 			ret = sock_sendto(sep->sock, &hdr, len, NULL, 0, sin);
 			if (ret != len) {
-				debug((CCI_DB_CONN | CCI_DB_MSG),
-				      "%s: ep %d failed to send conn_ack with %s",
-				      __func__, sep->sock,
-				      cci_strerror(&ep->endpoint,
-				                   (enum cci_status)ret));
+				debug_ep(ep, (CCI_DB_CONN | CCI_DB_MSG),
+				         "%s: failed to send conn_ack with %s",
+				         __func__,
+				         cci_strerror(&ep->endpoint,
+				                      (enum cci_status)ret));
 			}
 
 			pthread_mutex_lock(&ep->lock);
@@ -3875,14 +3879,14 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,
 				sock_sin_to_name(sin, from, sizeof(from));
 
 				/* We cannot be active without a tx pending */
-				debug(CCI_DB_WARN,
-				      "%s: ep %d received conn_reply (%s) from "
-				      "%s with an active conn and no matching "
-				      "tx",
-				      __func__, sep->sock,
-				      reply == CCI_SUCCESS ? "success"
-				                           : "rejected",
-				      from);
+				debug_ep(ep, CCI_DB_WARN,
+				         "%s: recv'd conn_reply (%s) from %s "
+				         "with an active conn and no matching "
+				         "tx",
+				         __func__,
+				         reply == CCI_SUCCESS ? "success"
+				                              : "rejected",
+				         from);
 				/* we can't transition to ready since we do not
 				   have the context from the conn_request tx */
 				assert(0);
@@ -3926,9 +3930,9 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,
 			/* send unreliable conn_ack */
 			memset(name, 0, sizeof(name));
 			sock_sin_to_name(sin, name, sizeof(name));
-			debug((CCI_DB_CONN | CCI_DB_MSG),
-			      "%s: ep %d recv'd conn_reply (rejected) from %s"
-			      " - closing conn", __func__, sep->sock, name);
+			debug_ep(ep, (CCI_DB_CONN | CCI_DB_MSG),
+			         "%s: recv'd conn_reply (rejected) from %s"
+			         " - closing conn", __func__, name);
 
 			/*
 			 * Implicit ACK of the corresponding conn_req
@@ -3958,12 +3962,11 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,
 			sock_pack_conn_ack(&hdr.header, sconn->peer_id);
 			ret = sock_sendto(sep->sock, &hdr, len, NULL, 0, sin);
 			if (ret != len) {
-				debug((CCI_DB_CONN | CCI_DB_MSG),
-				      "%s: ep %d failed to send conn_ack "
-				      "with %s",
-				      __func__, sep->sock,
-				      cci_strerror(&ep->endpoint,
-				                   (enum cci_status)ret));
+				debug_ep(ep, (CCI_DB_CONN | CCI_DB_MSG),
+				         "%s: failed to send conn_ack with %s",
+				         __func__,
+				         cci_strerror(&ep->endpoint,
+				                      (enum cci_status)ret));
 			}
 		}
 		/* add rx->evt to ep->evts */
@@ -4000,10 +4003,9 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,
 			sock_sin_to_name(sin, to, sizeof(to));
 
 			/* we can't ack, cleanup */
-			debug((CCI_DB_CONN | CCI_DB_MSG),
-			      "%s: ep %d does not have any tx "
-			      "buffs to send a conn_ack to %s",
-			      __func__, sep->sock, to);
+			debug_ep(ep, (CCI_DB_CONN | CCI_DB_MSG),
+			         "%s: no tx buff to send a conn_ack to %s",
+			         __func__, to);
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
 			pthread_mutex_unlock(&ep->lock);
@@ -4684,10 +4686,9 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 			/* Note that in the context of RMA_READ_REQUEST
 			   messages the length of the message is actually the
 			   size of the data to send back */
-			debug((CCI_DB_MSG),
-			      "%s: ep %d recv'd %s msg from %s with %d bytes",
-			      __func__, sep->sock, sock_msg_type(type), name,
-			      a + b);
+			debug_ep(ep, (CCI_DB_MSG),
+			         "%s: recv'd %s msg from %s with %d bytes",
+			         __func__, sock_msg_type(type), name, a + b);
 		}
 	}
 
