@@ -18,7 +18,8 @@ check_PROGRAMS = \
 	rma_pipeline \
 	rma_verify \
 	opt \
-	connect_reject
+	connect_reject \
+	msg_verify
 
 rma_verify_SOURCES = rma_verify.c crc32.c
 
