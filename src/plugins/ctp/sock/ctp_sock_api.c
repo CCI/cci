@@ -65,65 +65,79 @@ static int threads_running = 0;
 * Local functions
 */
 static int ctp_sock_init(cci_plugin_ctp_t *plugin,
-						uint32_t abi_ver,
-						uint32_t flags,
-						uint32_t * caps);
+                         uint32_t abi_ver,
+                         uint32_t flags,
+                         uint32_t * caps);
 static int ctp_sock_finalize(cci_plugin_ctp_t * plugin);
 static const char *ctp_sock_strerror(cci_endpoint_t * endpoint,
-				enum cci_status status);
+                                     enum cci_status status);
 static int ctp_sock_create_endpoint(cci_device_t * device,
-				int flags,
-				cci_endpoint_t ** endpoint,
-				cci_os_handle_t * fd);
+                                    int flags,
+                                    cci_endpoint_t ** endpoint,
+                                    cci_os_handle_t * fd);
 static int ctp_sock_destroy_endpoint(cci_endpoint_t * endpoint);
 static int ctp_sock_accept(cci_event_t *event, const void *context);
 static int ctp_sock_reject(cci_event_t *conn_req);
-static int ctp_sock_connect(cci_endpoint_t * endpoint, const char *server_uri,
-			const void *data_ptr, uint32_t data_len,
-			cci_conn_attribute_t attribute,
-			const void *context, int flags, const struct timeval *timeout);
+static int ctp_sock_connect(cci_endpoint_t * endpoint,
+                            const char *server_uri,
+                            const void *data_ptr,
+                            uint32_t data_len,
+                            cci_conn_attribute_t attribute,
+                            const void *context,
+                            int flags,
+                            const struct timeval *timeout);
 static int ctp_sock_disconnect(cci_connection_t * connection);
 static int ctp_sock_set_opt(cci_opt_handle_t * handle,
-			cci_opt_name_t name, const void *val);
+                            cci_opt_name_t name,
+                            const void *val);
 static int ctp_sock_get_opt(cci_opt_handle_t * handle,
-			cci_opt_name_t name, void *val);
+                            cci_opt_name_t name,
+                            void *val);
 static int ctp_sock_arm_os_handle(cci_endpoint_t * endpoint, int flags);
 static int ctp_sock_get_event(cci_endpoint_t * endpoint,
-			cci_event_t ** const event);
+                              cci_event_t ** const event);
 static int ctp_sock_return_event(cci_event_t * event);
 static int ctp_sock_send(cci_connection_t * connection,
-						const void *msg_ptr,
-						uint32_t msg_len,
-						const void *context,
-						int flags);
+                         const void *msg_ptr,
+                         uint32_t msg_len,
+                         const void *context,
+                         int flags);
 static int ctp_sock_sendv(cci_connection_t * connection,
-			const struct iovec *data, uint32_t iovcnt,
-			const void *context, int flags);
+                          const struct iovec *data,
+                          uint32_t iovcnt,
+                          const void *context,
+                          int flags);
 static int ctp_sock_rma_register(cci_endpoint_t * endpoint,
-			     void *start, uint64_t length,
-			     int flags, cci_rma_handle_t ** rma_handle);
+                                 void *start,
+                                 uint64_t length,
+                                 int flags,
+                                 cci_rma_handle_t ** rma_handle);
 static int ctp_sock_rma_deregister(cci_endpoint_t * endpoint,
-					cci_rma_handle_t * rma_handle);
+                                   cci_rma_handle_t * rma_handle);
 static int ctp_sock_rma(cci_connection_t * connection,
-		    const void *header_ptr, uint32_t header_len,
-		    cci_rma_handle_t * local_handle, uint64_t local_offset,
-		    cci_rma_handle_t * remote_handle, uint64_t remote_offset,
-		    uint64_t data_len, const void *context, int flags);
-
+                        const void *header_ptr,
+                        uint32_t header_len,
+                        cci_rma_handle_t * local_handle,
+                        uint64_t local_offset,
+                        cci_rma_handle_t * remote_handle,
+                        uint64_t remote_offset,
+                        uint64_t data_len,
+                        const void *context,
+                        int flags);
 static uint8_t sock_ip_hash(in_addr_t ip, uint16_t port);
 static void sock_progress_sends(cci__ep_t * ep);
 static void *sock_progress_thread(void *arg);
 static void *sock_recv_thread(void *arg);
 static int sock_sendto(cci_os_handle_t sock,
-					void *buf,
-					int len,
-					void *rma_ptr,
-					uint16_t rma_len,
-					const struct sockaddr_in sin);
+                       void *buf,
+                       int len,
+                       void *rma_ptr,
+                       uint16_t rma_len,
+                       const struct sockaddr_in sin);
 static void sock_ack_conns(cci__ep_t * ep);
-static inline int pack_piggyback_ack (cci__ep_t *ep,
-					sock_conn_t *sconn, sock_tx_t *tx);
-static inline int sock_ack_sconn (sock_ep_t *sep, sock_conn_t *sconn);
+static inline int pack_piggyback_ack(cci__ep_t *ep,
+                                     sock_conn_t *sconn, sock_tx_t *tx);
+static inline int sock_ack_sconn(sock_ep_t *sep, sock_conn_t *sconn);
 static int sock_recvfrom_ep(cci__ep_t * ep);
 int progress_recv (cci__ep_t *ep);
 
@@ -4482,7 +4496,7 @@ sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len,
 	endpoint = (&conn->connection)->endpoint;
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 
-    context = malloc (sizeof (uint64_t));
+	context = malloc (sizeof (uint64_t));
 	memcpy(context, hdr_r->data, sizeof(uint64_t));
 
 	/* get cci__evt_t to hang on ep->events */
