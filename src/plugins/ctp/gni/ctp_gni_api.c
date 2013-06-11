@@ -141,7 +141,7 @@ cci_plugin_ctp_t cci_ctp_gni_plugin = {
 
 static uint64_t gni_device_rate(void)
 {
-	uint64_t rate = 20000000000ULL;	/* 2.5 Gbps */
+	uint64_t rate = 52000000000ULL;
 
 	return rate;
 }
