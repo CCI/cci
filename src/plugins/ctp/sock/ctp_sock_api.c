@@ -770,7 +770,7 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	TAILQ_INIT(&sep->queued);
 	TAILQ_INIT(&sep->pending);
 
-	sep->tx_buf = calloc (1, ep->tx_buf_cnt * sizeof (sock_tx_t));
+	sep->tx_buf = calloc (1, ep->tx_buf_cnt * ep->buffer_len);
 	if (!sep->tx_buf) {
 		ret = CCI_ENOMEM;
 		goto out;
@@ -795,7 +795,7 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 		TAILQ_INSERT_TAIL(&sep->idle_txs, tx, dentry);
 	}
 
-	sep->rx_buf = calloc (1, ep->rx_buf_cnt * sizeof (sock_rx_t));
+	sep->rx_buf = calloc (1, ep->rx_buf_cnt * ep->buffer_len);
 	if (!sep->rx_buf) {
 		ret = CCI_ENOMEM;
 		goto out;
@@ -2668,6 +2668,8 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 		s += data[i].iov_len;
 	}
 
+	debug(CCI_DB_MSG, "%s: Sending %u bytes of payload", __func__, s);
+
 	/* if unreliable, try to send */
 	if (!is_reliable) {
 		ret = sock_sendto(sep->sock, tx->buffer, tx->len, tx->rma_ptr,
@@ -3197,7 +3199,7 @@ sock_handle_active_message(sock_conn_t * sconn,
 	hdr = (sock_header_t *) rx->buffer;
 
 	/* setup the generic event for the application */
-
+	debug (CCI_DB_MSG, "%s: Recv'd %u of payload", __func__, len);
 	event = & evt->event;
 	event->type = CCI_EVENT_RECV;
 	event->recv.len = len;
