@@ -5174,7 +5174,6 @@ static void sock_ack_conns(cci__ep_t * ep)
 	/* Since a ACK was issued, we try to receive more data */
 	if (sconn != NULL && sconn->last_ack_ts == now)
 		sock_recvfrom_ep (ep);
-#endif
 
 	CCI_EXIT;
 	return;
