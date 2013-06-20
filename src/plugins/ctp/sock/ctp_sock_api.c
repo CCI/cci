@@ -294,7 +294,8 @@ static int ctp_sock_init(cci_plugin_ctp_t *plugin,
 
 	CCI_ENTER;
 
-	/* Some unused parameters, the following avoids warning from compilers */
+	/* Some unused parameters, the following avoids warnings from 
+	   compilers */
 	UNUSED_PARAM (abi_ver);
 	UNUSED_PARAM (flags);
 	UNUSED_PARAM (caps);
@@ -1953,6 +1954,9 @@ static int sock_sendmsg(cci_os_handle_t sock, struct iovec iov[2],
 	return ret;
 }
 
+/**
+ * @return	Return code from sock_sendmsg()
+ */
 static int sock_sendto(cci_os_handle_t sock, void *buf, int len,
 			void *rma_ptr, uint16_t rma_len,
 			const struct sockaddr_in sin)
@@ -2036,6 +2040,7 @@ static void sock_progress_pending(cci__ep_t * ep)
 			case SOCK_MSG_SEND:
 				event->send.status = CCI_ETIMEDOUT;
 				if (tx->rnr != 0) {
+					printf ("Timeout && RNR!!!!\n");
 					event->send.status = CCI_ERR_RNR;
 					/* If a message that is already marked
 					   RNR times out, and if the connection
@@ -3238,8 +3243,9 @@ Handle incoming RNR messages
 */
 static void sock_handle_rnr(sock_conn_t * sconn, uint32_t seq, uint32_t ts)
 {
-	sock_tx_t *tx = NULL;
-	sock_tx_t *tmp = NULL;
+	sock_tx_t *tx 	= NULL;
+	sock_tx_t *tmp 	= NULL;
+	int found	= 0;
 
 	UNUSED_PARAM (ts);
 
@@ -3250,12 +3256,17 @@ static void sock_handle_rnr(sock_conn_t * sconn, uint32_t seq, uint32_t ts)
 			      "%s: Receiver not ready (seq: %u)", __func__,
 			      seq);
 			tx->rnr = 1;
+			found = 1;
 		}
 	}
 
 	/* We also mark the conn as RNR */
 	if (sconn->rnr == 0)
 		sconn->rnr = seq;
+
+	if (found == 0)
+		debug (CCI_DB_INFO,
+		       "%s: Cannot find TX corresponding to RNR", __func__);
 }
 
 /*!
@@ -3465,7 +3476,7 @@ sock_handle_ack(sock_conn_t * sconn,
 					if (tx->state == SOCK_TX_PENDING) {
 						debug(CCI_DB_MSG,
 						      "%s: sacking seq %u",
-						      __func__, acks[0]);
+						      __func__, acks[i]);
 						found++;
 						TAILQ_REMOVE(&sep->pending, &tx->evt, entry);
 						TAILQ_REMOVE(&sconn->tx_seqs, tx, tx_seq);
@@ -4654,10 +4665,17 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		   enough data to send a RNR NACK */
 		ret = recvfrom(sep->sock, (void *)tmp_buff, SOCK_UDP_MAX,
 				0, (struct sockaddr *)&sin, &sin_len);
+		if (ret == -1) {
+			debug (CCI_DB_INFO,
+			       "%s: No RX buffer + cannot recv data: %s",
+			       __func__, strerror (errno));
+			CCI_EXIT;
+			return 0;
+		}
 		if (ret < (int)sizeof(sock_header_t)) {
 			debug(CCI_DB_INFO,
-			      "%s: Not enough data to get the header",
-			      __func__);
+			      "%s: Not enough data (%d/%d) to get the header",
+			      __func__, ret, (int)sizeof(sock_header_t));
 			CCI_EXIT;
 			return 0;
 		}
@@ -4708,7 +4726,12 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		goto out;
 	}
 
-	again = 1;
+
+	/* FIXME: at the moment, we have no good way to guarantee the application
+	   can get events fast enough to keep up with an aggressive reception of
+	   messages, so we disable the reception of multiple message in a single
+	   "progress loop". We may re-enable this later. */
+	again = 0;
 
 	/* lookup connection from sin and id */
 
@@ -4778,9 +4801,11 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		   - RMA_READ_REQUEST are acked with the corresponding
 		     RMA_READ_REPLY message
 		   - RMA_READ_REPLY message are not acked since they act as an
-		     ACK (not ack of acks). */
+		     ACK (not ack of acks). 
+		   - SOCK_MSG_RNR are not acked since they act as a NACK */
 		if (!(type == SOCK_MSG_RMA_READ_REQUEST)
-		    && !(type == SOCK_MSG_RMA_READ_REPLY))
+		    && !(type == SOCK_MSG_RMA_READ_REPLY)
+		    && !(type == SOCK_MSG_RNR))
 		{
 			sock_handle_seq(sconn, seq);
 		}
@@ -4809,9 +4834,11 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		}
 
 		/* If we receive again the message that created the RNR status, we
-		resume normal operation */
-		if (sconn->rnr > 0 && sconn->rnr == seq)
+		   resume normal operation */
+		if (sconn->rnr > 0 && sconn->rnr == seq) {
+			debug (CCI_DB_EP, "%s: RNR: resuming normal operation", __func__);
 			sconn->rnr = 0;
+		}
 	}
 
 	/* TODO handle types */
@@ -4834,8 +4861,14 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 	case SOCK_MSG_RNR:{
 			sock_header_r_t *hdr_r = rx->buffer;
 
+			debug (CCI_DB_INFO,
+			       "%s: Receiver not ready", __func__);
+
 			sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
 			sock_handle_rnr(sconn, seq, ts);
+			/* No event is directly generated from the msg
+			   so we can reuse the RX buffer */
+			q_rx = 1;
 			break;
 		}
 	case SOCK_MSG_KEEPALIVE:
@@ -4845,6 +4878,7 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 	case SOCK_MSG_ACK_UP_TO:
 	case SOCK_MSG_SACK:
 		sock_handle_ack(sconn, type, rx, (uint32_t)a, id);
+		/* sock_handl_ack already requeue the RXs in the idle list */
 		break;
 	case SOCK_MSG_RMA_WRITE:
 		sock_handle_rma_write(sconn, rx, b);
@@ -4886,23 +4920,25 @@ out:
 			  SEQ from the message header 
 			*/
 
+			debug (CCI_DB_INFO, "%s: Sending RNR msg", __func__);
+
 			/* Receiver side and reliable-ordered connections: we
 			   store the seq of the msg for which we were RNR so
 			   we can drop all other following messages. */
 			if (conn->connection.attribute == CCI_CONN_ATTR_RO
-				&& sconn->rnr == 0)
+			    && sconn->rnr == 0)
 				sconn->rnr = seq;
 
 			/* Send a RNR NACK back to the sender */
 			memset(buffer, 0, sizeof(buffer));
 			hdr_r = (sock_header_r_t *) buffer;
 			sock_pack_nack(hdr_r, SOCK_MSG_RNR, sconn->peer_id, seq, ts, 0);
+			hdr_r->pb_ack = 0;
 			len = sizeof(*hdr_r);
 
-			/* XXX: Should we queue the message or we send it? 
-			I seems to me that it should be queued to maintain order as much as
-			possible (but what about RU connections? */
-			sock_sendto(sep->sock, buffer, len, NULL, 0, sconn->sin);
+			ret = sock_sendto(sep->sock, buffer, len, NULL, 0, sconn->sin);
+			if (ret == -1)
+				debug (CCI_DB_INFO, "%s: Cannot send RNR", __func__);
 		}
 
 		/* Drop the message */
@@ -5094,9 +5130,7 @@ static inline int sock_ack_sconn (sock_ep_t *sep, sock_conn_t *sconn)
 			free(ack);
 		}
 		hdr_r = (sock_header_r_t *) buffer;
-		sock_pack_ack(hdr_r, type,
-					  sconn->peer_id, 0, 0,
-					  acks, count);
+		sock_pack_ack(hdr_r, type, sconn->peer_id, 0, 0, acks, count);
 		
 		len = sizeof(*hdr_r) + (count * sizeof(acks[0]));
 		ret = sock_sendto(sep->sock, buffer, len, NULL, 0, sconn->sin);
@@ -5113,13 +5147,8 @@ static void sock_ack_conns(cci__ep_t * ep)
 	int i;
 	sock_ep_t *sep = ep->priv;
 	sock_conn_t *sconn = NULL;
-	sock_tx_t *tx = NULL;
 	static uint64_t last = 0ULL;
 	uint64_t now = 0ULL;
-	cci__evt_t *evt;
-
-	TAILQ_HEAD(s_txs, sock_tx) txs = TAILQ_HEAD_INITIALIZER(txs);
-	TAILQ_INIT(&txs);
 
 	CCI_ENTER;
 
@@ -5136,27 +5165,12 @@ static void sock_ack_conns(cci__ep_t * ep)
 	for (i = 0; i < SOCK_EP_HASH_SIZE; i++) {
 		if (!TAILQ_EMPTY(&sep->conn_hash[i])) {
 			TAILQ_FOREACH(sconn, &sep->conn_hash[i], entry) {
-#if 0
-				do {
-					ret = sock_ack_sconn (sep, sconn);
-				} while (ret > 0);
-#endif
 				sock_ack_sconn (sep, sconn);
 			}
 		}
 	}
 	pthread_mutex_unlock(&ep->lock);
 
-	while (!TAILQ_EMPTY(&txs)) {
-		tx = TAILQ_FIRST(&txs);
-		evt = &tx->evt;
-		TAILQ_REMOVE(&txs, tx, dentry);
-		pthread_mutex_lock(&ep->lock);
-		TAILQ_INSERT_TAIL(&sep->queued, evt, entry);
-		pthread_mutex_unlock(&ep->lock);
-	}
-
-#if 0
 	/* Since a ACK was issued, we try to receive more data */
 	if (sconn != NULL && sconn->last_ack_ts == now)
 		sock_recvfrom_ep (ep);
