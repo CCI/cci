@@ -21,16 +21,17 @@
 
 #include "cci.h"
 
-#define MAX_MSGS 3000
+#define MAX_MSGS 100000
 
 int connect_done 		= 0;
 int done 			= 0;
 cci_endpoint_t *endpoint 	= NULL;
 cci_connection_t *connection 	= NULL;
 int is_server 			= 0;
-cci_conn_attribute_t attr 	= CCI_CONN_ATTR_RO;
+cci_conn_attribute_t attr	= CCI_CONN_ATTR_RO;
+int nb_msgs			= 0;
+uint32_t expected_value		= 1;
 char *server_uri, *name, *test_uri, *uri;
-int nb_msgs = 0;
 
 typedef struct options {
         struct cci_rma_handle rma_handle;
@@ -45,6 +46,7 @@ typedef struct options {
 
 options_t opts;
 
+int poll_events (void);
 
 static inline void check_return(cci_endpoint_t * endpoint, char *func, int ret, int need_exit)
 {
@@ -73,8 +75,16 @@ static inline int send_msgs (void)
 
 	for (i = 0; i < MAX_MSGS; i++) {
 		fprintf (stderr, "Sending msg %d/%d %u\n", i, MAX_MSGS-1, value);
+retry:
 		ret = cci_send (connection, &value, sizeof (uint32_t), NULL, 0);
-		check_return (endpoint, "send_msgs", ret, 1);
+		if (ret == CCI_ENOBUFS) {
+			int rc = CCI_SUCCESS;
+			fprintf (stderr, "No more buffers, trying to poll events to free some\n");
+			while (rc == CCI_SUCCESS)
+				rc = poll_events ();
+			goto retry;
+		}
+		check_return (endpoint, "cci_end", ret, 1);
 		if (value >= INT_MAX)
 			value = 1;
 		else
@@ -84,7 +94,7 @@ static inline int send_msgs (void)
 	return 0;
 }
 
-static inline void poll_events (void)
+int poll_events (void)
 {
 	cci_event_t *event;
 	int ret;
@@ -110,15 +120,34 @@ static inline void poll_events (void)
 				}
 				fprintf (stderr, "Msg recv'd (%d/%d): %u\n", nb_msgs, MAX_MSGS-1, *(uint32_t*)event->recv.ptr);
 				nb_msgs++;
-				if (!is_server && nb_msgs == MAX_MSGS)  {
+				/* We check whether we received the expected msg or not */
+				if (*(uint32_t*)event->recv.ptr != expected_value) {
+					fprintf (stderr, "ERROR: %u was expected but we received %u...\n", expected_value, *(uint32_t*)event->recv.ptr);
+					/* Terminate the test */
+/*
+                                        ret = cci_send(connection, "bye", 3, (void *)0xdeadbeef, opts.flags);
+                                        check_return(endpoint, "cci_send", ret, 0);
+                                        done = 1;
+					break;
+*/
+					exit(EXIT_FAILURE);
+				}
+				/* We update the next expected value */
+				if (expected_value >= INT_MAX)
+                        		expected_value = 1;
+                		else
+                        		expected_value = expected_value * 2;
+				if (is_server && nb_msgs == MAX_MSGS)  {
 					fprintf (stderr, "Sending bye msg...\n");
 					ret = cci_send(connection, "bye", 3, (void *)0xdeadbeef, opts.flags);
         				check_return(endpoint, "cci_send", ret, 0);
 					done = 1;
 				}
+/*
 				if (is_server && nb_msgs == MAX_MSGS) {
 					send_msgs ();
 				}
+*/
 				break;
 			}
 			case CCI_EVENT_CONNECT:
@@ -135,6 +164,8 @@ static inline void poll_events (void)
 		}
 		cci_return_event (event);
 	}
+
+	return ret;
 }
 
 static inline void do_server (void)
