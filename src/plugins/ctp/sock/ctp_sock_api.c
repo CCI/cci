@@ -49,7 +49,7 @@
 #include "cci_lib_types.h"
 #include "cci-api.h"
 #include "plugins/ctp/ctp.h"
-#include "ctp_sock.h"
+#include "ctp_sock_internals.h"
 
 #define DEBUG_RNR 0
 
@@ -1156,6 +1156,7 @@ static int ctp_sock_accept(cci_event_t *event, const void *context)
 	sconn->conn = conn;
 	sconn->cwnd = SOCK_INITIAL_CWND;
 	sconn->status = SOCK_CONN_READY;	/* set ready since the app thinks it is */
+	sconn->last_recvd_seq = 0;
 	*((struct sockaddr_in *)&sconn->sin) = rx->sin;
 	sconn->peer_id = id;
 	sock_get_id(sep, &sconn->id);
@@ -1504,6 +1505,7 @@ static int ctp_sock_connect(cci_endpoint_t * endpoint,
 
 	sconn->status = SOCK_CONN_ACTIVE;
 	sconn->cwnd = SOCK_INITIAL_CWND;
+	sconn->last_recvd_seq = 0;
 	sin = (struct sockaddr_in *)&sconn->sin;
 	memset(sin, 0, sizeof(*sin));
 	sin->sin_family = AF_INET;
@@ -2040,7 +2042,6 @@ static void sock_progress_pending(cci__ep_t * ep)
 			case SOCK_MSG_SEND:
 				event->send.status = CCI_ETIMEDOUT;
 				if (tx->rnr != 0) {
-					printf ("Timeout && RNR!!!!\n");
 					event->send.status = CCI_ERR_RNR;
 					/* If a message that is already marked
 					   RNR times out, and if the connection
@@ -2308,11 +2309,11 @@ static void sock_progress_queued(cci__ep_t * ep)
 		      (tx->msg_type == SOCK_MSG_CONN_REPLY
                        && tx->evt.event.connect.status == CCI_ECONNREFUSED)))
 		{
-			if (tx->last_attempt_us == 0ULL) {
+			if (tx->timeout_us == 0ULL) {
 				timeout =
 					conn->tx_timeout ? conn->tx_timeout
 				                         : ep->tx_timeout;
-				tx->timeout_us = now + (uint64_t) timeout;
+				tx->timeout_us = now + (uint64_t) timeout; 
 			}
 
 			if (SOCK_U64_LT(tx->timeout_us, now)) {
@@ -2395,6 +2396,7 @@ static void sock_progress_queued(cci__ep_t * ep)
 			TAILQ_INSERT_TAIL(&sconn->tx_seqs, tx, tx_seq);
 		}
 
+#if 0
 		/* if reliable and ordered, we have to check whether the tx is marked
 		   RNR */
 		if (is_reliable
@@ -2404,6 +2406,7 @@ static void sock_progress_queued(cci__ep_t * ep)
 		{
 			event->send.status = CCI_ERR_RNR;
 		}
+#endif
 
 		/* For RMA Writes and RMA read request, we only allow a given
 		   number of messages to be in fly */
@@ -2673,7 +2676,7 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 		s += data[i].iov_len;
 	}
 
-	debug(CCI_DB_MSG, "%s: Sending %u bytes of payload", __func__, s);
+	debug(CCI_DB_MSG, "%s: Sending %d bytes of payload", __func__, (int)s);
 
 	/* if unreliable, try to send */
 	if (!is_reliable) {
@@ -3393,20 +3396,10 @@ sock_handle_ack(sock_conn_t * sconn,
 						tx->state = SOCK_TX_IDLE;
 						/* store locally until we can drop the locks */
 						TAILQ_INSERT_HEAD(&idle_txs, tx,
-								dentry);
+						                  dentry);
 					} else {
 						tx->state = SOCK_TX_COMPLETED;
-						/* In the context of an ordered reliable connection,
-						if the receiver was always ready to receive, the 
-						complete the send with a success status. Otherwise,
-						we complete the send with a RNR status */
-						if (conn->connection.attribute == CCI_CONN_ATTR_RO
-							&& tx->rnr != 0) 
-						{
-							tx->evt.event.send.status = CCI_ERR_RNR;
-						} else {
-							tx->evt.event.send.status = CCI_SUCCESS;
-						}
+						tx->evt.event.send.status = CCI_SUCCESS;
 						/* store locally until we can drop the locks */
 						TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
 					}
@@ -3448,16 +3441,7 @@ sock_handle_ack(sock_conn_t * sconn,
 								dentry);
 					} else {
 						tx->state = SOCK_TX_COMPLETED;
-						/* In the context of an ordered reliable connection,
-						if the receiver was always ready to receive, the 
-						complete the send with a success status. Otherwise,
-						we complete the send with a RNR status */
-						if (conn->connection.attribute == CCI_CONN_ATTR_RO
-							&& tx->rnr != 0) {
-							tx->evt.event.send.status = CCI_ERR_RNR;
-						} else {
-							tx->evt.event.send.status = CCI_SUCCESS;
-						}
+						tx->evt.event.send.status = CCI_SUCCESS;
 						/* store locally until we can drop the locks */
 						TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
 					}
@@ -3510,18 +3494,7 @@ sock_handle_ack(sock_conn_t * sconn,
 							TAILQ_INSERT_HEAD (&idle_txs, tx, dentry);
 						} else {
 							tx->state = SOCK_TX_COMPLETED;
-							/* In the context of an ordered reliable connection
-							if the receiver was always ready to receive, the
-							complete the send with a success status.
-							Otherwise, we complete the send with a RNR status
-							*/
-							if (conn->connection.attribute == CCI_CONN_ATTR_RO
-								&& tx->rnr != 0) 
-							{
-								tx->evt.event.send.status = CCI_ERR_RNR;
-							} else {
-								tx->evt.event.send.status = CCI_SUCCESS;
-							}
+							tx->evt.event.send.status = CCI_SUCCESS;
 							/* store locally until we can drop the dev->lock */
 							TAILQ_INSERT_TAIL(&evts, &tx->evt, entry);
 						}
@@ -4623,14 +4596,6 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		return 0;
 
 	pthread_mutex_lock(&ep->lock);
-#if 0
-	if (ep->closing) {
-		pthread_mutex_unlock(&ep->lock);
-		CCI_EXIT;
-		return 0;
-	}
-#endif
-	
 	if (!TAILQ_EMPTY(&sep->idle_rxs)) {
 		rx = TAILQ_FIRST(&sep->idle_rxs);
 		TAILQ_REMOVE(&sep->idle_rxs, rx, entry);
@@ -4644,8 +4609,8 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 	(otherwise RNR does not apply). */
 #if DEBUG_RNR
 	if (conn_established) {
-		/* We sumilate a case where we are not ready to receive 25% of the
-		time */
+		/* We sumilate a case where we are not ready to receive 25% of
+		   the time */
 		int n = (int)(4.0 * rand() / (RAND_MAX + 1.0));
 		if (n == 0) {
 			fprintf(stderr, "Simulating lack of RX buffer...\n");
@@ -4653,6 +4618,17 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		}
 	}
 #endif
+
+	/*
+	 * Two cases here:
+         * 1) Normal execution, we can get a RX buffer: then we read the msg
+         *    and just handle the message.
+         * 2) We are out of RX buffers; two cases again:
+	 *    a. The connection is reliable and in this case we fall into a RNR
+	 *       mode, which may lead to dropping the message and/or creating
+	 *       an extra RX buffer. See the semantic of RNR for more details.
+         *    b. The connection is unreliable, we just drop the message.
+         */
 	if (!rx) {
 		char tmp_buff[SOCK_UDP_MAX];
 		sock_header_t *hdr = NULL;
@@ -4697,8 +4673,9 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 			return 0;
 		}
 
-		/* If this is a reliable connection, we issue a RNR message */
-		if (cci_conn_is_reliable(sconn->conn)) {
+		/* If this is a reliable connection, we typically fall into a
+		   RNR mode */
+		if (cci_conn_is_reliable(conn)) {
 			sock_header_r_t *header_r = NULL;
 
 			/* We do the receive using a temporary buffer so we can
@@ -4709,32 +4686,48 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 			   and will be used later on */
 			header_r = (sock_header_r_t *) tmp_buff;
 			sock_parse_seq_ts(&header_r->seq_ts, &seq, &ts);
-			sconn->rnr = seq;
-			drop_msg = 1;
-			goto out;
+
+			ret = update_rnr_mode (sconn, seq);
+			if (ret == CCI_SOCK_RESUME_RNR) {
+				/* In case we receive the message we were
+				   waiting for to resume normal execution,
+				   we make sure we have a proper RX buffer and
+				   move on. This new buffer will be added to
+				   the list of available RX buffers later on */
+				rx = alloc_rx_buffer (ep);
+				if (rx == NULL) {
+					drop_msg = 1;
+					goto out;
+				}
+				memcpy (rx->buffer, tmp_buff, ep->buffer_len);
+			} else {
+				/* Otherwise we drop the msg */
+				drop_msg = 1;
+				goto out;
+			}
 		} else {
 			/* If the connection is unreliable, we simply exit */
 			CCI_EXIT;
 			return 0;
 		}
+	} else {
+		ret = recvfrom(sep->sock, rx->buffer, ep->buffer_len,
+		               0, (struct sockaddr *)&sin, &sin_len);
+		if (ret < (int)sizeof(sock_header_t)) {
+			q_rx = 1;
+			goto out;
+		}
+		/* Getting here means we are in a normal execution code path
+		   so we assume that if we received successfully a message,
+		   another one may be already available right away, so it is
+		   possible to try to receive it. */
+		again = 1;
 	}
 
-	ret = recvfrom(sep->sock, rx->buffer, ep->buffer_len,
-	               0, (struct sockaddr *)&sin, &sin_len);
-	if (ret < (int)sizeof(sock_header_t)) {
-		q_rx = 1;
-		goto out;
-	}
-
-
-	/* FIXME: at the moment, we have no good way to guarantee the application
-	   can get events fast enough to keep up with an aggressive reception of
-	   messages, so we disable the reception of multiple message in a single
-	   "progress loop". We may re-enable this later. */
-	again = 0;
+	/* From here, we know we have the message in a valid RX buffer so we
+	   can parse it and handle the data */
 
 	/* lookup connection from sin and id */
-
 	sock_parse_header(rx->buffer, &type, &a, &b, &id);
 	if (SOCK_MSG_CONN_REPLY == type) {
 		reply = 1;
@@ -4751,6 +4744,7 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		                       id, type);
 	}
 
+#if CCI_DEBUG
 	{
 		char name[32];
 
@@ -4766,6 +4760,7 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 			         __func__, sock_msg_type(type), name, a + b);
 		}
 	}
+#endif /* CCI_DEBUG */
 
 	/* if no conn, drop msg, requeue rx */
 	if (!ka && !sconn && !reply && !request) {
@@ -4790,58 +4785,51 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		goto out;
 	}
 
-	if (sconn && cci_conn_is_reliable(sconn->conn) &&
-		!(type == SOCK_MSG_CONN_REPLY))
+	/* Some actions specific to reliable connections */
+	if (sconn && cci_conn_is_reliable(sconn->conn))
 	{
 		sock_header_r_t *hdr_r = rx->buffer;
 		sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
 
-		/* We do not want to implicitely ack RMA_READ_REQUEST and
-		   RMA_READ_REPLY message:
-		   - RMA_READ_REQUEST are acked with the corresponding
-		     RMA_READ_REPLY message
-		   - RMA_READ_REPLY message are not acked since they act as an
-		     ACK (not ack of acks). 
-		   - SOCK_MSG_RNR are not acked since they act as a NACK */
-		if (!(type == SOCK_MSG_RMA_READ_REQUEST)
-		    && !(type == SOCK_MSG_RMA_READ_REPLY)
-		    && !(type == SOCK_MSG_RNR))
-		{
-			sock_handle_seq(sconn, seq);
+		/* For reliable/ordered connection, we make sure we receive the expected
+		   next seq */
+		if (sconn->conn->connection.attribute == CCI_CONN_ATTR_RO) {
+			if (sconn->last_recvd_seq == 0)
+				sconn->last_recvd_seq = seq;
+
+			if (seq > sconn->last_recvd_seq + 1) {
+				debug (CCI_DB_INFO,
+				       "%s: Drop msg, recvd seq %u when %u is expected",
+				       __func__, seq, sconn->last_recvd_seq + 1);
+				drop_msg = 1;
+				q_rx = 1;
+				goto out;
+			}
 		}
 
-		if (hdr_r->pb_ack != 0) {
-			sock_handle_ack (sconn, type, rx, 1, id);
-			/* Reset the value of pb_ack to make sure we won't try
-			   to do it again */
-			hdr_r->pb_ack = 0;
-		}
-	}
+		if (!(type == SOCK_MSG_CONN_REPLY)) {
+			/* We do not want to implicitely ack RMA_READ_REQUEST and
+			   RMA_READ_REPLY message:
+			   - RMA_READ_REQUEST are acked with the corresponding
+			     RMA_READ_REPLY message
+			   - RMA_READ_REPLY message are not acked since they act as an
+			     ACK (not ack of acks). 
+			   - SOCK_MSG_RNR are not acked since they act as a NACK */
+			if (!(type == SOCK_MSG_RMA_READ_REQUEST)
+			    && !(type == SOCK_MSG_RMA_READ_REPLY)
+			    && !(type == SOCK_MSG_RNR))
+			{
+				sock_handle_seq(sconn, seq);
+			}
 
-	/* Make sure the connection is already established */
-	if (sconn) {
-		/* If the connection is RNR and the seq is superior to seq for which
-		the RNR was generated, we drop the msg */
-		conn = sconn->conn;
-		if (conn->connection.attribute == CCI_CONN_ATTR_RO
-			&& sconn->rnr != 0 && seq > sconn->rnr) {
-			/* We just drop the message */
-			debug(CCI_DB_MSG,
-			      "%s: RNR connection, dropping msg (seq: %u)",
-			      __func__, seq);
-			drop_msg = 1;
-			goto out;
-		}
-
-		/* If we receive again the message that created the RNR status, we
-		   resume normal operation */
-		if (sconn->rnr > 0 && sconn->rnr == seq) {
-			debug (CCI_DB_EP, "%s: RNR: resuming normal operation", __func__);
-			sconn->rnr = 0;
+			if (hdr_r->pb_ack != 0) {
+				sock_handle_ack (sconn, type, rx, 1, id);
+				/* Reset the value of pb_ack to make sure we won't try
+				   to do it again */
+				hdr_r->pb_ack = 0;
+			}
 		}
 	}
-
-	/* TODO handle types */
 
 	switch (type) {
 	case SOCK_MSG_CONN_REQUEST:
@@ -4920,14 +4908,8 @@ out:
 			  SEQ from the message header 
 			*/
 
-			debug (CCI_DB_INFO, "%s: Sending RNR msg", __func__);
-
-			/* Receiver side and reliable-ordered connections: we
-			   store the seq of the msg for which we were RNR so
-			   we can drop all other following messages. */
-			if (conn->connection.attribute == CCI_CONN_ATTR_RO
-			    && sconn->rnr == 0)
-				sconn->rnr = seq;
+			debug (CCI_DB_INFO, "%s: Sending RNR msg (%u)",
+			       __func__, sconn->rnr);
 
 			/* Send a RNR NACK back to the sender */
 			memset(buffer, 0, sizeof(buffer));
@@ -4943,6 +4925,10 @@ out:
 
 		/* Drop the message */
 		sock_drop_msg(sep->sock);
+	} else {
+		if (sconn && sconn->conn &&
+		    sconn->conn->connection.attribute == CCI_CONN_ATTR_RO)
+			sconn->last_recvd_seq = seq;
 	}
 	
 	CCI_EXIT;

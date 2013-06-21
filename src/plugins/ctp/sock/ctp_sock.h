@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
- * Copyright © 2010-2012 UT-Battelle, LLC. All rights reserved.
- * Copyright © 2010-2012 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2010-2013 UT-Battelle, LLC. All rights reserved.
+ * Copyright © 2010-2013 Oak Ridge National Laboratory.  All rights reserved.
  * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
@@ -34,8 +34,8 @@ BEGIN_C_DECLS
 #define SOCK_MAX_SACK           (4)	/* pairs of start/end acks */
 #define SOCK_ACK_DELAY          (1)	/* send an ack after every Nth send */
 #define SOCK_EP_TX_TIMEOUT_SEC  (64)	/* seconds for now */
-#define SOCK_EP_RX_CNT          (16*1024)	/* number of rx active messages */
 #define SOCK_EP_TX_CNT          (16*1024)	/* number of tx active messages */
+#define SOCK_EP_RX_CNT          (2*SOCK_EP_TX_CNT)      /* number of rx active messages */
 #define SOCK_EP_HASH_SIZE       (256)	/* nice round number */
 #define SOCK_MAX_EPS            (256)	/* max sock fd value - 1 */
 #define SOCK_BLOCK_SIZE         (64)	/* use 64b blocks for id storage */
@@ -1118,6 +1118,9 @@ typedef struct sock_conn {
 	/*! Peer's last contiguous seqno acked (ACK_UP_TO) */
 	uint32_t acked;
 
+	/*! Peer's last seq received */
+	uint32_t last_recvd_seq;
+
 	/*! Peer's last timestamp received */
 	uint32_t ts;
 
@@ -1193,7 +1196,7 @@ typedef struct sock_globals {
 	if ((c->max_send_size - hdr_size) > (4*1024)) {                       \
 		max = (c->max_send_size - hdr_size)                           \
 		      - ((c->max_send_size - hdr_size) % (4*1024));           \
-	} else                                                                  \
+	} else                                                                \
 		max = c->max_send_size - hdr_size;                            \
 	} while(0)
 
@@ -1205,6 +1208,14 @@ typedef enum device_state {
 #ifndef FD_COPY
 #define FD_COPY(a,b) memcpy(a,b,sizeof(fd_set))
 #endif
+
+
+#define QUEUE_MSG(tx,ep,sep) do {					\
+	tx->state = SOCK_TX_QUEUED;					\
+	pthread_mutex_lock(&ep->lock);					\
+	TAILQ_INSERT_TAIL(&sep->queued, evt, entry);			\
+	pthread_mutex_unlock(&ep->lock);				\
+} while(0)
 
 extern sock_globals_t *sglobals;
 
