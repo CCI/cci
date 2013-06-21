@@ -79,9 +79,11 @@ retry:
 		ret = cci_send (connection, &value, sizeof (uint32_t), NULL, 0);
 		if (ret == CCI_ENOBUFS) {
 			int rc = CCI_SUCCESS;
-			fprintf (stderr, "No more buffers, trying to poll events to free some\n");
+			/* fprintf (stderr, "No more buffers, trying to poll events to free some\n"); */
 			while (rc == CCI_SUCCESS)
 				rc = poll_events ();
+			/* Since we used all the buffers, we simply pause for a while (dumb flow control)*/
+			sleep (2);
 			goto retry;
 		}
 		check_return (endpoint, "cci_end", ret, 1);
@@ -123,13 +125,6 @@ int poll_events (void)
 				/* We check whether we received the expected msg or not */
 				if (*(uint32_t*)event->recv.ptr != expected_value) {
 					fprintf (stderr, "ERROR: %u was expected but we received %u...\n", expected_value, *(uint32_t*)event->recv.ptr);
-					/* Terminate the test */
-/*
-                                        ret = cci_send(connection, "bye", 3, (void *)0xdeadbeef, opts.flags);
-                                        check_return(endpoint, "cci_send", ret, 0);
-                                        done = 1;
-					break;
-*/
 					exit(EXIT_FAILURE);
 				}
 				/* We update the next expected value */
@@ -143,11 +138,9 @@ int poll_events (void)
         				check_return(endpoint, "cci_send", ret, 0);
 					done = 1;
 				}
-/*
-				if (is_server && nb_msgs == MAX_MSGS) {
-					send_msgs ();
+				if (!is_server && nb_msgs == MAX_MSGS) {
+					fprintf (stderr, "All messages received!\n");
 				}
-*/
 				break;
 			}
 			case CCI_EVENT_CONNECT:
@@ -157,6 +150,13 @@ int poll_events (void)
 				}
 				break;
 			case CCI_EVENT_SEND:
+				if (event->send.status != CCI_SUCCESS) {
+					if (event->send.status == CCI_ERR_RNR)
+						fprintf (stderr, "Receiver Not Ready");
+					else
+						fprintf (stderr, "Send failed");
+					exit (EXIT_FAILURE);
+				}
 				break;
 			default:
 				fprintf (stderr, "Ignoring event type %d\n",
