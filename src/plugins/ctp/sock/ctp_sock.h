@@ -768,7 +768,7 @@ sock_pack_rma_read_reply (sock_rma_header_t * read, uint64_t data_len,
     <---------- 32 bits ---------->
     <- 8 -> <- 8 -> <---- 16 ----->
    +-------+-----------------------+
-   | type  |   a   |    context    |
+   | type  |   a   |       b       |
    +-------+-----------------------+
    |            peer id            |
    +-------------------------------+
@@ -779,13 +779,28 @@ sock_pack_rma_read_reply (sock_rma_header_t * read, uint64_t data_len,
    |           timestamp           |
    +-------------------------------+
 
-   TODO: description
+   +-------------------------------+
+   |        ACK Piggyback          |
+   +-------------------------------+
+
+   +-------------------------------+
+   |            msg_len            |
+   +-------------------------------+
+
+   a, b: unused
+   seq: sequence number
+   ts: timestamp
+   msg_len: length of the remote completion message
  */
 
 static inline void
 sock_pack_rma_write_done(sock_rma_header_t * write, uint16_t data_len,
             uint32_t peer_id, uint32_t seq, uint32_t ts)
 {
+#if CCI_DEBUG
+	assert (write);
+#endif
+
 	sock_pack_header(&write->header_r.header, SOCK_MSG_RMA_WRITE_DONE,
 			 0, data_len, peer_id);
 	sock_pack_seq_ts(&write->header_r.seq_ts, seq, ts);
