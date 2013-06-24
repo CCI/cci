@@ -3626,16 +3626,32 @@ sock_handle_ack(sock_conn_t * sconn,
 					tx->evt.event.send.context = rma_op->context;
 					tx->evt.conn = conn;
 					tx->evt.ep = ep;
-					memset(tx->buffer, 0, sizeof(sock_rma_header_t));
+
+					/* From here we have a valid TX buffer 
+					   that we can use to send the remote
+					   completion. First we prepare the
+					   header */
 					write = (sock_rma_header_t *) tx->buffer;
+					debug_ep (ep, CCI_DB_EP,
+					          "%s: Sending msg completion, %u",
+					          __func__, rma_op->msg_len);
 					sock_pack_rma_write_done(write,
-								(uint16_t) rma_op->msg_len,
-								sconn->peer_id,
-								tx->seq, 0);
-					memcpy(&hdr_r->data, rma_op->context, sizeof(uint64_t));
-					msg_ptr = (void *)(hdr_r->data + sizeof(uint64_t));
-					memcpy(msg_ptr, rma_op->msg_ptr, tx->len);
-					tx->len += sizeof(sock_rma_header_t) + sizeof(uint64_t);
+					    sizeof(uint32_t) + rma_op->msg_len,
+					    sconn->peer_id,
+					    tx->seq, 0);
+					/* Then we copy the completion data
+					   (len + data) */
+					msg_ptr = (void *)(hdr_r->data);
+					memcpy(msg_ptr, &rma_op->msg_len,
+					       sizeof(uint32_t));
+					msg_ptr = (void *)(hdr_r->data + sizeof(uint32_t));
+					memcpy(msg_ptr, rma_op->msg_ptr, rma_op->msg_len);
+					/* The total size of the RMA_WRITE_DONE
+					   msg is the RMA header + len and data
+					   for the remote completion msg */
+					tx->len += sizeof(sock_rma_header_t)
+					           + sizeof(uint32_t)
+					           + rma_op->msg_len;
 					TAILQ_INSERT_TAIL(&queued, tx, dentry);
 					continue;
 				} else {
@@ -4298,15 +4314,6 @@ sock_handle_conn_ack(sock_conn_t * sconn,
 	return;
 }
 
-/*
- * Function called to handle RMA_READ_REQUEST messages. This will do the
- * following:
- * 1/ Initiate the corresponding rma_write (rma_reads are implemented via
- *    rma_write).
- * 2/ Send a RMA_WRITE_DONE message to notify the remote peer that the
- *    rma_write succeeded. This message is used on the remote node to trigger
- *    completion at the application level.
- */
 static int
 sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
                              uint16_t len, uint32_t id)
@@ -4524,18 +4531,29 @@ sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len,
 	cci_endpoint_t *endpoint;	/* generic CCI endpoint */
 	cci__ep_t *ep;
 	sock_ep_t *sep = NULL;
-	void *context;
+	/* Length of the completion msg */
+	uint32_t msg_len;
+	/* Completion msg */
+	void *msg_ptr;
+	void *ptr;
 	sock_header_r_t *hdr_r = rx->buffer;
 
+#if 0
 	if (hdr_r->pb_ack != 0) {
 		sock_handle_ack (sconn, SOCK_MSG_RMA_WRITE_DONE, rx, 1, id);
 	}
+#endif
 
 	endpoint = (&conn->connection)->endpoint;
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 
-	context = malloc (sizeof (uint64_t));
-	memcpy(context, hdr_r->data, sizeof(uint64_t));
+	/* First we get the length of the completion message */
+	memcpy (&msg_len, hdr_r->data, sizeof (uint32_t));
+	debug_ep (ep, CCI_DB_EP,
+	          "%s: msg len is %u\n", __func__, msg_len);
+	ptr = hdr_r->data + sizeof (uint32_t);
+	msg_ptr = malloc (msg_len);
+	memcpy(msg_ptr, ptr, msg_len);
 
 	/* get cci__evt_t to hang on ep->events */
 	evt = &rx->evt;
@@ -4544,7 +4562,7 @@ sock_handle_rma_write_done(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len,
 	event = & evt->event;
 	event->type = CCI_EVENT_RECV;
 	event->recv.len = len;
-	*((void **)&event->recv.ptr) = context;
+	*((void **)&event->recv.ptr) = msg_ptr;
 	event->recv.connection = &conn->connection;
 
 	/* queue event on endpoint's completed event queue */
