@@ -1837,13 +1837,20 @@ ctp_sock_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
 
 	if (ev) {
 		TAILQ_REMOVE(&ep->evts, ev, entry);
+		*event = &ev->event;
 	} else {
-		ret = CCI_EAGAIN;
+		*event = NULL;
+		/* No event is available and there are no available
+		   receive buffers. The application must return events
+		   before any more messages can be received. */
+                if (TAILQ_EMPTY(&sep->idle_rxs)) {
+                        ret = CCI_ENOBUFS;
+                } else {
+			ret = CCI_EAGAIN;
+		}
 	}
 
 	pthread_mutex_unlock(&ep->lock);
-
-	*event = &ev->event;
 
 	/* We read on the fd to block again */
 	if (ev && sep->event_fd) {
