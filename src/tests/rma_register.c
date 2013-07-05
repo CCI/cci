@@ -112,7 +112,7 @@ static void poll_events(void)
 				opts.complete_msg2++;
 				fprintf (stdout, "RMA op on handle 2 completed (%d/%d)\n", opts.complete_msg2, ITERS);
 			}
-			if (opts.complete_msg1 == ITERS-1 && opts.complete_msg2 == ITERS-1) {
+			if (opts.complete_msg1 == ITERS && opts.complete_msg2 == ITERS) {
 				/* Send the termination message */
 				fprintf (stdout, "Sending bye message\n");
 				ret = cci_send(connection, "bye", 3, (void *)0xdeadbeef, opts.flags);
