@@ -19,7 +19,8 @@ check_PROGRAMS = \
 	rma_verify \
 	opt \
 	connect_reject \
-	msg_verify
+	msg_verify \
+	rma_register
 
 rma_verify_SOURCES = rma_verify.c crc32.c
 
