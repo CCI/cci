@@ -26,10 +26,10 @@
 
 BEGIN_C_DECLS
 #define SOCK_UDP_MAX            (65508)	/* 64 KB - 8 B UDP - 20 B IP */
-#define SOCK_MAX_HDR_SIZE       (52)	/* max sock header size (RMA) */
+#define SOCK_MAX_HDR_SIZE       (56)	/* max sock header size (RMA) */
 #define SOCK_MAX_HDRS           (SOCK_MAX_HDR_SIZE + 20 + 8)	/* IP + UDP */
 #define SOCK_DEFAULT_MSS        (SOCK_UDP_MAX - SOCK_MAX_HDR_SIZE)	/* assume jumbo frames */
-#define SOCK_DEFAULT_RMA_MSS	(SOCK_DEFAULT_MSS - 20)
+#define SOCK_DEFAULT_RMA_MSS    (SOCK_DEFAULT_MSS - 20)
 #define SOCK_MIN_MSS            (1500 - SOCK_MAX_HDR_SIZE)
 #define SOCK_MAX_SACK           (4)	/* pairs of start/end acks */
 #define SOCK_ACK_DELAY          (1)	/* send an ack after every Nth send */
@@ -423,7 +423,7 @@ static inline void sock_pack_conn_ack(sock_header_t * header, uint32_t id)
     <---------- 32 bits ---------->
     <- 8 -> <- 8 -> <---- 16 ----->
    +-------+-------+---------------+
-   | type  | rsvd  |   data len    |
+   | type  | rsvd  |   data_len    |
    +-------+-------+---------------+
    |              id               |
    +-------------------------------+
@@ -606,6 +606,10 @@ static inline void
 sock_pack_rma_handle_offset(sock_rma_handle_offset_t * ho,
 			uint64_t handle, uint64_t offset)
 {
+#if CCI_DEBUG
+	assert (ho);
+	assert (handle);
+#endif
 	ho->handle = sock_htonll(handle);
 	ho->offset = sock_htonll(offset);
 }
@@ -616,6 +620,9 @@ sock_parse_rma_handle_offset(sock_rma_handle_offset_t * ho,
 {
 	*handle = sock_ntohll(ho->handle);
 	*offset = sock_ntohll(ho->offset);
+#if CCI_DEBUG
+	assert (*handle);
+#endif
 }
 
 typedef struct sock_rma_header {
