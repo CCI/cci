@@ -212,7 +212,7 @@ again:
 		ret = recvfrom (fd, (void*) ((uintptr_t)ptr + offset), len - recv_len, flags, (struct sockaddr *)&sin, &sin_len);
 		if (ret < 0) {
 			if ((count++ & 0xFFFF) == 0xFFFF)
-				debug (CCI_DB_MSG, "%s: recvfrom() failed with %s (%u of %u bytes)", __func__,  strerror(ret), recv_len, len);
+				debug (CCI_DB_EP, "%s: recvfrom() failed with %s (%u of %u bytes)", __func__,  strerror(ret), recv_len, len);
 			if (ret == EAGAIN)
 				goto again;
 			goto out;
@@ -283,6 +283,16 @@ static inline const char *sock_msg_type(sock_msg_type_t type)
 		return "type_max";
 	}
 	return NULL;
+}
+
+static inline void sock_drop_msg(cci_os_handle_t sock)
+{
+        char buf[4];
+        struct sockaddr sa;
+        socklen_t slen = sizeof(sa);
+
+        recvfrom(sock, buf, 4, 0, &sa, &slen);
+        return;
 }
 
 static inline int sock_create_threads (cci__ep_t *ep)
@@ -2000,7 +2010,7 @@ static int sock_sendmsg(cci_os_handle_t sock, struct iovec iov[2],
 		      iov[0].iov_base, (int)iov[0].iov_len,
 		      iov[1].iov_base, (int)iov[1].iov_len);
 	}
-	debug (CCI_DB_EP, "Wrote %d bytes on the socket", ret);
+	debug (CCI_DB_EP, "%s: Wrote %d bytes on the socket", __func__, ret);
 
 	return ret;
 }
@@ -3929,6 +3939,10 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
 			pthread_mutex_unlock(&ep->lock);
+
+			/* We only did a peek of the header so far and we got enough
+			   data to move on so we drop the msg */
+			sock_drop_msg (sep->sock);
 			CCI_EXIT;
 			return;
 		}
@@ -3966,9 +3980,23 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,
 		if (CCI_SUCCESS == reply)
 		{
 			/* Connection is accepted */
+
+			/* We finally get the entire message */
+			uint32_t total_size = sizeof (sock_header_r_t)
+			                      + sizeof (sock_handshake_t);
+			uint32_t recv_len = sock_recv_msg (sep->sock,
+			                                   rx->buffer,
+			                                   total_size, 0,
+			                                   NULL);
+			debug (CCI_DB_EP, "%s: We now have %d/%u bytes",
+			       __func__, recv_len, total_size);
+#if CCI_DEBUG
+			assert (recv_len == total_size);
+#endif
+
 			debug(CCI_DB_CONN,
-			      "%s: transition active connection to ready",
-			      __func__);
+                              "%s: transition active connection to ready",
+                              __func__);
 
 			hs = (sock_handshake_t *) ((uintptr_t)rx->buffer
 			                           + sizeof(*hdr_r));
@@ -4045,6 +4073,18 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,
 			sock_header_r_t hdr;
 			int len = (int)sizeof(hdr);
 			char name[32];
+
+			/* We finally get the entire message */
+			uint32_t total_size = sizeof (sock_header_r_t);
+			uint32_t recv_len = sock_recv_msg (sep->sock,
+			                                   rx->buffer,
+			                                   total_size, 0,
+			                                   NULL);
+			debug (CCI_DB_EP, "%s: We now have %d/%u bytes",
+			       __func__, recv_len, total_size);
+#if CCI_DEBUG
+			assert (recv_len == total_size);
+#endif
 
 			free(sconn);
 			if (conn->uri)
@@ -4742,16 +4782,6 @@ sock_handle_rma_write_done(sock_conn_t * sconn,
 	}
 }
 
-static inline void sock_drop_msg(cci_os_handle_t sock)
-{
-	char buf[4];
-	struct sockaddr sa;
-	socklen_t slen = sizeof(sa);
-
-	recvfrom(sock, buf, 4, 0, &sa, &slen);
-	return;
-}
-
 static int sock_recvfrom_ep(cci__ep_t * ep)
 {
 	int ret = 0, drop_msg = 0, q_rx = 0, reply = 0, request = 0, again = 0;
@@ -4942,7 +4972,10 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 			
 			/* Note that in the context of RMA_READ_REQUEST
 			   messages the length of the message is actually the
-			   size of the data to send back */
+			   size of the data to send back; for CONN_REPLY, a 
+			   specifies whether the connection is accepted or
+			   rejected and b should be equal to 0 (so the size in
+			   the debug msg is not relevant */
 			debug_ep(ep, (CCI_DB_MSG),
 			         "%s: recv'd %s msg from %s with %d bytes",
 			         __func__, sock_msg_type(type), name, a + b);
@@ -4961,6 +4994,14 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		   CONN_ACK, this is most certainly the ack in the context of
 		   a conn_reject */
 		if (SOCK_MSG_CONN_ACK == type) {
+			uint32_t total_size = sizeof (sock_header_r_t);
+			recv_len = sock_recv_msg (sep->sock, rx->buffer,
+			                          total_size, 0, NULL);
+			debug (CCI_DB_EP, "%s: We now have %u/%u bytes",
+			       __func__, (unsigned int)recv_len, total_size);
+#if CCI_DEBUG
+			assert (recv_len == total_size);
+#endif
 			/* If we get a conn_ack but the sconn is NULL, this is
 			   a ack in the context of a conn_reject. We can safely
 			   call the sock_handle_conn_ack() but we need to
@@ -5051,12 +5092,11 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		break;
 	}
 	case SOCK_MSG_CONN_REPLY: {
-		uint32_t total_size = sizeof (sock_header_r_t)
-		                      + sizeof (sock_handshake_t);
+		/* We first get the header and only the header to know if we
+		   are in the context of a connect accept or reject */
+		uint32_t total_size = sizeof (sock_header_r_t);
 		recv_len = sock_recv_msg (sep->sock, rx->buffer,
-		                          total_size, 0, NULL);
-		debug (CCI_DB_EP, "%s: We now have %u/%u bytes",
-		       __func__, (unsigned int)recv_len, total_size);
+		                          total_size, MSG_PEEK, NULL);
 #if CCI_DEBUG
 		assert (recv_len == total_size);
 #endif
