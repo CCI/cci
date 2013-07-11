@@ -3080,17 +3080,16 @@ static int ctp_sock_rma(cci_connection_t * connection,
 			tx->evt.ep = ep;
 
 			tx->rma_ptr = NULL;
-			tx->rma_len = 0;
+			/* We calculate the amount of data we will actually need */
+			if (i == (rma_op->num_msgs - 1)) {
+				if (data_len % max_send_size)
+					tx->rma_len = data_len % max_send_size;
+			} else {
+				tx->rma_len = (uint16_t)max_send_size;
+			}
 
 			if (flags & CCI_FLAG_WRITE) {
 				tx->msg_type = SOCK_MSG_RMA_WRITE;
-				/* We calculate the amount of data we will actually send */
-				if (i == (rma_op->num_msgs - 1)) {
-                                	if (data_len % max_send_size)
-                                        	tx->rma_len = data_len % max_send_size;
-                        	} else {
-					tx->rma_len = (uint16_t)max_send_size;
-				}
 				tx->rma_ptr = (void*)((uintptr_t)local->start + local_offset + offset);
 				sock_pack_rma_write(rma_hdr, tx->rma_len,
 				        sconn->peer_id,
@@ -3113,8 +3112,6 @@ static int ctp_sock_rma(cci_connection_t * connection,
 				memcpy(rma_hdr->data, tx->rma_ptr, tx->rma_len);
 			} else {
 				tx->msg_type = SOCK_MSG_RMA_READ_REQUEST;
-				/* The READ_REQUEST msg does include any data */
-				tx->rma_len = 0;
 				debug (CCI_DB_MSG,
 				       "%s: pack RMA_READ_REQUEST (seq %u)",
 				       __func__, tx->seq);
@@ -4307,18 +4304,24 @@ sock_handle_rma_read_reply(sock_conn_t *sconn,
 	iov[1].iov_base = (void*)((uintptr_t)h->start + (uintptr_t)local_offset);
 	msg.msg_iov = iov;
 	msg.msg_iovlen = 2;
+again:
 	ret = recvmsg (sep->sock, &msg, 0);
-	debug (CCI_DB_EP,
-	       "%s: We now have %d/%lu bytes",
-	       __func__, ret,
-	       sizeof (sock_rma_header_t) + len);
-out:
-	if (ret) {
-		debug(CCI_DB_MSG,
-		      "%s: recv'ing RMA READ payload failed with %s",
-                      __func__, strerror(ret));
+	if (ret == -1) {
 		/* TODO we need to drain the message from the fd */
+		if (errno == EAGAIN)
+			goto again;
+		debug(CCI_DB_MSG,
+                      "%s: recv'ing RMA READ payload failed with %s",
+                      __func__, strerror(errno));
 	}
+#if CCI_DEBUG
+	assert (ret == sizeof (sock_rma_header_t) + len);
+#endif
+	debug (CCI_DB_EP,
+               "%s: We now have %d/%lu bytes",
+               __func__, ret,
+               sizeof (sock_rma_header_t) + len);
+out:
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_HEAD(&sep->idle_rxs, rx, entry);
