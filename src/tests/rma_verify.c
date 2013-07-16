@@ -227,6 +227,11 @@ static void poll_events(void)
 			}
 			break;
 		case CCI_EVENT_CONNECT:
+			if (event->connect.status != CCI_SUCCESS)
+			{
+				fprintf(stderr, "Connection rejected.\n");
+				exit(0);
+			}
 			if ((uintptr_t)event->connect.context == (uintptr_t)CONTROL) {
 				control = event->connect.connection;
 			} else {
@@ -235,9 +240,13 @@ static void poll_events(void)
 			if (control && test)
 				connect_done = 1;
 			break;
+		case CCI_EVENT_CONNECT_REQUEST:
+			fprintf(stderr, "Peer is reconnecting? Rejecting.\n");
+			cci_reject(event);
+			break;
 		default:
-			fprintf(stderr, "ignoring event type %d\n",
-				event->type);
+			fprintf(stderr, "ignoring event type %s\n",
+				cci_event_type_str(event->type));
 		}
 		cci_return_event(event);
 	}
@@ -429,8 +438,8 @@ static void do_server(void)
 			}
 			default:
 				fprintf(stderr,
-					"%s: ignoring unexpected event %d\n",
-					__func__, event->type);
+					"%s: ignoring unexpected event %s\n",
+					__func__, cci_event_type_str(event->type));
 				break;
 			}
 			ret = cci_return_event(event);
