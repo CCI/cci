@@ -211,23 +211,6 @@ static void poll_events(void)
 				done = 1;
 				break;
 			}
-#if 0
-			/* RMA completed */
-			count++;
-			if (count < iters) {
-				ret = cci_rma(test,
-						&msg,
-						msg_len,
-						local_rma_handle,
-						local_offset,
-						&remote_rma_handle,
-						remote_offset,
-						current_size,
-						NULL,
-						opts.flags);
-				check_return(endpoint, "cci_rma", ret, 1);
-			}
-#endif
 			break;
 		case CCI_EVENT_RECV:
 			if (is_client) {
