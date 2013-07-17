@@ -3109,7 +3109,6 @@ static int ctp_sock_rma(cci_connection_t * connection,
 				          local_offset + offset,
 				          remote_offset + offset,
 				          tx->rma_len, tx->seq);
-				memcpy(rma_hdr->data, tx->rma_ptr, tx->rma_len);
 			} else {
 				tx->msg_type = SOCK_MSG_RMA_READ_REQUEST;
 				debug (CCI_DB_MSG,
@@ -3631,12 +3630,12 @@ sock_handle_ack(sock_conn_t * sconn,
 				size_t max_send_size;
 
 				/* send more data */
-				i = rma_op->next++;
+				i = rma_op->next;
+				rma_op->next++;
 				tx->flags = rma_op->flags | CCI_FLAG_SILENT;
 				tx->state = SOCK_TX_QUEUED;
 				/* payload size for now */
 				RMA_PAYLOAD_SIZE (connection, max_send_size);
-				tx->len = (uint16_t) max_send_size;
 				tx->send_count = 0;
 				tx->last_attempt_us = 0ULL;
 				tx->timeout_us = 0ULL;
@@ -3647,15 +3646,18 @@ sock_handle_ack(sock_conn_t * sconn,
 				tx->evt.conn = conn;
 				if (i == (rma_op->num_msgs - 1)) {
 					if (rma_op->data_len % max_send_size)
-						tx->len = rma_op->data_len % max_send_size;
+						tx->rma_len = rma_op->data_len % max_send_size;
+				} else {
+					tx->rma_len = (uint16_t)max_send_size;
 				}
 				tx->seq = ++(sconn->seq);
-				tx->rma_len = tx->len;
 				tx->len = sizeof(sock_rma_header_t);
 
 				offset = (uint64_t) i * (uint64_t) max_send_size;
 
 				if (tx->flags & CCI_FLAG_WRITE) {
+					tx->msg_type = SOCK_MSG_RMA_WRITE;
+					tx->rma_ptr = (void*)((uintptr_t)local->start + rma_op->local_offset + offset);
 					sock_pack_rma_write(write, tx->rma_len,
 					                    sconn->peer_id, tx->seq, 0,
 					                    rma_op->local_handle->stuff[0],
@@ -3668,9 +3670,6 @@ sock_handle_ack(sock_conn_t * sconn,
 					          "len: %u\n",
 					          __func__, local->start,
 					          offset, tx->rma_len);
-					memcpy(write->data,
-					       (void*)((uintptr_t)local->start + offset),
-					       tx->rma_len);
 				} else {
 					tx->msg_type = SOCK_MSG_RMA_READ_REQUEST;
 					/* FIXME: not nice to use a "write" variable here, esp since
