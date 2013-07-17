@@ -3656,12 +3656,12 @@ sock_handle_ack(sock_conn_t * sconn,
 				offset = (uint64_t) i * (uint64_t) max_send_size;
 
 				if (tx->flags & CCI_FLAG_WRITE) {
-					sock_pack_rma_write(write, tx->len,
-								sconn->peer_id, tx->seq, 0,
-								rma_op->local_handle->stuff[0],
-								rma_op->local_offset + offset,
-								rma_op->remote_handle->stuff[0],
-								rma_op->remote_offset + offset);
+					sock_pack_rma_write(write, tx->rma_len,
+					                    sconn->peer_id, tx->seq, 0,
+					                    rma_op->local_handle->stuff[0],
+					                    rma_op->local_offset + offset,
+					                    rma_op->remote_handle->stuff[0],
+					                    rma_op->remote_offset + offset);
 					debug_ep (ep, CCI_DB_EP,
 					          "%s: Prepare RMA write -- "
 					          "start: %p, offset: %lu, "
@@ -4697,7 +4697,8 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 	msg.msg_iovlen = count;
 #if CCI_DEBUG
 	ret = recvmsg (sep->sock, &msg, 0);
-	debug (CCI_DB_EP, "We now have %d/%lu bytes", ret, sizeof (sock_rma_header_t) + len);
+	debug (CCI_DB_EP, "%s: We now have %d/%lu bytes",
+	       __func__, ret, sizeof (sock_rma_header_t) + len);
 	assert ((unsigned int)ret == (sizeof (sock_rma_header_t) + len));
 #else
 	recvmsg (sep->sock, &msg, 0);
