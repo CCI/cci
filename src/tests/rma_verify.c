@@ -140,6 +140,44 @@ static void check_return(cci_endpoint_t * endpoint, char *func, int ret, int nee
 	return;
 }
 
+static void
+init_buffer(int is_client)
+{
+	int i = 0, count = opts.reg_len / sizeof(uint32_t);
+	uint32_t *r = (uint32_t*)buffer;
+
+	memset(buffer, 0, opts.reg_len);
+
+	if ((is_client && opts.method == RMA_WRITE) ||
+		(!is_client && opts.method == RMA_READ)) {
+		for (i = 0; i < count; i++) {
+			*r = random();
+			r++;
+		}
+	}
+
+	return;
+}
+
+static void
+print_buffer(void *buf, int len)
+{
+	int i = 0;
+	uint8_t *c = (uint8_t *)buf;
+
+	if (len > 128)
+		return;
+
+	fprintf(stderr, "** ");
+	for (i = 0; i < len; i++) {
+		fprintf(stderr, "0x%02x ", *c);
+		if ((i % 16) == 15) fprintf(stderr, "\n** ");
+		c++;
+	}
+	fprintf(stderr, "\n");
+	return;
+}
+
 static void poll_events(void)
 {
 	int ret;
@@ -173,6 +211,7 @@ static void poll_events(void)
 				done = 1;
 				break;
 			}
+#if 0
 			/* RMA completed */
 			count++;
 			if (count < iters) {
@@ -188,6 +227,7 @@ static void poll_events(void)
 						opts.flags);
 				check_return(endpoint, "cci_rma", ret, 1);
 			}
+#endif
 			break;
 		case CCI_EVENT_RECV:
 			if (is_client) {
@@ -200,13 +240,47 @@ static void poll_events(void)
 						sizeof(remote_rma_handle));
 				} else {
 					/* RMA status msg */
-					if (h->status.crc != msg.check.crc)
-						fprintf(stderr,
-							"Server reported CRC failed.\n"
-							"Local CRC %u != remote CRC %u.\n"
-							"count=%d current_size=%u\n",
-							msg.check.crc, h->status.crc,
-							count, current_size);
+					if (opts.method == RMA_WRITE) {
+						if (h->status.crc != msg.check.crc) {
+							fprintf(stderr, "Server reported "
+								"CRC failed.\n"
+								"Local CRC 0x%x != "
+								"remote CRC 0x%x.\n"
+								"count=%d current_size=%u\n",
+								msg.check.crc, h->status.crc,
+								count, current_size);
+						}
+					} else {
+						uint32_t crc = 0;
+						void *ptr = (void*)((uintptr_t)buffer
+							+ local_offset);
+
+						crc = crc32(0, ptr, current_size);
+						if (crc != h->status.crc) {
+							fprintf(stderr, "Server reported "
+								"CRC failed.\n"
+								"Local CRC 0x%x != "
+								"remote CRC 0x%x.\n"
+								"count=%d current_size=%u\n",
+								crc, h->status.crc,
+								count, current_size);
+						}
+					}
+					/* RMA completed */
+					count++;
+					if (count < iters) {
+						ret = cci_rma(test,
+								&msg,
+								msg_len,
+								local_rma_handle,
+								local_offset,
+								&remote_rma_handle,
+								remote_offset,
+								current_size,
+								NULL,
+								opts.flags);
+						check_return(endpoint, "cci_rma", ret, 1);
+					}
 				}
 			} else {
 				hdr_t *h = (void*)event->recv.ptr;
@@ -216,13 +290,22 @@ static void poll_events(void)
 					done = 1;
 				} else {
 					uint32_t crc = 0;
+					void *ptr = (void*)((uintptr_t)buffer
+							+ h->check.offset);
 
 					/* RMA check request */
-					crc = crc32(0,
-						(void*)((uintptr_t)buffer + h->check.offset),
-						h->check.len);
+					crc = crc32(0, ptr, h->check.len);
 					msg.status.type = MSG_RMA_STATUS;
 					msg.status.crc = crc;
+					if (opts.method == RMA_WRITE) {
+						fprintf(stderr, "server: client crc=0x%x "
+							"server crc=0x%x\n", h->check.crc,
+							crc);
+					}
+					print_buffer(ptr, h->check.len);
+					ret = cci_send(test, &msg, sizeof(msg.status),
+							NULL, CCI_FLAG_SILENT);
+					check_return(endpoint, "cci_send", ret, 1);
 				}
 			}
 			break;
@@ -255,9 +338,8 @@ static void poll_events(void)
 
 static void do_client(void)
 {
-	int ret, rlen = 0, i = 0;
+	int ret, rlen = 0;
 	uint32_t min = 1;
-	hdr_t msg;
 	long *r = NULL;
 
 	/* initiate connect */
@@ -290,11 +372,11 @@ static void do_client(void)
 	ret = posix_memalign((void **)&buffer, 4096, opts.reg_len);
 	check_return(endpoint, "memalign buffer", ret, 1);
 
+	memset(buffer, 0xaa, opts.reg_len);
+
 	rlen = sizeof(*r);
-	for (i = 0; (((i + 1) * rlen)) < (int) opts.reg_len; i++) {
-		r = (void*)((uintptr_t)buffer + (i * rlen));
-		*r = random();
-	}
+	init_buffer(1);
+	print_buffer(buffer, (int) opts.reg_len);
 
 	/* for the client, we do not need remote access flags */
 
@@ -308,13 +390,14 @@ static void do_client(void)
 
 	/* begin communication with server */
 	for (current_size = min; current_size <= length;) {
+		void *ptr = (void*)((uintptr_t)buffer + local_offset);
+
 		msg.check.type = MSG_RMA_CHK;
 		msg.check.offset = remote_offset;
 		msg.check.len = current_size;
-		msg.check.crc = crc32(0,
-				(void*)((uintptr_t)buffer + local_offset),
-				current_size);
+		msg.check.crc = crc32(0, ptr, current_size);
 		msg_len = sizeof(msg.check);
+		print_buffer(ptr, current_size);
 
 		fprintf(stderr, "Testing length %9u ... ", current_size);
 
@@ -397,8 +480,7 @@ static void do_server(void)
 				if ((uintptr_t)event->accept.context == (uintptr_t)CONTROL) {
 					control = event->accept.connection;
 				} else {
-					int len, rlen, i;
-					long *r = NULL;
+					int len;
 
 					test = event->accept.connection;
 
@@ -409,11 +491,8 @@ static void do_server(void)
 							   4096, len);
 					check_return(endpoint, "memalign buffer", ret, 1);
 
-					rlen = sizeof(*r);
-					for (i = 0; ((i + 1) * rlen) < (int) opts.reg_len; i++) {
-						r = (void*)((uintptr_t)buffer + (i * rlen));
-						*r = random();
-					}
+					init_buffer(0);
+					print_buffer(buffer, opts.reg_len);
 
 					ret = cci_rma_register(endpoint,
 							     buffer,
@@ -471,6 +550,8 @@ int main(int argc, char *argv[])
 
 	pid = getpid();
 	srandom(pid);
+
+	memset(&msg, 0, sizeof(msg));
 
 	name = argv[0];
 
@@ -543,6 +624,9 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "-I will obtain the OS handle, but not use it to wait.\n");
 		print_usage();
 	}
+
+	if (!opts.method)
+		opts.method = RMA_WRITE;
 
 	if (!opts.reg_len) {
 		if (!length) {
