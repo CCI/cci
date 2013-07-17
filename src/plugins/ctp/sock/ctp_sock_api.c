@@ -3674,7 +3674,7 @@ sock_handle_ack(sock_conn_t * sconn,
 					tx->msg_type = SOCK_MSG_RMA_READ_REQUEST;
 					/* FIXME: not nice to use a "write" variable here, esp since
 					 * the code is correct, only the name is confusing */
-					sock_pack_rma_read_request (write, tx->len, 
+					sock_pack_rma_read_request (write, tx->rma_len, 
 								sconn->peer_id, tx->seq, 0, 
 								rma_op->local_handle->stuff[0],
 								rma_op->local_offset + offset,
