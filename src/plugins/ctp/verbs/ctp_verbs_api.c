@@ -2015,8 +2015,43 @@ verbs_insert_conn(cci__conn_t *conn)
 	return;
 }
 
+static inline void
+verbs_queue_evt(cci__ep_t *ep, cci__evt_t *evt);
+
 static int
 verbs_handle_conn_request(cci__ep_t * ep, struct rdma_cm_event *cm_evt);
+
+static int
+verbs_handle_conn_rejected(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
+{
+	int ret = CCI_SUCCESS;
+	cci__conn_t *conn = NULL;
+	cci_connection_t *connection = NULL;
+	verbs_tx_t *tx = NULL;
+	void *context = NULL;
+
+	conn = cm_evt->id->context;
+	assert(conn);
+
+	connection = &conn->connection;
+	context = connection->context;
+
+	tx = verbs_get_tx(ep);
+	if (!tx) {
+		/* TODO alloc a tx */
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	tx->evt.event.type = CCI_EVENT_CONNECT;
+	tx->evt.event.connect.status = ECONNRESET;
+	tx->evt.event.connect.context = context;
+	tx->evt.event.connect.connection = NULL;
+	tx->evt.conn = conn;
+	verbs_queue_evt(ep, &tx->evt);
+
+out:
+	return ret;
+}
 
 static int
 ctp_verbs_connect(cci_endpoint_t * endpoint, const char *server_uri,
@@ -2910,6 +2945,12 @@ static int verbs_get_cm_event(cci__ep_t * ep)
 		ret = verbs_handle_disconnected(ep, cm_evt);
 		if (ret)
 			debug(CCI_DB_CONN, "%s: verbs_handle_disconnected()"
+			      "returned %s", __func__, strerror(ret));
+		break;
+	case RDMA_CM_EVENT_REJECTED:
+		ret = verbs_handle_conn_rejected(ep, cm_evt);
+		if (ret)
+			debug(CCI_DB_CONN, "%s: verbs_handle_conn_rejected()"
 			      "returned %s", __func__, strerror(ret));
 		break;
 	default:
@@ -3806,6 +3847,12 @@ static int ctp_verbs_return_event(cci_event_t * event)
 				debug(CCI_DB_CONN, "%s [%s]: destroying conn %p qp_num %u",
 					__func__, ep->uri, (void*)conn, vconn->qp_num);
 				ctp_verbs_disconnect(&conn->connection);
+				if (event->connect.status == ECONNRESET) {
+					verbs_tx_t *tx = container_of(evt, verbs_tx_t, evt);
+
+					verbs_return_tx(tx);
+					break;
+				}
 			}
 
 			ret = verbs_post_rx(ep, rx);
@@ -4188,8 +4235,11 @@ static int verbs_post_rma(verbs_rma_op_t * rma_op)
 	wr.wr.rdma.rkey = (uint32_t) verbs_ntohll(rma_op->remote_handle->stuff[1]);
 
 	ret = ibv_post_send(vconn->id->qp, &wr, &bad_wr);
-	if (ret == -1)
+	if (ret == -1) {
 		ret = errno;
+		debug(CCI_DB_MSG, "%s: ibv_post_send() returned %s", __func__,
+			strerror(ret));
+	}
 
 	CCI_EXIT;
 	return ret;
