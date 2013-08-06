@@ -1934,6 +1934,9 @@ static int ctp_sock_return_event(cci_event_t * event)
 		return CCI_ENODEV;
 	}
 
+	if (!event)
+		return CCI_SUCCESS;
+
 	evt = container_of(event, cci__evt_t, event);
 
 	ep = evt->ep;
@@ -1961,10 +1964,14 @@ static int ctp_sock_return_event(cci_event_t * event)
 	case CCI_EVENT_CONNECT:
 		rx = container_of (evt, sock_rx_t, evt);
 		if (rx->ctx == SOCK_CTX_RX) {
+			pthread_mutex_lock(&ep->lock);
 			TAILQ_INSERT_HEAD (&sep->idle_rxs, rx, entry);
+			pthread_mutex_unlock(&ep->lock);
 		} else {
 			tx = (sock_tx_t*)rx;
+			pthread_mutex_lock(&ep->lock);
 			TAILQ_INSERT_HEAD (&sep->idle_txs, tx, dentry);
+			pthread_mutex_unlock(&ep->lock);
 		}
 		break;
 	default:
@@ -2261,9 +2268,7 @@ static void sock_progress_pending(cci__ep_t * ep)
 		evt = TAILQ_FIRST(&evts);
 		TAILQ_REMOVE(&evts, evt, entry);
 		ep = evt->ep;
-		pthread_mutex_lock(&ep->lock);
-		TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
-		pthread_mutex_unlock(&ep->lock);
+		sock_queue_event (ep, evt);
 		if (sep->event_fd) {
 			int rc;
 			rc = write (sep->fd[1], "a", 1);
@@ -2576,10 +2581,7 @@ static void sock_progress_queued(cci__ep_t * ep)
 	while (!TAILQ_EMPTY(&evts)) {
 		evt = TAILQ_FIRST(&evts);
 		TAILQ_REMOVE(&evts, evt, entry);
-		ep = evt->ep;
-		pthread_mutex_lock(&ep->lock);
-		TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
-		pthread_mutex_unlock(&ep->lock);
+		sock_queue_event (evt->ep, evt);
 		if (sep->event_fd) {
 			int rc;
 			rc = write (sep->fd[1], "a", 1);
@@ -2750,9 +2752,7 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 		if (ret == tx->len) {
 			/* queue event on enpoint's completed queue */
 			tx->state = SOCK_TX_COMPLETED;
-			pthread_mutex_lock(&ep->lock);
-			TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
-			pthread_mutex_unlock(&ep->lock);
+			sock_queue_event (ep, evt);
 			debug(CCI_DB_MSG, "%s: sent UU msg with %d bytes",
 			      __func__, tx->len - (int)sizeof(sock_header_t));
 			/* waking up the app thread if it is blocking on a OS handle */
@@ -3300,10 +3300,7 @@ sock_handle_active_message(sock_conn_t * sconn,
 	}
 
 	/* queue event on endpoint's completed event queue */
-
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
-	pthread_mutex_unlock(&ep->lock);
+	sock_queue_event (ep, evt);
 
 	/* waking up the app thread if it is blocking on a OS handle */
 	if (sep->event_fd) {
@@ -3833,10 +3830,7 @@ sock_handle_conn_request(sock_rx_t * rx,
 		*((void **)&rx->evt.event.request.data_ptr) = NULL;
 
 	/* queue event on endpoint's completed event queue */
-
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
-	pthread_mutex_unlock(&ep->lock);
+	sock_queue_event (ep, &rx->evt);
 
 	/* waking up the app thread if it is blocking on a OS handle */
 	sep = ep->priv;
@@ -4130,9 +4124,8 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,
 			}
 		}
 		/* add rx->evt to ep->evts */
-		pthread_mutex_lock(&ep->lock);
-		TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
-		pthread_mutex_unlock(&ep->lock);
+		sock_queue_event (ep, &rx->evt);
+
 		/* waking up the app thread if it is blocking on a OS handle */
 		if (sep->event_fd) {
 			int rc;
@@ -4314,7 +4307,7 @@ again:
                       __func__, strerror(errno));
 	}
 #if CCI_DEBUG
-	assert (ret == sizeof (sock_rma_header_t) + len);
+	assert (ret == (int)(sizeof (sock_rma_header_t) + len));
 #endif
 	debug (CCI_DB_EP,
                "%s: We now have %d/%lu bytes",
@@ -4571,9 +4564,7 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 
 	/* Emit an event */
 	tx->state = SOCK_TX_COMPLETED;
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
-	pthread_mutex_unlock(&ep->lock);
+	sock_queue_event (ep, &tx->evt);
 
 	/* TODO: do we need to return the TX? */
 
@@ -4772,9 +4763,7 @@ sock_handle_rma_write_done(sock_conn_t * sconn,
 	event->recv.connection = &conn->connection;
 
 	/* queue event on endpoint's completed event queue */
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
-	pthread_mutex_unlock(&ep->lock);
+	sock_queue_event (ep, evt);
 
 	/* waking up the app thread if it is blocking on a OS handle */
 	if (sep->event_fd) {
@@ -5341,10 +5330,8 @@ static void sock_keepalive(cci__ep_t *ep)
 			event->type = CCI_EVENT_KEEPALIVE_TIMEDOUT;
 			event->connection = &conn->connection;
 			TAILQ_REMOVE(&evts, evt, entry);
-			ep = evt->ep;
-			pthread_mutex_lock(&ep->lock);
-			TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
-			pthread_mutex_unlock(&ep->lock);
+			sock_queue_event (evt->ep, evt);
+
 			/* waking up the app thread if it is blocking on a OS
 			   handle */
 			if (sep->event_fd) {
