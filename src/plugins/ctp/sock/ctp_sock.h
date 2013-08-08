@@ -1168,14 +1168,24 @@ typedef struct sock_conn {
 	uint32_t rnr;
 } sock_conn_t;
 
-/* Only call if holding the ep->lock and sconn->acks is not empty
+/*
+ * Only call if holding the ep->lock and sconn->acks is not empty
  *
- * If only one item, return 0
- * If more than one item, return 1
+ * For ordered connections:
+ * - If only one item, return 0
+ * - If more than one item, return 1
+ * For unordered connections, even if we have a single item, we need to issue
+ * a SACK, because we limit the tracking of acked message, ACK_UP_TO is not
+ * usable.
  */
 static inline int sock_need_sack(sock_conn_t * sconn)
 {
-	return TAILQ_FIRST(&sconn->acks) != TAILQ_LAST(&sconn->acks, s_acks);
+	if (sconn->conn->connection.attribute == CCI_CONN_ATTR_RU) {
+		return 1;
+	} else {
+		/* Ordered connection */
+		return TAILQ_FIRST(&sconn->acks) != TAILQ_LAST(&sconn->acks, s_acks);
+	}
 }
 
 typedef struct sock_dev {
