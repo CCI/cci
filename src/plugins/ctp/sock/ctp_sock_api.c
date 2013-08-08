@@ -3017,6 +3017,12 @@ static int ctp_sock_rma(cci_connection_t * connection,
 		sock_tx_t **txs = NULL;
 		uint64_t old_seq = 0ULL;
 
+		debug(CCI_DB_MSG,
+		      "%s: starting RMA %s (start: %p, len: %u) ***",
+		      __func__,
+		      flags & CCI_FLAG_WRITE ? "Write" : "Read",
+		      (void*)local->start, data_len);
+
 		cnt = rma_op->num_msgs < SOCK_RMA_DEPTH ?
 			rma_op->num_msgs : SOCK_RMA_DEPTH;
 
@@ -3089,14 +3095,19 @@ static int ctp_sock_rma(cci_connection_t * connection,
 			}
 
 			if (flags & CCI_FLAG_WRITE) {
+				uint64_t src_offset = local_offset + offset;
+				uint64_t dst_offset = remote_offset + offset;
 				tx->msg_type = SOCK_MSG_RMA_WRITE;
-				tx->rma_ptr = (void*)((uintptr_t)local->start + local_offset + offset);
-				sock_pack_rma_write(rma_hdr, tx->rma_len,
-				        sconn->peer_id,
-				        tx->seq, 0, local_handle->stuff[0],
-				        local_offset + offset,
-				        remote_handle->stuff[0],
-				        remote_offset + offset);
+				tx->rma_ptr = (void*)((uintptr_t)local->start + src_offset);
+				sock_pack_rma_write(rma_hdr,
+				                    tx->rma_len,
+				                    sconn->peer_id,
+				                    tx->seq,
+				                    0,
+				                    local_handle->stuff[0],
+				                    src_offset,
+				                    remote_handle->stuff[0],
+				                    dst_offset);
 				debug_ep (ep, CCI_DB_INFO,
 				          "%s: Preparing RMA write -- "
 				          "local start: %p, "
@@ -3104,17 +3115,20 @@ static int ctp_sock_rma(cci_connection_t * connection,
 				          "local offset: %lu, "
 				          "remote offset: %lu, "
 				          "len: %u, seq: %u",
-				          __func__, local->start,
+				          __func__,
+				          local->start,
 				          remote_handle->stuff[0],
-				          local_offset + offset,
-				          remote_offset + offset,
-				          tx->rma_len, tx->seq);
+				          src_offset,
+				          dst_offset,
+				          tx->rma_len,
+				          tx->seq);
 			} else {
 				tx->msg_type = SOCK_MSG_RMA_READ_REQUEST;
 				debug (CCI_DB_MSG,
 				       "%s: pack RMA_READ_REQUEST (seq %u)",
 				       __func__, tx->seq);
-				sock_pack_rma_read_request (rma_hdr, tx->rma_len,
+				sock_pack_rma_read_request (rma_hdr,
+				        tx->rma_len,
 				        sconn->peer_id,
 				        tx->seq, 0,
 				        local_handle->stuff[0],
@@ -3595,6 +3609,7 @@ sock_handle_ack(sock_conn_t * sconn,
 		rma_op = tx->rma_op;
 		if (rma_op && rma_op->status == CCI_SUCCESS) {
 			sock_rma_handle_t *local = NULL;
+
 			if (rma_op->local_handle != NULL)
 				local = (void*)((uintptr_t)rma_op->local_handle->stuff[0]);
 			rma_op->completed++;
@@ -3653,20 +3668,26 @@ sock_handle_ack(sock_conn_t * sconn,
 				offset = (uint64_t) i * (uint64_t) max_send_size;
 
 				if (tx->flags & CCI_FLAG_WRITE) {
+					uint64_t src_offset = rma_op->local_offset + offset;
+					uint64_t dst_offset = rma_op->remote_offset + offset;
+
 					tx->msg_type = SOCK_MSG_RMA_WRITE;
-					tx->rma_ptr = (void*)((uintptr_t)local->start + rma_op->local_offset + offset);
-					sock_pack_rma_write(write, tx->rma_len,
-					                    sconn->peer_id, tx->seq, 0,
+					tx->rma_ptr = (void*)((uintptr_t)local->start + src_offset);
+					sock_pack_rma_write(write,
+					                    tx->rma_len,
+					                    sconn->peer_id,
+					                    tx->seq,
+					                    0,
 					                    rma_op->local_handle->stuff[0],
-					                    rma_op->local_offset + offset,
+					                    src_offset,
 					                    rma_op->remote_handle->stuff[0],
-					                    rma_op->remote_offset + offset);
-					debug_ep (ep, CCI_DB_EP,
+					                    dst_offset);
+					debug_ep (ep, CCI_DB_INFO,
 					          "%s: Prepare RMA write -- "
 					          "start: %p, offset: %lu, "
-					          "len: %u\n",
+					          "len: %u, seq: %u",
 					          __func__, local->start,
-					          offset, tx->rma_len);
+					          src_offset, tx->rma_len, tx->seq);
 				} else {
 					tx->msg_type = SOCK_MSG_RMA_READ_REQUEST;
 					/* FIXME: not nice to use a "write" variable here, esp since
@@ -3683,7 +3704,6 @@ sock_handle_ack(sock_conn_t * sconn,
 				TAILQ_INSERT_TAIL(&queued, tx, dentry);
 				continue;
 			} else if (rma_op->completed == rma_op->num_msgs) {
-
 				/* send remote completion? */
 				if (rma_op->msg_len) {
 					sock_header_r_t *hdr_r = tx->buffer;
@@ -4586,7 +4606,6 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 	cci__ep_t *ep 			= NULL;
 	cci__conn_t *conn 		= sconn->conn;
 	sock_ep_t *sep 			= NULL;
-	int count			= 2;
 	uint64_t local_handle;
 	uint64_t local_offset;
 	uint64_t remote_handle;	/* our handle */
@@ -4639,7 +4658,8 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 	}
 
 #if CCI_DEBUG
-        assert (h->start);
+	assert (h->start);
+	assert (len);
 #endif
 
 	if (remote_offset > remote->length) {
@@ -4668,7 +4688,6 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 	}
 
 	/* valid remote handle, copy the data */
-	assert (len > 0);
 	debug_ep (ep, CCI_DB_INFO,
 	          "%s: copying data into target buffer -- start: %p, "
 	          "offset: %lu, len: %d",
@@ -4684,7 +4703,7 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 	iov[1].iov_len = len;
 	iov[1].iov_base = (void*)((uintptr_t)h->start + (uintptr_t)remote_offset);
 	msg.msg_iov = iov;
-	msg.msg_iovlen = count;
+	msg.msg_iovlen = 2;
 #if CCI_DEBUG
 	ret = recvmsg (sep->sock, &msg, 0);
 	debug (CCI_DB_EP, "%s: We now have %d/%lu bytes",
