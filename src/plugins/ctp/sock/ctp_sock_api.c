@@ -2953,6 +2953,9 @@ static int ctp_sock_rma(cci_connection_t * connection,
 		return CCI_ENODEV;
 	}
 
+	if (local->length < local_offset + data_len)
+		return CCI_ERROR;
+
 	conn = container_of(connection, cci__conn_t, connection);
 	sconn = conn->priv;
 	ep = container_of(connection->endpoint, cci__ep_t, endpoint);
