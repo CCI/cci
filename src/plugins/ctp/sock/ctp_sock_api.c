@@ -2931,10 +2931,15 @@ ctp_sock_rma_deregister(cci_endpoint_t * endpoint,
 }
 
 static int ctp_sock_rma(cci_connection_t * connection,
-		    const void *msg_ptr, uint32_t msg_len,
-		    cci_rma_handle_t * local_handle, uint64_t local_offset,
-		    cci_rma_handle_t * remote_handle, uint64_t remote_offset,
-		    uint64_t data_len, const void *context, int flags)
+                        const void *msg_ptr,
+                        uint32_t msg_len,
+                        cci_rma_handle_t * local_handle,
+                        uint64_t local_offset,
+                        cci_rma_handle_t * remote_handle,
+                        uint64_t remote_offset,
+                        uint64_t data_len,
+                        const void *context,
+                        int flags)
 {
 	int ret = CCI_ERR_NOT_IMPLEMENTED;
 	cci__ep_t *ep = NULL;
@@ -3021,7 +3026,7 @@ static int ctp_sock_rma(cci_connection_t * connection,
 		uint64_t old_seq = 0ULL;
 
 		debug(CCI_DB_MSG,
-		      "%s: starting RMA %s (start: %p, len: %u) ***",
+		      "%s: starting RMA %s (start: %p, len: %"PRIu64") ***",
 		      __func__,
 		      flags & CCI_FLAG_WRITE ? "Write" : "Read",
 		      (void*)local->start, data_len);
@@ -3613,8 +3618,9 @@ sock_handle_ack(sock_conn_t * sconn,
 		if (rma_op && rma_op->status == CCI_SUCCESS) {
 			sock_rma_handle_t *local = NULL;
 
-			if (rma_op->local_handle != NULL)
+			if (rma_op->local_handle != NULL) {
 				local = (void*)((uintptr_t)rma_op->local_handle->stuff[0]);
+			}
 			rma_op->completed++;
 
 			/* progress RMA */
@@ -3625,8 +3631,6 @@ sock_handle_ack(sock_conn_t * sconn,
 				/* they acked our remote completion */
 				TAILQ_REMOVE(&sep->rma_ops, rma_op, entry);
 				TAILQ_REMOVE(&sconn->rmas, rma_op, rmas);
-				if (local != NULL)
-					local->refcnt--;
 
 				free(rma_op);
 				if (!(flags & CCI_FLAG_SILENT)) {
@@ -3674,6 +3678,12 @@ sock_handle_ack(sock_conn_t * sconn,
 					uint64_t src_offset = rma_op->local_offset + offset;
 					uint64_t dst_offset = rma_op->remote_offset + offset;
 
+					debug_ep (ep, CCI_DB_INFO,
+					          "%s: Prepare RMA write -- "
+					          "start: %p, offset: %lu, "
+					          "len: %u, seq: %u",
+					          __func__, local->start,
+					          src_offset, tx->rma_len, tx->seq);
 					tx->msg_type = SOCK_MSG_RMA_WRITE;
 					tx->rma_ptr = (void*)((uintptr_t)local->start + src_offset);
 					sock_pack_rma_write(write,
@@ -3685,12 +3695,6 @@ sock_handle_ack(sock_conn_t * sconn,
 					                    src_offset,
 					                    rma_op->remote_handle->stuff[0],
 					                    dst_offset);
-					debug_ep (ep, CCI_DB_INFO,
-					          "%s: Prepare RMA write -- "
-					          "start: %p, offset: %lu, "
-					          "len: %u, seq: %u",
-					          __func__, local->start,
-					          src_offset, tx->rma_len, tx->seq);
 				} else {
 					tx->msg_type = SOCK_MSG_RMA_READ_REQUEST;
 					/* FIXME: not nice to use a "write" variable here, esp since
@@ -4298,9 +4302,8 @@ sock_handle_rma_read_reply(sock_conn_t *sconn,
 	} else if ((local_offset + len) > local->length) {
 		/* length exceeds local handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
-		debug(CCI_DB_WARN, "%s: local length not valid (%lu/%lu)",
-		      __func__, (long unsigned int)local_offset + len,
-		      (long unsigned int)local->length);
+		debug(CCI_DB_WARN, "%s: local length not valid (%"PRIu64"/%"PRIu64")",
+		      __func__, local_offset + len, local->length);
 		goto out;
 	}
 
