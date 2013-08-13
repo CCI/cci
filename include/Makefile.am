@@ -8,7 +8,8 @@ include_HEADERS = \
 
 include_ccidir = $(includedir)/cci
 include_cci_HEADERS = \
-        cci/public_config.h
+        cci/public_config.h	\
+	cci/cci_e2e_wire.h
 
 noinst_HEADERS = \
         cci/private_config.h
