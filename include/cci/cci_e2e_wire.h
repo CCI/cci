@@ -51,10 +51,12 @@ typedef enum cci_e2e_msg_type {
 	CCI_E2E_MSG_CONN_REQUEST,
 	CCI_E2E_MSG_CONN_REPLY,
 	CCI_E2E_MSG_CONN_ACK,
+	CCI_E2E_MSG_BYE,
 	CCI_E2E_MSG_SEND,
 	CCI_E2E_MSG_SEND_ACK,
 	CCI_E2E_MSG_SEND_ACK_MANY,
 	CCI_E2E_MSG_SEND_SACK,
+	CCI_E2E_MSG_SEND_NACK,
 	CCI_E2E_MSG_RMA_WRITE_REQ,
 	CCI_E2E_MSG_RMA_WRITE_ACK,
 	CCI_E2E_MSG_RMA_READ_REQ,
@@ -74,6 +76,8 @@ cci_e2e_msg_type_str(cci_e2e_msg_type_t type)
 		return "E2E connect reply";
 	case CCI_E2E_MSG_CONN_ACK:
 		return "E2E connect ack";
+	case CCI_E2E_MSG_BYE:
+		return "E2E bye";
 	case CCI_E2E_MSG_SEND:
 		return "E2E send";
 	case CCI_E2E_MSG_SEND_ACK:
@@ -82,6 +86,8 @@ cci_e2e_msg_type_str(cci_e2e_msg_type_t type)
 		return "E2E send ack many";
 	case CCI_E2E_MSG_SEND_SACK:
 		return "E2E send sack";
+	case CCI_E2E_MSG_SEND_NACK:
+		return "E2E send nack";
 	case CCI_E2E_MSG_RMA_WRITE_REQ:
 		return "E2E RMA write request";
 	case CCI_E2E_MSG_RMA_WRITE_ACK:
@@ -137,6 +143,13 @@ typedef union cci_e2e_hdr {
 		/* 32b */
 	} conn_ack;
 
+	/* Bye */
+	struct cci_e2e_hdr_bye {
+		uint8_t type;		/* CCI_E2E_MSG_BYE */
+		uint8_t pad[3];		/* Unused for now */
+		/* 32b */
+	} bye;
+
 	/* Generic send (MSG) (without data ptr) */
 	struct cci_e2e_hdr_send_size {
 		uint8_t type;		/* CCI_E2E_MSG_SEND */
@@ -169,6 +182,17 @@ typedef union cci_e2e_hdr {
 		uint16_t seq;		/* Ack this sequence number only */
 		/* 32b */
 	} send_ack_many;
+
+	struct cci_e2e_hdr_send_sack {
+		uint8_t type;		/* CCI_E2E_MSG_SEND_SACK */
+		uint8_t count;		/* Number of SACK pairs */
+		uint8_t pad[2];		/* Unused for now */
+		/* 32b */
+		struct send_sack {
+			uint16_t start;	/* beginning ACK */
+			uint16_t end;	/* ack up to and including */
+		} pair[1];
+	} send_sack;
 
 	/* For easy byte swapping to/from network order */
 	uint32_t net;
@@ -297,6 +321,18 @@ cci_e2e_parse_connect_ack(cci_e2e_hdr_t *hdr, uint8_t *status, uint16_t *mss)
 }
 
 static inline void
+cci_e2e_pack_bye(cci_e2e_hdr_t *hdr)
+{
+	memset(hdr, 0, sizeof(*hdr));
+	hdr->bye.type = CCI_E2E_MSG_BYE;
+
+	hdr->net = htonl(hdr->net);
+	return;
+}
+
+/* NOTE: no parse needed for BYE because there are no other fields */
+
+static inline void
 cci_e2e_pack_send(cci_e2e_hdr_t *hdr, uint16_t seq)
 {
 	memset(hdr, 0, sizeof(hdr->send_size));
@@ -335,7 +371,7 @@ cci_e2e_parse_send_ack(cci_e2e_hdr_t *hdr, uint16_t *seq)
 }
 
 static inline void
-cci_e2e_pack_many_send_ack_many(cci_e2e_hdr_t *hdr, uint16_t seq)
+cci_e2e_pack_send_ack_many(cci_e2e_hdr_t *hdr, uint16_t seq)
 {
 	memset(hdr, 0, sizeof(hdr->send_ack_many));
 	hdr->send_ack_many.type = CCI_E2E_MSG_SEND_ACK_MANY;
@@ -351,6 +387,45 @@ cci_e2e_parse_send_ack_many(cci_e2e_hdr_t *hdr, uint16_t *seq)
 	/* already in host order */
 	*seq = hdr->send_ack_many.seq;
 	return;
+}
+
+static inline void
+cci_e2e_pack_send_sack(cci_e2e_hdr_t *hdr, uint8_t count)
+{
+	memset(hdr, 0, sizeof(hdr->send_sack));
+	hdr->send_sack.type = CCI_E2E_MSG_SEND_SACK;
+	hdr->send_sack.count = count;
+
+	hdr->net = htonl(hdr->net);
+	return;
+}
+
+static inline void
+cc1_e2e_pack_send_sack_pair(cci_e2e_hdr_t *hdr, uint8_t index, uint16_t start, uint16_t end)
+{
+	uint32_t *net = (uint32_t *)&(hdr->send_sack.pair[index]);
+
+	hdr->send_sack.pair[index].start = start;
+	hdr->send_sack.pair[index].end = end;
+	*net = htonl(*net);
+}
+
+static inline void
+cci_e2e_parse_send_sack(cci_e2e_hdr_t *hdr, uint8_t *count)
+{
+	/* already in host order */
+	*count = hdr->send_sack.count;
+	return;
+}
+
+static inline void
+cc1_e2e_parse_send_sack_pair(cci_e2e_hdr_t *hdr, uint8_t index, uint16_t *start, uint16_t *end)
+{
+	uint32_t *net = (uint32_t *)&(hdr->send_sack.pair[index]);
+
+	*net = ntohl(*net);
+	*start = hdr->send_sack.pair[index].start;
+	*end = hdr->send_sack.pair[index].end;
 }
 
 
