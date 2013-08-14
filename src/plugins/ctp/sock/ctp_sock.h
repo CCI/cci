@@ -1180,8 +1180,22 @@ typedef struct sock_conn {
  */
 static inline int sock_need_sack(sock_conn_t * sconn)
 {
+	
+
 	if (sconn->conn->connection.attribute == CCI_CONN_ATTR_RU) {
-		return 1;
+		sock_ack_t *ack = NULL;
+
+		/* If there are more than 1 msg to ACK, we should
+		   issue a SACK, otherwise ACK a single msg */
+		ack = TAILQ_FIRST(&sconn->acks);
+		if (TAILQ_FIRST(&sconn->acks) == TAILQ_LAST(&sconn->acks, s_acks))
+		{
+			if (ack->start == ack->end)
+				return 0;
+			else
+				return 1;
+		} else 
+			return 1;
 	} else {
 		/* Ordered connection */
 		return TAILQ_FIRST(&sconn->acks) != TAILQ_LAST(&sconn->acks, s_acks);
