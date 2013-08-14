@@ -3557,7 +3557,7 @@ sock_handle_ack(sock_conn_t * sconn,
 					if (tx->state == SOCK_TX_PENDING) {
 						debug(CCI_DB_MSG,
 						      "%s: sacking seq %u",
-						      __func__, acks[i]);
+						      __func__, tx->seq);
 						found++;
 						TAILQ_REMOVE(&sep->pending, &tx->evt, entry);
 						TAILQ_REMOVE(&sconn->tx_seqs, tx, tx_seq);
