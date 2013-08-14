@@ -142,6 +142,38 @@ sock_queue_event (cci__ep_t *ep, cci__evt_t *evt)
         pthread_mutex_unlock(&ep->lock);
 }
 
+#define INIT_TX(tx) do { \
+	if (tx != NULL) {		\
+		tx->rma_ptr 	= NULL; \
+		tx->rma_len	= 0;	\
+		tx->rma_op	= NULL;	\
+	}				\
+} while(0)
+
+static inline sock_tx_t*
+sock_get_tx (cci__ep_t *ep)
+{
+	sock_ep_t *sep	= NULL;
+	sock_tx_t *tx 	= NULL;
+
+#if CCI_DEBUG
+	assert (ep);
+#endif
+
+	sep = ep->priv;
+
+	pthread_mutex_lock(&ep->lock);
+        if (!TAILQ_EMPTY(&sep->idle_txs)) {
+                tx = TAILQ_FIRST(&sep->idle_txs);
+                TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
+        }
+        pthread_mutex_unlock(&ep->lock);
+
+	INIT_TX (tx);
+
+	return tx;
+}
+
 END_C_DECLS
 
 #endif /* CCI_SOCK_INTERNALS_H */

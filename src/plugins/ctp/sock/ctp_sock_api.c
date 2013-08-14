@@ -1164,13 +1164,7 @@ static int ctp_sock_accept(cci_event_t *event, const void *context)
 	}
 
 	/* get a tx */
-	pthread_mutex_lock(&ep->lock);
-	if (!TAILQ_EMPTY(&sep->idle_txs)) {
-		tx = TAILQ_FIRST(&sep->idle_txs);
-		TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
-	}
-	pthread_mutex_unlock(&ep->lock);
-
+	tx = sock_get_tx (ep);
 	if (!tx) {
 		free(conn->priv);
 		free(conn);
@@ -1322,13 +1316,7 @@ static int ctp_sock_reject(cci_event_t *event)
 	sock_parse_seq_ts(&hdr_r->seq_ts, &peer_seq, &peer_ts);
 
 	/* get a tx */
-	pthread_mutex_lock(&ep->lock);
-	if (!TAILQ_EMPTY(&sep->idle_txs)) {
-		tx = TAILQ_FIRST(&sep->idle_txs);
-		TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
-	}
-	pthread_mutex_unlock(&ep->lock);
-
+	tx = sock_get_tx (ep);
 	if (!tx) {
 		ret = CCI_ENOBUFS;
 		goto out;
@@ -1595,13 +1583,7 @@ static int ctp_sock_connect(cci_endpoint_t * endpoint,
 	pthread_mutex_unlock(&ep->lock);
 
 	/* get a tx */
-	pthread_mutex_lock(&ep->lock);
-	if (!TAILQ_EMPTY(&sep->idle_txs)) {
-		tx = TAILQ_FIRST(&sep->idle_txs);
-		TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
-	}
-	pthread_mutex_unlock(&ep->lock);
-
+	tx = sock_get_tx (ep);
 	if (!tx) {
 		/* FIXME leak */
 		CCI_EXIT;
@@ -2665,13 +2647,7 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 	is_reliable = cci_conn_is_reliable(conn);
 
 	/* get a tx */
-	pthread_mutex_lock(&ep->lock);
-	if (!TAILQ_EMPTY(&sep->idle_txs)) {
-		tx = TAILQ_FIRST(&sep->idle_txs);
-		TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
-	}
-	pthread_mutex_unlock(&ep->lock);
-
+	tx = sock_get_tx (ep);
 	if (!tx) {
 		debug(CCI_DB_FUNC, "exiting %s", func);
 		return CCI_ENOBUFS;
@@ -2958,8 +2934,14 @@ static int ctp_sock_rma(cci_connection_t * connection,
 		return CCI_ENODEV;
 	}
 
-	if (local->length < local_offset + data_len)
-		return CCI_ERROR;
+	if (local->length < local_offset + data_len) {
+		debug(CCI_DB_MSG,
+                      "%s: RMA length + offset exceeds registered length "
+                      "(%"PRIu64" + %"PRIu64" > %"PRIu64")",
+                      __func__, data_len, local_offset, local->length);
+		CCI_EXIT;
+		return CCI_EINVAL;
+	}
 
 	conn = container_of(connection, cci__conn_t, connection);
 	sconn = conn->priv;
@@ -3050,6 +3032,7 @@ static int ctp_sock_rma(cci_connection_t * connection,
 			if (!TAILQ_EMPTY(&sep->idle_txs)) {
 				txs[i] = TAILQ_FIRST(&sep->idle_txs);
 				TAILQ_REMOVE(&sep->idle_txs, txs[i], dentry);
+				INIT_TX (txs[i]);
 				txs[i]->seq = ++(sconn->seq);
 			} else
 				err++;
@@ -4169,13 +4152,7 @@ static void sock_handle_conn_reply(sock_conn_t * sconn,
 			return;
 		}
 	} else if (sconn->status == SOCK_CONN_READY) {
-		pthread_mutex_lock(&ep->lock);
-		if (!TAILQ_EMPTY(&sep->idle_txs)) {
-			tx = TAILQ_FIRST(&sep->idle_txs);
-			TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
-		}
-		pthread_mutex_unlock(&ep->lock);
-
+		tx = sock_get_tx (ep);
 		if (!tx) {
 			char to[32];
 
@@ -4542,12 +4519,7 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	}
 
 	/* Get a TX buffer */
-	pthread_mutex_lock(&ep->lock);
-	if (!TAILQ_EMPTY(&sep->idle_txs)) {
-		tx = TAILQ_FIRST(&sep->idle_txs);
-		TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
-	}
-	pthread_mutex_unlock(&ep->lock);
+	tx = sock_get_tx (ep);
 
 	/* Prepare the TX buffer */
 	tx->seq = 0;
@@ -5372,14 +5344,6 @@ static void sock_keepalive(cci__ep_t *ep)
 			/*
 			* Finally we send an heartbeat
 			*/
-
-			/* Get a TX */
-			pthread_mutex_lock(&ep->lock);
-			if (!TAILQ_EMPTY(&sep->idle_txs)) {
-				tx = TAILQ_FIRST(&sep->idle_txs);
-				TAILQ_REMOVE(&sep->idle_txs, tx, dentry);
-			}
-			pthread_mutex_unlock(&ep->lock);
 
 			/* Prepare and send the msg */
 			ep = container_of(conn->connection.endpoint, cci__ep_t, endpoint);
