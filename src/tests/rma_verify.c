@@ -238,7 +238,11 @@ static void poll_events(void)
 						void *ptr = (void*)((uintptr_t)buffer
 							+ local_offset);
 
-						crc = crc32(0, ptr, current_size);
+						/* Compute the CRC only on a valid buffer */
+						if (current_size + local_offset <= length)
+							crc = crc32(0, ptr, current_size);
+						else
+							crc = 0;
 						if (crc != h->status.crc) {
 							fprintf(stderr, "Server reported "
 								"CRC failed.\n"
@@ -321,9 +325,8 @@ static void poll_events(void)
 
 static void do_client(void)
 {
-	int ret, rlen = 0;
+	int ret;
 	uint32_t min = 1;
-	long *r = NULL;
 
 	/* initiate connect */
 	msg.request.type = MSG_CONTROL;
@@ -357,7 +360,6 @@ static void do_client(void)
 
 	memset(buffer, 0xaa, opts.reg_len);
 
-	rlen = sizeof(*r);
 	init_buffer(1);
 	print_buffer(buffer, (int) opts.reg_len);
 
@@ -378,7 +380,11 @@ static void do_client(void)
 		msg.check.type = MSG_RMA_CHK;
 		msg.check.offset = remote_offset;
 		msg.check.len = current_size;
-		msg.check.crc = crc32(0, ptr, current_size);
+		/* Compute the CRC only on a valid buffer */
+		if (current_size + local_offset <= length)
+			msg.check.crc = crc32(0, ptr, current_size);
+		else
+			msg.check.crc = 0;
 		msg_len = sizeof(msg.check);
 		print_buffer(ptr, current_size);
 
