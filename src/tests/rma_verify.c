@@ -239,7 +239,7 @@ static void poll_events(void)
 							+ local_offset);
 
 						/* Compute the CRC only on a valid buffer */
-						if (current_size + local_offset <= length)
+						if (current_size + local_offset <= opts.reg_len)
 							crc = crc32(0, ptr, current_size);
 						else
 							crc = 0;
@@ -281,7 +281,10 @@ static void poll_events(void)
 							+ h->check.offset);
 
 					/* RMA check request */
-					crc = crc32(0, ptr, h->check.len);
+					if ((h->check.len + h->check.offset) <= opts.reg_len)
+						crc = crc32(0, ptr, h->check.len);
+					else
+						crc = 0;
 					msg.status.type = MSG_RMA_STATUS;
 					msg.status.crc = crc;
 					if (opts.method == RMA_WRITE) {
@@ -381,7 +384,7 @@ static void do_client(void)
 		msg.check.offset = remote_offset;
 		msg.check.len = current_size;
 		/* Compute the CRC only on a valid buffer */
-		if (current_size + local_offset <= length)
+		if (current_size + local_offset <= opts.reg_len)
 			msg.check.crc = crc32(0, ptr, current_size);
 		else
 			msg.check.crc = 0;
