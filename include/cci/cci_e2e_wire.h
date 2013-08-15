@@ -194,6 +194,14 @@ typedef union cci_e2e_hdr {
 		} pair[1];
 	} send_sack;
 
+	/* Send nack (nacks one sequence number only) */
+	struct cci_e2e_hdr_send_nack {
+		uint8_t type;		/* CCI_E2E_MSG_SEND_NACK */
+		uint8_t status;		/* Reason for SEND failure */
+		uint16_t seq;		/* Nack this sequence number only */
+		/* 32b */
+	} send_nack;
+
 	/* For easy byte swapping to/from network order */
 	uint32_t net;
 } cci_e2e_hdr_t;
@@ -373,7 +381,7 @@ cci_e2e_parse_send_ack(cci_e2e_hdr_t *hdr, uint16_t *seq)
 static inline void
 cci_e2e_pack_send_ack_many(cci_e2e_hdr_t *hdr, uint16_t seq)
 {
-	memset(hdr, 0, sizeof(hdr->send_ack_many));
+	memset(hdr, 0, sizeof(hdr->send_ack_many)); /* hdr + pair[0] */
 	hdr->send_ack_many.type = CCI_E2E_MSG_SEND_ACK_MANY;
 	hdr->send_ack_many.seq = seq;
 
@@ -428,6 +436,26 @@ cc1_e2e_parse_send_sack_pair(cci_e2e_hdr_t *hdr, uint8_t index, uint16_t *start,
 	*end = hdr->send_sack.pair[index].end;
 }
 
+static inline void
+cci_e2e_pack_send_nack(cci_e2e_hdr_t *hdr, uint8_t status, uint16_t seq)
+{
+	memset(hdr, 0, sizeof(hdr->send_nack));
+	hdr->send_nack.type = CCI_E2E_MSG_SEND_NACK;
+	hdr->send_nack.status = status;
+	hdr->send_nack.seq = seq;
+
+	hdr->net = htonl(hdr->net);
+	return;
+}
+
+static inline void
+cci_e2e_parse_send_nack(cci_e2e_hdr_t *hdr, uint8_t *status, uint16_t *seq)
+{
+	/* already in host order */
+	*status = hdr->send_nack.status;
+	*seq = hdr->send_nack.seq;
+	return;
+}
 
 
 #endif /* CCI_E2E_WIRE_H */
