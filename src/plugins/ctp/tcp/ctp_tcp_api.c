@@ -2311,6 +2311,15 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 		return CCI_ENODEV;
 	}
 
+	if ((data_len + local_offset) > local->length) {
+		debug(CCI_DB_MSG,
+		      "%s: RMA length + offset exceeds registered length "
+		      "(%"PRIu64" + %"PRIu64" > %"PRIu64")",
+		      __func__, data_len, local_offset, local->length);
+		CCI_EXIT;
+		return CCI_EINVAL;
+	}
+
 	conn = container_of(connection, cci__conn_t, connection);
 	tconn = conn->priv;
 	ep = container_of(connection->endpoint, cci__ep_t, endpoint);
