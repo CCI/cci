@@ -19,6 +19,7 @@
 int iters = 10;
 int send_done = 0;
 int recv_done = 0;
+int flags = 0;
 /* By default the connection is reliable ordered; users can change the
    connection type via the command line */
 cci_conn_attribute_t attr = CCI_CONN_ATTR_RO;
@@ -92,7 +93,7 @@ int main(int argc, char *argv[])
 	cci_connection_t *connection = NULL;
 	uint32_t timeout = 30 * 1000000;
 
-	while ((c = getopt(argc, argv, "h:c:")) != -1) {
+	while ((c = getopt(argc, argv, "h:c:b")) != -1) {
 		switch (c) {
 		case 'h':
 			server_uri = strdup(optarg);
@@ -104,6 +105,9 @@ int main(int argc, char *argv[])
 				attr = CCI_CONN_ATTR_RO;
 			else if (strncasecmp ("uu", optarg, 2) == 0)
 				attr = CCI_CONN_ATTR_UU;
+			break;
+		case 'b':
+			flags |= CCI_FLAG_BLOCKING;
 			break;
 		default:
 			fprintf(stderr, "usage: %s -h <server_uri> [-c <type>]\n",
@@ -172,18 +176,27 @@ int main(int argc, char *argv[])
 		sprintf(data, "%4d", i);
 		sprintf(data + 4, "Hello World!");
 		ret = cci_send(connection, data, (uint32_t) strlen(data) + 4,
-			       (void *)(uintptr_t) i, 0);
+			       (void *)(uintptr_t) i, flags);
 		if (ret)
 			fprintf(stderr, "send %d failed with %s\n", i,
 				cci_strerror(endpoint, ret));
+		if (flags & CCI_FLAG_BLOCKING)
+			fprintf(stderr, "send %d completed with %d\n", i, ret);
+
 	}
+	if (flags == CCI_FLAG_BLOCKING)
+		send_done = iters;
+
 	while (!done)
 		poll_events(endpoint, &connection, &done);
 
-	ret = cci_send(connection, "bye", 3, (void *)(uintptr_t) iters, 0);
+	ret = cci_send(connection, "bye", 3, (void *)(uintptr_t) iters, flags);
 	if (ret)
 		fprintf(stderr, "sending \"bye\" failed with %s\n",
 			cci_strerror(endpoint, ret));
+
+	if (flags & CCI_FLAG_BLOCKING)
+		done = 2;
 
 	while (done != 2)
 		poll_events(endpoint, &connection, &done);
