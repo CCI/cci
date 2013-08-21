@@ -99,6 +99,8 @@ cci_e2e_msg_type_str(cci_e2e_msg_type_t type)
 	case CCI_E2E_MSG_MAX:
 		return "E2E max (invalid)";
 	}
+	/* silence picky compiler */
+	return NULL;
 }
 
 typedef union cci_e2e_hdr {
