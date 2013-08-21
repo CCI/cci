@@ -4059,6 +4059,7 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 	if (flags & CCI_FLAG_BLOCKING && is_reliable) {
 		cci__evt_t *e, *evt = NULL;
 		do {
+			verbs_progress_ep(ep);
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_FOREACH(e, &ep->evts, entry) {
 				if (&tx->evt == e) {
