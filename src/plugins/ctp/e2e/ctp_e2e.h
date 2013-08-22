@@ -176,6 +176,8 @@ struct e2e_rma {
 	uint32_t pending;		/* Number of fragments in-flight */
 };
 
+extern e2e_globals_t *eglobals;
+
 int cci_ctp_e2e_post_load(cci_plugin_t * me);
 int cci_ctp_e2e_pre_unload(cci_plugin_t * me);
 

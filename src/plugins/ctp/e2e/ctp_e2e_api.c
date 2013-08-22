@@ -12,6 +12,8 @@
 #include "plugins/ctp/ctp.h"
 #include "ctp_e2e.h"
 
+e2e_globals_t *eglobals = NULL;
+
 /*
  * Local functions
  */
@@ -74,7 +76,7 @@ cci_plugin_ctp_t cci_ctp_e2e_plugin = {
 	 CCI_CTP_API_VERSION,
 	 "e2e",
 	 CCI_MAJOR_VERSION, CCI_MINOR_VERSION, CCI_RELEASE_VERSION,
-	 0, /* priority set to 0 because people shouldn't ever use it */
+	 1, /* priority set to 1 */
 
 	 /* Bootstrap function pointers */
 	 cci_ctp_e2e_post_load,
@@ -105,7 +107,66 @@ cci_plugin_ctp_t cci_ctp_e2e_plugin = {
 
 static int ctp_e2e_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
+	int ret = 0;
+	struct cci_device *device;
+	cci__dev_t *dev = NULL;
+	cci_device_t **devices = NULL;
+
 	CCI_ENTER;
+
+	eglobals = calloc(1, sizeof(*eglobals));
+	if (!eglobals) {
+		CCI_EXIT;
+		return CCI_ENOMEM;
+	}
+
+	devices = calloc(2, sizeof(*devices));
+	if (!devices) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	/* Create one e2e virtual device. It will be generic and can
+	 * use any native transport.
+	 */
+
+	dev = calloc(1, sizeof(*dev));
+	if (!dev) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	cci__init_dev(dev);
+	dev->plugin = plugin;
+	dev->priority = plugin->base.priority;
+	dev->device.up = 1;
+	dev->device.rate = 0;
+
+	device = &dev->device;
+	device->conf_argv = calloc(2, sizeof(*device->conf_argv));
+	if (!device->conf_argv) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	((char **)device->conf_argv)[0] = strdup("transport=e2e");
+	if (!device->conf_argv[0]) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	cci__add_dev(dev);
+
+	*((cci_device_t ***)&eglobals->devices) = devices;
+	eglobals->count = 1;
+    out:
+	if (ret) {
+		if (device) {
+			if (device->conf_argv)
+				free((char *)device->conf_argv[0]);
+		}
+		free(dev);
+		free(devices);
+		free(eglobals);
+	}
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
