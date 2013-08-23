@@ -3263,10 +3263,12 @@ tcp_handle_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		pthread_mutex_lock(&ep->lock);
 		if (!(tx->msg_type == TCP_MSG_CONN_REPLY &&
 			tconn->status == TCP_CONN_CLOSING)) {
-			if (tx->flags & CCI_FLAG_SILENT)
+			if (tx->flags & CCI_FLAG_SILENT) {
 				tcp_put_tx_locked(tep, tx);
-			else
+			} else {
+				tx->state = TCP_TX_COMPLETED;
 				TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
+			}
 		} else {
 			/* We rejected this conn, clean it up */
 			/* FIXME */

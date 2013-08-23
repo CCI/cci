@@ -3557,7 +3557,7 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 		struct ibv_cq *cq;
 		void *cq_ctx;
 
-		debug(CCI_DB_MSG, "%s: checking for CQ event", __func__);
+		debug(CCI_DB_EP, "%s: checking for CQ event", __func__);
 		ret = ibv_get_cq_event(vep->ib_channel, &cq, &cq_ctx);
 		if (!ret) {
 			vep->acks++;
@@ -3579,15 +3579,20 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 	memset(wc, 0, sizeof(wc));	/* silence valgrind */
 	ret = ibv_poll_cq(vep->cq, VERBS_WC_CNT, wc);
 	if (ret == -1) {
+		vep->check_cq = 0;
 		ret = errno;
 		goto out;
 	}
 
 	found = ret;
-	if (found == 0)
+	if (found == 0) {
 		ret = CCI_EAGAIN;
+		vep->check_cq = 0;
+		goto out;
+	}
 
-	debug(CCI_DB_EP, "%s: poll_cq() found %d events", __func__, found);
+	debug(CCI_DB_EP, "%s: poll_cq() found %d events (check_cq = %u)", __func__, found,
+			vep->check_cq);
 	success++;
 
 	if (vep->fd)
@@ -4059,6 +4064,7 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 	if (flags & CCI_FLAG_BLOCKING && is_reliable) {
 		cci__evt_t *e, *evt = NULL;
 		do {
+			verbs_progress_ep(ep);
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_FOREACH(e, &ep->evts, entry) {
 				if (&tx->evt == e) {
