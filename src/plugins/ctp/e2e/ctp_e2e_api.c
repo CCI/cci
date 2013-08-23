@@ -156,7 +156,8 @@ static int ctp_e2e_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t fla
 
 	cci__add_dev(dev);
 
-	*((cci_device_t ***)&eglobals->devices) = devices;
+	devices[0] = device;
+	*((cci_device_t ***)&(eglobals->devices)) = devices;
 	eglobals->count = 1;
     out:
 	if (ret) {
@@ -214,6 +215,9 @@ static int ctp_e2e_create_endpoint(cci_device_t * device,
 
 	CCI_ENTER;
 
+	endpoint_real = *endpointp;
+	ep_real = container_of(endpoint_real, cci__ep_t, endpoint);
+
 	/* find URI base (after <transport>:// */
 	base = strstr(ep_real->uri, "://");
 	if (!base) {
@@ -255,6 +259,7 @@ static int ctp_e2e_create_endpoint(cci_device_t * device,
 				ret = CCI_ENOMEM;
 				goto out;
 			}
+			i++;
 		}
 	}
 
@@ -271,9 +276,6 @@ static int ctp_e2e_create_endpoint(cci_device_t * device,
 		ret = CCI_EINVAL;
 		goto out;
 	}
-
-	endpoint_real = *endpointp;
-	ep_real = container_of(endpoint_real, cci__ep_t, endpoint);
 
 	ep_e2e = calloc(1, sizeof(*ep_e2e));
 	if (!ep_e2e) {
