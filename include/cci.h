@@ -469,8 +469,8 @@ CCI_DECLSPEC int cci_get_devices(cci_device_t * const ** devices);
   \ingroup endpoints
  */
 typedef enum cci_endpoint_flags {
-	/*! For future expansion */
-	bogus_must_have_something_here
+	/*! Enable end-to-end routing */
+	CCI_EP_ROUTING = (1 << 0)
 } cci_endpoint_flags_t;
 
 /*! Endpoint.

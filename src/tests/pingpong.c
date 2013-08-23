@@ -574,7 +574,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* create an endpoint */
-	ret = cci_create_endpoint(NULL, 0, &endpoint, os_handle);
+	ret = cci_create_endpoint(NULL, CCI_EP_ROUTING, &endpoint, os_handle);
 	if (ret) {
 		fprintf(stderr, "cci_create_endpoint() failed with %s\n",
 			cci_strerror(NULL, ret));
