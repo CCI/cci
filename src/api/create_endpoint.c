@@ -77,6 +77,18 @@ int cci_create_endpoint(cci_device_t * device,
 	TAILQ_INSERT_TAIL(&dev->eps, ep, entry);
 	pthread_mutex_unlock(&dev->lock);
 
+#if ENABLE_E2E_ROUTING == 1
+	ret = CCI_ENODEV;
+	if (flags & CCI_EP_ROUTING) {
+		TAILQ_FOREACH_REVERSE(dev, &globals->devs, s_devs, entry) {
+			if (0 == strcmp("e2e", dev->device.name)) {
+				ret = dev->plugin->create_endpoint(device, flags, endpoint, fd);
+				break;
+			}
+		}
+	}
+#endif
+
 	return ret;
 
 out:

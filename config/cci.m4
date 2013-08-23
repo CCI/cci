@@ -15,6 +15,9 @@ AC_DEFUN([CCI_DEFINE_ARGS],[
            AS_IF([test "$enable_picky" = ""],
                  [AC_MSG_WARN([Developer build: enabling pickyness by default])
                   enable_picky=yes])])
+    AC_ARG_ENABLE([routing],
+        [AC_HELP_STRING([--enable-routing],
+                        [Enable the end-to-end routing transport])])
 ])
 
 # Main CCI m4 macro
@@ -110,6 +113,17 @@ AC_DEFUN([CCI_SETUP_CTP],[
                        [:],
                        [[#include <valgrind/memcheck.h>]])
     fi
+
+    # Look for end-to-end routing
+
+    if test "x$enable_routing" = "xyes"; then
+        AC_DEFINE([ENABLE_E2E_ROUTING], [1], "Enable end-to-end routing")
+	AC_MSG_WARN([enabling end-to-end routing])
+    else
+        AC_DEFINE([ENABLE_E2E_ROUTING], [0], "Disable end-to-end routing")
+    fi
+
+    # Check headers
 
     AC_CHECK_HEADERS([ifaddrs.h], [
 	AC_CHECK_FUNCS([getifaddrs])
