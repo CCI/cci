@@ -69,6 +69,9 @@ struct e2e_ep {
 	TAILQ_HEAD(e_active, e2e_conn) active; /* List of conns waiting on CONNECT */
 	TAILQ_HEAD(e_passive, e2e_conn) passive; /* List of conns waiting on ACCEPT */
 	TAILQ_HEAD(e_closing, e2e_conn) closing; /* List of conns closing */
+	const char * const *routers;	/* NULL-terminated array of router URIs */
+	uint32_t as;			/* Our organization's AS ID */
+	uint32_t subnet;		/* Subnet ID for this endpoint */
 };
 
 typedef enum e2e_conn_state {
