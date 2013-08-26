@@ -103,8 +103,8 @@ client done
 
 CCI ships with these test programs:
 
-	pingpong  # run a pingpong (request-response) between two hosts
-	stream    # stream uni-directional traffic from client to server
-	opt       # test the set and get option routines
-
+	pingpong    # run a pingpong (request-response) between two hosts
+	stream      # stream uni-directional traffic from client to server
+	opt         # test the set and get option routines
+	rma_verify  # test and verify RMA transfers
 
