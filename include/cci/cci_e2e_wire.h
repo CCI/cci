@@ -459,5 +459,63 @@ cci_e2e_parse_send_nack(cci_e2e_hdr_t *hdr, uint8_t *status, uint16_t *seq)
 	return;
 }
 
+static int
+cci_e2e_parse_uri(const char *uri, uint32_t *asp, uint32_t *snp, char **base)
+{
+	int ret = 0;
+	uint32_t as = 0, subnet = 0;
+	char *p = NULL, *dot = NULL;
 
+	if (memcmp(uri, "e2e://", 6)) {
+		ret = EINVAL;
+		goto out;
+	}
+
+	p = (char*) uri + 6; /* start of as id */
+	dot = strstr(p, ".");
+	if (!dot) {
+		ret = EINVAL;
+		goto out;
+	}
+	*dot = '\0';
+	as = strtol(p, NULL, 0);
+	*dot = '.';
+
+	p = dot + 1;
+	dot = strstr(p, ".");
+	if (!dot) {
+		ret = EINVAL;
+		goto out;
+	}
+	*dot = '\0';
+	subnet = strtol(p, NULL, 0);
+	*dot = '.';
+
+	if (asp)
+		*asp = as;
+	if (snp)
+		*snp = subnet;
+	if (base)
+		*base = dot + 1;
+    out:
+	return ret;
+}
+
+static int
+cci_e2e_uri_prefix_len(const char *uri, int *len)
+{
+	int ret = 0;
+	char *colon = NULL;
+
+	colon = strstr(uri, "://");
+	if (!colon) {
+		ret = EINVAL;
+		goto out;
+	}
+
+	*len = colon - uri + 3; /* include :// in the length */
+
+    out:
+	return ret;
+}
 #endif /* CCI_E2E_WIRE_H */

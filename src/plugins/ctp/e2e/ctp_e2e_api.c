@@ -7,6 +7,7 @@
 #include "cci/private_config.h"
 
 #include <stdio.h>
+#include <sys/types.h>
 
 #include "cci.h"
 #include "plugins/ctp/ctp.h"
@@ -401,10 +402,108 @@ static int ctp_e2e_connect(cci_endpoint_t * endpoint, const char *server_uri,
 			    cci_conn_attribute_t attribute,
 			    const void *context, int flags, const struct timeval *timeout)
 {
+	int ret = 0;
+	uint32_t len = 0, total_len = 0, as = 0, subnet = 0;
+	char *base = NULL, *uri = (void*) server_uri, *local_uri = NULL;
+	cci__ep_t *ep = NULL, *ep_real = NULL;
+	cci__conn_t *conn = NULL;
+	e2e_ep_t *eep = NULL;
+	e2e_conn_t *econn = NULL;
+	/* e2e_tx_t *tx = NULL; */
+	void *buf = NULL;
+	cci_e2e_hdr_t *hdr = NULL;
+
 	CCI_ENTER;
 
+	if (!eglobals) {
+		CCI_EXIT;
+		return CCI_ENODEV;
+	}
+
+	ep = container_of(endpoint, cci__ep_t, endpoint);
+	eep = ep->priv;
+	ep_real =container_of(eep->real, cci__ep_t, endpoint);
+
+	conn = calloc(1, sizeof(*conn));
+	if (!conn) {
+		CCI_EXIT;
+		return CCI_ENOMEM;
+	}
+	conn->plugin = ep->plugin;
+
+	conn->connection.max_send_size = eep->real->device->max_send_size;
+	conn->connection.endpoint = endpoint;
+	conn->connection.attribute = attribute;
+	conn->connection.context = (void*) context;
+
+	conn->uri = strdup(server_uri);
+	if (!conn->uri) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	conn->tx_timeout = ep->tx_timeout;
+	conn->priv = calloc(1, sizeof(*econn));
+	if (!conn->priv) {
+	}
+	econn = conn->priv;
+	econn->conn = conn;
+	econn->state = E2E_CONN_ACTIVE;
+
+	total_len = sizeof(*hdr) + sizeof(cci_e2e_connect_t) + data_len;
+	total_len += strlen(ep->uri) + strlen(server_uri);
+
+	buf = calloc(1, total_len);
+	if (!buf) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	cci_e2e_pack_connect(hdr, server_uri, ep->uri, data_ptr, data_len, &len);
+	assert(len == total_len);
+
+	/* Is the peer a router or a native user? */
+	ret = cci_e2e_parse_uri(server_uri, &as, &subnet, &base);
+	if (ret)
+		goto out;
+
+	if (subnet == eep->subnet) {
+		int prefix_len = 0, base_len = 0, len = 0;
+
+		/* build local URI for non-routed connection */
+		ret = cci_e2e_uri_prefix_len(server_uri, &prefix_len);
+		if (ret)
+			goto out;
+
+		base_len = strlen(base);
+		len = prefix_len + base_len;
+
+		local_uri = calloc(1, len + 1);
+		if (!local_uri) {
+			ret = CCI_ENOMEM;
+			goto out;
+		}
+		snprintf(local_uri, prefix_len, "%s", ep_real->uri);
+		snprintf(local_uri + prefix_len, base_len, "%s", base);
+
+		uri = local_uri;
+	} else {
+		/* send to a router */
+	}
+
+	ret = cci_connect(eep->real, uri, hdr, len, attribute, (void*)conn,
+			flags, timeout);
+
+    out:
+	if (ret) {
+		if (conn) {
+			free(conn->priv);
+			free((void*)conn->uri);
+		}
+		free(conn);
+	}
+
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 static int ctp_e2e_disconnect(cci_connection_t * connection)
