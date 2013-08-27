@@ -446,12 +446,15 @@ static int ctp_e2e_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	conn->tx_timeout = ep->tx_timeout;
 	conn->priv = calloc(1, sizeof(*econn));
 	if (!conn->priv) {
+		ret = CCI_ENOMEM;
+		goto out;
 	}
 	econn = conn->priv;
 	econn->conn = conn;
 	econn->state = E2E_CONN_ACTIVE;
 
-	total_len = sizeof(*hdr) + sizeof(cci_e2e_connect_t) + data_len;
+	/* this is large by 4 bytes, it is ok */
+	total_len = sizeof(hdr->connect_size) + sizeof(cci_e2e_connect_t) + data_len;
 	total_len += strlen(ep->uri) + strlen(server_uri);
 
 	buf = calloc(1, total_len);
@@ -459,9 +462,9 @@ static int ctp_e2e_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		ret = CCI_ENOMEM;
 		goto out;
 	}
+	hdr = buf;
 
 	cci_e2e_pack_connect(hdr, server_uri, ep->uri, data_ptr, data_len, &len);
-	assert(len == total_len);
 
 	/* Is the peer a router or a native user? */
 	ret = cci_e2e_parse_uri(server_uri, &as, &subnet, &base);
@@ -490,12 +493,16 @@ static int ctp_e2e_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		uri = local_uri;
 	} else {
 		/* send to a router */
+		/* TODO round-robin over eep->routers */
+		uri = eep->routers[0];
 	}
 
 	ret = cci_connect(eep->real, uri, hdr, len, attribute, (void*)conn,
 			flags, timeout);
 
     out:
+	free(buf);
+	free(local_uri);
 	if (ret) {
 		if (conn) {
 			free(conn->priv);
