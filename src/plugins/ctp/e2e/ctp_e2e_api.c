@@ -497,9 +497,18 @@ static int ctp_e2e_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		uri = eep->routers[0];
 	}
 
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_TAIL(&eep->active, econn, entry);
+	pthread_mutex_unlock(&ep->lock);
+
 	ret = cci_connect(eep->real, uri, hdr, len, attribute, (void*)conn,
 			flags, timeout);
 
+	if (ret) {
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_REMOVE(&eep->active, econn, entry);
+		pthread_mutex_unlock(&ep->lock);
+	}
     out:
 	free(buf);
 	free(local_uri);
@@ -549,21 +558,110 @@ static int ctp_e2e_arm_os_handle(cci_endpoint_t * endpoint, int flags)
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
+static int
+handle_native_connect(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
+{
+	int ret = 0;
+	cci__conn_t *conn = native_event->connect.context;
+	e2e_conn_t *econn = conn->priv;
+	e2e_ep_t *eep = ep->priv;
+
+	if (native_event->connect.status == CCI_SUCCESS) {
+		econn->real = native_event->connect.connection;
+	} else {
+		cci__evt_t *tmp = calloc(1, sizeof(*tmp));
+		if (!tmp) {
+			/* FIXME */
+			return CCI_EAGAIN;
+		}
+		tmp->event.connect.type = CCI_EVENT_CONNECT;
+		tmp->event.connect.status = native_event->connect.status;
+		tmp->event.connect.context = conn->connection.context;
+		tmp->event.connect.connection = NULL;
+		tmp->ep = ep;
+		tmp->conn = NULL;
+		*new = &tmp->event;
+		ret = CCI_SUCCESS;
+
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_REMOVE(&eep->active, econn, entry);
+		pthread_mutex_unlock(&ep->lock);
+
+		free(conn->priv);
+		free((void*)conn->uri);
+		free(conn);
+	}
+
+	return ret;
+}
+
 static int ctp_e2e_get_event(cci_endpoint_t * endpoint,
 			      cci_event_t ** event)
 {
+	int ret = 0;
+	cci__ep_t *ep = NULL;
+	e2e_ep_t *eep = NULL;
+	cci_event_t *native_event = NULL;
+
 	CCI_ENTER;
 
+	if (!eglobals) {
+		CCI_EXIT;
+		return CCI_ENODEV;
+	}
+
+	ep = container_of(endpoint, cci__ep_t, endpoint);
+	eep = ep->priv;
+
+	ret = cci_get_event(eep->real, &native_event);
+	if (ret == CCI_SUCCESS) {
+
+		switch (native_event->type) {
+		case CCI_EVENT_CONNECT:
+			ret = handle_native_connect(ep, native_event, event);
+			break;
+		case CCI_EVENT_CONNECT_REQUEST:
+			break;
+		case CCI_EVENT_ACCEPT:
+			break;
+		case CCI_EVENT_SEND:
+			break;
+		case CCI_EVENT_RECV:
+			break;
+		default:
+			break;
+		}
+		cci_return_event(native_event);
+	}
+
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 static int ctp_e2e_return_event(cci_event_t * event)
 {
+	int ret = 0;
+
 	CCI_ENTER;
 
+	switch (event->type) {
+	case CCI_EVENT_CONNECT:
+	{
+		if (event->connect.status != CCI_SUCCESS) {
+			cci__evt_t *evt = container_of(event, cci__evt_t, event);
+
+			/* This was alloced in get_event().
+			 * Free it now */
+			free(evt);
+		}
+		break;
+	}
+	default:
+		break;
+	}
+
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 static int ctp_e2e_send(cci_connection_t * connection,
