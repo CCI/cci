@@ -338,7 +338,8 @@ static int ctp_e2e_create_endpoint(cci_device_t * device,
 		free(routers);
 		cci_destroy_endpoint(endpoint_real);
 		*endpointp = NULL;
-		*fd = 0;
+		if (fd)
+			*fd = 0;
 	}
 
 	CCI_EXIT;
@@ -404,7 +405,8 @@ static int ctp_e2e_connect(cci_endpoint_t * endpoint, const char *server_uri,
 {
 	int ret = 0;
 	uint32_t len = 0, total_len = 0, as = 0, subnet = 0;
-	char *base = NULL, *uri = (void*) server_uri, *local_uri = NULL;
+	const char *base = NULL, *uri = server_uri;
+	char *local_uri = NULL;
 	cci__ep_t *ep = NULL, *ep_real = NULL;
 	cci__conn_t *conn = NULL;
 	e2e_ep_t *eep = NULL;
@@ -470,14 +472,14 @@ static int ctp_e2e_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		int prefix_len = 0, base_len = 0, len = 0;
 
 		/* build local URI for non-routed connection */
-		ret = cci_e2e_uri_prefix_len(server_uri, &prefix_len);
+		ret = cci_e2e_uri_prefix_len(ep_real->uri, &prefix_len);
 		if (ret)
 			goto out;
 
 		base_len = strlen(base);
 		len = prefix_len + base_len;
 
-		local_uri = calloc(1, len + 1);
+		local_uri = calloc(1, len + 1); /* len + \0 */
 		if (!local_uri) {
 			ret = CCI_ENOMEM;
 			goto out;

@@ -459,8 +459,8 @@ cci_e2e_parse_send_nack(cci_e2e_hdr_t *hdr, uint8_t *status, uint16_t *seq)
 	return;
 }
 
-static int
-cci_e2e_parse_uri(const char *uri, uint32_t *asp, uint32_t *snp, char **base)
+static inline int
+cci_e2e_parse_uri(const char *uri, uint32_t *asp, uint32_t *snp, const char **base)
 {
 	int ret = 0;
 	uint32_t as = 0, subnet = 0;
@@ -501,7 +501,7 @@ cci_e2e_parse_uri(const char *uri, uint32_t *asp, uint32_t *snp, char **base)
 	return ret;
 }
 
-static int
+static inline int
 cci_e2e_uri_prefix_len(const char *uri, int *len)
 {
 	int ret = 0;
