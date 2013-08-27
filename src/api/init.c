@@ -29,6 +29,12 @@
 #include <linux/sockios.h>
 #else
 #define __linux__ 0
+#if (__APPLE__&__MACH__)
+#include <sys/ioctl.h>
+#else
+#define __APPLE__ 0
+#define __MACH__ 0
+#endif
 #endif
 
 #include "cci.h"
@@ -222,12 +228,14 @@ void cci__add_dev(cci__dev_t * dev)
 int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 {
 	struct cci_device * device = &dev->device;
+#if __linux__ || (__APPLE__ & __MACH__)
 #if __linux__
 	struct ethtool_drvinfo edi;
 	struct ethtool_cmd ecmd;
+#endif /* __linux__ */
 	struct ifreq ifr;
 	int sockfd;
-#endif /* __linux__ */
+#endif /* __linux__ || (__APPLE_ & __MACH__) */
 
 	/* mark the MSS as unknown in case we fail later */
 	device->max_send_size = -1;
@@ -239,7 +247,7 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 	      "querying interface %s info with socket ioctls and ethtool...",
 	      ifaddr->ifa_name);
 
-#if __linux__
+#if __linux__ || (__APPLE__ & __MACH__)
 	/* identify the target interface for following socket ioctls */
 	memset(&ifr, 0, sizeof(ifr));
 	strncpy(ifr.ifr_name, ifaddr->ifa_name, IFNAMSIZ);
@@ -257,6 +265,7 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 	CCI_VALGRIND_MEMORY_MAKE_READABLE(&ifr.ifr_mtu, sizeof(ifr.ifr_mtu));
 	device->max_send_size = ifr.ifr_mtu;
 
+#if __linux__
 	/* try to get the link rate now, kernel allows non-root since 2.6.37 only */
 	ecmd.cmd = ETHTOOL_GSET;
 	ifr.ifr_data = (void *)&ecmd;
@@ -280,7 +289,7 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 		speed = ethtool_cmd_speed(&ecmd);
 #else
 		speed = ecmd.speed;
-#endif
+#endif /* HAVE_DECL_ETHTOOL_CMD_SPEED */
 		device->rate = (speed == (unsigned)-1) ? 0 : speed * 1000000ULL;
 	}
 
@@ -302,13 +311,14 @@ int cci__get_dev_ifaddrs_info(cci__dev_t *dev, struct ifaddrs *ifaddr)
 		       &device->pci.domain, &device->pci.bus, &device->pci.dev,
 		       &device->pci.func);
 	}
+#endif /* __linux __ */
 
 	close(sockfd);
-#endif /* __linux__ */
+#endif /* __linux__ || (__APPLE__ & __MACH__) */
 
 	return 0;
 
-#if __linux__
+#if __linux__ || (__APPLE__ & __MACH__)
 out_with_sockfd:
 	close(sockfd);
 out:
