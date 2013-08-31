@@ -12,11 +12,17 @@ check_PROGRAMS = \
         init	\
 	server	\
 	client	\
-	pingpong	\
+	pingpong \
 	stream	\
-	register	\
-    rma_pipeline \
-	opt	\
+	register \
+	rma_pipeline \
+	rma_verify \
+	opt \
+	connect_reject \
+	msg_verify \
+	rma_register \
 	loopback
+
+rma_verify_SOURCES = rma_verify.c crc32.c
 
 TESTS =

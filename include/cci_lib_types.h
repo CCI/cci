@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2010-2011 UT-Battelle, LLC.  All rights reserved.
- * Copyright (c) 2010-2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright (c) 2010-2013 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2010-2013 Oak Ridge National Labs.  All rights reserved.
  * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
@@ -18,6 +18,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <stddef.h>
+#include <unistd.h>
 #include "bsd/queue.h"
 #include "plugins/ctp/ctp.h"
 
@@ -236,10 +237,22 @@ extern int cci__debug;
 #define debug(lvl,fmt,args...)                          \
   do {                                                  \
       if (lvl & cci__debug)                         \
-          fprintf(stderr, "cci: " fmt "\n", ##args);    \
+          fprintf(stderr, "cci:%d:" fmt "\n", \
+                  getpid(), ##args);    \
   } while (0)
 #else /* ! CCI_DEBUG */
 #define debug(lvl,fmt,...) do { } while (0)
+#endif /* CCI_DEBUG */
+
+#if CCI_DEBUG
+#define debug_ep(ep,lvl,fmt,args...)                          \
+  do {                                                  \
+      if (lvl & cci__debug)                         \
+          fprintf(stderr, "cci:%d:ep %p:" fmt "\n", \
+                  getpid(), (void*)ep,##args);    \
+  } while (0)
+#else /* ! CCI_DEBUG */
+#define debug_ep(ep,lvl,fmt,...) do { } while (0)
 #endif /* CCI_DEBUG */
 
 #define CCI_ENTER                                                               \

@@ -102,18 +102,27 @@ int ccieth_rma_register(struct ccieth_endpoint *ep,
 	nr_pages = (rr->buffer_len + first_page_offset + PAGE_SIZE-1)/PAGE_SIZE;
 
 	/* get a rma handle id (only reserve it */
+#ifdef CCIETH_HAVE_IDR_PRELOAD
+	idr_preload(GFP_KERNEL);
+	spin_lock(&ep->rma_handle_idr_lock);
+        err = idr_alloc(&ep->rma_handle_idr, NULL, 0, 0, GFP_NOWAIT);
+	spin_unlock(&ep->rma_handle_idr_lock);
+        idr_preload_end();
+        if (err < 0)
+                goto out_with_handle;
+        id = err;
+#else /* !CCIETH_HAVE_IDR_PRELOAD */
 retry:
 	spin_lock(&ep->rma_handle_idr_lock);
 	err = idr_get_new(&ep->rma_handle_idr, NULL, &id);
 	spin_unlock(&ep->rma_handle_idr_lock);
-	if (err < 0) {
-		if (err == -EAGAIN) {
-			if (idr_pre_get(&ep->rma_handle_idr, GFP_KERNEL) > 0)
-				goto retry;
-			err = -ENOMEM;
-		}
+	if (err == -EAGAIN) {
+		if (idr_pre_get(&ep->rma_handle_idr, GFP_KERNEL) > 0)
+			goto retry;
+		err = -ENOMEM;
 		goto out_with_handle;
 	}
+#endif /* !CCIETH_HAVE_IDR_PRELOAD */
 
 	if (nr_pages <= CCIETH_RMA_PAGES_VMALLOC_THRESHOLD) {
 		pages = kmalloc(nr_pages * sizeof(*pages), GFP_KERNEL);

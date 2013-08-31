@@ -141,7 +141,7 @@ cci_plugin_ctp_t cci_ctp_gni_plugin = {
 
 static uint64_t gni_device_rate(void)
 {
-	uint64_t rate = 20000000000ULL;	/* 2.5 Gbps */
+	uint64_t rate = 52000000000ULL;
 
 	return rate;
 }
@@ -797,12 +797,16 @@ gni_create_cdm_cqs(cci__dev_t *dev, cci__ep_t *ep, uint32_t port)
 			0, &gep->cdm);
 	if (grc) {
 		ret = gni_to_cci_status(grc);
+		debug(CCI_DB_EP, "%s: GNI_CdmCreate() failed with %u (%u)",
+			__func__, grc, ret);
 		goto out;
 	}
 
 	grc = GNI_CdmAttach(gep->cdm, gdev->device_id, &unused, &gep->nic);
 	if (grc) {
 		ret = gni_to_cci_status(grc);
+		debug(CCI_DB_EP, "%s: GNI_CdmAttach() failed with %u (%u)",
+			__func__, grc, ret);
 		goto out;
 	}
 
@@ -814,6 +818,8 @@ gni_create_cdm_cqs(cci__dev_t *dev, cci__ep_t *ep, uint32_t port)
 			NULL, NULL, &gep->tx_cq);
 	if (grc) {
 		ret = gni_to_cci_status(grc);
+		debug(CCI_DB_EP, "%s: GNI_CqCreate(tx) failed with %u (%u)",
+			__func__, grc, ret);
 		goto out;
 	}
 	debug(CCI_DB_INFO, "%s: created tx cq %p", __func__, gep->tx_cq);
@@ -822,6 +828,8 @@ gni_create_cdm_cqs(cci__dev_t *dev, cci__ep_t *ep, uint32_t port)
 			NULL, NULL, &gep->rx_cq);
 	if (grc) {
 		ret = gni_to_cci_status(grc);
+		debug(CCI_DB_EP, "%s: GNI_CqCreate(rx) failed with %u (%u)",
+			__func__, grc, ret);
 		goto out;
 	}
 	debug(CCI_DB_INFO, "%s: created rx cq %p", __func__, gep->rx_cq);

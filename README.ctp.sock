@@ -31,7 +31,9 @@
     mtu = 9000
 
   The sock transport will then set the endpoint->max_send_size to this size
-  less what it needs for headers.
+  less what it needs for headers. If the OS supports MTU discovery (i.e.
+  recent Linux), then CCI will use the actual MTU (less headers) and ignore
+  this keyword
 
     bufsize = 20971520
 
@@ -63,8 +65,14 @@
 
 Not implemented:
 
-  Fence
+  RMA Fence
   RO connections may not be ordered (i.e. RU)
+
+Platform specific limitations:
+  * MacOS: when using the loopback interface, it is not possible to use the
+           entire MTU size to send data; much less should be sent. To use the
+           loopback interface, please set the appropriate MTU in the
+           configuration file (e.g., mtu = 9000).
 
 
 = CCI Performance Tuning =======================================================

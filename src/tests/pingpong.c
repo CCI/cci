@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2011-2012 UT-Battelle, LLC.  All rights reserved.
- * Copyright (c) 2011-2012 Oak Ridge National Labs.  All rights reserved.
+ * Copyright (c) 2011-2013 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2011-2013 Oak Ridge National Labs.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -396,7 +396,7 @@ static void do_server(void)
 					check_return(endpoint, "cci_accept", ret, 1);
 				} else {
 					ret = cci_reject(event);
-					check_return(endpoint, "cci_accept", ret, 1);
+					check_return(endpoint, "cci_reject", ret, 1);
 				}
 				break;
 			case CCI_EVENT_ACCEPT:

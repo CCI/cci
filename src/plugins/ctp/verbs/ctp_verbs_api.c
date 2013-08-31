@@ -2015,8 +2015,43 @@ verbs_insert_conn(cci__conn_t *conn)
 	return;
 }
 
+static inline void
+verbs_queue_evt(cci__ep_t *ep, cci__evt_t *evt);
+
 static int
 verbs_handle_conn_request(cci__ep_t * ep, struct rdma_cm_event *cm_evt);
+
+static int
+verbs_handle_conn_rejected(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
+{
+	int ret = CCI_SUCCESS;
+	cci__conn_t *conn = NULL;
+	cci_connection_t *connection = NULL;
+	verbs_tx_t *tx = NULL;
+	void *context = NULL;
+
+	conn = cm_evt->id->context;
+	assert(conn);
+
+	connection = &conn->connection;
+	context = connection->context;
+
+	tx = verbs_get_tx(ep);
+	if (!tx) {
+		/* TODO alloc a tx */
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	tx->evt.event.type = CCI_EVENT_CONNECT;
+	tx->evt.event.connect.status = ECONNRESET;
+	tx->evt.event.connect.context = context;
+	tx->evt.event.connect.connection = NULL;
+	tx->evt.conn = conn;
+	verbs_queue_evt(ep, &tx->evt);
+
+out:
+	return ret;
+}
 
 static int
 ctp_verbs_connect(cci_endpoint_t * endpoint, const char *server_uri,
@@ -2912,6 +2947,12 @@ static int verbs_get_cm_event(cci__ep_t * ep)
 			debug(CCI_DB_CONN, "%s: verbs_handle_disconnected()"
 			      "returned %s", __func__, strerror(ret));
 		break;
+	case RDMA_CM_EVENT_REJECTED:
+		ret = verbs_handle_conn_rejected(ep, cm_evt);
+		if (ret)
+			debug(CCI_DB_CONN, "%s: verbs_handle_conn_rejected()"
+			      "returned %s", __func__, strerror(ret));
+		break;
 	default:
 		debug(CCI_DB_CONN, "ignoring %s event",
 		      rdma_event_str(cm_evt->event));
@@ -3516,7 +3557,7 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 		struct ibv_cq *cq;
 		void *cq_ctx;
 
-		debug(CCI_DB_MSG, "%s: checking for CQ event", __func__);
+		debug(CCI_DB_EP, "%s: checking for CQ event", __func__);
 		ret = ibv_get_cq_event(vep->ib_channel, &cq, &cq_ctx);
 		if (!ret) {
 			vep->acks++;
@@ -3538,15 +3579,20 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 	memset(wc, 0, sizeof(wc));	/* silence valgrind */
 	ret = ibv_poll_cq(vep->cq, VERBS_WC_CNT, wc);
 	if (ret == -1) {
+		vep->check_cq = 0;
 		ret = errno;
 		goto out;
 	}
 
 	found = ret;
-	if (found == 0)
+	if (found == 0) {
 		ret = CCI_EAGAIN;
+		vep->check_cq = 0;
+		goto out;
+	}
 
-	debug(CCI_DB_EP, "%s: poll_cq() found %d events", __func__, found);
+	debug(CCI_DB_EP, "%s: poll_cq() found %d events (check_cq = %u)", __func__, found,
+			vep->check_cq);
 	success++;
 
 	if (vep->fd)
@@ -3806,6 +3852,12 @@ static int ctp_verbs_return_event(cci_event_t * event)
 				debug(CCI_DB_CONN, "%s [%s]: destroying conn %p qp_num %u",
 					__func__, ep->uri, (void*)conn, vconn->qp_num);
 				ctp_verbs_disconnect(&conn->connection);
+				if (event->connect.status == ECONNRESET) {
+					verbs_tx_t *tx = container_of(evt, verbs_tx_t, evt);
+
+					verbs_return_tx(tx);
+					break;
+				}
 			}
 
 			ret = verbs_post_rx(ep, rx);
@@ -4012,6 +4064,7 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 	if (flags & CCI_FLAG_BLOCKING && is_reliable) {
 		cci__evt_t *e, *evt = NULL;
 		do {
+			verbs_progress_ep(ep);
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_FOREACH(e, &ep->evts, entry) {
 				if (&tx->evt == e) {
@@ -4188,8 +4241,11 @@ static int verbs_post_rma(verbs_rma_op_t * rma_op)
 	wr.wr.rdma.rkey = (uint32_t) verbs_ntohll(rma_op->remote_handle->stuff[1]);
 
 	ret = ibv_post_send(vconn->id->qp, &wr, &bad_wr);
-	if (ret == -1)
+	if (ret == -1) {
 		ret = errno;
+		debug(CCI_DB_MSG, "%s: ibv_post_send() returned %s", __func__,
+			strerror(ret));
+	}
 
 	CCI_EXIT;
 	return ret;

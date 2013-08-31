@@ -160,9 +160,19 @@ ccieth_create_endpoint(struct file *file, struct ccieth_ioctl_create_endpoint *a
 	idr_init(&ep->rma_handle_idr);
 	spin_lock_init(&ep->rma_handle_idr_lock);
 
-retry:
 	/* reserve an index without exposing the endpoint there yet
 	 * because it's id isn't ready yet */
+#ifdef CCIETH_HAVE_IDR_PRELOAD
+	idr_preload(GFP_KERNEL);
+	spin_lock(&ccieth_ep_idr_lock);
+	err = idr_alloc(&ccieth_ep_idr, NULL, 0, 0, GFP_NOWAIT);
+	spin_unlock(&ccieth_ep_idr_lock);
+	idr_preload_end();
+	if (err < 0)
+		goto out_with_events;
+	id = err;
+#else /* !CCIETH_HAVE_IDR_PRELOAD */
+retry:
 	spin_lock(&ccieth_ep_idr_lock);
 	err = idr_get_new(&ccieth_ep_idr, NULL, &id);
 	spin_unlock(&ccieth_ep_idr_lock);
@@ -172,6 +182,7 @@ retry:
 		err = -ENOMEM;
 		goto out_with_events;
 	}
+#endif /* !CCIETH_HAVE_IDR_PRELOAD */
 	ep->id = arg->id = id;
 
 	/* link the endpoint now that everything is ready */
