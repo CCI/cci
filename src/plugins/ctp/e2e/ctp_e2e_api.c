@@ -568,6 +568,7 @@ handle_native_connect(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **ne
 
 	if (native_event->connect.status == CCI_SUCCESS) {
 		econn->real = native_event->connect.connection;
+		ret = CCI_EAGAIN;
 	} else {
 		cci__evt_t *tmp = calloc(1, sizeof(*tmp));
 		if (!tmp) {
@@ -595,10 +596,96 @@ handle_native_connect(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **ne
 	return ret;
 }
 
+/* We have received an e2e connect request.
+ * Validate the e2e header.
+ * Alloc e2e connection.
+ * Accept the native connection.
+ * Generate the e2e connect request event.
+ */
+static int
+handle_native_connect_request(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
+{
+	int ret = 0;
+	char dst[256], src[256];
+	uint32_t e2e_len = 0, len = 0;
+	void *ptr = NULL;
+	cci_e2e_hdr_t *hdr = (void *)native_event->request.data_ptr;
+	cci_e2e_connect_t *connect = NULL;
+	cci__conn_t *conn = NULL;
+	e2e_ep_t *eep = ep->priv;
+	e2e_conn_t *econn = NULL;
+	cci__evt_t *evt = NULL;
+
+	e2e_len = sizeof(hdr->connect_size) + sizeof(connect->size);
+
+	if (native_event->request.data_len < e2e_len) {
+		debug(CCI_DB_CONN, "%s: invalid connection request. Length %u is too small",
+			__func__, native_event->request.data_len);
+		ret = CCI_EINVAL;
+		goto out;
+	}
+
+	ret = cci_e2e_parse_connect(hdr, dst, src, &ptr, &len);
+	if (ret) {
+		debug(CCI_DB_CONN, "%s: no memory for payload", __func__);
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	conn = calloc(1, sizeof(*conn));
+	if (!conn) {
+		debug(CCI_DB_CONN, "%s: no memory for new conn", __func__);
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	conn->priv = calloc(1, sizeof(*econn));
+	if (!conn->priv) {
+		debug(CCI_DB_CONN, "%s: no memory for new econn", __func__);
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	econn = conn->priv;
+	econn->conn = conn;
+	econn->state = E2E_CONN_PASSIVE;
+
+	evt = calloc(1, sizeof(*evt));
+	if (!evt) {
+		debug(CCI_DB_CONN, "%s: no memory for new event", __func__);
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	evt->event.request.type = CCI_EVENT_CONNECT_REQUEST;
+	evt->event.request.data_len = len;
+	evt->event.request.data_ptr = ptr;
+	evt->event.request.attribute = native_event->request.attribute;
+	evt->ep = ep;
+	evt->conn = conn;
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_TAIL(&eep->passive, econn, entry);
+	pthread_mutex_unlock(&ep->lock);
+
+	*new = &(evt->event);
+	ret = CCI_SUCCESS;
+
+    out:
+	if (ret) {
+		free(evt);
+		if (conn)
+			free(conn->priv);
+		free(conn);
+		free(ptr);
+		*new = NULL;
+	}
+	return ret;
+}
+
 static int ctp_e2e_get_event(cci_endpoint_t * endpoint,
 			      cci_event_t ** event)
 {
-	int ret = 0;
+	int ret = CCI_EAGAIN;
 	cci__ep_t *ep = NULL;
 	e2e_ep_t *eep = NULL;
 	cci_event_t *native_event = NULL;
@@ -616,19 +703,31 @@ static int ctp_e2e_get_event(cci_endpoint_t * endpoint,
 	ret = cci_get_event(eep->real, &native_event);
 	if (ret == CCI_SUCCESS) {
 
+		debug(CCI_DB_EP, "%s: found %s", __func__,
+				cci_event_type_str(native_event->type));
+
 		switch (native_event->type) {
 		case CCI_EVENT_CONNECT:
 			ret = handle_native_connect(ep, native_event, event);
 			break;
 		case CCI_EVENT_CONNECT_REQUEST:
+			ret = handle_native_connect_request(ep, native_event, event);
 			break;
 		case CCI_EVENT_ACCEPT:
+			debug(CCI_DB_EP, "%s: ignoring %s", __func__,
+				cci_event_type_str(native_event->type));
 			break;
 		case CCI_EVENT_SEND:
+			debug(CCI_DB_EP, "%s: ignoring %s", __func__,
+				cci_event_type_str(native_event->type));
 			break;
 		case CCI_EVENT_RECV:
+			debug(CCI_DB_EP, "%s: ignoring %s", __func__,
+				cci_event_type_str(native_event->type));
 			break;
 		default:
+			debug(CCI_DB_EP, "%s: ignoring %s", __func__,
+				cci_event_type_str(native_event->type));
 			break;
 		}
 		cci_return_event(native_event);
