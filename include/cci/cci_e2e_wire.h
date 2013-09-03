@@ -266,11 +266,12 @@ cci_e2e_pack_connect(cci_e2e_hdr_t *hdr, const char *dst, const char *src,
 	connect->net[1] = htonl(connect->net[1]);
 }
 
-static inline void
-cci_e2e_parse_connect(cci_e2e_hdr_t *hdr, char *dst, char *src, void *ptr, uint32_t *len)
+static inline int
+cci_e2e_parse_connect(cci_e2e_hdr_t *hdr, char *dst, char *src, void **ptr, uint32_t *len)
 {
+	int ret = 0;
 	cci_e2e_connect_t *connect = (cci_e2e_connect_t *)&(hdr->connect.data);
-	void *p = connect->request.data;
+	void *p = connect->request.data, *q = NULL;
 
 	/* hdr already in host order */
 	connect->net[0] = htonl(connect->net[0]);
@@ -281,11 +282,18 @@ cci_e2e_parse_connect(cci_e2e_hdr_t *hdr, char *dst, char *src, void *ptr, uint3
 	memcpy(src, p, connect->request.src_len);
 	p = (void*) ((uintptr_t) p + (uintptr_t) connect->request.src_len);
 	if (connect->request.payload_len) {
+		q = calloc(1, connect->request.payload_len);
+		if (!q)
+			return CCI_ENOMEM;
 		*len = connect->request.payload_len;
-		memcpy(ptr, p, *len);
+		memcpy(q, p, *len);
+		*ptr = q;
+	} else {
+		*len = 0;
+		*ptr = NULL;
 	}
 
-	return;
+	return ret;
 }
 
 static inline void
