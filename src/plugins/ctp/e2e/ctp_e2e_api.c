@@ -310,6 +310,9 @@ static int ctp_e2e_create_endpoint(cci_device_t * device,
 	eep = ep_e2e->priv;
 
 	eep->real = endpoint_real;
+	TAILQ_INIT(&eep->idle_txs);
+	TAILQ_INIT(&eep->idle_rxs);
+	TAILQ_INIT(&eep->idle_rma_frags);
 	TAILQ_INIT(&eep->conns);
 	TAILQ_INIT(&eep->active);
 	TAILQ_INIT(&eep->passive);
@@ -317,6 +320,48 @@ static int ctp_e2e_create_endpoint(cci_device_t * device,
 	*((char ***)&eep->routers) = routers;
 	eep->as = as;
 	eep->subnet = subnet;
+
+	eep->txs = calloc(E2E_TX_CNT, sizeof(*eep->txs));
+	if (!eep->txs) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	for (i = 0; i < E2E_TX_CNT; i++) {
+		e2e_tx_t *tx = &(eep->txs[i]);
+
+		tx->type = E2E_CTX_TX;
+		tx->evt.ep = ep_e2e;
+		TAILQ_INSERT_TAIL(&eep->idle_txs, &(tx->evt), entry);
+	}
+	eep->tx_cnt = E2E_TX_CNT;
+
+	eep->rxs = calloc(E2E_RX_CNT, sizeof(*eep->rxs));
+	if (!eep->rxs) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	for (i = 0; i < E2E_RX_CNT; i++) {
+		e2e_rx_t *rx = &(eep->rxs[i]);
+
+		rx->type = E2E_CTX_RX;
+		rx->evt.ep = ep_e2e;
+		TAILQ_INSERT_TAIL(&eep->idle_rxs, &(rx->evt), entry);
+	}
+	eep->rx_cnt = E2E_RX_CNT;
+
+	eep->rma_frags = calloc(E2E_RMA_CNT, sizeof(*eep->rma_frags));
+	if (!eep->rma_frags) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	for (i = 0; i < E2E_RMA_CNT; i++) {
+		e2e_rma_frag_t *rma_frag = &(eep->rma_frags[i]);
+
+		rma_frag->type = E2E_CTX_RMA;
+		rma_frag->evt.ep = ep_e2e;
+		TAILQ_INSERT_TAIL(&eep->idle_rma_frags, &(rma_frag->evt), entry);
+	}
+	eep->rma_frag_cnt = E2E_RMA_CNT;
 
 	pthread_mutex_lock(&dev_e2e->lock);
 	TAILQ_INSERT_TAIL(&dev_e2e->eps, ep_e2e, entry);
@@ -327,8 +372,13 @@ static int ctp_e2e_create_endpoint(cci_device_t * device,
     out:
 	if (ret) {
 		if (ep_e2e) {
-			free(ep_e2e->uri);
+			if (eep) {
+				free(eep->rma_frags);
+				free(eep->rxs);
+				free(eep->txs);
+			}
 			free(ep_e2e->priv);
+			free(ep_e2e->uri);
 		}
 		free(ep_e2e);
 		if (routers) {
@@ -374,6 +424,13 @@ static int ctp_e2e_destroy_endpoint(cci_endpoint_t * endpoint)
 		free(*router);
 	free((void **)eep->routers);
 
+	if (ep->priv) {
+		e2e_ep_t *eep = ep->priv;
+
+		free(eep->rma_frags);
+		free(eep->rxs);
+		free(eep->txs);
+	}
 	free(ep->priv);
 	free(ep->uri);
 	free(ep);
@@ -384,10 +441,24 @@ static int ctp_e2e_destroy_endpoint(cci_endpoint_t * endpoint)
 
 static int ctp_e2e_accept(cci_event_t *event, const void *context)
 {
+	int ret = 0;
+	cci__ep_t *ep = NULL;
+	cci__conn_t *conn = NULL;
+	cci__evt_t *evt = NULL;
+	e2e_ep_t *eep = NULL;
+	e2e_conn_t *econn = NULL;
+
 	CCI_ENTER;
 
+	evt = container_of(event, cci__evt_t, event);
+	ep = evt->ep;
+	eep = ep->priv;
+
+	conn = evt->conn;
+	econn = conn->priv;
+
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 static int ctp_e2e_reject(cci_event_t *event)

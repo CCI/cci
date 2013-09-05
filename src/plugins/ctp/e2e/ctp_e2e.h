@@ -50,10 +50,17 @@ BEGIN_C_DECLS
 
 /* NOTE: see cci_e2e_wire.h for headers and msg types */
 
+#define E2E_TX_CNT	(1024)
+#define E2E_RX_CNT	(1024)
+#define E2E_RMA_CNT	(E2E_TX_CNT)
+
 typedef struct e2e_globals e2e_globals_t;	/* globals state */
 typedef struct e2e_ep e2e_ep_t;			/* endpoint */
 typedef struct e2e_conn e2e_conn_t;		/* connection */
 typedef struct e2e_rma e2e_rma_t;		/* Pipelined RMA state */
+typedef struct e2e_tx e2e_tx_t;			/* Send context */
+typedef struct e2e_rx e2e_rx_t;			/* Receive context */
+typedef struct e2e_rma_frag e2e_rma_frag_t;	/* RMA fragment context */
 typedef union e2e_ctx e2e_ctx_t;		/* MSG/RMA context */
 
 struct e2e_globals {
@@ -65,13 +72,22 @@ struct e2e_globals {
 
 struct e2e_ep {
 	cci_endpoint_t *real;	/* The underlying transport's real endpoint */
+	TAILQ_HEAD(e_txs, cci__evt) idle_txs; /* Idle txs */
+	TAILQ_HEAD(e_rxs, cci__evt) idle_rxs; /* Idle rxs */
+	TAILQ_HEAD(e_rmas, cci__evt) idle_rma_frags; /* Idle rmas */
 	TAILQ_HEAD(e_conns, e2e_conn) conns; /* List of open connections */
 	TAILQ_HEAD(e_active, e2e_conn) active; /* List of conns waiting on CONNECT */
 	TAILQ_HEAD(e_passive, e2e_conn) passive; /* List of conns waiting on ACCEPT */
 	TAILQ_HEAD(e_closing, e2e_conn) closing; /* List of conns closing */
 	const char * const *routers;	/* NULL-terminated array of router URIs */
-	uint32_t as;			/* Our organization's AS ID */
-	uint32_t subnet;		/* Subnet ID for this endpoint */
+	uint32_t as;		/* Our organization's AS ID */
+	uint32_t subnet;	/* Subnet ID for this endpoint */
+	e2e_tx_t *txs;		/* Array of txs */
+	e2e_rx_t *rxs;		/* Array of rxs */
+	e2e_rma_frag_t *rma_frags; /* Array of rma fragments */
+	uint32_t tx_cnt;	/* Number of txs */
+	uint32_t rx_cnt;	/* Number of rxs */
+	uint32_t rma_frag_cnt;	/* Number of rma fragments */
 };
 
 typedef enum e2e_conn_state {
@@ -134,33 +150,37 @@ e2e_ctx_type_str(e2e_ctx_type_t type) {
 	return NULL;
 }
 
+
+struct e2e_rx {
+	e2e_ctx_type_t type;	/* E2E_CTX_RX */
+	cci__evt_t evt;		/* Associated event (including public event) */
+	cci_e2e_msg_type_t msg_type; /* E2E msg type */
+	uint16_t seq;		/* Sequence number for ack */
+};
+
+struct e2e_tx {
+	e2e_ctx_type_t type;	/* E2E_CTX_TX */
+	cci__evt_t evt;		/* Associated event (including public event) */
+	cci_e2e_msg_type_t msg_type; /* E2E msg type */
+	uint16_t seq;		/* Sequence number for ack */
+	e2e_rma_t *rma;		/* Owning RMA if completion msg */
+};
+
+struct e2e_rma_frag {
+	e2e_ctx_type_t type;	/* E2E_CTX_RMA */
+	cci__evt_t evt;		/* Associated event (including public event) */
+	uint64_t loffset;	/* Local offset of this fragment */
+	uint64_t roffset;	/* Remote offset of this fragment  */
+	uint64_t len;		/* Length of this fragment */
+	e2e_rma_t *rma;		/* Owning RMA operation */
+	uint32_t id;		/* Fragment ID */
+};
+
 union e2e_ctx {
 	e2e_ctx_type_t type;		/* ctx type - must be first in each struct */
-
-	struct e2e_rx {
-		e2e_ctx_type_t type;	/* E2E_CTX_RX */
-		cci__evt_t evt;		/* Associated event (including public event) */
-		cci_e2e_msg_type_t msg_type; /* E2E msg type */
-		uint16_t seq;		/* Sequence number for ack */
-	} rx;
-
-	struct e2e_tx {
-		e2e_ctx_type_t type;	/* E2E_CTX_TX */
-		cci__evt_t evt;		/* Associated event (including public event) */
-		cci_e2e_msg_type_t msg_type; /* E2E msg type */
-		uint16_t seq;		/* Sequence number for ack */
-		e2e_rma_t *rma;		/* Owning RMA if completion msg */
-	} tx;
-
-	struct e2e_rma_frag {
-		e2e_ctx_type_t type;	/* E2E_CTX_RMA */
-		cci__evt_t evt;		/* Associated event (including public event) */
-		uint64_t loffset;	/* Local offset of this fragment */
-		uint64_t roffset;	/* Remote offset of this fragment  */
-		uint64_t len;		/* Length of this fragment */
-		e2e_rma_t *rma;		/* Owning RMA operation */
-		uint32_t id;		/* Fragment ID */
-	} rma;
+	e2e_rx_t rx;
+	e2e_tx_t tx;
+	e2e_rma_frag_t rma_frag;
 };
 
 struct e2e_rma {
