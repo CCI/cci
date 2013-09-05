@@ -410,13 +410,20 @@ get_tx_locked(e2e_ep_t *eep)
 }
 
 static inline e2e_tx_t *
-get_tx(cci__ep_t *ep) {
+get_tx(cci__ep_t *ep, int allocate) {
 	e2e_ep_t *eep = ep->priv;
 	e2e_tx_t *tx = NULL;
 
 	pthread_mutex_lock(&ep->lock);
 	tx = get_tx_locked(eep);
 	pthread_mutex_unlock(&ep->lock);
+
+	if (!tx && allocate) {
+		do {
+			tx = calloc(1, sizeof(*tx));
+			tx->type = E2E_CTX_TX;
+		} while (!tx);
+	}
 
 	return tx;
 }
@@ -440,9 +447,13 @@ put_tx(e2e_tx_t *tx)
 	cci__ep_t *ep = tx->evt.ep;
 	e2e_ep_t *eep = ep->priv;
 
-	pthread_mutex_lock(&ep->lock);
-	put_tx_locked(eep, tx);
-	pthread_mutex_unlock(&ep->lock);
+	if (tx->evt.ep) {
+		pthread_mutex_lock(&ep->lock);
+		put_tx_locked(eep, tx);
+		pthread_mutex_unlock(&ep->lock);
+	} else {
+		free(tx);
+	}
 
 	return;
 }
@@ -542,6 +553,34 @@ static int ctp_e2e_destroy_endpoint(cci_endpoint_t * endpoint)
 	return ret;
 }
 
+static int
+send_e2e_conn_reply(cci__ep_t *ep, cci__conn_t *conn, uint8_t status)
+{
+	int ret = 0;
+	e2e_ep_t *eep = ep->priv;
+	e2e_conn_t *econn = conn->priv;
+	cci_e2e_hdr_t reply;
+	e2e_tx_t *tx = NULL;
+
+	tx = get_tx(ep, 1);
+	/* do not set tx->evt.ep - we will free this when it completes */
+	tx->evt.conn = conn;
+	tx->msg_type = CCI_E2E_MSG_CONN_REPLY;
+	tx->state = E2E_TX_PENDING;
+
+	cci_e2e_pack_connect_reply(&reply, status, econn->real->max_send_size);
+
+	ret = cci_send(econn->real, &reply, sizeof(reply.conn_reply), (void*)tx, 0);
+	if (ret)
+		debug(CCI_DB_CONN, "%s: send conn_reply returned %s",
+			__func__, cci_strerror(eep->real, ret));
+
+	if (ret)
+		put_tx(tx);
+
+	return ret;
+}
+
 static int ctp_e2e_accept(cci_event_t *event, const void *context)
 {
 	int ret = 0;
@@ -563,17 +602,11 @@ static int ctp_e2e_accept(cci_event_t *event, const void *context)
 	conn->connection.context = (void*) context;
 
 	if (econn->real) {
-		cci_e2e_hdr_t hdr;
-
 		/* we have the real connection, send the e2e connect reply */
+		assert(econn->state == E2E_CONN_PASSIVE2);
 
-		econn->state = E2E_CONN_PASSIVE2;
-
-		cci_e2e_pack_connect_reply(&hdr, 0, econn->real->max_send_size);
-		ret = cci_send(econn->real, &hdr, sizeof(hdr.conn_reply), NULL, 0);
+		ret = send_e2e_conn_reply(ep, conn, CCI_SUCCESS);
 		if (ret) {
-			debug(CCI_DB_CONN, "%s: send conn_reply returned %s", __func__,
-					cci_strerror(eep->real, ret));
 			assert(0);
 			/* TODO */
 		}
@@ -767,18 +800,18 @@ handle_native_connect(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **ne
 		econn->state = E2E_CONN_ACTIVE2;
 		ret = CCI_EAGAIN;
 	} else {
-		cci__evt_t *tmp = calloc(1, sizeof(*tmp));
-		if (!tmp) {
+		cci__evt_t *evt = calloc(1, sizeof(*evt));
+		if (!evt) {
 			/* FIXME */
 			return CCI_EAGAIN;
 		}
-		tmp->event.connect.type = CCI_EVENT_CONNECT;
-		tmp->event.connect.status = native_event->connect.status;
-		tmp->event.connect.context = conn->connection.context;
-		tmp->event.connect.connection = NULL;
-		tmp->ep = ep;
-		tmp->conn = NULL;
-		*new = &tmp->event;
+		evt->event.connect.type = CCI_EVENT_CONNECT;
+		evt->event.connect.status = native_event->connect.status;
+		evt->event.connect.context = conn->connection.context;
+		evt->event.connect.connection = NULL;
+		evt->ep = ep;
+		evt->conn = NULL;
+		*new = &evt->event;
 		ret = CCI_SUCCESS;
 
 		pthread_mutex_lock(&ep->lock);
@@ -855,7 +888,7 @@ handle_native_connect_request(cci__ep_t *ep, cci_event_t *native_event, cci_even
 
 	evt->event.request.type = CCI_EVENT_CONNECT_REQUEST;
 	evt->event.request.data_len = len;
-	evt->event.request.data_ptr = ptr;
+	evt->event.request.data_ptr = ptr; /* need to free this later */
 	evt->event.request.attribute = native_event->request.attribute;
 	evt->ep = ep;
 	evt->conn = conn;
@@ -885,7 +918,7 @@ handle_native_connect_request(cci__ep_t *ep, cci_event_t *native_event, cci_even
 	return ret;
 }
 
-/* We have received a native accept.
+/* We have received a native accept event.
  * If successful, store real connection.
  * If not, free connection, generate e2e accept event
  */
@@ -901,23 +934,26 @@ handle_native_accept(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new
 		econn->real = native_event->accept.connection;
 		if (econn->state & E2E_CONN_PASSIVE2) {
 			/* User has called accept(), send e2e conn reply */
-			/* TODO */
+			ret = send_e2e_conn_reply(ep, conn, CCI_SUCCESS);
+			if (ret) {
+				/* TODO */
+				assert(0);
+			}
 		}
 		econn->state = E2E_CONN_PASSIVE2;
 		ret = CCI_EAGAIN;
 	} else {
-		cci__evt_t *tmp = calloc(1, sizeof(*tmp));
-		if (!tmp) {
-			/* FIXME */
-			return CCI_EAGAIN;
-		}
-		tmp->event.accept.type = CCI_EVENT_CONNECT;
-		tmp->event.accept.status = native_event->accept.status;
-		tmp->event.accept.context = conn->connection.context;
-		tmp->event.accept.connection = NULL;
-		tmp->ep = ep;
-		tmp->conn = NULL;
-		*new = &tmp->event;
+		e2e_tx_t *tx = NULL;
+
+		tx = get_tx(ep, 1);
+		tx->msg_type = CCI_E2E_MSG_CONN_REPLY;
+		tx->state = E2E_TX_COMPLETED;
+		tx->evt.event.accept.type = CCI_EVENT_ACCEPT;
+		tx->evt.event.accept.status = CCI_ERR_DISCONNECTED;
+		tx->evt.event.accept.context = conn->connection.context;
+		tx->evt.event.accept.connection = NULL;
+		*new = &(tx->evt.event);
+
 		ret = CCI_SUCCESS;
 
 		pthread_mutex_lock(&ep->lock);
@@ -927,6 +963,81 @@ handle_native_accept(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new
 		free(conn->priv);
 		free((void*)conn->uri);
 		free(conn);
+	}
+
+	return ret;
+}
+
+/* We have received a native send event.
+ * If successful, store real connection.
+ * If not, free connection, generate e2e accept event
+ */
+static int
+handle_native_send(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
+{
+	int ret = 0;
+	e2e_tx_t *tx = native_event->send.context;
+	cci__conn_t *conn = tx->evt.conn;
+
+	switch (tx->msg_type) {
+	case CCI_E2E_MSG_CONN_REPLY:
+		if (native_event->send.status != CCI_SUCCESS) {
+			/* The conn reply failed.
+			 * Generate ACCEPT event with failed status.
+			 */
+			tx->evt.event.accept.type = CCI_EVENT_ACCEPT;
+			tx->evt.event.accept.status = CCI_ERR_DISCONNECTED;
+			tx->evt.event.accept.context = conn->connection.context;
+			tx->evt.event.accept.connection = NULL;
+			*new = &(tx->evt.event);
+		} else {
+			put_tx(tx);
+		}
+		break;
+	default:
+		debug(CCI_DB_MSG, "%s: ignoring %s send completion", __func__,
+			cci_e2e_msg_type_str(tx->msg_type));
+	}
+
+	return ret;
+}
+
+static int
+handle_e2e_conn_reply(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
+{
+	int ret = 0;
+
+	/* TODO */
+	/* Is accept or reject? */
+	/* Update connection->max_send_size */
+	/* Send conn_ack */
+	/* Set econn->state = CONNECTED */
+	/* Generate CONNECT event */
+
+	return ret;
+}
+
+static int
+handle_native_recv(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new, int *recycle)
+{
+	int ret = 0;
+	cci_e2e_hdr_t *hdr = (void *)native_event->recv.ptr;
+
+	if (native_event->recv.len < sizeof(hdr->generic)) {
+		debug(CCI_DB_MSG, "%s: recv'd runt with len %u",
+			__func__, native_event->recv.len);
+		return CCI_EAGAIN;
+	}
+
+	hdr->net = ntohl(hdr->net);
+
+	switch (hdr->generic.type) {
+	case CCI_E2E_MSG_CONN_REPLY:
+		ret = handle_e2e_conn_reply(ep, native_event, new);
+		break;
+	default:
+		debug(CCI_DB_MSG, "%s: ignoring %s recv completion", __func__,
+			cci_e2e_msg_type_str(hdr->generic.type));
 	}
 
 	return ret;
@@ -952,6 +1063,7 @@ static int ctp_e2e_get_event(cci_endpoint_t * endpoint,
 
 	ret = cci_get_event(eep->real, &native_event);
 	if (ret == CCI_SUCCESS) {
+		int recycle = 1;
 
 		debug(CCI_DB_EP, "%s: found %s", __func__,
 				cci_event_type_str(native_event->type));
@@ -967,19 +1079,22 @@ static int ctp_e2e_get_event(cci_endpoint_t * endpoint,
 			ret = handle_native_accept(ep, native_event, event);
 			break;
 		case CCI_EVENT_SEND:
-			debug(CCI_DB_EP, "%s: ignoring %s", __func__,
-				cci_event_type_str(native_event->type));
+			ret = handle_native_send(ep, native_event, event);
 			break;
 		case CCI_EVENT_RECV:
-			debug(CCI_DB_EP, "%s: ignoring %s", __func__,
-				cci_event_type_str(native_event->type));
+			ret = handle_native_recv(ep, native_event, event, &recycle);
 			break;
 		default:
 			debug(CCI_DB_EP, "%s: ignoring %s", __func__,
 				cci_event_type_str(native_event->type));
 			break;
 		}
-		cci_return_event(native_event);
+		if (recycle) {
+			ret = cci_return_event(native_event);
+			if (ret)
+				debug(CCI_DB_EP, "%s: native return_event failed with %s",
+					__func__, cci_strerror(eep->real, ret));
+		}
 	}
 
 	CCI_EXIT;
@@ -998,20 +1113,33 @@ static int ctp_e2e_return_event(cci_event_t * event)
 		if (event->connect.status != CCI_SUCCESS) {
 			cci__evt_t *evt = container_of(event, cci__evt_t, event);
 
-			/* This was alloced in get_event().
+			/* This was alloced in handle_native_connect().
 			 * Free it now */
 			free(evt);
 		}
 		break;
 	}
+	case CCI_EVENT_CONNECT_REQUEST:
+	{
+		cci__evt_t *evt = container_of(event, cci__evt_t, event);
+		cci__conn_t *conn = evt->conn;
+		e2e_conn_t *econn = conn->priv;
+
+		if (!(econn->state & E2E_CONN_PASSIVE2))
+			ret = CCI_EINVAL;
+
+		/* This was alloced in handle_native_connect_request().
+		 * Free it now */
+		free((void*)evt->event.request.data_ptr);
+		free(evt);
+		break;
+	}
 	case CCI_EVENT_ACCEPT:
 	{
-		if (event->connect.status != CCI_SUCCESS) {
+		if (event->accept.status != CCI_SUCCESS) {
 			cci__evt_t *evt = container_of(event, cci__evt_t, event);
-
-			/* This was alloced in get_event().
-			 * Free it now */
-			free(evt);
+			e2e_tx_t *tx = container_of(evt, e2e_tx_t, evt);
+			put_tx(tx);
 		}
 		break;
 	}

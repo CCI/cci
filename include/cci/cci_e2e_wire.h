@@ -311,7 +311,7 @@ cci_e2e_pack_connect_reply(cci_e2e_hdr_t *hdr, uint8_t status, uint16_t mss)
 static inline void
 cci_e2e_parse_connect_reply(cci_e2e_hdr_t *hdr, uint8_t *status, uint16_t *mss)
 {
-	/* already in host order */
+	/* hdr already in host order */
 	*status = hdr->conn_reply.status;
 	*mss = hdr->conn_reply.mss;
 	return;
@@ -332,7 +332,7 @@ cci_e2e_pack_connect_ack(cci_e2e_hdr_t *hdr, uint8_t status, uint16_t mss)
 static inline void
 cci_e2e_parse_connect_ack(cci_e2e_hdr_t *hdr, uint8_t *status, uint16_t *mss)
 {
-	/* already in host order */
+	/* hdr already in host order */
 	*status = hdr->conn_ack.status;
 	*mss = hdr->conn_ack.mss;
 	return;
@@ -364,7 +364,7 @@ cci_e2e_pack_send(cci_e2e_hdr_t *hdr, uint16_t seq)
 static inline void
 cci_e2e_parse_send(cci_e2e_hdr_t *hdr, uint16_t *seq)
 {
-	/* already in host order */
+	/* hdr already in host order */
 	*seq = hdr->send.seq;
 	return;
 }
@@ -383,7 +383,7 @@ cci_e2e_pack_send_ack(cci_e2e_hdr_t *hdr, uint16_t seq)
 static inline void
 cci_e2e_parse_send_ack(cci_e2e_hdr_t *hdr, uint16_t *seq)
 {
-	/* already in host order */
+	/* hdr already in host order */
 	*seq = hdr->send_ack.seq;
 	return;
 }
@@ -402,7 +402,7 @@ cci_e2e_pack_send_ack_many(cci_e2e_hdr_t *hdr, uint16_t seq)
 static inline void
 cci_e2e_parse_send_ack_many(cci_e2e_hdr_t *hdr, uint16_t *seq)
 {
-	/* already in host order */
+	/* hdr already in host order */
 	*seq = hdr->send_ack_many.seq;
 	return;
 }
@@ -431,7 +431,7 @@ cc1_e2e_pack_send_sack_pair(cci_e2e_hdr_t *hdr, uint8_t index, uint16_t start, u
 static inline void
 cci_e2e_parse_send_sack(cci_e2e_hdr_t *hdr, uint8_t *count)
 {
-	/* already in host order */
+	/* hdr already in host order */
 	*count = hdr->send_sack.count;
 	return;
 }
@@ -461,7 +461,7 @@ cci_e2e_pack_send_nack(cci_e2e_hdr_t *hdr, uint8_t status, uint16_t seq)
 static inline void
 cci_e2e_parse_send_nack(cci_e2e_hdr_t *hdr, uint8_t *status, uint16_t *seq)
 {
-	/* already in host order */
+	/* hdr already in host order */
 	*status = hdr->send_nack.status;
 	*seq = hdr->send_nack.seq;
 	return;
