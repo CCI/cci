@@ -91,12 +91,14 @@ struct e2e_ep {
 };
 
 typedef enum e2e_conn_state {
-	E2E_CONN_CLOSED = -2,
-	E2E_CONN_CLOSING = -1,
-	E2E_CONN_INIT = 0,
-	E2E_CONN_ACTIVE,	/* waiting on CCI_EVENT_CONNECT */
-	E2E_CONN_PASSIVE,	/* waiting on CCI_EVENT_ACCEPT */
-	E2E_CONN_CONNECTED
+	E2E_CONN_INIT		= 0,
+	E2E_CONN_ACTIVE1	= (1 << 0),	/* waiting on native CCI_EVENT_CONNECT */
+	E2E_CONN_ACTIVE2	= (1 << 1),	/* waiting on e2e CCI_EVENT_CONNECT */
+	E2E_CONN_PASSIVE1	= (1 << 2),	/* waiting on native CCI_EVENT_ACCEPT */
+	E2E_CONN_PASSIVE2	= (1 << 3),	/* waiting on e2e CCI_EVENT_ACCEPT */
+	E2E_CONN_CONNECTED	= (1 << 4),
+	E2E_CONN_CLOSED		= (1 << 5),
+	E2E_CONN_CLOSING	= (1 << 6)
 } e2e_conn_state_t;
 
 static inline char *
@@ -111,10 +113,14 @@ e2e_conn_state_str(e2e_conn_state_t state)
 		return "E2E_CONN_CLOSING";
 	case E2E_CONN_INIT:
 		return "E2E_CONN_INIT";
-	case E2E_CONN_ACTIVE:
-		return "E2E_CONN_ACTIVE";
-	case E2E_CONN_PASSIVE:
-		return "E2E_CONN_PASSIVE";
+	case E2E_CONN_ACTIVE1:
+		return "E2E_CONN_ACTIVE1";
+	case E2E_CONN_ACTIVE2:
+		return "E2E_CONN_ACTIVE2";
+	case E2E_CONN_PASSIVE1:
+		return "E2E_CONN_PASSIVE1";
+	case E2E_CONN_PASSIVE2:
+		return "E2E_CONN_PASSIVE2";
 	}
 	/* silence picky compiler */
 	return NULL;
@@ -150,7 +156,6 @@ e2e_ctx_type_str(e2e_ctx_type_t type) {
 	return NULL;
 }
 
-
 struct e2e_rx {
 	e2e_ctx_type_t type;	/* E2E_CTX_RX */
 	cci__evt_t evt;		/* Associated event (including public event) */
@@ -158,10 +163,18 @@ struct e2e_rx {
 	uint16_t seq;		/* Sequence number for ack */
 };
 
+typedef enum e2e_tx_state {
+	E2E_TX_IDLE = 0,	/* available, held by endpoint */
+	E2E_TX_QUEUED,		/* queued for sending */
+	E2E_TX_PENDING,		/* sent, waiting e2e ack */
+	E2E_TX_COMPLETED	/* completed with status set */
+} e2e_tx_state_t;
+
 struct e2e_tx {
 	e2e_ctx_type_t type;	/* E2E_CTX_TX */
 	cci__evt_t evt;		/* Associated event (including public event) */
 	cci_e2e_msg_type_t msg_type; /* E2E msg type */
+	e2e_tx_state_t state;	/* Send state */
 	uint16_t seq;		/* Sequence number for ack */
 	e2e_rma_t *rma;		/* Owning RMA if completion msg */
 };
