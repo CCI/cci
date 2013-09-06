@@ -139,7 +139,7 @@ typedef union cci_e2e_hdr {
 
 	/* Connect ack */
 	struct cci_e2e_hdr_conn_ack {
-		uint8_t type;		/* CCI_E2E_MSG_CONN_REPLY */
+		uint8_t type;		/* CCI_E2E_MSG_CONN_ACK */
 		uint8_t pad;		/* Unused for now */
 		uint16_t mss;		/* Max send size */
 		/* 32b */
