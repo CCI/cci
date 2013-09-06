@@ -764,8 +764,8 @@ static int ctp_e2e_connect(cci_endpoint_t * endpoint, const char *server_uri,
 			ret = CCI_ENOMEM;
 			goto out;
 		}
-		snprintf(local_uri, prefix_len, "%s", ep_real->uri);
-		snprintf(local_uri + prefix_len, base_len, "%s", base);
+		snprintf(local_uri, prefix_len + 1, "%s", ep_real->uri);
+		snprintf(local_uri + prefix_len, base_len + 1, "%s", base);
 
 		uri = local_uri;
 	} else {
