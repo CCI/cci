@@ -140,7 +140,7 @@ typedef union cci_e2e_hdr {
 	/* Connect ack */
 	struct cci_e2e_hdr_conn_ack {
 		uint8_t type;		/* CCI_E2E_MSG_CONN_REPLY */
-		uint8_t status;		/* 0 for success, else errno */
+		uint8_t pad;		/* Unused for now */
 		uint16_t mss;		/* Max send size */
 		/* 32b */
 	} conn_ack;
@@ -318,11 +318,10 @@ cci_e2e_parse_connect_reply(cci_e2e_hdr_t *hdr, uint8_t *status, uint16_t *mss)
 }
 
 static inline void
-cci_e2e_pack_connect_ack(cci_e2e_hdr_t *hdr, uint8_t status, uint16_t mss)
+cci_e2e_pack_connect_ack(cci_e2e_hdr_t *hdr, uint16_t mss)
 {
 	memset(hdr, 0, sizeof(*hdr));
 	hdr->conn_ack.type = CCI_E2E_MSG_CONN_ACK;
-	hdr->conn_ack.status = status;
 	hdr->conn_ack.mss = mss;
 
 	hdr->net = htonl(hdr->net);
@@ -330,10 +329,9 @@ cci_e2e_pack_connect_ack(cci_e2e_hdr_t *hdr, uint8_t status, uint16_t mss)
 }
 
 static inline void
-cci_e2e_parse_connect_ack(cci_e2e_hdr_t *hdr, uint8_t *status, uint16_t *mss)
+cci_e2e_parse_connect_ack(cci_e2e_hdr_t *hdr, uint16_t *mss)
 {
 	/* hdr already in host order */
-	*status = hdr->conn_ack.status;
 	*mss = hdr->conn_ack.mss;
 	return;
 }
