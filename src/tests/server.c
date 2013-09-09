@@ -54,7 +54,7 @@ int main(int argc, char *argv[])
 
 	while (!done) {
 		int accept = 1;
-		cci_event_t *event;
+		cci_event_t *event = NULL;
 
 		ret = cci_get_event(endpoint, &event);
 		if (ret != 0) {
@@ -75,7 +75,7 @@ int main(int argc, char *argv[])
 
 				if (len == 3) {
 					done = 1;
-					continue;
+					break;
 				}
 
 				memset(buf, 0, 8192);
