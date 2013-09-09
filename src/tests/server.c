@@ -37,7 +37,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* create an endpoint */
-	ret = cci_create_endpoint(NULL, 0, &endpoint, ep_fd);
+	ret = cci_create_endpoint(NULL, CCI_EP_ROUTING, &endpoint, ep_fd);
 	if (ret) {
 		fprintf(stderr, "cci_create_endpoint() failed with %s\n",
 			cci_strerror(NULL, ret));
@@ -101,6 +101,7 @@ int main(int argc, char *argv[])
 			break;
 		case CCI_EVENT_CONNECT_REQUEST:
 			/* inspect conn_req_t and decide to accept or reject */
+			fprintf(stderr, "got connect request\n");
 			if (accept) {
 				/* associate this connect request with this endpoint */
 				cci_accept(event, ACCEPT_CONTEXT);
