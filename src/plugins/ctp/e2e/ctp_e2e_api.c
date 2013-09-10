@@ -1100,7 +1100,7 @@ e2e_handle_conn_reply(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **ne
 
 	cci_e2e_parse_connect_reply(hdr, &status, &mss);
 
-	conn->connection.max_send_size = mss;
+	conn->connection.max_send_size = mss - sizeof(*hdr);
 
 	evt = calloc(1, sizeof(*evt));
 	if (!evt) {
@@ -1175,7 +1175,7 @@ e2e_handle_conn_ack(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
 
 	cci_e2e_parse_connect_ack(hdr, &mss);
 
-	conn->connection.max_send_size = mss;
+	conn->connection.max_send_size = mss - sizeof(*hdr);
 
 	evt = calloc(1, sizeof(*evt));
 	if (!evt) {
@@ -1478,10 +1478,63 @@ static int ctp_e2e_sendv(cci_connection_t * connection,
 			  const struct iovec *data, uint32_t iovcnt,
 			  const void *context, int flags)
 {
+	int ret = 0, i = 0;
+	cci__ep_t *ep = container_of(connection->endpoint, cci__ep_t, endpoint);
+	cci__conn_t *conn = container_of(connection, cci__conn_t, connection);
+	e2e_conn_t *econn = conn->priv;
+	e2e_tx_t *tx = NULL;
+	cci_e2e_hdr_t hdr;
+	struct iovec *iov = NULL;
+
 	CCI_ENTER;
 
+	if (!eglobals) {
+		CCI_EXIT;
+		return CCI_ENODEV;
+	}
+
+	tx = e2e_get_tx(ep, 0);
+	if (!tx) {
+		CCI_EXIT;
+		return CCI_ENOBUFS;
+	}
+
+	tx->evt.event.send.type = CCI_EVENT_SEND;
+	tx->evt.event.send.status = CCI_SUCCESS; /* for now */
+	tx->evt.event.send.connection = connection;
+	tx->evt.event.send.context = (void*)context;
+	/* tx->evt.ep = ep; already set */
+	tx->evt.conn = conn;
+	tx->msg_type = CCI_E2E_MSG_SEND;
+	tx->state = E2E_TX_PENDING;
+	tx->seq = e2e_conn_next_seq(ep, conn);
+	/* tx->rma = NULL; already set */
+
+	cci_e2e_pack_send(&hdr, tx->seq);
+
+	iov = calloc(iovcnt + 1, sizeof(*iov)); /* iovcnt + hdr */
+	if (!iov) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	iov[0].iov_base = &hdr;
+	iov[0].iov_len = sizeof(hdr.send_size);
+
+	for (i = 1; i < iovcnt + 1; i++) {
+		iov[i].iov_base = data[i - 1].iov_base;
+		iov[i].iov_len = data[i - 1].iov_len;
+	}
+
+	ret = cci_sendv(econn->real, iov, iovcnt + 1, (void*)tx, flags);
+out:
+	if (ret) {
+		free(iov);
+		e2e_put_tx(tx);
+	}
+
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 static int ctp_e2e_rma_register(cci_endpoint_t * endpoint,
