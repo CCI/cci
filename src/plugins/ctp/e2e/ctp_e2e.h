@@ -131,6 +131,7 @@ struct e2e_conn {
 	e2e_conn_state_t state;		/* State */
 	cci_connection_t *real;		/* Underlying transport's real connection */
 	TAILQ_ENTRY(e2e_conn) entry;	/* To hang on eep->conns */
+	TAILQ_HEAD(c_txs, cci__evt) pending; /* pending reliable sends */
 	uint16_t seq;
 };
 
@@ -177,6 +178,7 @@ struct e2e_tx {
 	cci__evt_t evt;		/* Associated event (including public event) */
 	cci_e2e_msg_type_t msg_type; /* E2E msg type */
 	e2e_tx_state_t state;	/* Send state */
+	int flags;		/* Send flags */
 	uint16_t seq;		/* Sequence number for ack */
 	e2e_rma_t *rma;		/* Owning RMA if completion msg */
 };

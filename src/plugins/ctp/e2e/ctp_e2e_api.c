@@ -549,7 +549,6 @@ static int ctp_e2e_destroy_endpoint(cci_endpoint_t * endpoint)
 	}
 	free(ep->priv);
 	free(ep->uri);
-	free(ep);
 
 	CCI_EXIT;
 	return ret;
@@ -729,6 +728,7 @@ static int ctp_e2e_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	econn = conn->priv;
 	econn->conn = conn;
 	econn->state = E2E_CONN_ACTIVE1;
+	TAILQ_INIT(&econn->pending);
 
 	/* this is large by 4 bytes, it is ok */
 	total_len = sizeof(hdr->connect_size) + sizeof(cci_e2e_connect_t) + data_len;
@@ -930,6 +930,7 @@ e2e_handle_native_connect_request(cci__ep_t *ep, cci_event_t *native_event, cci_
 	econn = conn->priv;
 	econn->conn = conn;
 	econn->state = E2E_CONN_PASSIVE1;
+	TAILQ_INIT(&econn->pending);
 
 	evt = calloc(1, sizeof(*evt));
 	if (!evt) {
@@ -1201,13 +1202,57 @@ e2e_handle_conn_ack(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
 }
 
 static int
+e2e_handle_send_ack(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
+{
+	int ret = CCI_EAGAIN;
+	uint16_t seq = 0;
+	cci_connection_t *connection = native_event->recv.connection;
+	cci__conn_t *conn = connection->context;
+	cci__evt_t *evt = NULL;
+	e2e_conn_t *econn = conn->priv;
+	e2e_tx_t *tx = NULL;
+	cci_e2e_hdr_t *hdr = (void *)native_event->recv.ptr;
+
+	*new = NULL;
+
+	if (native_event->recv.len != sizeof(hdr->send_ack)) {
+		debug(CCI_DB_CONN, "%s: invalid send ack size of %u", __func__,
+			native_event->recv.len);
+		/* TODO */
+		assert(native_event->recv.len == sizeof(hdr->conn_ack));
+	}
+
+	cci_e2e_parse_send_ack(hdr, &seq);
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_FOREACH(evt, &econn->pending, entry) {
+		tx = container_of(evt, e2e_tx_t, evt);
+		if (tx->seq == seq) {
+			TAILQ_REMOVE(&econn->pending, evt, entry);
+			*new = &(evt->event);
+			ret = CCI_SUCCESS;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&ep->lock);
+
+	if (ret) {
+		debug(CCI_DB_MSG, "%s: no matching send for ack %u from %s", __func__,
+			seq, conn->uri);
+	}
+
+	return ret;
+}
+
+static int
 e2e_handle_recv(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new, int *recycle)
 {
 	int ret = CCI_EAGAIN;
 	uint16_t seq = 0;
 	cci_connection_t *connection = native_event->recv.connection;
 	cci__conn_t *conn = connection->context;
-	cci_e2e_hdr_t *hdr = (void *)native_event->recv.ptr;
+	e2e_conn_t *econn = conn->priv;
+	cci_e2e_hdr_t *hdr = (void *)native_event->recv.ptr, ack;
 	e2e_rx_t *rx = NULL;
 
 	*new = NULL;
@@ -1236,6 +1281,20 @@ e2e_handle_recv(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new, int
 	*new = &(rx->evt.event);
 	*recycle = 0;
 
+	if (cci_conn_is_reliable(conn)) {
+		int ret2 = 0;
+
+		cci_e2e_pack_send_ack(&ack, rx->seq);
+		ret2 = cci_send(econn->real, &ack, sizeof(ack.send_ack), NULL, CCI_FLAG_SILENT);
+		if (ret2) {
+			e2e_ep_t *eep = ep->priv;
+
+			debug(CCI_DB_MSG, "%s: sending ack %u to %s failed with %s", __func__,
+				rx->seq, conn->uri, cci_strerror(eep->real, ret2));
+			assert(ret2 == 0);
+		}
+	}
+
 	return ret;
 }
 
@@ -1263,6 +1322,9 @@ e2e_handle_native_recv(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **n
 	case CCI_E2E_MSG_SEND:
 		ret = e2e_handle_recv(ep, native_event, new, recycle);
 		break;
+	case CCI_E2E_MSG_SEND_ACK:
+		ret = e2e_handle_send_ack(ep, native_event, new);
+		break;
 	default:
 		debug(CCI_DB_MSG, "%s: ignoring %s (0x%x) recv completion", __func__,
 			cci_e2e_msg_type_str(hdr->generic.type), hdr->net);
@@ -1276,6 +1338,7 @@ static int ctp_e2e_get_event(cci_endpoint_t * endpoint,
 {
 	int ret = CCI_EAGAIN;
 	cci__ep_t *ep = NULL;
+	cci__evt_t *e = NULL, *evt = NULL;
 	e2e_ep_t *eep = NULL;
 	cci_event_t *native_event = NULL;
 
@@ -1288,6 +1351,32 @@ static int ctp_e2e_get_event(cci_endpoint_t * endpoint,
 
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 	eep = ep->priv;
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_FOREACH(e, &ep->evts, entry) {
+		if (e->event.type == CCI_EVENT_SEND) {
+			e2e_tx_t *tx = container_of(e, e2e_tx_t, evt);
+
+			if (tx->flags & CCI_FLAG_BLOCKING) {
+				continue;
+			} else {
+				evt = e;
+				break;
+			}
+		} else {
+			evt = e;
+			break;
+		}
+
+	}
+
+	if (evt) {
+		pthread_mutex_unlock(&ep->lock);
+		*event = &(evt->event);
+		ret = CCI_SUCCESS;
+		goto out;
+	}
+	pthread_mutex_unlock(&ep->lock);
 
 	ret = cci_get_event(eep->real, &native_event);
 	if (ret == CCI_SUCCESS) {
@@ -1325,6 +1414,7 @@ static int ctp_e2e_get_event(cci_endpoint_t * endpoint,
 		}
 	}
 
+    out:
 	CCI_EXIT;
 	return ret;
 }
@@ -1432,6 +1522,7 @@ static int ctp_e2e_send(cci_connection_t * connection,
 	e2e_tx_t *tx = NULL;
 	cci_e2e_hdr_t hdr;
 	struct iovec iov[2];
+	uint32_t iov_cnt = msg_len ? 2 : 1;
 
 	CCI_ENTER;
 
@@ -1454,6 +1545,7 @@ static int ctp_e2e_send(cci_connection_t * connection,
 	tx->evt.conn = conn;
 	tx->msg_type = CCI_E2E_MSG_SEND;
 	tx->state = E2E_TX_PENDING;
+	tx->flags = flags;
 	tx->seq = e2e_conn_next_seq(ep, conn);
 	/* tx->rma = NULL; already set */
 
@@ -1462,14 +1554,36 @@ static int ctp_e2e_send(cci_connection_t * connection,
 	iov[0].iov_base = &hdr;
 	iov[0].iov_len = sizeof(hdr.send_size);
 
-	iov[1].iov_base = (void*)msg_ptr;
-	iov[1].iov_len = msg_len;
-
-	ret = cci_sendv(econn->real, iov, 2, (void*)tx, flags);
-	if (ret) {
-		e2e_put_tx(tx);
+	if (msg_len) {
+		iov[1].iov_base = (void*)msg_ptr;
+		iov[1].iov_len = msg_len;
 	}
 
+	if (cci_conn_is_reliable(conn) && !(flags & CCI_FLAG_BLOCKING)) {
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_INSERT_TAIL(&econn->pending, &(tx->evt), entry);
+		pthread_mutex_unlock(&ep->lock);
+	}
+
+	ret = cci_sendv(econn->real, iov, iov_cnt, (void*)tx, flags);
+	if (ret) {
+		if (cci_conn_is_reliable(conn) && !(flags & CCI_FLAG_BLOCKING)) {
+			pthread_mutex_lock(&ep->lock);
+			TAILQ_REMOVE(&econn->pending, &(tx->evt), entry);
+			pthread_mutex_unlock(&ep->lock);
+		}
+		e2e_put_tx(tx);
+		goto out;
+	}
+
+	if (!(cci_conn_is_reliable(conn))) {
+		pthread_mutex_lock(&ep->lock);
+		tx->state = E2E_TX_COMPLETED;
+		TAILQ_INSERT_TAIL(&ep->evts, &(tx->evt), entry);
+		pthread_mutex_unlock(&ep->lock);
+	}
+
+    out:
 	CCI_EXIT;
 	return ret;
 }
@@ -1507,6 +1621,7 @@ static int ctp_e2e_sendv(cci_connection_t * connection,
 	tx->evt.conn = conn;
 	tx->msg_type = CCI_E2E_MSG_SEND;
 	tx->state = E2E_TX_PENDING;
+	tx->flags = flags;
 	tx->seq = e2e_conn_next_seq(ep, conn);
 	/* tx->rma = NULL; already set */
 
@@ -1521,18 +1636,37 @@ static int ctp_e2e_sendv(cci_connection_t * connection,
 	iov[0].iov_base = &hdr;
 	iov[0].iov_len = sizeof(hdr.send_size);
 
-	for (i = 1; i < iovcnt + 1; i++) {
+	for (i = 1; i < (int) iovcnt + 1; i++) {
 		iov[i].iov_base = data[i - 1].iov_base;
 		iov[i].iov_len = data[i - 1].iov_len;
 	}
 
-	ret = cci_sendv(econn->real, iov, iovcnt + 1, (void*)tx, flags);
-out:
-	if (ret) {
-		free(iov);
-		e2e_put_tx(tx);
+	if (cci_conn_is_reliable(conn)) {
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_INSERT_TAIL(&econn->pending, &(tx->evt), entry);
+		pthread_mutex_unlock(&ep->lock);
 	}
 
+	ret = cci_sendv(econn->real, iov, iovcnt + 1, (void*)tx, flags);
+	if (ret) {
+		if (cci_conn_is_reliable(conn)) {
+			pthread_mutex_lock(&ep->lock);
+			TAILQ_REMOVE(&econn->pending, &(tx->evt), entry);
+			pthread_mutex_unlock(&ep->lock);
+		}
+		free(iov);
+		e2e_put_tx(tx);
+		goto out;
+	}
+
+	if (!(cci_conn_is_reliable(conn))) {
+		pthread_mutex_lock(&ep->lock);
+		tx->state = E2E_TX_COMPLETED;
+		TAILQ_INSERT_TAIL(&ep->evts, &(tx->evt), entry);
+		pthread_mutex_unlock(&ep->lock);
+	}
+
+out:
 	CCI_EXIT;
 	return ret;
 }
