@@ -1463,7 +1463,7 @@ static int ctp_e2e_send(cci_connection_t * connection,
 	iov[0].iov_len = sizeof(hdr.send_size);
 
 	iov[1].iov_base = (void*)msg_ptr;
-	iov[2].iov_len = msg_len;
+	iov[1].iov_len = msg_len;
 
 	ret = cci_sendv(econn->real, iov, 2, (void*)tx, flags);
 	if (ret) {
