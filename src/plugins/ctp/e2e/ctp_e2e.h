@@ -131,6 +131,7 @@ struct e2e_conn {
 	e2e_conn_state_t state;		/* State */
 	cci_connection_t *real;		/* Underlying transport's real connection */
 	TAILQ_ENTRY(e2e_conn) entry;	/* To hang on eep->conns */
+	uint16_t seq;
 };
 
 typedef enum e2e_ctx_type {
@@ -161,6 +162,7 @@ struct e2e_rx {
 	cci__evt_t evt;		/* Associated event (including public event) */
 	cci_e2e_msg_type_t msg_type; /* E2E msg type */
 	uint16_t seq;		/* Sequence number for ack */
+	cci_event_t *native;	/* Stored native recv event */
 };
 
 typedef enum e2e_tx_state {
