@@ -50,7 +50,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "cci_get_opt() failed with %s\n", cci_strerror(NULL, ret));
 		exit(EXIT_FAILURE);
 	}
-	printf("Opened %s\n", uri);
+	fprintf(stderr, "Opened %s\n", uri);
 
 	while (!done) {
 		int accept = 1;
@@ -118,7 +118,7 @@ int main(int argc, char *argv[])
 			connection = event->accept.connection;
 			break;
 		default:
-			printf("event type %d\n", event->type);
+			fprintf(stderr, "event type %d\n", event->type);
 			break;
 		}
 		cci_return_event(event);
