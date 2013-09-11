@@ -919,6 +919,7 @@ e2e_handle_native_connect_request(cci__ep_t *ep, cci_event_t *native_event, cci_
 	}
 	conn->plugin = ep->plugin;
 	conn->connection.endpoint = &(ep->endpoint);
+	conn->connection.attribute = native_event->request.attribute;
 	/* conn->connection.max_send_size will be set in conn_reply */
 
 	conn->priv = calloc(1, sizeof(*econn));
@@ -1024,8 +1025,9 @@ e2e_handle_native_accept(cci__ep_t *ep, cci_event_t *native_event, cci_event_t *
 }
 
 /* We have received a native send event.
- * If successful, store real connection.
- * If not, free connection, generate e2e accept event
+ * If reliable and successful, ignore and return tx.
+ * If reliable and failed, generate send event.
+ * If unreliable, generate send event.
  */
 static int
 e2e_handle_native_send(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
@@ -1061,11 +1063,21 @@ e2e_handle_native_send(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **n
 		e2e_put_tx(tx);
 		break;
 	case CCI_E2E_MSG_SEND:
-		if (native_event->send.status != CCI_SUCCESS) {
+		if (!cci_conn_is_reliable(conn) ||
+			native_event->send.status != CCI_SUCCESS) {
+
 			/* complete now with error, otherwise wait for e2e ack */
 			tx->evt.event.send.status = native_event->send.status;
 			*new = &(tx->evt.event);
 			ret = CCI_SUCCESS;
+
+			if (cci_conn_is_reliable(conn)) {
+				e2e_conn_t *econn = conn->priv;
+
+				pthread_mutex_lock(&ep->lock);
+				TAILQ_REMOVE(&econn->pending, &(tx->evt), entry);
+				pthread_mutex_unlock(&ep->lock);
+			}
 		}
 		break;
 	default:
@@ -1338,7 +1350,6 @@ static int ctp_e2e_get_event(cci_endpoint_t * endpoint,
 {
 	int ret = CCI_EAGAIN;
 	cci__ep_t *ep = NULL;
-	cci__evt_t *e = NULL, *evt = NULL;
 	e2e_ep_t *eep = NULL;
 	cci_event_t *native_event = NULL;
 
@@ -1351,32 +1362,6 @@ static int ctp_e2e_get_event(cci_endpoint_t * endpoint,
 
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 	eep = ep->priv;
-
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_FOREACH(e, &ep->evts, entry) {
-		if (e->event.type == CCI_EVENT_SEND) {
-			e2e_tx_t *tx = container_of(e, e2e_tx_t, evt);
-
-			if (tx->flags & CCI_FLAG_BLOCKING) {
-				continue;
-			} else {
-				evt = e;
-				break;
-			}
-		} else {
-			evt = e;
-			break;
-		}
-
-	}
-
-	if (evt) {
-		pthread_mutex_unlock(&ep->lock);
-		*event = &(evt->event);
-		ret = CCI_SUCCESS;
-		goto out;
-	}
-	pthread_mutex_unlock(&ep->lock);
 
 	ret = cci_get_event(eep->real, &native_event);
 	if (ret == CCI_SUCCESS) {
@@ -1414,7 +1399,6 @@ static int ctp_e2e_get_event(cci_endpoint_t * endpoint,
 		}
 	}
 
-    out:
 	CCI_EXIT;
 	return ret;
 }
@@ -1576,13 +1560,6 @@ static int ctp_e2e_send(cci_connection_t * connection,
 		goto out;
 	}
 
-	if (!(cci_conn_is_reliable(conn))) {
-		pthread_mutex_lock(&ep->lock);
-		tx->state = E2E_TX_COMPLETED;
-		TAILQ_INSERT_TAIL(&ep->evts, &(tx->evt), entry);
-		pthread_mutex_unlock(&ep->lock);
-	}
-
     out:
 	CCI_EXIT;
 	return ret;
@@ -1641,7 +1618,7 @@ static int ctp_e2e_sendv(cci_connection_t * connection,
 		iov[i].iov_len = data[i - 1].iov_len;
 	}
 
-	if (cci_conn_is_reliable(conn)) {
+	if (cci_conn_is_reliable(conn) && !(flags & CCI_FLAG_BLOCKING)) {
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_INSERT_TAIL(&econn->pending, &(tx->evt), entry);
 		pthread_mutex_unlock(&ep->lock);
@@ -1649,7 +1626,7 @@ static int ctp_e2e_sendv(cci_connection_t * connection,
 
 	ret = cci_sendv(econn->real, iov, iovcnt + 1, (void*)tx, flags);
 	if (ret) {
-		if (cci_conn_is_reliable(conn)) {
+		if (cci_conn_is_reliable(conn) && !(flags & CCI_FLAG_BLOCKING)) {
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_REMOVE(&econn->pending, &(tx->evt), entry);
 			pthread_mutex_unlock(&ep->lock);
@@ -1657,13 +1634,6 @@ static int ctp_e2e_sendv(cci_connection_t * connection,
 		free(iov);
 		e2e_put_tx(tx);
 		goto out;
-	}
-
-	if (!(cci_conn_is_reliable(conn))) {
-		pthread_mutex_lock(&ep->lock);
-		tx->state = E2E_TX_COMPLETED;
-		TAILQ_INSERT_TAIL(&ep->evts, &(tx->evt), entry);
-		pthread_mutex_unlock(&ep->lock);
 	}
 
 out:
