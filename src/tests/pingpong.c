@@ -51,6 +51,7 @@ int ignore_os_handle = 0;
 int blocking = 0;
 int nfds = 0;
 fd_set rfds;
+cci_endpoint_flags_t ep_flags = 0;
 
 typedef struct options {
 	struct cci_rma_handle rma_handle;
@@ -68,7 +69,7 @@ options_t opts;
 static void print_usage(void)
 {
 	fprintf(stderr, "usage: %s -h <server_uri> [-s] [-i <iters>] "
-		"[-W <warmup>] [-c <type>] [-n] [-b|-o]"
+		"[-W <warmup>] [-c <type>] [-n] [-b|-o] [-E]"
 		"[[-w | -r] [-m <max_rma_size> [-C]]]\n", name);
 	fprintf(stderr, "where:\n");
 	fprintf(stderr, "\t-h\tServer's URI\n");
@@ -85,6 +86,7 @@ static void print_usage(void)
 	fprintf(stderr, "\t-C\tSend RMA remote completion message\n");
 	fprintf(stderr, "\t-b\tBlock using the OS handle instead of polling\n");
 	fprintf(stderr, "\t-o\tGet OS handle but don't use it\n\n");
+	fprintf(stderr, "\t-E\tUse end-to-end routing\n\n");
 	fprintf(stderr, "Example:\n");
 	fprintf(stderr, "server$ %s -h ip://foo -p 2211 -s\n", name);
 	fprintf(stderr, "client$ %s -h ip://foo -p 2211\n", name);
@@ -474,7 +476,7 @@ int main(int argc, char *argv[])
 
 	name = argv[0];
 
-	while ((c = getopt(argc, argv, "h:sRc:nwrm:Ci:W:bo")) != -1) {
+	while ((c = getopt(argc, argv, "h:sRc:nwrm:Ci:W:boE")) != -1) {
 		switch (c) {
 		case 'h':
 			server_uri = strdup(optarg);
@@ -527,6 +529,9 @@ int main(int argc, char *argv[])
 			ignore_os_handle = 1;
 			os_handle = &fd;
 			break;
+		case 'E':
+			ep_flags = CCI_EP_ROUTING;
+			break;
 		default:
 			print_usage();
 		}
@@ -574,7 +579,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* create an endpoint */
-	ret = cci_create_endpoint(NULL, CCI_EP_ROUTING, &endpoint, os_handle);
+	ret = cci_create_endpoint(NULL, ep_flags, &endpoint, os_handle);
 	if (ret) {
 		fprintf(stderr, "cci_create_endpoint() failed with %s\n",
 			cci_strerror(NULL, ret));
