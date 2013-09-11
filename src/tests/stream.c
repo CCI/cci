@@ -195,7 +195,11 @@ again:
 			}
 			if (ready == 2) {
 				gettimeofday(&start, NULL);
-				cci_send(control_conn, buffer, current_size, NULL, 0);
+				ret = cci_send(control_conn, buffer, current_size, NULL, 0);
+				if (ret) {
+					fprintf(stderr, "send control size returned %s\n",
+							cci_strerror(endpoint, ret));
+				}
 				printf("\tBytes\t     # Rcvd\t     Rcvd\n");
 			}
 			break;
@@ -281,6 +285,9 @@ static void do_client(void)
 			    cci_send(test_conn, buffer, current_size, NULL, 0);
 			if (!ret)
 				send++;
+			else
+				fprintf(stderr, "send i=%d returned %s\n",
+						i, cci_strerror(endpoint, ret));
 		}
 
 		LOCK;
@@ -301,7 +308,10 @@ static void do_client(void)
 
 		current_size *= 2;
 	}
-	cci_send(control_conn, "bye", 3, (void*)0xdeadbeef, 0);
+	ret = cci_send(control_conn, "bye", 3, (void*)0xdeadbeef, 0);
+	if (ret) {
+		fprintf(stderr, "send bye failed with %s\n", cci_strerror(endpoint, ret));
+	}
 
 	while (!done)
 		poll_events ();

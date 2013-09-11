@@ -85,7 +85,7 @@ poll_events(cci_endpoint_t * endpoint, cci_connection_t ** connection,
 
 int main(int argc, char *argv[])
 {
-	int done = 0, ret, i = 0, c;
+	int done = 0, ret, i = 0, c, ep_flags = 0;
 	uint32_t caps = 0;
 	char *server_uri = NULL;
 	cci_os_handle_t *fd = NULL;
@@ -93,7 +93,7 @@ int main(int argc, char *argv[])
 	cci_connection_t *connection = NULL;
 	uint32_t timeout = 30 * 1000000;
 
-	while ((c = getopt(argc, argv, "h:c:b")) != -1) {
+	while ((c = getopt(argc, argv, "h:c:bE")) != -1) {
 		switch (c) {
 		case 'h':
 			server_uri = strdup(optarg);
@@ -109,11 +109,15 @@ int main(int argc, char *argv[])
 		case 'b':
 			flags |= CCI_FLAG_BLOCKING;
 			break;
+		case 'E':
+			ep_flags = CCI_EP_ROUTING;
+			break;
 		default:
-			fprintf(stderr, "usage: %s -h <server_uri> [-c <type>]\n",
+			fprintf(stderr, "usage: %s -h <server_uri> [-c <type>] [-E]\n",
 			        argv[0]);
 			fprintf(stderr, "\t-c\tConnection type (UU, RU, or RO) "
 			                "set by client; RO by default\n");
+			fprintf(stderr, "\t-E\tUse e2e transport for routed connections\n");
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -133,7 +137,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* create an endpoint */
-	ret = cci_create_endpoint(NULL, CCI_EP_ROUTING, &endpoint, fd);
+	ret = cci_create_endpoint(NULL, ep_flags, &endpoint, fd);
 	if (ret) {
 		fprintf(stderr, "cci_create_endpoint() failed with %s\n",
 			cci_strerror(NULL, ret));

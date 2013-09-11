@@ -22,12 +22,24 @@
 
 int main(int argc, char *argv[])
 {
-	int ret, done = 0;
+	int ret, done = 0, c = 0, ep_flags = 0;
 	uint32_t caps = 0;
 	char *uri = NULL;
 	cci_endpoint_t *endpoint = NULL;
 	cci_os_handle_t *ep_fd = NULL;
 	cci_connection_t *connection = NULL;
+
+	while ((c = getopt(argc, argv, "E")) != -1) {
+		switch (c) {
+		case 'E':
+			ep_flags = CCI_EP_ROUTING;
+			break;
+		default:
+			fprintf(stderr, "usage: %s [-E]\n", argv[0]);
+			fprintf(stderr, "\t-E\tUse e2e transport for routed connections\n");
+			exit(EXIT_FAILURE);
+		}
+	}
 
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
 	if (ret) {
@@ -37,7 +49,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* create an endpoint */
-	ret = cci_create_endpoint(NULL, CCI_EP_ROUTING, &endpoint, ep_fd);
+	ret = cci_create_endpoint(NULL, ep_flags, &endpoint, ep_fd);
 	if (ret) {
 		fprintf(stderr, "cci_create_endpoint() failed with %s\n",
 			cci_strerror(NULL, ret));
