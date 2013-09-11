@@ -2102,9 +2102,12 @@ static int tcp_send_common(cci_connection_t * connection,
 
 	/* if unreliable, try to send */
 	if (!is_reliable) {
+    again:
 		ret = tcp_sendto(tconn->fd, tx->buffer, tx->len, tx->rma_ptr,
 				tx->rma_len, &tx->offset);
 		if (ret == CCI_SUCCESS) {
+			if (tx->offset < tx->len)
+				goto again;
 			/* queue event on enpoint's completed queue */
 			tx->state = TCP_TX_COMPLETED;
 			pthread_mutex_lock(&ep->lock);
