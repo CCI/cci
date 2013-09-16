@@ -3436,14 +3436,27 @@ tcp_poll_events(cci__ep_t *ep)
 		if (conn)
 			tconn = conn->priv;
 
+again:
 		if (revents & POLLHUP) {
 			tcp_conn_status_t old_status = tconn->status;
 			cci__evt_t *evt = NULL;
 			tcp_tx_t *tx = NULL;
+			int rc = 0;
+			socklen_t err = 0, *pe = &err, slen = sizeof(err);
+
+			rc = getsockopt(tconn->fd, SOL_SOCKET, SO_ERROR, (void*)pe, &slen);
+			if (old_status == TCP_CONN_ACTIVE1) {
+				debug(CCI_DB_CONN, "%s: ignoring spurious POLLHUP for "
+					"for async connection completion - connection "
+					"is valid", __func__);
+				revents = revents & (~(POLLHUP));
+				goto again;
+			}
 
 			/* handle disconnect */
-			debug(CCI_DB_CONN, "%s: got POLLHUP on conn %p (%s)",
-				__func__, (void*)conn, tcp_conn_status_str(tconn->status));
+			debug(CCI_DB_CONN, "%s: got POLLHUP on conn %p (%s) revents (0x%x) %s",
+				__func__, (void*)conn, tcp_conn_status_str(tconn->status),
+				revents, strerror(err));
 
 			pthread_mutex_lock(&ep->lock);
 			tcp_conn_set_closing_locked(ep, conn);
