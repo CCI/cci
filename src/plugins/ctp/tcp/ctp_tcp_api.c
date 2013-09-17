@@ -3445,7 +3445,7 @@ again:
 			socklen_t err = 0, *pe = &err, slen = sizeof(err);
 
 			rc = getsockopt(tconn->fd, SOL_SOCKET, SO_ERROR, (void*)pe, &slen);
-			if (old_status == TCP_CONN_ACTIVE1) {
+			if (old_status == TCP_CONN_ACTIVE1 && pe == 0 && revents != POLLHUP) {
 				debug(CCI_DB_CONN, "%s: ignoring spurious POLLHUP for "
 					"for async connection completion - connection "
 					"is valid", __func__);
