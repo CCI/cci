@@ -1535,7 +1535,9 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 
 	/* try to progress txs */
 
-	tcp_progress_conn_sends(conn, 0);
+	pthread_mutex_lock(&ep->lock);
+	tcp_progress_conn_sends(conn, 1);
+	pthread_mutex_unlock(&ep->lock);
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -2134,7 +2136,9 @@ static int tcp_send_common(cci_connection_t * connection,
 
 	/* try to progress txs */
 
-	tcp_progress_conn_sends(conn, 0);
+	pthread_mutex_lock(&ep->lock);
+	tcp_progress_conn_sends(conn, 1);
+	pthread_mutex_unlock(&ep->lock);
 
 	/* if unreliable, we are done since it is buffered internally */
 	if (!is_reliable) {
@@ -2489,7 +2493,9 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 
 	ret = CCI_SUCCESS;
 
-	tcp_progress_conn_sends(conn, 0);
+	pthread_mutex_lock(&ep->lock);
+	tcp_progress_conn_sends(conn, 1);
+	pthread_mutex_unlock(&ep->lock);
 
 out:
 	if (ret) {
@@ -2738,7 +2744,9 @@ tcp_handle_conn_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		pthread_mutex_unlock(&ep->lock);
 
 		/* try to progress txs */
-		tcp_progress_conn_sends(conn, 0);
+		pthread_mutex_lock(&ep->lock);
+		tcp_progress_conn_sends(conn, 1);
+		pthread_mutex_unlock(&ep->lock);
 	} else {
 		pthread_mutex_lock(&tconn->slock);
 		TAILQ_REMOVE(&tconn->pending, &tx->evt, entry);
@@ -3524,7 +3532,9 @@ again:
 				tconn->status = TCP_CONN_ACTIVE2;
 				tep->fds[i].events = POLLIN | POLLOUT;
 			}
-			tcp_progress_conn_sends(conn, 0);
+			pthread_mutex_lock(&ep->lock);
+			tcp_progress_conn_sends(conn, 1);
+			pthread_mutex_unlock(&ep->lock);
 			found++;
 		}
 		if (revents & POLLERR) {
