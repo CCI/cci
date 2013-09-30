@@ -274,8 +274,8 @@ cci_e2e_parse_connect(cci_e2e_hdr_t *hdr, char *dst, char *src, void **ptr, uint
 	void *p = connect->request.data, *q = NULL;
 
 	/* hdr already in host order */
-	connect->net[0] = htonl(connect->net[0]);
-	connect->net[1] = htonl(connect->net[1]);
+	connect->net[0] = ntohl(connect->net[0]);
+	connect->net[1] = ntohl(connect->net[1]);
 
 	memcpy(dst, p, connect->request.dst_len);
 	p = (void*) ((uintptr_t) p + (uintptr_t) connect->request.dst_len);
