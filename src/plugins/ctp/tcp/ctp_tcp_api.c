@@ -2041,6 +2041,8 @@ static int tcp_send_common(cci_connection_t * connection,
 	} else {
 		tx = tcp_get_tx(ep, 0);
 		if (!tx) {
+			tcp_progress_ep(ep);
+
 			debug(CCI_DB_FUNC, "exiting %s", func);
 			return CCI_ENOBUFS;
 		}
