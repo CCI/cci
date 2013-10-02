@@ -57,10 +57,11 @@ typedef enum cci_e2e_msg_type {
 	CCI_E2E_MSG_SEND_ACK_MANY,
 	CCI_E2E_MSG_SEND_SACK,
 	CCI_E2E_MSG_SEND_NACK,
-	CCI_E2E_MSG_RMA_WRITE_REQ,
-	CCI_E2E_MSG_RMA_WRITE_ACK,
-	CCI_E2E_MSG_RMA_READ_REQ,
-	CCI_E2E_MSG_RMA_READ_ACK,
+	CCI_E2E_MSG_RMA_WRITE_REQ,		/* RMA Write request */
+	CCI_E2E_MSG_RMA_READ_REQ,		/* RMA Read request */
+	CCI_E2E_MSG_RMA_READ_REPLY,		/* RMA Read reply */
+	CCI_E2E_MSG_RMA_DONE,			/* Actual RMA completion MSG */
+	CCI_E2E_MSG_RMA_ACK,			/* E2E RMA acknowledgment MSG */
 	CCI_E2E_MSG_MAX = ((1 << 7) - 1)	/* We can never exceed this */
 } cci_e2e_msg_type_t;
 
@@ -90,12 +91,14 @@ cci_e2e_msg_type_str(cci_e2e_msg_type_t type)
 		return "E2E send nack";
 	case CCI_E2E_MSG_RMA_WRITE_REQ:
 		return "E2E RMA write request";
-	case CCI_E2E_MSG_RMA_WRITE_ACK:
-		return "E2E RMA write ack";
 	case CCI_E2E_MSG_RMA_READ_REQ:
 		return "E2E RMA read request";
-	case CCI_E2E_MSG_RMA_READ_ACK:
-		return "E2E RMA read ack";
+	case CCI_E2E_MSG_RMA_READ_REPLY:
+		return "E2E RMA read reply";
+	case CCI_E2E_MSG_RMA_DONE:
+		return "E2E RMA done";
+	case CCI_E2E_MSG_RMA_ACK:
+		return "E2E RMA ack";
 	case CCI_E2E_MSG_MAX:
 		return "E2E max (invalid)";
 	}
@@ -482,7 +485,7 @@ cci_e2e_parse_send_nack(cci_e2e_hdr_t *hdr, uint8_t *status, uint16_t *seq)
 	return;
 }
 
-typedef union cci_e2e_rma {
+typedef union cci_e2e_rma_request {
 	struct rma_request {
 		cci_rma_handle_t initiator;	/* already in network order */
 		/* 256b / 32B */
@@ -499,9 +502,9 @@ typedef union cci_e2e_rma {
 	} request;
 
 	uint64_t net[11];			/* For easy byte swapping */
-} cci_e2e_rma_t;
+} cci_e2e_rma_request_t;
 
-/* Pack a RMA fragment request.
+/* Pack a RMA request.
  *
  * initiator is a pointer to the RMA handle
  * target is a pointer to the RMA handle
@@ -509,12 +512,12 @@ typedef union cci_e2e_rma {
  * type must be CCI_E2E_MSG_RMA_WRITE_REQ or CCI_E2E_MSG_RMA_READ_REQ
  */
 static inline int
-cci_e2e_pack_rma(cci_e2e_hdr_t *hdr, cci_rma_handle_t *initiator,
+cci_e2e_pack_rma_request(cci_e2e_hdr_t *hdr, cci_rma_handle_t *initiator,
 		cci_rma_handle_t *target, uint64_t initiator_offset,
 		uint64_t target_offset, uint32_t len, uint16_t seq,
 		cci_e2e_msg_type_t type)
 {
-	cci_e2e_rma_t *rma = (cci_e2e_rma_t *)&hdr->rma.data;
+	cci_e2e_rma_request_t *rma = (cci_e2e_rma_request_t *)&hdr->rma.data;
 
 	if (type != CCI_E2E_MSG_RMA_WRITE_REQ && type != CCI_E2E_MSG_RMA_READ_REQ)
 		return CCI_EINVAL;
@@ -540,12 +543,12 @@ cci_e2e_pack_rma(cci_e2e_hdr_t *hdr, cci_rma_handle_t *initiator,
 }
 
 static inline void
-cci_e2e_parse_rma(cci_e2e_hdr_t *hdr, cci_rma_handle_t *initiator,
+cci_e2e_parse_rma_request(cci_e2e_hdr_t *hdr, cci_rma_handle_t *initiator,
 		cci_rma_handle_t *target, uint64_t *initiator_offset,
 		uint64_t *target_offset, uint32_t *len, uint16_t *seq,
 		cci_e2e_msg_type_t *type)
 {
-	cci_e2e_rma_t *rma = (cci_e2e_rma_t *)&(hdr->rma.data);
+	cci_e2e_rma_request_t *rma = (cci_e2e_rma_request_t *)&(hdr->rma.data);
 
 	/* hdr already in host order */
 	*type = hdr->rma.type;
@@ -561,6 +564,55 @@ cci_e2e_parse_rma(cci_e2e_hdr_t *hdr, cci_rma_handle_t *initiator,
 	*initiator_offset = rma->request.initiator_offset;
 	*target_offset = rma->request.target_offset;
 	*len = rma->request.len;
+
+	return;
+}
+
+typedef union cci_e2e_rma_done {
+	struct rma_done {
+		cci_rma_handle_t handle;	/* already in network order */
+		/* 256b / 32B */
+		uint64_t offset;
+		/* 512b / 64B */
+	} done;
+
+	uint64_t net[5];			/* For easy byte swapping */
+} cci_e2e_rma_done_t;
+
+/* Pack a RMA done.
+ *
+ * handle is a pointer to the target's RMA handle
+ * offset is the target's offset
+ */
+static inline int
+cci_e2e_pack_rma_done(cci_e2e_hdr_t *hdr, cci_rma_handle_t *handle, uint64_t offset)
+{
+	cci_e2e_rma_done_t *rma = (cci_e2e_rma_done_t *)&hdr->rma.data;
+
+	memset(hdr, 0, sizeof(*hdr));
+	hdr->rma.type = CCI_E2E_MSG_RMA_DONE;
+
+	memset(rma, 0, sizeof(*rma));
+	memcpy((void*)&rma->done.handle, handle, sizeof(*handle));
+	rma->done.offset = offset;
+
+	hdr->net = htonl(hdr->net);
+	/* rma->net[0] through rma->net[3] are already in network order */
+	rma->net[4] = cci_e2e_htonll(rma->net[4]);
+
+	return CCI_SUCCESS;
+}
+
+static inline void
+cci_e2e_parse_rma_done(cci_e2e_hdr_t *hdr, cci_rma_handle_t *handle, uint64_t *offset)
+{
+	cci_e2e_rma_done_t *rma = (cci_e2e_rma_done_t *)&(hdr->rma.data);
+
+	/* rma->net[0] through rma->net[3] stay in network order */
+	rma->net[4] = cci_e2e_ntohll(rma->net[4]);
+
+	memcpy((void*)handle, &rma->done.handle, sizeof(*handle));
+	*offset = rma->done.offset;
 
 	return;
 }
