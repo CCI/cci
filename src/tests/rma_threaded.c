@@ -57,6 +57,7 @@ int blocking = 0;
 int nfds = 0;
 fd_set rfds;
 int client_threads = 1;
+int server_threads = 1;
 pthread_t *tid = NULL;	/* client: RMA thread(s) */
 sem_t *sem = NULL;	/* client: to notify RMA thread of completion */
 int running = 1;
@@ -137,6 +138,7 @@ static void print_usage(void)
 	fprintf(stderr, "\t-B\tBlock using the OS handle instead of polling\n");
 	fprintf(stderr, "\t-I\tGet OS handle but ignore it\n\n");
 	fprintf(stderr, "\t-T\tNumber of client RMA threads (default 1)\n");
+	fprintf(stderr, "\t-t\tNumber of server threads (default 1) set by server only\n");
 	fprintf(stderr, "Example:\n");
 	fprintf(stderr, "server$ %s -h sock://foo -p 2211 -s\n", name);
 	fprintf(stderr, "client$ %s -h sock://foo -p 2211\n", name);
@@ -496,9 +498,21 @@ out:
 	return;
 }
 
+static void *server_thread(void *arg)
+{
+	int i = (int)((uintptr_t)arg);
+
+	while (!done)
+		poll_events();
+
+	fprintf(stderr, "Thread %d exiting\n", i);
+
+	pthread_exit(NULL);
+}
+
 static void do_server(void)
 {
-	int ret = 0;
+	int ret = 0, i = 0;
 	hdr_t *h = NULL;
 
 	while (!ready) {
@@ -584,6 +598,17 @@ static void do_server(void)
 		}
 	}
 
+	/* spawn server threads */
+	for (i = 1; i < server_threads; i++) {
+		ret = pthread_create(&tid[i], NULL, &server_thread,
+				(void*)((uintptr_t)i));
+		if (ret) {
+			fprintf(stderr, "failed to create thread %d with %s\n",
+				i, strerror(ret));
+			exit(EXIT_FAILURE);
+		}
+	}
+
 	while (!done)
 		poll_events();
 
@@ -609,7 +634,7 @@ int main(int argc, char *argv[])
 
 	name = argv[0];
 
-	while ((c = getopt(argc, argv, "h:si:c:wrl:o:O:R:BIT:")) != -1) {
+	while ((c = getopt(argc, argv, "h:si:c:wrl:o:O:R:BIT:t:")) != -1) {
 		switch (c) {
 		case 'h':
 			server_uri = strdup(optarg);
@@ -659,6 +684,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'T':
 			opts.threads = client_threads = strtoul(optarg, NULL, 0);
+			break;
+		case 't':
+			server_threads = strtoul(optarg, NULL, 0);
 			break;
 		default:
 			print_usage();
@@ -758,6 +786,12 @@ int main(int argc, char *argv[])
 				"remote_offset %"PRIu64" "
 				"reg_len %"PRIu64" length %"PRIu64"\n",
 				local_offset, remote_offset, opts.reg_len, length);
+	} else { /* is server */
+		tid = calloc(server_threads, sizeof(*tid));
+		if (!tid) {
+			fprintf(stderr, "Unable to alloc memory for thread ids\n");
+			exit(EXIT_FAILURE);
+		}
 	}
 
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
