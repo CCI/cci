@@ -28,6 +28,7 @@
 #define RMA_REG_LEN	(4 * 1024 * 1024)
 
 /* Globals */
+int verbose = 0;
 int connect_done = 0, done = 0;
 int ready = 0;
 int is_server = 0;
@@ -127,7 +128,7 @@ static void print_usage(void)
 	fprintf(stderr, "where:\n");
 	fprintf(stderr, "\t-h\tServer's URI\n");
 	fprintf(stderr, "\t-s\tSet to run as the server\n");
-	fprintf(stderr, "\t-i\tRun this number of iterations\n");
+	fprintf(stderr, "\t-i\tRun this number of iterations (default %d)\n", iters);
 	fprintf(stderr, "\t-c\tConnection type (RU or RO) set by client only\n");
 	fprintf(stderr, "\t-w\tUse RMA WRITE (default)\n");
 	fprintf(stderr, "\t-r\tUse RMA READ instead of RMA WRITE\n");
@@ -183,7 +184,7 @@ print_buffer(int id, void *buf, int len)
 	int i = 0;
 	uint8_t *c = (uint8_t *)buf;
 
-	if (len > 128)
+	if (len > 128 || !verbose)
 		return;
 
 	fprintf(stderr, "%d: ** ", id);
@@ -305,12 +306,14 @@ static void poll_events(void)
 					m.status.crc = crc;
 					m.status.thread = h->check.thread;
 					if (opts.method == RMA_WRITE) {
+						if (crc != h->check.crc || verbose) {
 						fprintf(stderr, "server: client %d crc=0x%08x "
 							"server crc=0x%08x %s\n",
 							h->check.thread,
 							h->check.crc,
 							crc, crc == h->check.crc ?
 							"(ok)" : "(FAIL)");
+						}
 					}
 					print_buffer(0, ptr, h->check.len);
 					ret = cci_send(test, &m, sizeof(m.status),
@@ -634,7 +637,7 @@ int main(int argc, char *argv[])
 
 	name = argv[0];
 
-	while ((c = getopt(argc, argv, "h:si:c:wrl:o:O:R:BIT:t:")) != -1) {
+	while ((c = getopt(argc, argv, "h:si:c:wrl:o:O:R:BIT:t:v")) != -1) {
 		switch (c) {
 		case 'h':
 			server_uri = strdup(optarg);
@@ -687,6 +690,9 @@ int main(int argc, char *argv[])
 			break;
 		case 't':
 			server_threads = strtoul(optarg, NULL, 0);
+			break;
+		case 'v':
+			verbose = 1;
 			break;
 		default:
 			print_usage();
