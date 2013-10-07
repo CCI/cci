@@ -1860,8 +1860,9 @@ tcp_progress_conn_sends(cci__conn_t *conn, int ep_locked)
 		debug(CCI_DB_MSG, "%s: sending %s to conn %p",
 			__func__, tcp_msg_type(tx->msg_type), (void*)conn);
 
-		debug(CCI_DB_MSG, "%s: buffer %p len %u rma_ptr %p rma_len %u offset %"PRIuPTR"",
-			__func__, (void*)tx->buffer, tx->len, (void*)tx->rma_ptr, tx->rma_len, tx->offset);
+		debug(CCI_DB_MSG, "%s: buffer %p len %u rma_ptr %p rma_len %u "
+			"offset %"PRIuPTR" tx %u", __func__, (void*)tx->buffer,
+			tx->len, (void*)tx->rma_ptr, tx->rma_len, tx->offset, tx->id);
 
 		ret = tcp_sendto(tconn->fd, tx->buffer, tx->len,
 				tx->rma_ptr, tx->rma_len, &tx->offset);
@@ -2479,6 +2480,7 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 			tx->rma_len = 0;
 		}
 	}
+	pthread_mutex_lock(&ep->lock);
 	pthread_mutex_lock(&tconn->slock);
 	for (i = 0; i < cnt; i++)
 		TAILQ_INSERT_TAIL(&tconn->queued, &(txs[i])->evt, entry);
@@ -2486,7 +2488,6 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	tep->fds[tconn->index].events = POLLIN | POLLOUT;
 	pthread_mutex_unlock(&tconn->slock);
 
-	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&tep->rma_ops, rma_op, entry);
 	pthread_mutex_unlock(&ep->lock);
 
@@ -2846,6 +2847,8 @@ out:
 
 		ack = tx->buffer;
 		tcp_pack_ack(ack, tx_id, ret);
+
+		debug(CCI_DB_MSG, "%s: queuing ack for received tx %u", __func__, tx_id);
 
 		tcp_queue_tx(tep, tconn, &tx->evt);
 	}
