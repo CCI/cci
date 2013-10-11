@@ -1229,7 +1229,9 @@ static inline int
 tcp_new_conn(cci__ep_t *ep, struct sockaddr_in sin, int fd, cci__conn_t **connp)
 {
 	int ret = CCI_SUCCESS;
+	cci__dev_t *dev = ep->dev;
 	cci__conn_t *conn = NULL;
+	tcp_dev_t *tdev = dev->priv;
 	tcp_conn_t *tconn = NULL;
 	pthread_mutexattr_t attr;
 
@@ -1267,6 +1269,22 @@ tcp_new_conn(cci__ep_t *ep, struct sockaddr_in sin, int fd, cci__conn_t **connp)
 	ret = pthread_mutex_init(&tconn->slock, &attr);
 	if (ret)
 		goto out_with_rlock;
+
+	if (tdev->bufsize) {
+		uint32_t bufsize = tdev->bufsize;
+		socklen_t opt_len = sizeof(bufsize);
+
+		debug(CCI_DB_CONN, "%s: setting socket buffer sizes to %u",
+			__func__, bufsize);
+
+		ret = setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &bufsize, opt_len);
+		if (ret) debug(CCI_DB_EP, "%s: unable to set SO_SNDBUF (%s)",
+				__func__, strerror(errno));
+
+		ret = setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bufsize, opt_len);
+		if (ret) debug(CCI_DB_EP, "%s: unable to set SO_RCVBUF (%s)",
+				__func__, strerror(errno));
+	}
 
 	*connp = conn;
 
@@ -1409,22 +1427,6 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		goto out;
 	}
 	fd = ret;
-
-	if (tdev->bufsize) {
-		uint32_t bufsize = tdev->bufsize;
-		socklen_t opt_len = sizeof(bufsize);
-
-		debug(CCI_DB_CONN, "%s: setting socket buffer sizes to %u",
-			__func__, bufsize);
-
-		ret = setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &bufsize, opt_len);
-		if (ret) debug(CCI_DB_EP, "%s: unable to set SO_SNDBUF (%s)",
-				__func__, strerror(errno));
-
-		ret = setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bufsize, opt_len);
-		if (ret) debug(CCI_DB_EP, "%s: unable to set SO_RCVBUF (%s)",
-				__func__, strerror(errno));
-	}
 
 	ret = tcp_new_conn(ep, sin, fd, &conn);
 	if (ret)
