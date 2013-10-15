@@ -4625,7 +4625,7 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 
 	if (h != remote) {
 		/* remote is no longer valid, send nack */
-		debug(CCI_DB_WARN, "%s: remote handle not valid", __func__);
+		debug(CCI_DB_MSG, "%s: remote handle not valid", __func__);
 		/* TODO
 		   Note: we have already handled the seq for this rx
 		         and we may have acked it. If it was the last
@@ -4642,7 +4642,7 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 
 	if (remote_offset > remote->length) {
 		/* offset exceeds remote handle's range, send nak */
-		debug(CCI_DB_WARN,
+		debug(CCI_DB_MSG,
 		      "%s: remote offset not valid (start: %p, offset: %lu, "
 		      "length: %lu)", __func__, remote->start, remote_offset,
 		      remote->length);
@@ -4655,7 +4655,7 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 		goto out;
 	} else if (remote_offset + len > remote->length) {
 		/* length exceeds remote handle's range, send nak */
-		debug(CCI_DB_WARN, "%s: remote length not valid", __func__);
+		debug(CCI_DB_MSG, "%s: remote length not valid", __func__);
 		/* TODO
 		   Note: we have already handled the seq for this rx
 		         and we may have acked it. If it was the last
