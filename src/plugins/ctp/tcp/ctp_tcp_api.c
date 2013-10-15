@@ -1520,10 +1520,13 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
 	pthread_mutex_unlock(&tconn->slock);
 
+again:
 	/* ok, initiate connect()... */
 	ret = connect(tconn->fd, (struct sockaddr *)&sin, slen);
 	if (ret) {
 		ret = errno;
+		if (ret == EINTR)
+			goto again;
 		if (ret != EINPROGRESS) {
 			debug(CCI_DB_CONN, "%s: connect() returned %s",
 				__func__, strerror(ret));
@@ -1537,9 +1540,11 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 
 	/* try to progress txs */
 
+#if 0
 	pthread_mutex_lock(&ep->lock);
 	tcp_progress_conn_sends(conn, 1);
 	pthread_mutex_unlock(&ep->lock);
+#endif
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -2156,11 +2161,13 @@ static int tcp_send_common(cci_connection_t * connection,
 	/* if blocking, wait for completion */
 
 	if (tx->flags & CCI_FLAG_BLOCKING) {
-		while (tx->state != TCP_TX_COMPLETED)
+		while (tx->state != TCP_TX_COMPLETED && tconn->status == TCP_CONN_READY)
 			tcp_progress_ep(ep);
 
 		/* get status and cleanup */
 		ret = event->send.status;
+		if (ret == CCI_SUCCESS && tconn->status != TCP_CONN_READY)
+			ret = CCI_ERR_DISCONNECTED;
 
 		/* NOTE race with get_event()
 		 *      get_event() must ignore sends with
@@ -3441,6 +3448,7 @@ tcp_poll_events(cci__ep_t *ep)
 		cci__conn_t *conn = tep->c[i];
 		tcp_conn_t *tconn = NULL;
 
+again:
 		if (revents) {
 			debug(CCI_DB_EP, "%s: revents 0x%x",
 				__func__, revents);
@@ -3451,7 +3459,6 @@ tcp_poll_events(cci__ep_t *ep)
 		if (conn)
 			tconn = conn->priv;
 
-again:
 		if (revents & POLLHUP) {
 			tcp_conn_status_t old_status = tconn->status;
 			cci__evt_t *evt = NULL;
@@ -3460,10 +3467,9 @@ again:
 			socklen_t err = 0, *pe = &err, slen = sizeof(err);
 
 			rc = getsockopt(tconn->fd, SOL_SOCKET, SO_ERROR, (void*)pe, &slen);
-			if (old_status == TCP_CONN_ACTIVE1 && err == 0 && revents != POLLHUP) {
-				debug(CCI_DB_CONN, "%s: ignoring spurious POLLHUP for "
-					"for async connection completion - connection "
-					"is valid", __func__);
+			if (err == 0 && revents == (POLLHUP|POLLOUT)) {
+				debug(CCI_DB_CONN, "%s: got both POLLHUP & POLLOUT for for "
+					"conn %p so_error is Success", __func__, (void*)conn);
 				revents = revents & (~(POLLHUP));
 				goto again;
 			}
@@ -3484,7 +3490,8 @@ again:
 			case TCP_CONN_ACTIVE1:
 			case TCP_CONN_ACTIVE2:
 				pthread_mutex_lock(&tconn->slock);
-				if (old_status == TCP_CONN_ACTIVE1) {
+				if (old_status == TCP_CONN_ACTIVE1 ||
+					!TAILQ_EMPTY(&tconn->queued)) {
 					evt = TAILQ_FIRST(&tconn->queued);
 					TAILQ_REMOVE(&tconn->queued, evt, entry);
 				} else {
@@ -3533,12 +3540,16 @@ again:
 			}
 		}
 		if (revents & POLLOUT) {
+			pthread_mutex_lock(&tconn->slock);
 			if (tconn->status == TCP_CONN_ACTIVE1) {
 				/*  send CONN_REQUEST on new connection */
-				debug(CCI_DB_CONN, "%s: connect() completed", __func__);
+				debug(CCI_DB_CONN, "%s: conn %p connect() completed",
+					__func__, (void*)conn);
 				tconn->status = TCP_CONN_ACTIVE2;
 				tep->fds[i].events = POLLIN | POLLOUT;
 			}
+			pthread_mutex_unlock(&tconn->slock);
+
 			pthread_mutex_lock(&ep->lock);
 			tcp_progress_conn_sends(conn, 1);
 			pthread_mutex_unlock(&ep->lock);
@@ -3558,7 +3569,7 @@ again:
 increment:
 		i++;
 
-		if (count == (int)tep->nfds)
+		if (found == tep->nfds)
 			break; /* because OSX returns the wrong count from poll */
 	} while (count);
 
