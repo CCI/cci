@@ -603,11 +603,8 @@ typedef struct tcp_rx {
 	/*! Buffer length */
 	uint16_t len;
 
-	/*! rx ID */
-	uint32_t id;
-
-	/*! Peer's sockaddr_in for connection requests */
-	struct sockaddr_in sin;
+	/*! Amount read (header + payload (including RMA) */
+	uintptr_t offset;
 } tcp_rx_t;
 
 typedef struct tcp_rma_handle {
@@ -693,6 +690,11 @@ typedef struct tcp_ep {
 	 *  while is_polling is set. We need to queue any changes and the
 	 *  poller can perform them after processing the poll results. */
 	uint32_t is_polling;
+
+	int32_t waiting;
+
+	/*! Use to block waiting on is_polling, use ep->lock as needed */
+	pthread_cond_t poll_wait;
 
 	/*! For polling connection sockets */
 	struct pollfd *fds;
@@ -829,11 +831,11 @@ typedef struct tcp_conn {
 	/*! socket for this connection */
 	uint32_t fd;
 
-	/*! Lock for receiving */
-	pthread_mutex_t rlock;
+	/*! partial receive */
+	tcp_rx_t *rx;
 
-	/*! Lock for sending */
-	pthread_mutex_t slock;
+	/*! Lock */
+	pthread_mutex_t lock;
 
 	/*! Index in tep->fds */
 	uint32_t index;
