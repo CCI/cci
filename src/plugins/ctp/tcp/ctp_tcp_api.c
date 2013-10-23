@@ -520,15 +520,27 @@ static inline void tcp_close_socket(cci_os_handle_t sock)
 	return;
 }
 
+static inline int
+tcp_new_conn(cci__ep_t *ep, struct sockaddr_in sin, int fd, cci__conn_t **connp);
+
+static void
+queue_conn(cci__ep_t *ep, cci__conn_t *conn, int which);
+
+static void
+conn_decref(cci__ep_t *ep, cci__conn_t *conn);
+
 static int ctp_tcp_create_endpoint(cci_device_t * device,
 				int flags,
 				cci_endpoint_t ** endpointp,
 				cci_os_handle_t * fd)
 {
 	int i, ret, one = 1;
+	cci_os_handle_t sock;
 	cci__dev_t *dev = NULL;
 	cci__ep_t *ep = NULL;
+	cci__conn_t *conn = NULL;
 	tcp_ep_t *tep = NULL;
+	tcp_conn_t *tconn = NULL;
 	struct cci_endpoint *endpoint = (struct cci_endpoint *) *endpointp;
 	tcp_dev_t *tdev;
 	struct sockaddr_in sin;
@@ -573,13 +585,13 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 
 	tep = ep->priv;
 
-	tep->sock = socket(PF_INET, SOCK_STREAM, 0);
-	if (tep->sock == -1) {
+	sock = socket(PF_INET, SOCK_STREAM, 0);
+	if (sock == -1) {
 		ret = errno;
 		goto out;
 	}
 
-	ret = setsockopt(tep->sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+	ret = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 	if (ret) {
 		ret = errno;
 		debug(CCI_DB_EP, "%s: setting SO_REUSEADDR returned %s",
@@ -594,7 +606,7 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 	if (tdev->port != 0)
         sin.sin_port = tdev->port;
 
-	ret = bind(tep->sock, (const struct sockaddr *)&sin, sizeof(sin));
+	ret = bind(sock, (const struct sockaddr *)&sin, sizeof(sin));
 	if (ret) {
 		ret = errno;
 		goto out;
@@ -602,7 +614,7 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 
 	slen = sizeof(tep->sin);
 
-	ret = getsockname(tep->sock, (struct sockaddr *)&tep->sin, &slen);
+	ret = getsockname(sock, (struct sockaddr *)&tep->sin, &slen);
 	if (ret) {
 		ret = errno;
 		goto out;
@@ -612,13 +624,6 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 	sprintf(name, "tcp://");
 	tcp_sin_to_name(tep->sin, name + (uintptr_t) 6, sizeof(name) - 6);
 	ep->uri = strdup(name);
-
-	ret = pthread_cond_init(&tep->poll_wait, NULL);
-	if (ret) {
-		debug(CCI_DB_EP, "%s: pthread_cond_init() failed with %s",
-			__func__, strerror(ret));
-		goto out;
-	}
 
 	TAILQ_INIT(&tep->conns);
 	TAILQ_INIT(&tep->active);
@@ -630,22 +635,15 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 	TAILQ_INIT(&tep->handles);
 	TAILQ_INIT(&tep->rma_ops);
 
-	tep->fds = calloc(TCP_EP_MAX_CONNS, sizeof(*tep->fds));
-	if (!tep->fds) {
-		ret = CCI_ENOMEM;
+	ret = tcp_new_conn(ep, sin, sock, &conn);
+	if (ret)
 		goto out;
-	}
 
-	tep->fds[0].fd = tep->sock;
-	tep->fds[0].events = POLLIN;
-	tep->nfds = 1;
-
-	tep->c = calloc(TCP_EP_MAX_CONNS, sizeof(*tep->c));
-	if (!tep->c) {
-		ret = CCI_ENOMEM;
-		goto out;
-	}
-	/* NOTE: tep->c[0] is the listening socket and not a connection */
+	tconn = conn->priv;
+	tconn->status = TCP_CONN_READY;
+	tconn->is_listener = 1;
+	tconn->pfd.events = POLLIN;
+	queue_conn(ep, conn, TCP_Q_CONNS);
 
 	tep->tx_buf = calloc(1, ep->tx_buf_cnt * ep->buffer_len);
 	if (!tep->tx_buf) {
@@ -698,11 +696,11 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 		TAILQ_INSERT_TAIL(&tep->idle_rxs, &rx->evt, entry);
 	}
 
-	ret = tcp_set_nonblocking(tep->sock);
+	ret = tcp_set_nonblocking(sock);
 	if (ret)
 		goto out;
 
-	ret = listen(tep->sock, SOMAXCONN);
+	ret = listen(sock, SOMAXCONN);
 	if (ret) {
 		ret = errno;
 		goto out;
@@ -721,10 +719,22 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 			goto out;
 	}
 
+	conn_decref(ep, conn); /* drop our ref to the listening conn */
+
 	CCI_EXIT;
 	return CCI_SUCCESS;
 
 out:
+	if (conn) {
+		if (tconn) {
+			if (tconn->pfd.fd)
+				close(tconn->pfd.fd);
+		}
+		free((char*)conn->uri);
+	}
+	free(conn->priv);
+	free(conn);
+
 	pthread_mutex_lock(&dev->lock);
 	if (!TAILQ_EMPTY(&dev->eps)) {
 		TAILQ_REMOVE(&dev->eps, ep, entry);
@@ -737,12 +747,10 @@ out:
 		free(tep->rxs);
 		free(tep->rx_buf);
 
-		free(tep->fds);
-
 		if (tep->ids)
 			free(tep->ids);
-		if (tep->sock)
-			tcp_close_socket(tep->sock);
+		if (sock)
+			tcp_close_socket(sock);
 		free(tep);
 	}
 	if (ep) {
@@ -752,51 +760,6 @@ out:
 	*endpointp = NULL;
 	CCI_EXIT;
 	return ret;
-}
-
-static inline int
-tcp_take_polling_token(cci__ep_t *ep)
-{
-	int ret = CCI_SUCCESS;
-
-	tcp_ep_t *tep = ep->priv;
-
-	pthread_mutex_lock(&ep->lock);
-	if (ep->closing) {
-		pthread_mutex_unlock(&ep->lock);
-		return CCI_ERROR;
-	}
-	if (tep->is_polling) {
-		tep->waiting++;
-		pthread_cond_wait(&tep->poll_wait, &ep->lock);
-		tep->waiting--;
-		assert(tep->waiting >= 0);
-		assert(tep->is_polling == 0);
-	}
-	if (ep->closing)
-		ret = CCI_ERROR;
-	else
-		tep->is_polling = 1;
-	pthread_mutex_unlock(&ep->lock);
-
-	return ret;
-}
-
-static inline void
-tcp_release_polling_token(cci__ep_t *ep)
-{
-	tcp_ep_t *tep = ep->priv;
-
-	pthread_mutex_lock(&ep->lock);
-	tep->is_polling = 0;
-	if (ep->closing) {
-		pthread_cond_broadcast(&tep->poll_wait);
-	} else if (tep->waiting) {
-		pthread_cond_signal(&tep->poll_wait);
-	}
-	pthread_mutex_unlock(&ep->lock);
-
-	return;
 }
 
 static inline void
@@ -816,18 +779,23 @@ tcp_conn_set_closing_locked(cci__ep_t *ep, cci__conn_t *conn)
 
 	tcp_ignore_fd_locked(tep, tconn);
 
-	if (tconn->status == TCP_CONN_READY)
+	if (tconn->status == TCP_CONN_READY) {
 		TAILQ_REMOVE(&tep->conns, tconn, entry);
-	else if (tconn->status == TCP_CONN_ACTIVE1 ||
-			tconn->status == TCP_CONN_ACTIVE2)
+	} else if (tconn->status == TCP_CONN_ACTIVE1 ||
+			tconn->status == TCP_CONN_ACTIVE2) {
 		TAILQ_REMOVE(&tep->active, tconn, entry);
-	else if (tconn->status == TCP_CONN_PASSIVE1 ||
-			tconn->status == TCP_CONN_PASSIVE2)
+		if (tep->poll_conn[TCP_Q_ACTIVE] == tconn)
+			tep->poll_conn[TCP_Q_ACTIVE] = NULL;
+	} else if (tconn->status == TCP_CONN_PASSIVE1 ||
+			tconn->status == TCP_CONN_PASSIVE2) {
 		TAILQ_REMOVE(&tep->passive, tconn, entry);
-	else
+		if (tep->poll_conn[TCP_Q_PASSIVE] == tconn)
+			tep->poll_conn[TCP_Q_PASSIVE] = NULL;
+	} else {
 		debug(CCI_DB_WARN, "%s: conn %p status %s", __func__,
 				(void*)conn,
 				tcp_conn_status_str(tconn->status));
+	}
 
 	debug(CCI_DB_CONN, "%s: closing conn %p tconn %p status %s",
 		__func__, (void*)conn, (void*)tconn, tcp_conn_status_str(tconn->status));
@@ -872,9 +840,6 @@ static int ctp_tcp_destroy_endpoint(cci_endpoint_t * endpoint)
 		pthread_mutex_lock(&dev->lock);
 		pthread_mutex_lock(&ep->lock);
 
-		if (tep->sock)
-			tcp_close_socket(tep->sock);
-
 		while (!TAILQ_EMPTY(&tep->conns)) {
 			tconn = TAILQ_FIRST(&tep->conns);
 			conn = tconn->conn;
@@ -914,9 +879,6 @@ static int ctp_tcp_destroy_endpoint(cci_endpoint_t * endpoint)
 
 		free(tep->rxs);
 		free(tep->rx_buf);
-
-		free(tep->fds);
-		free(tep->c);
 
 		while (!TAILQ_EMPTY(&tep->rma_ops)) {
 			tcp_rma_op_t *rma_op = TAILQ_FIRST(&tep->rma_ops);
@@ -1102,6 +1064,8 @@ static int ctp_tcp_accept(cci_event_t *event, const void *context)
 
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_REMOVE(&tep->passive, tconn, entry); /* FIXME */
+		if (tep->poll_conn[TCP_Q_PASSIVE] == tconn)
+			tep->poll_conn[TCP_Q_PASSIVE] = NULL;
 		pthread_mutex_unlock(&ep->lock);
 
 		free((char*)conn->uri);
@@ -1207,12 +1171,9 @@ static int ctp_tcp_reject(cci_event_t *event)
 	debug((CCI_DB_MSG | CCI_DB_CONN), "ep %d sending reject to %s",
 	      tep->sock, name);
 
-	tcp_take_polling_token(ep);
-
 	pthread_mutex_lock(&ep->lock);
 	tcp_conn_set_closing_locked(ep, conn);
 	pthread_mutex_unlock(&ep->lock);
-	tcp_release_polling_token(ep);
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -1296,7 +1257,12 @@ tcp_new_conn(cci__ep_t *ep, struct sockaddr_in sin, int fd, cci__conn_t **connp)
 
 	tconn = conn->priv;
 	tconn->conn = conn;
+	tconn->refcnt = 1; /* one for the caller */
 	tconn->pfd.fd = fd;
+	if (fd != -1)
+		tconn->status = TCP_CONN_ACTIVE1;
+	else
+		tconn->status = TCP_CONN_PASSIVE1;
 	TAILQ_INIT(&tconn->rmas);
 	TAILQ_INIT(&tconn->queued);
 	TAILQ_INIT(&tconn->pending);
@@ -1354,9 +1320,7 @@ tcp_monitor_fd(cci__ep_t *ep, cci__conn_t *conn, int events)
 	pthread_mutex_lock(&ep->lock);
 	tconn->index = tep->nfds++;
 	assert(tep->nfds < TCP_EP_MAX_CONNS);
-	tep->fds[tconn->index].fd = tconn->pfd.fd;
-	tep->fds[tconn->index].events = events;
-	tep->c[tconn->index] = conn;
+	tconn->pfd.events = events;
 	pthread_mutex_unlock(&ep->lock);
 
 	debug(CCI_DB_CONN, "%s: tconn->index = %u tep->nfds = %u",
@@ -1385,30 +1349,32 @@ tcp_ignore_fd_locked(tcp_ep_t *tep, tcp_conn_t *tconn)
 	debug(CCI_DB_CONN, "%s: conn=%p tconn=%p tconn->index=%u nfds=%u",
 		__func__, (void*)conn, (void*)tconn, index, nfds);
 
-	if (index != nfds) {
-		/* The closing conn is not the last conn.
-		 * Move the last conn to the closing conn's place.
-		 */
-		cci__conn_t *c = tep->c[nfds];
-		tcp_conn_t *tc = c->priv;
-
-		debug(CCI_DB_CONN, "%s: moving conn %p from index %u to %u",
-			__func__, (void*)c, nfds, index);
-
-		tep->fds[index].fd = tep->fds[nfds].fd;
-		tep->fds[index].events = tep->fds[nfds].events;
-		tep->c[index] = tep->c[nfds];
-		tc->index = index;
-
-		index = nfds;
-	}
-	tep->fds[nfds].fd = 0;
-	tep->fds[nfds].events = 0;
-	tep->c[nfds] = NULL;
-
 	close(tconn->pfd.fd);
 	tconn->index = 0;
 
+	return;
+}
+
+static void
+queue_conn(cci__ep_t *ep, cci__conn_t *conn, int which)
+{
+	tcp_ep_t *tep = ep->priv;
+	tcp_conn_t *tconn = conn->priv;
+
+	pthread_mutex_lock(&ep->lock);
+	if (which == TCP_Q_CONNS) {
+		TAILQ_INSERT_TAIL(&tep->conns, tconn, entry);
+	} else if (which == TCP_Q_ACTIVE) {
+		TAILQ_INSERT_TAIL(&tep->active, tconn, entry);
+	} else if (which == TCP_Q_PASSIVE) {
+		TAILQ_INSERT_TAIL(&tep->passive, tconn, entry);
+	} else {
+		debug(CCI_DB_CONN, "%s: conn %p with unknown queue %d", __func__,
+				(void*)conn, which);
+		assert(0);
+	}
+	tconn->refcnt++; /* for the list */
+	pthread_mutex_unlock(&ep->lock);
 	return;
 }
 
@@ -1476,7 +1442,6 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	/* set up tcp specific info */
 
 	tconn = conn->priv;
-	tconn->status = TCP_CONN_ACTIVE1;
 
 	/* Dealing with keepalive, if set, include the keepalive timeout value into
 	   the connection request */
@@ -1485,10 +1450,6 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	    && ep->keepalive_timeout != 0UL) {
 		keepalive = ep->keepalive_timeout;
 	}
-
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_TAIL(&tep->active, tconn, entry);
-	pthread_mutex_unlock(&ep->lock);
 
 	/* get a tx */
 	tx = tcp_get_tx(ep, 0);
@@ -1557,13 +1518,19 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
 	pthread_mutex_unlock(&tconn->lock);
 
+	queue_conn(ep, conn, TCP_Q_ACTIVE);
+
 again:
 	/* ok, initiate connect()... */
 	ret = connect(tconn->pfd.fd, (struct sockaddr *)&sin, slen);
 	if (ret) {
 		ret = errno;
-		if (ret == EINTR)
+		if (ret == EINTR) {
+			debug(CCI_DB_CONN, "%s: connect() returned %s",
+				__func__, strerror(ret));
+			usleep(100000);
 			goto again;
+		}
 		if (ret != EINPROGRESS) {
 			debug(CCI_DB_CONN, "%s: connect() returned %s",
 				__func__, strerror(ret));
@@ -1572,8 +1539,10 @@ again:
 	} else {
 		/* TODO connect completed, send CONN_REQUEST */
 		debug(CCI_DB_CONN, "%s: connect() completed", __func__);
-		tep->fds[tconn->index].events = POLLIN | POLLOUT;
+		tconn->pfd.events = POLLIN | POLLOUT;
 	}
+
+	conn_decref(ep, conn);
 
 	/* try to progress txs */
 
@@ -1588,13 +1557,17 @@ again:
 
 out:
 	if (conn) {
-		if (ret == CCI_ENOBUFS) {
-			pthread_mutex_lock(&ep->lock);
-			TAILQ_REMOVE(&tep->active, tconn, entry);
-			pthread_mutex_unlock(&ep->lock);
-		}
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_REMOVE(&tep->active, tconn, entry);
+		if (tconn == tep->poll_conn[TCP_Q_ACTIVE])
+			tep->poll_conn[TCP_Q_ACTIVE] = NULL;
+		pthread_mutex_unlock(&ep->lock);
 
 		free((char *)conn->uri);
+#if CCI_DEBUG
+		memset(tconn, 0xFF, sizeof(*tconn));
+		memset(conn, 0xFF, sizeof(*conn));
+#endif
 		free(conn->priv);
 		free(conn);
 	}
@@ -1621,12 +1594,9 @@ static int ctp_tcp_disconnect(cci_connection_t * connection)
 	ep = container_of(connection->endpoint, cci__ep_t, endpoint);
 	tep = ep->priv;
 
-	tcp_take_polling_token(ep);
-
 	pthread_mutex_lock(&ep->lock);
 	tcp_conn_set_closing_locked(ep, conn);
 	pthread_mutex_unlock(&ep->lock);
-	tcp_release_polling_token(ep);
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -1958,10 +1928,7 @@ tcp_progress_conn_sends(cci__conn_t *conn, int ep_locked)
 		}
 	}
 	if (TAILQ_EMPTY(&tconn->queued)) {
-		cci_endpoint_t *endpoint = conn->connection.endpoint;
-		cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
-		tcp_ep_t *tep = ep->priv;
-		tep->fds[tconn->index].events = POLLIN;
+		tconn->pfd.events = POLLIN;
 	}
 	pthread_mutex_unlock(&tconn->lock);
 
@@ -2026,7 +1993,7 @@ tcp_queue_tx(tcp_ep_t *tep, tcp_conn_t *tconn, cci__evt_t *evt)
 {
 	pthread_mutex_lock(&tconn->lock);
 	TAILQ_INSERT_TAIL(&tconn->queued, evt, entry);
-	tep->fds[tconn->index].events = POLLIN | POLLOUT;
+	tconn->pfd.events = POLLIN | POLLOUT;
 	pthread_mutex_unlock(&tconn->lock);
 }
 
@@ -2523,7 +2490,7 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	for (i = 0; i < cnt; i++)
 		TAILQ_INSERT_TAIL(&tconn->queued, &(txs[i])->evt, entry);
 	TAILQ_INSERT_TAIL(&tconn->rmas, rma_op, rmas);
-	tep->fds[tconn->index].events = POLLIN | POLLOUT;
+	tconn->pfd.events = POLLIN | POLLOUT;
 	pthread_mutex_unlock(&tconn->lock);
 
 	TAILQ_INSERT_TAIL(&tep->rma_ops, rma_op, entry);
@@ -2551,12 +2518,11 @@ out:
 
 
 static void
-tcp_handle_listen_socket(cci__ep_t *ep)
+tcp_handle_listen_socket(cci__ep_t *ep, cci__conn_t *listen_conn)
 {
 	int ret;
 	cci__conn_t *conn = NULL;
-	tcp_ep_t *tep = ep->priv;
-	tcp_conn_t *tconn = NULL;
+	tcp_conn_t *listen_tconn = listen_conn->priv, *tconn = NULL;
 	struct sockaddr_in sin;
 	socklen_t slen = sizeof(sin);
 	char name[256 + 6];	/* POSIX HOST_NAME_MAX + tcp:// */
@@ -2569,7 +2535,7 @@ tcp_handle_listen_socket(cci__ep_t *ep)
 
 	tconn = conn->priv;
 
-	ret = accept(tep->sock, (struct sockaddr *)&sin, &slen);
+	ret = accept(listen_tconn->pfd.fd, (struct sockaddr *)&sin, &slen);
 	if (ret == -1) {
 		ret = errno;
 		debug(CCI_DB_CONN, "%s: accept() failed with %s (%d)",
@@ -2582,14 +2548,13 @@ tcp_handle_listen_socket(cci__ep_t *ep)
 	if (ret)
 		goto out;
 
-	pthread_mutex_lock(&ep->lock);
-	tconn->status = TCP_CONN_PASSIVE1;
-	TAILQ_INSERT_TAIL(&tep->passive, tconn, entry);
-	pthread_mutex_unlock(&ep->lock);
+	queue_conn(ep, conn, TCP_Q_PASSIVE);
 
 	memset(name, 0, sizeof(name));
-	tcp_sin_to_name(tconn->sin, name, sizeof(name));
+	tcp_sin_to_name(sin, name, sizeof(name));
 	debug(CCI_DB_CONN, "%s: new conn request from %s", __func__, name);
+
+	conn_decref(ep, conn); /* drop our ref */
 
 	CCI_EXIT;
 	return;
@@ -2775,7 +2740,10 @@ tcp_handle_conn_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		pthread_mutex_unlock(&tconn->lock);
 
 		pthread_mutex_lock(&ep->lock);
+		/* active's refcnt goes to conns */
 		TAILQ_REMOVE(&tep->active, tconn, entry);
+		if (tconn == tep->poll_conn[TCP_Q_ACTIVE])
+			tep->poll_conn[TCP_Q_ACTIVE] = NULL;
 		TAILQ_INSERT_TAIL(&tep->conns, tconn, entry);
 		pthread_mutex_unlock(&ep->lock);
 
@@ -2823,7 +2791,10 @@ tcp_handle_conn_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx, uint32_t tx_
 
 	pthread_mutex_lock(&ep->lock);
 	tconn->status = TCP_CONN_READY;
+	/* passive's refcnt goes to conns */
 	TAILQ_REMOVE(&tep->passive, tconn, entry);
+	if (tep->poll_conn[TCP_Q_PASSIVE] == tconn)
+		tep->poll_conn[TCP_Q_PASSIVE] = NULL;
 	TAILQ_INSERT_TAIL(&tep->conns, tconn, entry);
 	TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
 	pthread_mutex_unlock(&ep->lock);
@@ -3427,186 +3398,427 @@ out:
 	return;
 }
 
+/* Get next conn from tep->conns
+ *
+ * Returns CCI_SUCCESS or CCI_EAGAIN
+ * and sets connp accordingly
+ */
+static int
+get_ready_conn_locked(cci__ep_t *ep, cci__conn_t **connp)
+{
+	int ret = CCI_EAGAIN;
+	cci__conn_t *conn = NULL;
+	tcp_ep_t *tep = ep->priv;
+	tcp_conn_t *last = tep->poll_conn[TCP_Q_CONNS], *end = NULL;
+
+	if (TAILQ_EMPTY(&tep->conns)) {
+		assert(last == NULL);
+		goto out;
+	}
+
+	if (last == NULL)
+		last = TAILQ_FIRST(&tep->conns);
+
+	end = last;
+
+	do {
+		last = TAILQ_NEXT(last, entry);
+
+		if (!last)
+			last = TAILQ_FIRST(&tep->conns);
+
+		if (last->status > TCP_CONN_INIT && last->refcnt == 1) {
+			conn = last->conn;
+			last->refcnt++;
+			ret = CCI_SUCCESS;
+			break;
+		}
+	} while (last != end);
+
+	tep->poll_conn[TCP_Q_CONNS] = last;
+    out:
+	*connp = conn;
+	return ret;
+}
+
+/* Get next conn from tep->active
+ *
+ * Returns CCI_SUCCESS or CCI_EAGAIN
+ * and sets connp accordingly
+ */
+static int
+get_active_conn_locked(cci__ep_t *ep, cci__conn_t **connp)
+{
+	int ret = CCI_EAGAIN;
+	cci__conn_t *conn = NULL;
+	tcp_ep_t *tep = ep->priv;
+	tcp_conn_t *last = tep->poll_conn[TCP_Q_ACTIVE], *end = NULL;
+
+	if (TAILQ_EMPTY(&tep->active)) {
+		assert(last == NULL);
+		goto out;
+	}
+
+	if (last == NULL)
+		last = TAILQ_FIRST(&tep->active);
+
+	end = last;
+
+	do {
+		last = TAILQ_NEXT(last, entry);
+
+		if (!last)
+			last = TAILQ_FIRST(&tep->active);
+
+		if (last->status > TCP_CONN_INIT && last->refcnt == 1) {
+			conn = last->conn;
+			last->refcnt++;
+			ret = CCI_SUCCESS;
+			break;
+		}
+	} while (last != end);
+
+	tep->poll_conn[TCP_Q_ACTIVE] = last;
+    out:
+	*connp = conn;
+	return ret;
+}
+
+/* Get next conn from tep->passive
+ *
+ * Returns CCI_SUCCESS or CCI_EAGAIN
+ * and sets connp accordingly
+ */
+static int
+get_passive_conn_locked(cci__ep_t *ep, cci__conn_t **connp)
+{
+	int ret = CCI_EAGAIN;
+	cci__conn_t *conn = NULL;
+	tcp_ep_t *tep = ep->priv;
+	tcp_conn_t *last = tep->poll_conn[TCP_Q_PASSIVE], *end = NULL;
+
+	if (TAILQ_EMPTY(&tep->passive)) {
+		assert(last == NULL);
+		goto out;
+	}
+
+	if (last == NULL)
+		last = TAILQ_FIRST(&tep->passive);
+
+	end = last;
+
+	do {
+		last = TAILQ_NEXT(last, entry);
+
+		if (!last)
+			last = TAILQ_FIRST(&tep->passive);
+
+		if (last->status > TCP_CONN_INIT && last->refcnt == 1) {
+			conn = last->conn;
+			last->refcnt++;
+			ret = CCI_SUCCESS;
+			break;
+		}
+	} while (last != end);
+
+	tep->poll_conn[TCP_Q_PASSIVE] = last;
+    out:
+	*connp = conn;
+	return ret;
+}
+
+static void
+delete_conn_locked(cci__conn_t *conn)
+{
+	tcp_conn_t *tconn = conn->priv;
+
+	assert(tconn->rx == NULL);
+	assert(TAILQ_EMPTY(&tconn->queued));
+	assert(TAILQ_EMPTY(&tconn->pending));
+	assert(TAILQ_EMPTY(&tconn->rmas));
+
+	free((char *)conn->uri);
+
+#if CCI_DEBUG
+	memset(tconn, 0xFF, sizeof(*tconn));
+	memset(conn, 0xFF, sizeof(*conn));
+#endif
+	free(tconn);
+	free(conn);
+	return;
+}
+
+static void
+conn_decref_locked(cci__ep_t *ep, cci__conn_t *conn)
+{
+	tcp_ep_t *tep = ep->priv;
+	tcp_conn_t *tconn = conn->priv;
+
+	tconn->refcnt--;
+
+	if (tconn->refcnt == 0) {
+		assert(tconn->status < TCP_CONN_INIT);
+		TAILQ_REMOVE(&tep->closing, tconn, entry);
+		delete_conn_locked(conn);
+	}
+	return;
+}
+
+static void
+conn_decref(cci__ep_t *ep, cci__conn_t *conn)
+{
+	pthread_mutex_lock(&ep->lock);
+	conn_decref_locked(ep, conn);
+	pthread_mutex_unlock(&ep->lock);
+	return;
+}
+
+/* Get the next conn to poll
+ *
+ * Maybe active, passive, or ready
+ * Adds tconn->refcnt for the caller
+ *
+ * Return CCI_SUCCESS or CCI_EAGAIN
+ */
+static int
+get_next_conn(cci__ep_t *ep, cci__conn_t **connp)
+{
+	int ret = CCI_EAGAIN, try = 0;
+	tcp_ep_t *tep = ep->priv;
+
+	if (ep->closing)
+		goto out;
+
+	pthread_mutex_lock(&ep->lock);
+    again:
+	switch (tep->poll_list) {
+	case TCP_Q_CONNS:
+		ret = get_ready_conn_locked(ep, connp);
+		break;
+	case TCP_Q_ACTIVE:
+		ret = get_active_conn_locked(ep, connp);
+		break;
+	case TCP_Q_PASSIVE:
+		ret = get_passive_conn_locked(ep, connp);
+		break;
+	}
+	tep->poll_list++;
+	if (tep->poll_list > TCP_Q_PASSIVE)
+		tep->poll_list = TCP_Q_CONNS;
+	if (ret == CCI_EAGAIN && try < 3)
+		goto again;
+	pthread_mutex_unlock(&ep->lock);
+    out:
+	return ret;
+}
+
+static void
+events(short revents, char *str, int len)
+{
+	int bar = 0, offset = 0;
+
+	memset(str, 0, len);
+
+	if (revents & POLLIN) {
+		sprintf(str, "POLLIN");
+		bar = 1;
+		offset = strlen(str);
+		revents &= ~POLLIN;
+	}
+	if (revents & POLLOUT) {
+		sprintf((void*)((uintptr_t)str + offset), "%sPOLLOUT", bar ? "|" : "");
+		bar = 1;
+		offset = strlen(str);
+		revents &= ~POLLOUT;
+	}
+	if (revents & POLLHUP) {
+		sprintf((void*)((uintptr_t)str + offset), "%sPOLLHUP", bar ? "|" : "");
+		bar = 1;
+		offset = strlen(str);
+		revents &= ~POLLHUP;
+	}
+	if (revents & POLLERR) {
+		sprintf((void*)((uintptr_t)str + offset), "%sPOLLERR", bar ? "|" : "");
+		bar = 1;
+		offset = strlen(str);
+		revents &= ~POLLERR;
+	}
+	if (revents & POLLNVAL) {
+		sprintf((void*)((uintptr_t)str + offset), "%sPOLLNVAL", bar ? "|" : "");
+		bar = 1;
+		offset = strlen(str);
+		revents &= ~POLLNVAL;
+	}
+	if (revents) {
+		sprintf((void*)((uintptr_t)str + offset), "%s0x%x", bar ? "|" : "", revents);
+	}
+	return;
+}
+
+#define POLL_EVENTS_LEN	(64)
+
 static int
 tcp_poll_events(cci__ep_t *ep)
 {
-	int ret = CCI_EAGAIN, i, count;
+	int ret = CCI_EAGAIN;
+	char str[POLL_EVENTS_LEN];
 	tcp_ep_t *tep = ep->priv;
+	cci__conn_t *conn = NULL;
+	tcp_conn_t *tconn = NULL;
+	short revents = 0;
 
 	if (!tep)
 		return CCI_ENODEV;
 
-	pthread_mutex_lock(&ep->lock);
-	if (ep->closing) {
-		pthread_mutex_unlock(&ep->lock);
-		CCI_EXIT;
-		return ret;
-	}
-	pthread_mutex_unlock(&ep->lock);
-
-	ret = tcp_take_polling_token(ep);
+	ret = get_next_conn(ep, &conn);
 	if (ret)
 		return CCI_EAGAIN;
+
+	tconn = conn->priv;
+	/* Note: we have a ref on this conn */
 
 	/* check for incoming messages (POLLIN) _and_
 	 * connect completions (POLLOUT)
 	 */
-	ret = poll(tep->fds, tep->nfds, 0);
+	ret = poll(&tconn->pfd, 1, 0);
 	if (ret < 1) {
 		if (ret == -1) {
 			ret = errno;
-			debug(CCI_DB_EP, "%s: poll() returned %s",
-				__func__, strerror(ret));
+			debug(CCI_DB_EP, "%s: poll() on conn %p returned %s",
+				__func__, (void*)conn, strerror(ret));
 		} else {
 			ret = CCI_EAGAIN;
 		}
+		conn_decref(ep, conn);
 		goto out;
 	}
 
-	count = ret;
-	debug(CCI_DB_EP, "%s: poll found %d events", __func__, count);
+	revents = tconn->pfd.revents;
 
-	i = 0;
-	do {
-		uint32_t found = 0;
-		short revents = tep->fds[i].revents;
-		cci__conn_t *conn = tep->c[i];
-		tcp_conn_t *tconn = NULL;
+	events(revents, str, POLL_EVENTS_LEN);
+	debug(CCI_DB_EP, "%s: poll() on conn %p found events %s", __func__,
+		(void*)conn, str);
 
-again:
-		if (revents) {
-			debug(CCI_DB_EP, "%s: revents 0x%x",
-				__func__, revents);
-		} else {
-			goto increment;
-		}
+	if (revents & POLLHUP) {
+		tcp_conn_status_t old_status = tconn->status;
+		cci__evt_t *evt = NULL;
+		tcp_tx_t *tx = NULL;
 
-		if (conn)
-			tconn = conn->priv;
+		/* handle disconnect */
+		debug(CCI_DB_CONN, "%s: got POLLHUP on conn %p (%s) revents (0x%x)",
+			__func__, (void*)conn, tcp_conn_status_str(tconn->status), revents);
 
-		if (revents & POLLHUP) {
-			tcp_conn_status_t old_status = tconn->status;
-			cci__evt_t *evt = NULL;
-			tcp_tx_t *tx = NULL;
-			int rc = 0;
-			socklen_t err = 0, *pe = &err, slen = sizeof(err);
+		pthread_mutex_lock(&ep->lock);
+		tcp_conn_set_closing_locked(ep, conn);
+		pthread_mutex_unlock(&ep->lock);
 
-			rc = getsockopt(tconn->pfd.fd, SOL_SOCKET, SO_ERROR, (void*)pe, &slen);
-			if (err == 0 && revents == (POLLHUP|POLLOUT)) {
-				debug(CCI_DB_CONN, "%s: got both POLLHUP & POLLOUT for for "
-					"conn %p so_error is Success", __func__, (void*)conn);
-				revents = revents & (~(POLLHUP));
-				goto again;
+		switch (old_status) {
+		case TCP_CONN_READY:
+			/* TODO drain queues */
+			break;
+		case TCP_CONN_ACTIVE1:
+		case TCP_CONN_ACTIVE2:
+			pthread_mutex_lock(&tconn->lock);
+			if (old_status == TCP_CONN_ACTIVE1 ||
+				!TAILQ_EMPTY(&tconn->queued)) {
+				evt = TAILQ_FIRST(&tconn->queued);
+				TAILQ_REMOVE(&tconn->queued, evt, entry);
+			} else {
+				evt = TAILQ_FIRST(&tconn->pending);
+				TAILQ_REMOVE(&tconn->pending, evt, entry);
 			}
+			pthread_mutex_unlock(&tconn->lock);
 
-			/* handle disconnect */
-			debug(CCI_DB_CONN, "%s: got POLLHUP on conn %p (%s) revents (0x%x) %s",
-				__func__, (void*)conn, tcp_conn_status_str(tconn->status),
-				revents, strerror(err));
+			evt->event.connect.status = CCI_ETIMEDOUT;
+			tx = container_of(evt, tcp_tx_t, evt);
+			tx->state = TCP_TX_COMPLETED;
 
 			pthread_mutex_lock(&ep->lock);
-			tcp_conn_set_closing_locked(ep, conn);
+			TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
 			pthread_mutex_unlock(&ep->lock);
-
-			switch (old_status) {
-			case TCP_CONN_READY:
-				/* TODO drain queues */
-				break;
-			case TCP_CONN_ACTIVE1:
-			case TCP_CONN_ACTIVE2:
-				pthread_mutex_lock(&tconn->lock);
-				if (old_status == TCP_CONN_ACTIVE1 ||
-					!TAILQ_EMPTY(&tconn->queued)) {
-					evt = TAILQ_FIRST(&tconn->queued);
-					TAILQ_REMOVE(&tconn->queued, evt, entry);
-				} else {
-					evt = TAILQ_FIRST(&tconn->pending);
-					TAILQ_REMOVE(&tconn->pending, evt, entry);
-				}
-				pthread_mutex_unlock(&tconn->lock);
-
-				evt->event.connect.status = CCI_ETIMEDOUT;
-				tx = container_of(evt, tcp_tx_t, evt);
-				tx->state = TCP_TX_COMPLETED;
-
-				pthread_mutex_lock(&ep->lock);
-				TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
-				pthread_mutex_unlock(&ep->lock);
-				break;
-			case TCP_CONN_PASSIVE1:
-			case TCP_CONN_PASSIVE2:
-				/* handled in tcp_conn_set_closing_locked() */
-				break;
-			case TCP_CONN_CLOSING:
-				fprintf(stderr, "%s: got POLLHUP on conn %p (%s) "
-						"with status TCP_CONN_CLOSING\n",
-						__func__, (void*)conn, conn->uri);
-				break;
-			default:
-				debug(CCI_DB_CONN, "%s: connection status was %s",
-					__func__, tcp_conn_status_str(tconn->status));
-			}
-
-			goto out;
+			break;
+		case TCP_CONN_PASSIVE1:
+		case TCP_CONN_PASSIVE2:
+			/* handled in tcp_conn_set_closing_locked() */
+			break;
+		case TCP_CONN_CLOSING:
+			fprintf(stderr, "%s: got POLLHUP on conn %p (%s) "
+					"with status TCP_CONN_CLOSING\n",
+					__func__, (void*)conn, conn->uri);
+			break;
+		default:
+			debug(CCI_DB_CONN, "%s: connection status was %s",
+				__func__, tcp_conn_status_str(tconn->status));
 		}
-		if (revents & POLLIN) {
-			found++;
-			if (i == 0) {
-				/* handle accept */
-				tcp_handle_listen_socket(ep);
-			} else {
-				/* process recv */
-				if (conn)
-					tcp_handle_recv(ep, conn);
-				else
-					debug(CCI_DB_WARN, "%s: POLLIN event on "
-						"fds[%d] but no conn in tep->c",
-						__func__, i);
+
+		conn_decref(ep, conn);
+		goto out;
+	}
+	if (revents & POLLERR || revents & POLLNVAL) {
+		/* handle error */
+		/* TODO close connection */
+		conn_decref(ep, conn);
+		goto out;
+	}
+	if (revents & POLLIN) {
+		if (tconn->is_listener == 1) {
+			/* handle accept */
+			tcp_handle_listen_socket(ep, conn);
+		} else {
+			/* process recv */
+			tcp_handle_recv(ep, conn);
+		}
+		revents &= ~POLLIN;
+		if (!(revents & POLLOUT))
+			conn_decref(ep, conn);
+	}
+	if (revents & POLLOUT) {
+		int rc = 0;
+		socklen_t err, *pe = &err, slen = sizeof(err);
+
+    again:
+		rc = getsockopt(tconn->pfd.fd, SOL_SOCKET, SO_ERROR, (void*)pe, &slen);
+		if (rc) {
+			debug(CCI_DB_CONN, "%s: getsockopt() for conn %p (fd %d) "
+				"failed with %s", __func__, (void*)conn,
+				tconn->pfd.fd, strerror(errno));
+			if (errno == EBADF) {
+				/* TODO close connection */
+				assert(0);
+				conn_decref(ep, conn);
+				goto out;
+			} else if (errno == ENOMEM || errno == ENOBUFS) {
+				goto again;
 			}
 		}
-		if (revents & POLLOUT) {
-			pthread_mutex_lock(&tconn->lock);
-			if (tconn->status == TCP_CONN_ACTIVE1) {
+
+		pthread_mutex_lock(&ep->lock);
+		if (tconn->status == TCP_CONN_ACTIVE1) {
+			if (err == 0) {
 				/*  send CONN_REQUEST on new connection */
 				debug(CCI_DB_CONN, "%s: conn %p connect() completed",
 					__func__, (void*)conn);
 				tconn->status = TCP_CONN_ACTIVE2;
-				tep->fds[i].events = POLLIN | POLLOUT;
+				tconn->pfd.events = POLLIN | POLLOUT;
+			} else {
+				/* TODO close connection */
+				assert(0);
+				pthread_mutex_unlock(&ep->lock);
+				conn_decref_locked(ep, conn);
+				goto out;
 			}
-			pthread_mutex_unlock(&tconn->lock);
-
-			pthread_mutex_lock(&ep->lock);
-			tcp_progress_conn_sends(conn, 1);
-			pthread_mutex_unlock(&ep->lock);
-			found++;
 		}
-		if (revents & POLLERR) {
-			/* handle error */
-			debug(CCI_DB_CONN, "%s: got POLLERR on conn %p",
-				__func__, (void*)conn);
-			found++;
-		}
-		if (!found && revents)
-			debug(CCI_DB_WARN, "%s: unhandled revents %u",
-				__func__, revents);
-		if (found)
-			count--;
-increment:
-		i++;
-
-		if (found == tep->nfds)
-			break; /* because OSX returns the wrong count from poll */
-	} while (count);
-
+		tcp_progress_conn_sends(conn, 1);
+		conn_decref_locked(ep, conn);
+		pthread_mutex_unlock(&ep->lock);
+		revents &= ~POLLOUT;
+	}
+	if (revents) {
+		events(revents, str, POLL_EVENTS_LEN);
+		debug(CCI_DB_WARN, "%s: conn %p has unhandled revents %s",
+			__func__, (void*)conn, str);
+	}
 out:
-	tcp_release_polling_token(ep);
-#if 0
-	pthread_mutex_lock(&ep->lock);
-	/* TODO process queued changes to tep->fds, tep->c */
-	tep->is_polling = 0;
-	pthread_mutex_unlock(&ep->lock);
-#endif
-
 	return ret;
 }
 
