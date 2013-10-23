@@ -828,8 +828,8 @@ typedef struct tcp_conn {
 	/*! Peer's sockaddr_in (IP, port) */
 	struct sockaddr_in sin;
 
-	/*! socket for this connection */
-	uint32_t fd;
+	/*! poll fd */
+	struct pollfd pfd;
 
 	/*! partial receive */
 	tcp_rx_t *rx;
