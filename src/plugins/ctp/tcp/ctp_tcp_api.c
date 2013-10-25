@@ -1859,7 +1859,9 @@ tcp_progress_conn_sends(cci__conn_t *conn, int ep_locked)
 
 		if (tx->msg_type == TCP_MSG_RMA_WRITE ||
 			tx->msg_type == TCP_MSG_RMA_READ_REQUEST) {
-			if (tx->rma_op->pending >= TCP_RMA_DEPTH)
+			if (tx->rma_op->pending >= TCP_RMA_DEPTH &&
+					tx->offset == 0)
+				/* don't start this RMA fragment yet */
 				break;
 		}
 
