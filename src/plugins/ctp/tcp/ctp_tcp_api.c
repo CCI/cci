@@ -642,7 +642,7 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 	tconn->status = TCP_CONN_READY;
 	tconn->is_listener = 1;
 	tconn->pfd.events = POLLIN;
-	queue_conn(ep, conn, TCP_Q_CONNS);
+	queue_conn(ep, conn, TCP_Q_PASSIVE);
 
 	tep->tx_buf = calloc(1, ep->tx_buf_cnt * ep->buffer_len);
 	if (!tep->tx_buf) {
@@ -1546,6 +1546,9 @@ out:
 	return ret;
 }
 
+static void
+conn_decref_locked(cci__ep_t *ep, cci__conn_t *conn);
+
 static int ctp_tcp_disconnect(cci_connection_t * connection)
 {
 	cci__conn_t *conn = NULL;
@@ -1565,6 +1568,7 @@ static int ctp_tcp_disconnect(cci_connection_t * connection)
 
 	pthread_mutex_lock(&ep->lock);
 	tcp_conn_set_closing_locked(ep, conn);
+	conn_decref_locked(ep, conn); /* drop application's ref */
 	pthread_mutex_unlock(&ep->lock);
 
 	CCI_EXIT;
@@ -2483,11 +2487,11 @@ tcp_handle_listen_socket(cci__ep_t *ep, cci__conn_t *listen_conn)
 	if (ret)
 		goto out;
 
-	queue_conn(ep, conn, TCP_Q_PASSIVE);
-
 	memset(name, 0, sizeof(name));
 	tcp_sin_to_name(sin, name, sizeof(name));
 	debug(CCI_DB_CONN, "%s: new conn request from %s", __func__, name);
+
+	queue_conn(ep, conn, TCP_Q_PASSIVE);
 
 	conn_decref(ep, conn); /* drop our ref */
 
@@ -2672,6 +2676,7 @@ tcp_handle_conn_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		TAILQ_REMOVE(&tconn->pending, &tx->evt, entry);
 		TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
 		tconn->status = TCP_CONN_READY;
+		tconn->refcnt++; /* for the calling application */
 		pthread_mutex_unlock(&tconn->lock);
 
 		pthread_mutex_lock(&ep->lock);
@@ -2726,6 +2731,7 @@ tcp_handle_conn_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx, uint32_t tx_
 
 	pthread_mutex_lock(&ep->lock);
 	tconn->status = TCP_CONN_READY;
+	tconn->refcnt++; /* for calling the application */
 	/* passive's refcnt goes to conns */
 	TAILQ_REMOVE(&tep->passive, tconn, entry);
 	if (tep->poll_conn[TCP_Q_PASSIVE] == tconn)
@@ -3362,7 +3368,7 @@ get_ready_conn_locked(cci__ep_t *ep, cci__conn_t **connp)
 		if (!last)
 			last = TAILQ_FIRST(&tep->conns);
 
-		if (last->status > TCP_CONN_INIT && last->refcnt == 1) {
+		if (last->status > TCP_CONN_INIT && last->refcnt == 2) {
 			conn = last->conn;
 			last->refcnt++;
 			ret = CCI_SUCCESS;
