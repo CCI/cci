@@ -87,7 +87,6 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 		    cci_rma_handle_t * remote_handle, uint64_t remote_offset,
 		    uint64_t data_len, const void *context, int flags);
 
-static void tcp_progress_sends(cci__ep_t * ep);
 static void *tcp_progress_thread(void *arg);
 static int tcp_progress_ep(cci__ep_t *ep);
 static int tcp_poll_events(cci__ep_t *ep);
@@ -727,6 +726,9 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 out:
 	if (conn) {
 		if (tconn) {
+			pthread_mutex_lock(&ep->lock);
+			TAILQ_REMOVE(&tep->conns, tconn, entry);
+			pthread_mutex_unlock(&ep->lock);
 			if (tconn->pfd.fd)
 				close(tconn->pfd.fd);
 		}
@@ -1289,7 +1291,6 @@ tcp_monitor_fd(cci__ep_t *ep, cci__conn_t *conn, int events)
 {
 	int ret = CCI_SUCCESS, one = 1;
 	cci__dev_t *dev = ep->dev;
-	tcp_ep_t *tep = ep->priv;
 	tcp_dev_t *tdev = dev->priv;
 	tcp_conn_t *tconn = conn->priv;
 
@@ -1318,13 +1319,8 @@ tcp_monitor_fd(cci__ep_t *ep, cci__conn_t *conn, int events)
 	}
 
 	pthread_mutex_lock(&ep->lock);
-	tconn->index = tep->nfds++;
-	assert(tep->nfds < TCP_EP_MAX_CONNS);
 	tconn->pfd.events = events;
 	pthread_mutex_unlock(&ep->lock);
-
-	debug(CCI_DB_CONN, "%s: tconn->index = %u tep->nfds = %u",
-		__func__, tconn->index, (unsigned) tep->nfds);
 
 out:
 	return ret;
@@ -1337,20 +1333,18 @@ out:
 static inline void
 tcp_ignore_fd_locked(tcp_ep_t *tep, tcp_conn_t *tconn)
 {
-	uint32_t index = tconn->index, nfds = 0;
 	cci__conn_t *conn = tconn->conn;
 
 	/* If 1, then only the listening socket is open */
-	if (tep->nfds == 1 || index == 0)
+	if (tep->nfds == 1)
 		return;
 
-	nfds = --tep->nfds;
+	--tep->nfds;
 
-	debug(CCI_DB_CONN, "%s: conn=%p tconn=%p tconn->index=%u nfds=%u",
-		__func__, (void*)conn, (void*)tconn, index, nfds);
+	debug(CCI_DB_CONN, "%s: conn=%p tconn=%p nfds=%u",
+		__func__, (void*)conn, (void*)tconn, tep->nfds);
 
 	close(tconn->pfd.fd);
-	tconn->index = 0;
 
 	return;
 }
@@ -1827,11 +1821,6 @@ out:
 	return ret;
 }
 
-static void tcp_progress_pending(cci__ep_t * ep)
-{
-	return;
-}
-
 static inline void
 tcp_progress_conn_sends(cci__conn_t *conn, int ep_locked)
 {
@@ -1949,43 +1938,12 @@ tcp_progress_conn_sends(cci__conn_t *conn, int ep_locked)
 	return;
 }
 
-static void tcp_progress_queued(cci__ep_t * ep)
-{
-	tcp_ep_t *tep = ep->priv;
-	tcp_conn_t *tconn, *tmp;
-
-	CCI_ENTER;
-
-	if (!tep)
-		return;
-
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_FOREACH_SAFE(tconn, &tep->conns, entry, tmp) {
-		tcp_progress_conn_sends(tconn->conn, 1);
-	}
-	pthread_mutex_unlock(&ep->lock);
-
-	CCI_EXIT;
-
-	return;
-}
-
-static void
-tcp_progress_sends(cci__ep_t * ep)
-{
-	tcp_progress_pending(ep);
-	tcp_progress_queued(ep);
-
-	return;
-}
-
 static int
 tcp_progress_ep(cci__ep_t *ep)
 {
 	int ret = CCI_EAGAIN;
 
 	tcp_poll_events(ep);
-	tcp_progress_sends(ep);
 
 	return ret;
 }
@@ -3678,6 +3636,9 @@ tcp_poll_events(cci__ep_t *ep)
 
 	tconn = conn->priv;
 	/* Note: we have a ref on this conn */
+
+	if (!tconn->is_listener && tconn->status > TCP_CONN_INIT)
+		tconn->pfd.events = POLLIN | POLLOUT;
 
 	/* check for incoming messages (POLLIN) _and_
 	 * connect completions (POLLOUT)
