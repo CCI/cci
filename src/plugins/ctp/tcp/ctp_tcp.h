@@ -817,14 +817,11 @@ struct tcp_conn {
 	/*! Status */
 	tcp_conn_status_t status;
 
-	/*! poll fd */
-	struct pollfd pfd;
-
 	/*! Reference count */
 	int refcnt;
 
-	/*! Is this the endpoint's listening socket? */
-	int is_listener;
+	/*! poll fd */
+	struct pollfd pfd;
 
 	/*! partial receive */
 	tcp_rx_t *rx;
@@ -835,8 +832,8 @@ struct tcp_conn {
 	/*! Index in tep->fds */
 	uint32_t index;
 
-	/*! Max sends in flight to this peer (i.e. rwnd) */
-	uint32_t max_tx_cnt;
+	/*! Is this the endpoint's listening socket? */
+	int is_listener;
 
 	/*! Entry to hang on tcp_ep->conns */
 	 TAILQ_ENTRY(tcp_conn) entry;
@@ -852,6 +849,9 @@ struct tcp_conn {
 
 	/*! Peer's sockaddr_in (IP, port) */
 	struct sockaddr_in sin;
+
+	/*! Max sends in flight to this peer (i.e. rwnd) */
+	uint32_t max_tx_cnt;
 
 	/*! Flag to know if the receiver is ready or not */
 	uint32_t rnr;
