@@ -764,11 +764,7 @@ out:
 	return ret;
 }
 
-static inline void
-tcp_ignore_fd_locked(tcp_ep_t *tep, tcp_conn_t *tconn);
-
-/* NOTE: this calls tcp_ignore_fd_locked() which requires
- *	 the caller holds both ep->lock and tep->is_polling
+/* NOTE: the caller holds ep->lock
  */
 static void
 tcp_conn_set_closing_locked(cci__ep_t *ep, cci__conn_t *conn)
@@ -779,10 +775,12 @@ tcp_conn_set_closing_locked(cci__ep_t *ep, cci__conn_t *conn)
 	if (tconn->status < TCP_CONN_INIT)
 		return;
 
-	tcp_ignore_fd_locked(tep, tconn);
+	close(tconn->pfd.fd);
 
 	if (tconn->status == TCP_CONN_READY) {
 		TAILQ_REMOVE(&tep->conns, tconn, entry);
+		if (tep->poll_conn[TCP_Q_CONNS] == tconn)
+			tep->poll_conn[TCP_Q_CONNS] = NULL;
 	} else if (tconn->status == TCP_CONN_ACTIVE1 ||
 			tconn->status == TCP_CONN_ACTIVE2) {
 		TAILQ_REMOVE(&tep->active, tconn, entry);
@@ -1324,29 +1322,6 @@ tcp_monitor_fd(cci__ep_t *ep, cci__conn_t *conn, int events)
 
 out:
 	return ret;
-}
-
-/* NOTE: caller must have both ep->lock _and_ ep->is_polling
- *       to prevent the poll_events() from accessing these
- *       structures.
- */
-static inline void
-tcp_ignore_fd_locked(tcp_ep_t *tep, tcp_conn_t *tconn)
-{
-	cci__conn_t *conn = tconn->conn;
-
-	/* If 1, then only the listening socket is open */
-	if (tep->nfds == 1)
-		return;
-
-	--tep->nfds;
-
-	debug(CCI_DB_CONN, "%s: conn=%p tconn=%p nfds=%u",
-		__func__, (void*)conn, (void*)tconn, tep->nfds);
-
-	close(tconn->pfd.fd);
-
-	return;
 }
 
 static void
