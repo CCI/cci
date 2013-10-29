@@ -829,9 +829,6 @@ struct tcp_conn {
 	/*! Lock */
 	pthread_mutex_t lock;
 
-	/*! Index in tep->fds */
-	uint32_t index;
-
 	/*! Is this the endpoint's listening socket? */
 	int is_listener;
 
