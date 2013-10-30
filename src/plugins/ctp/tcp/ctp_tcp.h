@@ -685,8 +685,8 @@ typedef struct tcp_rma_op {
 	char *msg_ptr;
 } tcp_rma_op_t;
 
-#define TCP_Q_CONNS		(0)
-#define TCP_Q_ACTIVE		(1)
+#define TCP_Q_CONNS	(0)
+#define TCP_Q_ACTIVE	(1)
 #define TCP_Q_PASSIVE	(2)
 
 struct tcp_ep {

@@ -1400,7 +1400,7 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	}
 	fd = ret;
 
-	ret = tcp_new_conn(ep, sin, fd, &conn);
+	ret = tcp_new_conn(ep, sin, fd, &conn); /* gives us a ref on conn */
 	if (ret)
 		goto out;
 
@@ -1511,15 +1511,7 @@ again:
 		tconn->pfd.events = POLLIN | POLLOUT;
 	}
 
-	conn_decref(ep, conn);
-
-	/* try to progress txs */
-
-#if 0
-	pthread_mutex_lock(&ep->lock);
-	tcp_progress_conn_sends(conn, 1);
-	pthread_mutex_unlock(&ep->lock);
-#endif
+	conn_decref(ep, conn); /* drop our reference */
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -1896,9 +1888,6 @@ tcp_progress_conn_sends(cci__conn_t *conn, int ep_locked)
 				break;
 			}
 		}
-	}
-	if (TAILQ_EMPTY(&tconn->queued)) {
-		tconn->pfd.events = POLLIN;
 	}
 	pthread_mutex_unlock(&tconn->lock);
 
@@ -2501,6 +2490,7 @@ tcp_handle_listen_socket(cci__ep_t *ep, cci__conn_t *listen_conn)
 out:
 	pthread_mutex_lock(&ep->lock);
 	tcp_conn_set_closing_locked(ep, conn);
+	conn_decref_locked(ep, conn); /* drop our ref */
 	pthread_mutex_unlock(&ep->lock);
 
 	return;
@@ -3621,9 +3611,6 @@ tcp_poll_events(cci__ep_t *ep)
 	if (!tconn->is_listener && tconn->status > TCP_CONN_INIT)
 		tconn->pfd.events = POLLIN | POLLOUT;
 
-	/* check for incoming messages (POLLIN) _and_
-	 * connect completions (POLLOUT)
-	 */
 	ret = poll(&tconn->pfd, 1, 0);
 	if (ret < 1) {
 		if (ret == -1) {
@@ -3633,7 +3620,6 @@ tcp_poll_events(cci__ep_t *ep)
 		} else {
 			ret = CCI_EAGAIN;
 		}
-		conn_decref(ep, conn);
 		goto out;
 	}
 
@@ -3695,13 +3681,11 @@ tcp_poll_events(cci__ep_t *ep)
 				__func__, tcp_conn_status_str(tconn->status));
 		}
 
-		conn_decref(ep, conn);
 		goto out;
 	}
 	if (revents & POLLERR || revents & POLLNVAL) {
 		/* handle error */
 		/* TODO close connection */
-		conn_decref(ep, conn);
 		goto out;
 	}
 	if (revents & POLLIN) {
@@ -3713,47 +3697,46 @@ tcp_poll_events(cci__ep_t *ep)
 			tcp_handle_recv(ep, conn);
 		}
 		revents &= ~POLLIN;
-		if (!(revents & POLLOUT))
-			conn_decref(ep, conn);
 	}
 	if (revents & POLLOUT) {
 		int rc = 0;
 		socklen_t err, *pe = &err, slen = sizeof(err);
 
-    again:
-		rc = getsockopt(tconn->pfd.fd, SOL_SOCKET, SO_ERROR, (void*)pe, &slen);
-		if (rc) {
-			debug(CCI_DB_CONN, "%s: getsockopt() for conn %p (fd %d) "
-				"failed with %s", __func__, (void*)conn,
-				tconn->pfd.fd, strerror(errno));
-			if (errno == EBADF) {
-				/* TODO close connection */
-				assert(0);
-				conn_decref(ep, conn);
-				goto out;
-			} else if (errno == ENOMEM || errno == ENOBUFS) {
-				goto again;
-			}
-		}
-
-		pthread_mutex_lock(&ep->lock);
 		if (tconn->status == TCP_CONN_ACTIVE1) {
+    again:
+			rc = getsockopt(tconn->pfd.fd, SOL_SOCKET, SO_ERROR, (void*)pe, &slen);
+			if (rc) {
+				debug(CCI_DB_CONN, "%s: getsockopt() for conn %p (fd %d) "
+					"failed with %s", __func__, (void*)conn,
+					tconn->pfd.fd, strerror(errno));
+				if (errno == EBADF) {
+					/* TODO close connection */
+					assert(0);
+					goto out;
+				} else if (errno == ENOMEM || errno == ENOBUFS) {
+					goto again;
+				}
+			}
+
 			if (err == 0) {
 				/*  send CONN_REQUEST on new connection */
 				debug(CCI_DB_CONN, "%s: conn %p connect() completed",
 					__func__, (void*)conn);
+				pthread_mutex_lock(&ep->lock);
 				tconn->status = TCP_CONN_ACTIVE2;
 				tconn->pfd.events = POLLIN | POLLOUT;
+				pthread_mutex_unlock(&ep->lock);
 			} else {
 				/* TODO close connection */
 				assert(0);
+				pthread_mutex_lock(&ep->lock);
+				tcp_conn_set_closing_locked(ep, conn);
 				pthread_mutex_unlock(&ep->lock);
-				conn_decref_locked(ep, conn);
 				goto out;
 			}
 		}
+		pthread_mutex_lock(&ep->lock);
 		tcp_progress_conn_sends(conn, 1);
-		conn_decref_locked(ep, conn);
 		pthread_mutex_unlock(&ep->lock);
 		revents &= ~POLLOUT;
 	}
@@ -3763,6 +3746,7 @@ tcp_poll_events(cci__ep_t *ep)
 			__func__, (void*)conn, str);
 	}
 out:
+	conn_decref(ep, conn);
 	return ret;
 }
 
