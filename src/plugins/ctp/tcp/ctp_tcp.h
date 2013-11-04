@@ -719,9 +719,6 @@ struct tcp_ep {
 	/*! Pipe for OS handle */
 	int pipe[2];
 
-	/*! Connection id blocks */
-	uint64_t *ids;
-
 	/* Our IP and port */
 	struct sockaddr_in sin;
 
@@ -743,10 +740,10 @@ struct tcp_ep {
 /* Connection info */
 
 typedef enum tcp_conn_status {
-	/*! Shutdown */
+	/*! Disconnect called, free resources */
 	TCP_CONN_CLOSED = -2,
 
-	/*! Disconnect called */
+	/*! Error detected */
 	TCP_CONN_CLOSING = -1,
 
 	/*! NULL (intial) state */
