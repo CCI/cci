@@ -639,7 +639,7 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 		goto out;
 
 	tconn = conn->priv;
-	tconn->status = TCP_CONN_READY;
+	tconn->status = TCP_CONN_PASSIVE1;
 	tconn->is_listener = 1;
 	tconn->pfd.events = POLLIN;
 	queue_conn(ep, conn, TCP_Q_PASSIVE);
@@ -3196,8 +3196,13 @@ tcp_handle_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 	tcp_tx_t *tx = &tep->txs[tx_id];
 	uint32_t status = a & 0xFF;
 
-	debug(CCI_DB_MSG, "%s: conn %p acked tx %p (%s) with status %u",
-		__func__, (void*)conn, (void*)tx, tcp_msg_type(tx->msg_type), status);
+	debug(CCI_DB_MSG, "%s: conn %p acked tx %p (%s) with status %u (conn "
+		"status %s)", __func__, (void*)conn, (void*)tx,
+		tcp_msg_type(tx->msg_type), status, tcp_conn_status_str(tconn->status));
+
+	/* If disconnect() called, complete with disconnected */
+	if (tconn->status < TCP_CONN_INIT)
+		status = CCI_ERR_DISCONNECTED;
 
 	switch (tx->msg_type) {
 	case TCP_MSG_SEND:
