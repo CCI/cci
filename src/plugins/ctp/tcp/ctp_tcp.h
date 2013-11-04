@@ -685,22 +685,15 @@ typedef struct tcp_rma_op {
 	char *msg_ptr;
 } tcp_rma_op_t;
 
-#define TCP_Q_CONNS	(0)
-#define TCP_Q_ACTIVE	(1)
-#define TCP_Q_PASSIVE	(2)
-
 struct tcp_ep {
 	/*! Socket for listen */
 	cci_os_handle_t sock;
 
-	/*! List of open connections */
+	/*! List of all connections */
 	TAILQ_HEAD(s_conns, tcp_conn) conns;
 
-	/*! Which list is being polled? TCP_Q_* */
-	int poll_list;
-
-	/*! Last conn polled per TCP_Q_* list */
-	tcp_conn_t *poll_conn[3];
+	/*! Last conn polled */
+	tcp_conn_t *poll_conn;
 
 	/*! Number of pollfds */
 	nfds_t nfds;
@@ -736,15 +729,6 @@ struct tcp_ep {
 	/* FIXME: revisit the code to use this
 	TAILQ_HEAD(s_ka, tcp_conn) ka_conns;
 	*/
-
-	/*! List of active connections awaiting replies */
-	TAILQ_HEAD(s_active, tcp_conn) active;
-
-	/*! List of passive connections awaiting requests and acks */
-	TAILQ_HEAD(s_passive, tcp_conn) passive;
-
-	/*! List of closing connections */
-	TAILQ_HEAD(ss_conns, tcp_conn) closing;
 
 	/*! List of RMA registrations */
 	TAILQ_HEAD(s_handles, tcp_rma_handle) handles;
