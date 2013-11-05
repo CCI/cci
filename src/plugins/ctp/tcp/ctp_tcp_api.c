@@ -1837,7 +1837,7 @@ tcp_progress_conn_sends(cci__conn_t *conn)
 						free(tx->buffer);
 						free(tx);
 					} else {
-						tcp_put_tx(tx);
+						put_tx = tx;
 					}
 					break;
 				}
