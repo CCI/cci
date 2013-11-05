@@ -92,7 +92,7 @@ static int tcp_progress_ep(cci__ep_t *ep);
 static int tcp_poll_events(cci__ep_t *ep);
 static int tcp_sendto(cci_os_handle_t sock, void *buf, int len,
 			void *rma_ptr, uint32_t rma_len, uintptr_t *offset);
-static inline void tcp_progress_conn_sends(cci__conn_t *conn, int ep_locked);
+static inline void tcp_progress_conn_sends(cci__conn_t *conn);
 
 
 /*
@@ -1760,7 +1760,7 @@ out:
 }
 
 static inline void
-tcp_progress_conn_sends(cci__conn_t *conn, int ep_locked)
+tcp_progress_conn_sends(cci__conn_t *conn)
 {
 	int ret, is_reliable = 0;
 	tcp_conn_t *tconn = conn->priv;
@@ -1837,17 +1837,7 @@ tcp_progress_conn_sends(cci__conn_t *conn, int ep_locked)
 						free(tx->buffer);
 						free(tx);
 					} else {
-						cci_endpoint_t *endpoint =
-							conn->connection.endpoint;
-						cci__ep_t *ep =
-							container_of(endpoint, cci__ep_t,
-									endpoint);
-						tcp_ep_t *tep = ep->priv;
-
-						if (ep_locked)
-							tcp_put_tx_locked(tep, tx);
-						else
-							tcp_put_tx(tx);
+						tcp_put_tx(tx);
 					}
 					break;
 				}
@@ -1859,15 +1849,7 @@ tcp_progress_conn_sends(cci__conn_t *conn, int ep_locked)
 	pthread_mutex_unlock(&tconn->lock);
 
 	if (put_tx) {
-		if (ep_locked) {
-			cci_endpoint_t *endpoint = conn->connection.endpoint;
-			cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
-			tcp_ep_t *tep = ep->priv;
-
-			tcp_put_tx_locked(tep, put_tx);
-		} else {
-			tcp_put_tx(put_tx);
-		}
+		tcp_put_tx(put_tx);
 	}
 
 	return;
@@ -2037,9 +2019,7 @@ static int tcp_send_common(cci_connection_t * connection,
 
 	/* try to progress txs */
 
-	pthread_mutex_lock(&ep->lock);
-	tcp_progress_conn_sends(conn, 1);
-	pthread_mutex_unlock(&ep->lock);
+	tcp_progress_conn_sends(conn);
 
 	/* if unreliable, we are done since it is buffered internally */
 	if (!is_reliable) {
@@ -2396,9 +2376,7 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 
 	ret = CCI_SUCCESS;
 
-	pthread_mutex_lock(&ep->lock);
-	tcp_progress_conn_sends(conn, 1);
-	pthread_mutex_unlock(&ep->lock);
+	tcp_progress_conn_sends(conn);
 
 out:
 	if (ret) {
@@ -2635,9 +2613,7 @@ tcp_handle_conn_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 	pthread_mutex_unlock(&tconn->lock);
 
 	/* try to progress txs */
-	pthread_mutex_lock(&ep->lock);
-	tcp_progress_conn_sends(conn, 1);
-	pthread_mutex_unlock(&ep->lock);
+	tcp_progress_conn_sends(conn);
 
 out:
 	pthread_mutex_lock(&ep->lock);
@@ -3602,9 +3578,7 @@ tcp_poll_events(cci__ep_t *ep)
 				goto out;
 			}
 		}
-		pthread_mutex_lock(&ep->lock);
-		tcp_progress_conn_sends(conn, 1);
-		pthread_mutex_unlock(&ep->lock);
+		tcp_progress_conn_sends(conn);
 		revents &= ~POLLOUT;
 	}
 	if (revents) {
