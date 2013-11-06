@@ -2940,9 +2940,11 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 		/* last segment - complete rma */
 		tx->evt.event.send.status = rma_op->status;
 		if (rma_op->status || !rma_op->msg_ptr) {
+			pthread_mutex_lock(&tconn->lock);
+			TAILQ_REMOVE(&tconn->rmas, rma_op, rmas);
+			pthread_mutex_unlock(&tconn->lock);
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_REMOVE(&tep->rma_ops, rma_op, entry);
-			TAILQ_REMOVE(&tconn->rmas, rma_op, rmas);
 			TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
 			pthread_mutex_unlock(&ep->lock);
 			debug(CCI_DB_MSG, "%s: completed %s ***",
@@ -2960,9 +2962,11 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 			iov.iov_base = rma_op->msg_ptr;
 			iov.iov_len = rma_op->msg_len;
 
+			pthread_mutex_lock(&tconn->lock);
+			TAILQ_REMOVE(&tconn->rmas, rma_op, rmas);
+			pthread_mutex_unlock(&tconn->lock);
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_REMOVE(&tep->rma_ops, rma_op, entry);
-			TAILQ_REMOVE(&tconn->rmas, rma_op, rmas);
 			pthread_mutex_unlock(&ep->lock);
 			debug(CCI_DB_MSG, "%s: sending RMA completion MSG ***",
 				__func__);
