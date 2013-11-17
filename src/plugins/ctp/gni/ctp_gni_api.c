@@ -2524,7 +2524,7 @@ static int gni_progress_connections(cci__ep_t * ep)
 
 	CCI_ENTER;
 
-	if (!gep->fd && likely(++count != 1000000))
+	if (!gep->fd && likely(++count != 10000))
 		return CCI_EAGAIN;
 	else
 		count = 0;
