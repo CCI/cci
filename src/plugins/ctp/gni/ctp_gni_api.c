@@ -3378,6 +3378,8 @@ ctp_gni_rma_register(cci_endpoint_t * endpoint,
 	grc = GNI_MemRegister(gep->nic, (uint64_t)(uintptr_t)start,
 		length, NULL, gflags, -1, &handle->mh);
 	if (grc != GNI_RC_SUCCESS) {
+		debug(CCI_DB_EP, "%s: GNI_MemRegister() failed with %s", __func__,
+				gni_rc_str(grc));
 		free(handle);
 		ret = gni_to_cci_status(grc);
 		goto out;
