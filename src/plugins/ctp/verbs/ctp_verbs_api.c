@@ -2135,7 +2135,7 @@ ctp_verbs_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	attr.send_cq = vep->cq;
 	attr.recv_cq = vep->cq;
 	attr.srq = vep->srq;
-	attr.cap.max_send_wr = VERBS_EP_TX_CNT;
+	attr.cap.max_send_wr = VERBS_CONN_TX_CNT;
 	attr.cap.max_send_sge = 2;
 	attr.cap.max_recv_sge = 1;
 	attr.cap.max_inline_data = VERBS_INLINE_BYTES;
@@ -2638,7 +2638,7 @@ verbs_handle_conn_request(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 	attr.send_cq = vep->cq;
 	attr.recv_cq = vep->cq;
 	attr.srq = vep->srq;
-	attr.cap.max_send_wr = VERBS_EP_TX_CNT;
+	attr.cap.max_send_wr = VERBS_CONN_TX_CNT;
 	attr.cap.max_send_sge = 2;
 	attr.cap.max_recv_sge = 1;
 	attr.cap.max_inline_data = VERBS_INLINE_BYTES;

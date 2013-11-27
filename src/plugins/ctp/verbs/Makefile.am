@@ -11,4 +11,4 @@ cci_ctp_verbs_la_SOURCES = \
         ctp_verbs.h \
         ctp_verbs_module.c \
         ctp_verbs_api.c
-cci_ctp_verbs_la_LIBADD = $(ctp_verbs_LIBS)
+cci_ctp_verbs_la_LIBADD = $(ctp_verbs_LIBS) $(top_builddir)/src/libcci.la

@@ -130,7 +130,7 @@ int main(int argc, char *argv[])
 		gettimeofday(&start, NULL);
 
 	for (i = 0; i < count; i++) {
-		void *p = (void*)((uintptr_t)ptr + (uintptr_t) i);
+		void *p = (void*)((uintptr_t)ptr + ((uintptr_t) i * (uintptr_t)length));
 
 		ret = cci_rma_register(endpoint, p, length, CCI_FLAG_READ|CCI_FLAG_WRITE, &handles[i]);
 		check_return(endpoint, "cci_rma_register", ret);
@@ -155,7 +155,8 @@ int main(int argc, char *argv[])
 	    end.tv_usec - start.tv_usec;
 	printf("%10s%10s%10s%10s\n", "RegSize", "Count", "usecs", "us/page");
 	printf("%10" PRIu64 "%10" PRIu64 "%10" PRIu64 "%10.2f\n",
-	       regsize, count, usecs, (double)usecs / (double)count);
+	       regsize, count, usecs,
+	       ((double)usecs / (double) count) / ((double)regsize / (double)pagesize));
 
 	ret = cci_destroy_endpoint(endpoint);
 	check_return(endpoint, "cci_destroy_endpoint", ret);

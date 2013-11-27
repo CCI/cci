@@ -11,3 +11,4 @@ cci_ctp_tcp_la_SOURCES = \
         ctp_tcp.h \
         ctp_tcp_module.c \
         ctp_tcp_api.c
+cci_ctp_tcp_la_LIBADD = $(top_builddir)/src/libcci.la
