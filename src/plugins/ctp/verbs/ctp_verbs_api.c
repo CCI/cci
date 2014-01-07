@@ -3572,7 +3572,7 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 		} else {
 			ret = errno;
 			if (ret != EAGAIN)
-				debug(CCI_DB_ALL, "%s: ibv_get_cq_event() returned %s (%d)",
+				debug(CCI_DB_EP, "%s: ibv_get_cq_event() returned %s (%d)",
 					__func__, strerror(ret), ret);
 			return ret;
 		}
@@ -3602,9 +3602,11 @@ static int verbs_get_cq_event(cci__ep_t * ep)
 
 	for (i = 0; i < found; i++) {
 		if (wc[i].status != IBV_WC_SUCCESS) {
-			debug(CCI_DB_INFO, "%s wc returned with status %s",
+			debug(CCI_DB_MSG, "%s wc returned with status %s (opcode 0x%x "
+			      "vendor_err 0x%x)",
 			      wc[i].opcode & IBV_WC_RECV ? "recv" : "send",
-			      ibv_wc_status_str(wc[i].status));
+			      ibv_wc_status_str(wc[i].status),
+			      wc[i].opcode, wc[i].vendor_err);
 			/* TODO do what? */
 		}
 		if (wc[i].opcode & IBV_WC_RECV) {
@@ -4244,10 +4246,14 @@ static int verbs_post_rma(verbs_rma_op_t * rma_op)
 		verbs_ntohll(rma_op->remote_handle->stuff[0]) + rma_op->remote_offset;
 	wr.wr.rdma.rkey = (uint32_t) verbs_ntohll(rma_op->remote_handle->stuff[1]);
 
+	debug(CCI_DB_MSG, "%s: local_addr %p len %10u local_rkey 0x%x "
+			"opcode 0x%x remote_addr %p remote_rkey 0x%x",
+			__func__, (void*)list.addr, list.length, list.lkey,
+			wr.opcode, (void*)wr.wr.rdma.remote_addr, wr.wr.rdma.rkey);
+
 	ret = ibv_post_send(vconn->id->qp, &wr, &bad_wr);
-	if (ret == -1) {
-		ret = errno;
-		debug(CCI_DB_MSG, "%s: ibv_post_send() returned %s", __func__,
+	if (ret) {
+		debug(CCI_DB_MSG, "%s: ibv_post_send() failed with %s", __func__,
 			strerror(ret));
 	}
 
@@ -4325,6 +4331,13 @@ ctp_verbs_rma(cci_connection_t * connection,
 		rma_op->msg_ptr = rma_op->tx->buffer;
 		rma_op->msg_len = msg_len;
 	}
+
+	debug(CCI_DB_MSG, "%s: rma_op %p msg_ptr %p msg_len %4u local_handle %p "
+			"local_offset %10"PRIu64" remote_handle %p remote_offset "
+			"%10"PRIu64" length %10"PRIu64" context %p flags 0x%x",
+			__func__, (void*) rma_op, msg_ptr, msg_len, (void*) local_handle,
+			local_offset, (void*) remote_handle, remote_offset, data_len,
+			context, flags);
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&vep->rma_ops, rma_op, entry);
