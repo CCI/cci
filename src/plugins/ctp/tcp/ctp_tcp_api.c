@@ -902,8 +902,8 @@ tcp_get_tx_locked(tcp_ep_t *tep)
 		tx->rma_id = 0;
 		tx->flags = 0;
 		tx->evt.conn = NULL;
-		debug(CCI_DB_MSG, "%s: getting tx %p buffer %p",
-			__func__, (void*)tx, (void*)tx->buffer);
+		debug(CCI_DB_MSG, "%s: getting tx %p buffer %p id %u",
+			__func__, (void*)tx, (void*)tx->buffer, tx->id);
 	}
 	return tx;
 }
@@ -936,8 +936,8 @@ tcp_put_tx_locked(tcp_ep_t *tep, tcp_tx_t *tx)
 {
 	assert(tx->ctx == TCP_CTX_TX);
 	tx->state = TCP_TX_IDLE;
-	debug(CCI_DB_MSG, "%s: putting tx %p buffer %p",
-		__func__, (void*)tx, (void*)tx->buffer);
+	debug(CCI_DB_MSG, "%s: putting tx %p buffer %p id %u",
+		__func__, (void*)tx, (void*)tx->buffer, tx->id);
 	TAILQ_INSERT_HEAD(&tep->idle_txs, &tx->evt, entry);
 
 	return;
@@ -2294,8 +2294,7 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	if (err) {
 		for (i = 0; i < cnt; i++) {
 			if (txs[i])
-				TAILQ_INSERT_HEAD(&tep->idle_txs,
-						  &txs[i]->evt, entry);
+				tcp_put_tx_locked(tep, txs[i]);
 		}
 		local->refcnt--;
 	}
