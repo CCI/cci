@@ -3430,6 +3430,9 @@ queue:
 		} else {
 			if (rma_op->tx)
 				verbs_return_tx(rma_op->tx);
+			pthread_mutex_lock(&ep->lock);
+			TAILQ_REMOVE(&vep->rma_ops, rma_op, entry);
+			pthread_mutex_unlock(&ep->lock);
 			debug(CCI_DB_MSG, "%s: freeing rma_op %p", __func__, (void*)rma_op);
 			free(rma_op);
 		}
@@ -4345,7 +4348,9 @@ ctp_verbs_rma(cci_connection_t * connection,
 
 	ret = verbs_post_rma(rma_op);
 	if (ret) {
-		/* FIXME clean up? */
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_REMOVE(&vep->rma_ops, rma_op, entry);
+		pthread_mutex_unlock(&ep->lock);
 	}
 
 out:
