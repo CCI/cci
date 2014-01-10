@@ -2215,6 +2215,8 @@ gni_check_active_connections(cci__ep_t *ep)
 			debug(CCI_DB_CONN, "%s: conn %p fd %d connect() %s", __func__,
 					(void*) gconn->conn, gconn->new->sock,
 					strerror(err));
+			if (err)
+				gconn->state = GNI_CONN_CLOSING;
 			TAILQ_REMOVE(&gep->active, gconn, temp);
 			TAILQ_INSERT_TAIL(&active, gconn, temp);
 			count--;
@@ -2227,7 +2229,33 @@ gni_check_active_connections(cci__ep_t *ep)
 	while (!TAILQ_EMPTY(&active)) {
 		gconn = TAILQ_FIRST(&active);
 		TAILQ_REMOVE(&active, gconn, temp);
-		gni_conn_est_active(ep, gconn->conn);
+		if (gconn->state != GNI_CONN_CLOSING) {
+			gni_conn_est_active(ep, gconn->conn);
+		} else {
+			cci__evt_t *evt = calloc(1, sizeof(*evt));
+			evt->event.type = CCI_EVENT_CONNECT;
+			evt->event.connect.context = (void *) gconn->conn->connection.context;
+			evt->event.connect.status = CCI_ECONNREFUSED;
+
+			pthread_rwlock_wrlock(&gep->conn_tree_lock);
+			tdelete(&gconn->id, &gep->conn_tree, gni_compare_u32);
+			pthread_rwlock_unlock(&gep->conn_tree_lock);
+
+			if (gconn->new) {
+				close(gconn->new->sock);
+				free(gconn->new->ptr);
+			}
+			free(gconn->new);
+			if (gconn->conn)
+				free((void*)gconn->conn->uri);
+			free(gconn->conn);
+			free(gconn->msg_buffer);
+			free(gconn);
+
+			pthread_mutex_lock(&ep->lock);
+			gni_queue_event(ep, evt);
+			pthread_mutex_unlock(&ep->lock);
+		}
 	}
 out:
 	CCI_EXIT;
@@ -2303,10 +2331,7 @@ gni_check_for_conn_requests(cci__ep_t *ep)
 
 	CCI_ENTER;
 
-	debug(CCI_DB_CONN, "%s: calling accept()", __func__);
 	ret = accept(gep->sock, (struct sockaddr*) &sin, &slen);
-	debug(CCI_DB_CONN, "%s: accept() returned %s", __func__,
-			ret == 0 ? "success" : strerror(errno));
 	if (ret == -1) {
 		ret = errno;
 		goto out;
@@ -2687,7 +2712,6 @@ static int gni_get_recv_event(cci__ep_t * ep, gni_cq_entry_t cqe)
 	}
 
 	if (!cqe) {
-		debug(CCI_DB_MSG, "%s: calling GNI_CqGetEvent()", __func__);
 		grc = GNI_CqGetEvent(gep->rx_cq, &gevt);
 	} else {
 		gevt = cqe;
@@ -3012,10 +3036,7 @@ static void gni_progress_ep(cci__ep_t * ep)
 		cqs[0] = gep->rx_cq;
 		cqs[1] = gep->tx_cq;
 
-		debug(CCI_DB_CONN, "%s: calling GNI_CqVectorWaitEvent()", __func__);
 		grc = GNI_CqVectorWaitEvent(cqs, 2, 10, &cqe, &type);
-		debug(CCI_DB_CONN, "%s: GNI_CqVectorWaitEvent() returned with %s",
-				__func__, grc == GNI_RC_TIMEOUT ? "timeout" : "other");
 		if (grc == GNI_RC_SUCCESS) {
 			switch (type) {
 			case 0:
