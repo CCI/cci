@@ -959,10 +959,12 @@ ctp_gni_create_endpoint(cci_device_t * device,
 	}
 
 	ret = fcntl(gep->sock, F_GETFD, 0);
-	if (ret == -1)
-		fflags = 0;
-	else
+	if (ret == -1) {
+		debug(CCI_DB_CONN, "%s: fcntl() failed with %s", __func__, strerror(errno));
+		fflags = O_RDWR;
+	} else {
 		fflags = ret;
+	}
 	ret = fcntl(gep->sock, F_SETFL, fflags | O_NONBLOCK);
 	if (ret == -1) {
 		ret = errno;
@@ -1632,10 +1634,12 @@ ctp_gni_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	}
 	new->sock = ret;
 	ret = fcntl(new->sock, F_GETFD, 0);
-	if (ret == -1)
-		fflags = 0;
-	else
+	if (ret == -1) {
+		debug(CCI_DB_CONN, "%s: fcntl() failed with %s", __func__, strerror(errno));
+		fflags = O_RDWR;
+	} else {
 		fflags = ret;
+	}
 	ret = fcntl(new->sock, F_SETFL, fflags | O_NONBLOCK);
 	if (ret == -1) {
 		ret = errno;
@@ -1735,7 +1739,7 @@ ctp_gni_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	ret = 0;	/* when connect is done, the socket will be ready
 			   for writing. When ready, send payload */
 
-	debug(CCI_DB_CONN, "connecting to %s %s\n", node, service);
+	debug(CCI_DB_CONN, "%s: connecting to %s %s", __func__, node, service);
 
       out:
 	if (ret) {
@@ -1965,6 +1969,8 @@ static int gni_conn_est_passive(cci__ep_t * ep, cci__conn_t *conn)
 	ret = recv(new->sock, &new->cr, sizeof(new->cr), 0);
 	if (ret != sizeof(new->cr)) {
 		/* TODO tear-down connection */
+		debug(CCI_DB_CONN, "%s: only recevied %d of %d bytes of cr",
+				__func__, ret, (int) new->len);
 		goto out;
 	}
 	ret = CCI_SUCCESS;
@@ -1977,12 +1983,15 @@ static int gni_conn_est_passive(cci__ep_t * ep, cci__conn_t *conn)
 	if (new->len) {
 		new->ptr = calloc(1, new->len);
 		if (!new->ptr) {
+			debug(CCI_DB_CONN, "%s: no memory for payload", __func__);
 			ret = CCI_ENOMEM;
 			goto out;
 		}
 		ret = recv(new->sock, new->ptr, new->len, 0);
 		if (ret != (int) new->len) {
 			/* TODO tear-down connection */
+			debug(CCI_DB_CONN, "%s: only recevied %d of %d bytes of payload",
+					__func__, ret, (int) new->len);
 			goto out;
 		} else {
 			ret = CCI_SUCCESS;
@@ -1992,6 +2001,7 @@ static int gni_conn_est_passive(cci__ep_t * ep, cci__conn_t *conn)
 	evt = calloc(1, sizeof(*evt));
 	if (!evt) {
 		/* TODO tear-down connection */
+		debug(CCI_DB_CONN, "%s: no memory for event", __func__);
 		goto out;
 	}
 
@@ -2008,7 +2018,12 @@ static int gni_conn_est_passive(cci__ep_t * ep, cci__conn_t *conn)
 	gni_queue_event(ep, evt);
 	pthread_mutex_unlock(&ep->lock);
 out:
-	if (ret) {
+	if (!ret) {
+		debug(CCI_DB_CONN, "%s: conn %p from %s:%u with payload len of %d",
+				__func__, (void*) gconn->conn,
+				inet_ntoa(gconn->sin.sin_addr),
+				ntohs(gconn->sin.sin_port), new->len);
+	} else {
 		debug(CCI_DB_CONN, "%s: conn payload from %s:%u failed with %s", __func__,
 			inet_ntoa(gconn->sin.sin_addr), ntohs(gconn->sin.sin_port),
 			cci_strerror(&ep->endpoint, ret));
@@ -2269,7 +2284,10 @@ gni_check_for_conn_requests(cci__ep_t *ep)
 
 	CCI_ENTER;
 
+	debug(CCI_DB_CONN, "%s: calling accept()", __func__);
 	ret = accept(gep->sock, (struct sockaddr*) &sin, &slen);
+	debug(CCI_DB_CONN, "%s: accept() returned %s", __func__,
+			ret == 0 ? "success" : strerror(errno));
 	if (ret == -1) {
 		ret = errno;
 		goto out;
@@ -2314,10 +2332,12 @@ gni_check_for_conn_requests(cci__ep_t *ep)
 	gconn->new = new;
 	new->sock = sock;
 	ret = fcntl(new->sock, F_GETFD, 0);
-	if (ret == -1)
-		fflags = 0;
-	else
+	if (ret == -1) {
+		debug(CCI_DB_CONN, "%s: fcntl() failed with %s", __func__, strerror(errno));
+		fflags = O_RDWR;
+	} else {
 		fflags = ret;
+	}
 	ret = fcntl(new->sock, F_SETFL, fflags | O_NONBLOCK);
 	if (ret == -1) {
 		ret = errno;
@@ -2647,10 +2667,12 @@ static int gni_get_recv_event(cci__ep_t * ep, gni_cq_entry_t cqe)
 		goto out;
 	}
 
-	if (!cqe)
+	if (!cqe) {
+		debug(CCI_DB_MSG, "%s: calling GNI_CqGetEvent()", __func__);
 		grc = GNI_CqGetEvent(gep->rx_cq, &gevt);
-	else
+	} else {
 		gevt = cqe;
+	}
 	if (grc == GNI_RC_SUCCESS) {
 		uint32_t id = GNI_CQ_GET_INST_ID(gevt);
 		cci__conn_t *conn = NULL;
@@ -2971,7 +2993,10 @@ static void gni_progress_ep(cci__ep_t * ep)
 		cqs[0] = gep->rx_cq;
 		cqs[1] = gep->tx_cq;
 
+		debug(CCI_DB_CONN, "%s: calling GNI_CqVectorWaitEvent()", __func__);
 		grc = GNI_CqVectorWaitEvent(cqs, 2, 10, &cqe, &type);
+		debug(CCI_DB_CONN, "%s: GNI_CqVectorWaitEvent() returned with %s",
+				__func__, grc == GNI_RC_TIMEOUT ? "timeout" : "other");
 		if (grc == GNI_RC_SUCCESS) {
 			switch (type) {
 			case 0:
