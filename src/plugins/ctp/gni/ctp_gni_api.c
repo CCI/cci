@@ -498,12 +498,12 @@ static int ctp_gni_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver,
 					    (uint16_t) strtoul(port_str, NULL,
 							       0);
 				} else if (0 == strncmp("interface=", *arg, 10)) {
-					interface = (void *) *arg + 10;
+					interface = (void *) ((uintptr_t)*arg + 10);
 				} else if (0 == strncmp("ptag=", *arg, 10)) {
-					ptag = (void *) *arg + 5;
+					ptag = (void *) ((uintptr_t) *arg + 5);
 					gdev->ptag = strtoul(ptag, NULL, 0);
 				} else if (0 == strncmp("cookie=", *arg, 10)) {
-					cookie = (void *) *arg + 7;
+					cookie = (void *) ((uintptr_t) *arg + 7);
 					gdev->cookie = strtoul(cookie, NULL, 0);
 				} else if (0 == strncmp("transport=", *arg, 7)) {
 					/* do nothing */
@@ -738,7 +738,7 @@ static int gni_create_rx_pool(cci__ep_t * ep, int rx_buf_cnt)
 
 		rx->evt.ep = ep;
 		rx->offset = offset;
-		rx->ptr = rx_pool->buf + (uintptr_t) rx->offset;
+		rx->ptr = (void *) ((uintptr_t) rx_pool->buf + rx->offset);
 		rx->rx_pool = rx_pool;
 		TAILQ_INSERT_TAIL(&rx_pool->rxs, rx, entry);
 		TAILQ_INSERT_TAIL(&rx_pool->idle_rxs, rx, idle);
@@ -822,7 +822,7 @@ gni_create_cdm_cqs(cci__dev_t *dev, cci__ep_t *ep, uint32_t port)
 			__func__, grc, ret);
 		goto out;
 	}
-	debug(CCI_DB_INFO, "%s: created tx cq %p", __func__, gep->tx_cq);
+	debug(CCI_DB_INFO, "%s: created tx cq %p", __func__, (void*) gep->tx_cq);
 
 	grc = GNI_CqCreate(gep->nic, GNI_EP_RX_CNT, 0, cq_mode,
 			NULL, NULL, &gep->rx_cq);
@@ -832,7 +832,7 @@ gni_create_cdm_cqs(cci__dev_t *dev, cci__ep_t *ep, uint32_t port)
 			__func__, grc, ret);
 		goto out;
 	}
-	debug(CCI_DB_INFO, "%s: created rx cq %p", __func__, gep->rx_cq);
+	debug(CCI_DB_INFO, "%s: created rx cq %p", __func__, (void*) gep->rx_cq);
 
 out:
 	if (ret) {
@@ -988,7 +988,7 @@ ctp_gni_create_endpoint(cci_device_t * device,
 		gni_tx_t *tx = &gep->txs[i];
 
 		tx->evt.ep = ep;
-		tx->buffer = gep->tx_buf + offset;
+		tx->buffer = (void*) ((uintptr_t) gep->tx_buf + offset);
 		tx->id = i;
 		TAILQ_INSERT_TAIL(&gep->idle_txs, tx, entry);
 	}
@@ -1306,7 +1306,7 @@ static int ctp_gni_accept(cci_event_t *event, const void *context)
 	gconn->state = GNI_CONN_PASSIVE2;
 	conn->connection.context = (void *) context;
 
-	debug(CCI_DB_INFO, "%s: creating GNI ep with tx cq %p", __func__, gep->tx_cq);
+	debug(CCI_DB_INFO, "%s: creating GNI ep with tx cq %p", __func__, (void*) gep->tx_cq);
 	grc = GNI_EpCreate(gep->nic, gep->tx_cq, &gconn->peer);
 	if (grc) {
 		ret = gni_to_cci_status(grc);
@@ -1359,7 +1359,7 @@ static int ctp_gni_accept(cci_event_t *event, const void *context)
 	memcpy(&reply.attr, &local, sizeof(local));
 
 	grc = GNI_SmsgInit(gconn->peer, &local, &remote);
-	if (grc == -1) {
+	if (grc != GNI_RC_SUCCESS) {
 		ret = gni_to_cci_status(grc);
 		goto out;
 	}
@@ -1648,7 +1648,6 @@ ctp_gni_connect(cci_endpoint_t * endpoint, const char *server_uri,
 			new->cr.attr.msg_type = GNI_SMSG_TYPE_MBOX_AUTO_RETRANSMIT;
 	else
 			new->cr.attr.msg_type = GNI_SMSG_TYPE_MBOX_AUTO_RETRANSMIT;
-			//new->cr.attr.msg_type = GNI_SMSG_TYPE_MBOX;
 
 	grc = GNI_SmsgBufferSizeNeeded(&new->cr.attr, &gconn->buff_size);
 	if (grc) {
@@ -1686,7 +1685,7 @@ ctp_gni_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	new->len = len + data_len; /* conn request and payload */
 	ptr = new->ptr;
 	memcpy(ptr, &new->cr, sizeof(new->cr));
-	ptr += (uintptr_t) sizeof(new->cr);
+	ptr = (void*) ((uintptr_t) ptr + sizeof(new->cr));
 	if (data_len)
 		memcpy(ptr, data_ptr, data_len);
 
@@ -1815,11 +1814,6 @@ ctp_gni_set_opt(cci_opt_handle_t * handle,
 		cci_opt_name_t name, const void *val)
 {
 	int ret = CCI_ERR_NOT_IMPLEMENTED;
-	//cci_endpoint_t *endpoint = NULL;
-	//cci__ep_t *ep = NULL;
-	//cci__dev_t *dev = NULL;
-	//gni_ep_t *gep = NULL;
-	//gni_dev_t *gdev = NULL;
 
 	CCI_ENTER;
 
@@ -1827,12 +1821,6 @@ ctp_gni_set_opt(cci_opt_handle_t * handle,
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
-
-	//endpoint = handle;
-	//ep = container_of(endpoint, cci__ep_t, endpoint);
-	//gep = ep->priv;
-	//dev = ep->dev;
-	//gdev = dev->priv;
 
 	switch (name) {
 	case CCI_OPT_ENDPT_SEND_TIMEOUT:
@@ -1949,7 +1937,7 @@ static int gni_conn_est_active(cci__ep_t * ep, cci__conn_t *conn)
 	if (ret == -1) {
 		ret = errno;
 		goto out;
-	} else if (ret != new->len) {
+	} else if (ret != (int) new->len) {
 		/* truncated send? */
 		/* TODO */
 	} else {
@@ -1993,7 +1981,7 @@ static int gni_conn_est_passive(cci__ep_t * ep, cci__conn_t *conn)
 			goto out;
 		}
 		ret = recv(new->sock, new->ptr, new->len, 0);
-		if (ret != new->len) {
+		if (ret != (int) new->len) {
 			/* TODO tear-down connection */
 			goto out;
 		} else {
@@ -2081,7 +2069,7 @@ static int gni_handle_conn_reply(cci__ep_t * ep, cci__conn_t *conn)
 		memcpy(&remote, &reply.attr, sizeof(remote));
 
 		debug(CCI_DB_INFO, "%s: creating GNI ep with tx cq %p",
-			__func__, gep->tx_cq);
+			__func__, (void*) gep->tx_cq);
 		grc = GNI_EpCreate(gep->nic, gep->tx_cq, &gconn->peer);
 		if (grc) {
 			ret = gni_to_cci_status(grc);
@@ -2524,7 +2512,7 @@ static int gni_progress_connections(cci__ep_t * ep)
 
 	CCI_ENTER;
 
-	if (!gep->fd && likely(++count != 10000))
+	if (0 && !gep->fd && likely(++count != 10000))
 		return CCI_EAGAIN;
 	else
 		count = 0;
@@ -2572,11 +2560,11 @@ gni_handle_recv(gni_rx_t *rx, void *msg)
 
 	CCI_ENTER;
 
-	rx->evt.event.type = CCI_EVENT_RECV; //FIXME redundant
+	rx->evt.event.type = CCI_EVENT_RECV; /* FIXME redundant */
 	rx->evt.event.recv.len = (*header >> 4) & 0xFFF;
 	if (rx->evt.event.recv.len) {
 		void *p = rx->ptr;
-		void *m = msg + (uintptr_t) sizeof(*header);
+		void *m = (void*) ((uintptr_t) msg + sizeof(*header));
 
 		memcpy(p, m, rx->evt.event.recv.len);
 		rx->evt.event.recv.ptr = p;
@@ -2868,7 +2856,7 @@ gni_rma_send_completion(cci__ep_t *ep, gni_cq_entry_t gevt)
 
 			dest = (void *) (local->addr + rma_op->local_offset);
 			/* FIXME double check this */
-			src = rma_op->buf + (((uintptr_t) rma_op->remote_offset) & 0xC);
+			src = (void*) ((uintptr_t)rma_op->buf + ((rma_op->remote_offset) & 0xC));
 			memcpy(dest, src, rma_op->data_len);
 		}
 		grc = GNI_MemDeregister(gep->nic, &rma_op->pd.local_mem_hndl);
@@ -2977,8 +2965,11 @@ static void gni_progress_ep(cci__ep_t * ep)
 	if (gep->fd) {
 		uint32_t type;
 		gni_return_t grc;
-		gni_cq_handle_t cqs[2] = { gep->rx_cq, gep->tx_cq };
+		gni_cq_handle_t cqs[2];
 		gni_cq_entry_t cqe;
+
+		cqs[0] = gep->rx_cq;
+		cqs[1] = gep->tx_cq;
 
 		grc = GNI_CqVectorWaitEvent(cqs, 2, 10, &cqe, &type);
 		if (grc == GNI_RC_SUCCESS) {
@@ -2995,9 +2986,11 @@ static void gni_progress_ep(cci__ep_t * ep)
 		}
 	}
 
+	pthread_mutex_lock(&ep->lock);
       again:
 	try++;
 	switch (which) {
+		pthread_mutex_unlock(&ep->lock);
 		case GNI_PRG_EVT_CONN:
 			ret = gni_progress_connections(ep);
 			break;
@@ -3010,13 +3003,16 @@ static void gni_progress_ep(cci__ep_t * ep)
 		default:
 			debug(CCI_DB_WARN, "%s: unknown progress event type %d",
 				__func__, which);
+		pthread_mutex_lock(&ep->lock);
 	}
 	which++;
-	if (which == GNI_PRG_EVT_MAX)
+	if (which >= GNI_PRG_EVT_MAX)
 		which = GNI_PRG_EVT_CONN;
 
 	if (ret == CCI_EAGAIN && try < GNI_PRG_EVT_MAX)
 		goto again;
+
+	pthread_mutex_unlock(&ep->lock);
 
 out:
 	CCI_EXIT;
@@ -3214,7 +3210,7 @@ gni_send_common(cci_connection_t * connection, const struct iovec *iov,
 	if (likely(iovcnt == 1)) {
 		len = iov[0].iov_len;
 	} else {
-		for (i = 0; i < iovcnt; i++)
+		for (i = 0; i < (int) iovcnt; i++)
 			len += (uint32_t) iov[i].iov_len;
 	}
 
@@ -3258,8 +3254,9 @@ gni_send_common(cci_connection_t * connection, const struct iovec *iov,
 		} else {
 			uint32_t offset = 0;
 
-			for (i = 0; i < iovcnt; i++) {
-				memcpy(ptr + offset, iov[i].iov_base, iov[i].iov_len);
+			for (i = 0; i < (int) iovcnt; i++) {
+				memcpy((void*)((uintptr_t)ptr + offset),
+						iov[i].iov_base, iov[i].iov_len);
 				offset += iov[i].iov_len;
 			}
 		}
@@ -3362,7 +3359,7 @@ ctp_gni_rma_register(cci_endpoint_t * endpoint,
 
 	handle = calloc(1, sizeof(*handle));
 	if (!handle) {
-		debug(CCI_DB_INFO, "no memory for rma handle");
+		debug(CCI_DB_INFO, "%s", "no memory for rma handle");
 		CCI_EXIT;
 		return CCI_ENOMEM;
 	}

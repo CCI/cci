@@ -61,7 +61,7 @@ BEGIN_C_DECLS
 	GNI_MSG_SEND,
 	GNI_MSG_KEEPALIVE,
 	GNI_MSG_RMA,
-	GNI_MSG_TYPE_MAX,
+	GNI_MSG_TYPE_MAX
 } gni_msg_type_t;
 
 /* MSG header */
@@ -322,7 +322,7 @@ typedef enum gni_conn_state {
 	GNI_CONN_ACTIVE,
 	GNI_CONN_PASSIVE,
 	GNI_CONN_PASSIVE2,
-	GNI_CONN_ESTABLISHED,
+	GNI_CONN_ESTABLISHED
 } gni_conn_state_t;
 
 typedef struct gni_new_conn {
