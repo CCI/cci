@@ -2551,7 +2551,7 @@ static int gni_progress_connections(cci__ep_t * ep)
 
 	CCI_ENTER;
 
-	if (0 && !gep->fd && likely(++count != 10000))
+	if (!gep->fd && likely(++count != 10000))
 		return CCI_EAGAIN;
 	else
 		count = 0;
@@ -3034,20 +3034,25 @@ static void gni_progress_ep(cci__ep_t * ep)
       again:
 	try++;
 	switch (which) {
-		pthread_mutex_unlock(&ep->lock);
 		case GNI_PRG_EVT_CONN:
+			pthread_mutex_unlock(&ep->lock);
 			ret = gni_progress_connections(ep);
+			pthread_mutex_lock(&ep->lock);
 			break;
 		case GNI_PRG_EVT_RECV:
+			pthread_mutex_unlock(&ep->lock);
 			ret = gni_get_recv_event(ep, 0);
+			pthread_mutex_lock(&ep->lock);
 			break;
 		case GNI_PRG_EVT_SEND:
+			pthread_mutex_unlock(&ep->lock);
 			ret = gni_get_send_event(ep, 0);
+			pthread_mutex_lock(&ep->lock);
 			break;
 		default:
 			debug(CCI_DB_WARN, "%s: unknown progress event type %d",
 				__func__, which);
-		pthread_mutex_lock(&ep->lock);
+			break;
 	}
 	which++;
 	if (which >= GNI_PRG_EVT_MAX)
