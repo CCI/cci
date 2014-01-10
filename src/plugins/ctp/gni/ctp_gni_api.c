@@ -2195,7 +2195,26 @@ gni_check_active_connections(cci__ep_t *ep)
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_FOREACH_SAFE(gconn, &gep->active, temp, gc) {
 		if (FD_ISSET(gconn->new->sock, &fds)) {
+			int rc = 0;
+			socklen_t err, *pe = &err, slen = sizeof(err);
+
 			/* connect is done */
+			rc = getsockopt(gconn->new->sock, SOL_SOCKET,
+					SO_ERROR, (void*)pe, &slen);
+			if (rc) {
+				debug(CCI_DB_CONN, "%s: getsockopt() for conn %p (fd %d) "
+					"failed with %s", __func__, (void*)gconn->conn,
+					gconn->new->sock, strerror(errno));
+				if (errno == EBADF) {
+					/* TODO close connection */
+					assert(0);
+					goto out;
+				}
+			}
+
+			debug(CCI_DB_CONN, "%s: conn %p fd %d connect() %s", __func__,
+					(void*) gconn->conn, gconn->new->sock,
+					strerror(err));
 			TAILQ_REMOVE(&gep->active, gconn, temp);
 			TAILQ_INSERT_TAIL(&active, gconn, temp);
 			count--;
