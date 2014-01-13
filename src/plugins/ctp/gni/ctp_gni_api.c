@@ -3005,7 +3005,7 @@ static int gni_get_send_event(cci__ep_t * ep, gni_cq_entry_t cqe)
 #define GNI_RECV_EVT 1
 #define GNI_SEND_EVT 2
 typedef enum gni_progress_event {
-	GNI_PRG_EVT_CONN,
+	GNI_PRG_EVT_CONN = 0,
 	GNI_PRG_EVT_RECV,
 	GNI_PRG_EVT_SEND,
 	GNI_PRG_EVT_MAX
@@ -3015,7 +3015,7 @@ static void gni_progress_ep(cci__ep_t * ep)
 {
 	int ret = CCI_SUCCESS;
 	gni_ep_t *gep = ep->priv;
-	static gni_progress_event_t which = GNI_PRG_EVT_CONN;
+	static gni_progress_event_t which = GNI_PRG_EVT_CONN, local;
 	int try = 0;
 
 	CCI_ENTER;
@@ -3052,37 +3052,39 @@ static void gni_progress_ep(cci__ep_t * ep)
 	}
 
 	pthread_mutex_lock(&ep->lock);
+	local = which++;
+	if (which >= GNI_PRG_EVT_MAX)
+		which = GNI_PRG_EVT_CONN;
+	pthread_mutex_unlock(&ep->lock);
+
       again:
 	try++;
-	switch (which) {
+	debug(CCI_DB_EP, "%s: checking for %s (%d)", __func__,
+			local == GNI_PRG_EVT_CONN ? "GNI_PRG_EVT_CONN" :
+			local == GNI_PRG_EVT_RECV ? "GNI_PRG_EVT_RECV" :
+			local == GNI_PRG_EVT_SEND ? "GNI_PRG_EVT_SEND" :
+			"unknown", local);
+	switch (local) {
 		case GNI_PRG_EVT_CONN:
-			pthread_mutex_unlock(&ep->lock);
 			ret = gni_progress_connections(ep);
-			pthread_mutex_lock(&ep->lock);
 			break;
 		case GNI_PRG_EVT_RECV:
-			pthread_mutex_unlock(&ep->lock);
 			ret = gni_get_recv_event(ep, 0);
-			pthread_mutex_lock(&ep->lock);
 			break;
 		case GNI_PRG_EVT_SEND:
-			pthread_mutex_unlock(&ep->lock);
 			ret = gni_get_send_event(ep, 0);
-			pthread_mutex_lock(&ep->lock);
 			break;
 		default:
 			debug(CCI_DB_WARN, "%s: unknown progress event type %d",
-				__func__, which);
+				__func__, local);
 			break;
 	}
-	which++;
-	if (which >= GNI_PRG_EVT_MAX)
-		which = GNI_PRG_EVT_CONN;
+	local++;
+	if (local >= GNI_PRG_EVT_MAX)
+		local = GNI_PRG_EVT_CONN;
 
 	if (ret == CCI_EAGAIN && try < GNI_PRG_EVT_MAX)
 		goto again;
-
-	pthread_mutex_unlock(&ep->lock);
 
 out:
 	CCI_EXIT;
