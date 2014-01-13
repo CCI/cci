@@ -48,8 +48,8 @@ cci_conn_attribute_t attr	= CCI_CONN_ATTR_RU;
 
 cci_rma_handle_t *local_rma_handle;
 cci_rma_handle_t *local_rma_handle2;
-struct cci_rma_handle *server_rma_handle;
-struct cci_rma_handle *server_rma_handle2;
+struct cci_rma_handle *server_rma_handle = NULL;
+struct cci_rma_handle *server_rma_handle2 = NULL;
 
 typedef struct options {
 	struct cci_rma_handle rma_handle;
@@ -419,10 +419,8 @@ int main(int argc, char *argv[])
 	free(uri);
 	free(server_uri);
 
-	if (server_rma_handle == NULL)
-		free (server_rma_handle);
-	if (server_rma_handle2 == NULL)
-		free (server_rma_handle2);
+	free (server_rma_handle);
+	free (server_rma_handle2);
 
 	ret = cci_finalize();
 	if (ret) {
