@@ -16,7 +16,7 @@ release=0
 # requirement is that it must be entirely printable ASCII characters
 # and have no white space.
 
-greek=b4
+greek=b5
 
 # If want_repo_rev=1, then the repository version number will be
 # included in the overall CCI version number in some form.  

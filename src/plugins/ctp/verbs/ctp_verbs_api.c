@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
- * Copyright (c) 2011-2012 UT-Battelle, LLC.  All rights reserved.
- * Copyright (c) 2011-2012 Oak Ridge National Labs.  All rights reserved.
+ * Copyright (c) 2011-2014 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2011-2014 Oak Ridge National Labs.  All rights reserved.
  * Copyright © 2012 Inria.  All rights reserved.
  * $COPYRIGHT$
  */

@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
- * Copyright © 2010-2012 UT-Battelle, LLC. All rights reserved.
- * Copyright © 2010-2012 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2010-2014 UT-Battelle, LLC. All rights reserved.
+ * Copyright © 2010-2014 Oak Ridge National Labs.  All rights reserved.
  * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
@@ -555,7 +555,7 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 
 	/* TODO support blocking mode
 	 * in the meantime, fail if the fd is requested */
-	if (fd) {
+	if (0 && fd) {
 		debug(CCI_DB_WARN, "%s: The TCP transport does not yet support "
 			"blocking mode via the OS handle.\n", __func__);
 		debug(CCI_DB_WARN, "%s: Either choose another transport or set "

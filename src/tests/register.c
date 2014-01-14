@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2011 UT-Battelle, LLC.  All rights reserved.
- * Copyright (c) 2011 Oak Ridge National Labs.  All rights reserved.
+ * Copyright (c) 2011-2013 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2011-2013 Oak Ridge National Labs.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
