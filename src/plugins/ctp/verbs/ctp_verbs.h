@@ -377,6 +377,7 @@ typedef struct verbs_conn {
 	verbs_conn_state_t state;	/* current state */
 	uint32_t mss;		/* max send size */
 	uint32_t max_tx_cnt;	/* max sends in flight */
+	uint32_t tx_pending;	/* sends in flight */
 	uint32_t inline_size;	/* largest inline msg */
 
 	/* for RDMA SEND enabled connections */
