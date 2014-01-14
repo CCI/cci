@@ -1295,6 +1295,8 @@ tcp_monitor_fd(cci__ep_t *ep, cci__conn_t *conn, int events)
 		ret = setsockopt(tconn->pfd.fd, SOL_SOCKET, SO_RCVBUF, &bufsize, opt_len);
 		if (ret) debug(CCI_DB_EP, "%s: unable to set SO_RCVBUF (%s)",
 				__func__, strerror(errno));
+
+		ret = 0;
 	}
 
 	pthread_mutex_lock(&ep->lock);
