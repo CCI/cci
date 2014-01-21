@@ -1,7 +1,7 @@
 /*
  * CCI over Ethernet
  *
- * Copyright © 2011-2012 Inria.  All rights reserved.
+ * Copyright © 2011-2013 Inria.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -260,27 +260,62 @@ ccieth_connection_event_destructor(struct ccieth_endpoint *ep,
 	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
 }
 
-int
+static int
 ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data)
 {
 	struct ccieth_connection *conn = p;
 	enum ccieth_connection_status status = conn->status;
-	int *destroyed_conn = data;
+	struct list_head *tmplist = data;
 
 	if (cmpxchg(&conn->status, status, CCIETH_CONNECTION_CLOSING) != status)
 		/* somebody else is closing it */
 		return 0;
 
-	/* we set to CLOSING, we own the connection now, nobody else may destroy it */
-	del_timer_sync(&conn->connect_timer);
-	ccieth_conn_stop_sync(conn);
-	/* remove our debugfs entries now, so that the caller can remove its endpoint debugfs dir */
-	ccieth_conn_stats_destroy(conn);
-	/* the caller will destroy the entire idr, no need to remove us from there */
-	call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
-
-	(*destroyed_conn)++;
+	list_add(&conn->endpoint_destroy_list_elt, tmplist);
 	return 0;
+}
+
+void
+ccieth_destroy_endpoint_connections(struct ccieth_endpoint *ep)
+{
+	struct ccieth_connection *conn, *nconn;
+	struct list_head destroy_conn_list;
+	int destroyed_conn = 0;
+
+	/* only some RCU callbacks and connection timers may still be in-flight.
+	 * the timer may touch the idr, so we have to lock it,
+	 * which means we can't cancel timers here.
+	 * place the connections that we own/close on a temporary list.
+	 */
+	INIT_LIST_HEAD(&destroy_conn_list);
+	spin_lock(&ep->connection_idr_lock);
+	idr_for_each(&ep->connection_idr, ccieth_destroy_connection_idrforeach_cb, &destroy_conn_list);
+	spin_unlock(&ep->connection_idr_lock);
+
+	/* all connections are now CLOSING. destroy the ones that we set to CLOSING.
+	 * we own them, nobody else may destroy them.
+	 */
+	destroyed_conn = 0;
+	list_for_each_entry_safe(conn, nconn, &destroy_conn_list, endpoint_destroy_list_elt) {
+		del_timer_sync(&conn->connect_timer);
+		ccieth_conn_stop_sync(conn);
+		/* remove our debugfs entries now, so that the caller can remove its endpoint debugfs dir */
+		ccieth_conn_stats_destroy(conn);
+		/* the caller will destroy the entire idr, no need to remove us from there */
+		call_rcu(&conn->destroy_rcu_head, ccieth_destroy_connection_rcu);
+
+		/* still need to lock the idr in case another connection timer has set it to CLOSING
+		 * and is still removing it from idr */
+		spin_lock(&ep->connection_idr_lock);
+		/* not required starting with 3.9 since idr_destroy() does a full cleanup */
+		idr_remove(&ep->connection_idr, conn->id);
+		spin_unlock(&ep->connection_idr_lock);
+
+		destroyed_conn++;
+	}
+        dprintk("destroyed %d connections on endpoint destroy\n", destroyed_conn);
+
+	/* some RCU callback may still be in-flight for connection destruction, no more timers */
 }
 
 /*
@@ -419,6 +454,16 @@ ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_r
 	setup_timer(&conn->connect_timer, ccieth_connect_request_timer_hdlr, (unsigned long)conn);
 
 	/* get a connection id (only reserve it) */
+#ifdef CCIETH_HAVE_IDR_PRELOAD
+	idr_preload(GFP_KERNEL);
+	spin_lock(&ep->connection_idr_lock);
+	err = idr_alloc(&ep->connection_idr, NULL, 0, 0, GFP_NOWAIT);
+	spin_unlock(&ep->connection_idr_lock);
+	idr_preload_end();
+	if (err < 0)
+		goto out_with_conn;
+	id = err;
+#else /* CCIETH_HAVE_IDR_PRELOAD */
 retry:
 	spin_lock(&ep->connection_idr_lock);
 	err = idr_get_new(&ep->connection_idr, NULL, &id);
@@ -431,6 +476,7 @@ retry:
 		}
 		goto out_with_conn;
 	}
+#endif /* CCIETH_HAVE_IDR_PRELOAD */
 
 	/* allocate and initialize the skb */
 	skblen = sizeof(*hdr) + arg->data_len;
@@ -647,6 +693,21 @@ ccieth__recv_connect_request(struct ccieth_endpoint *ep,
 	conn->max_send_size = src_max_send_size < ep->max_send_size ? src_max_send_size : ep->max_send_size;
 
 	/* get a connection id (only reserve it for now) */
+#ifdef CCIETH_HAVE_IDR_PRELOAD
+	idr_preload(GFP_KERNEL);
+	spin_lock(&ep->connection_idr_lock);
+	/* check for duplicates */
+	err = idr_for_each(&ep->connection_idr, ccieth_recv_connect_idrforeach_cb, conn);
+	if (err != -EBUSY)
+		err = idr_alloc(&ep->connection_idr, NULL, 0, 0, GFP_NOWAIT);
+	else
+		need_ack = 1;
+	spin_unlock(&ep->connection_idr_lock);
+	idr_preload_end();
+	if (err < 0)
+		goto out_with_replyskb;
+	id = err;
+#else /* CCIETH_HAVE_IDR_PRELOAD */
 retry:
 	spin_lock(&ep->connection_idr_lock);
 	/* check for duplicates */
@@ -666,6 +727,7 @@ retry:
 		}
 		goto out_with_replyskb;
 	}
+#endif /* CCIETH_HAVE_IDR_PRELOAD */
 
 	/* setup the event */
 	event->event.type = CCIETH_IOCTL_EVENT_CONNECT_REQUEST;

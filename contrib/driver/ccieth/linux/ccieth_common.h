@@ -1,7 +1,7 @@
 /*
  * CCI over Ethernet
  *
- * Copyright © 2011-2012 Inria.  All rights reserved.
+ * Copyright © 2011-2013 Inria.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -196,6 +196,9 @@ struct ccieth_connection {
 
 	struct rcu_head destroy_rcu_head;
 
+	/* temporary list element, only used during ccieth_destroy_endpoint() */
+	struct list_head endpoint_destroy_list_elt;
+
 	/* event to be used when destroying the connection:
 	 * the user should set the status to CLOSING first,
 	 * and let the event destructor destroy the connection for real.
@@ -266,7 +269,8 @@ extern struct idr ccieth_ep_idr;	/* accessed under RCU read lock */
 extern struct dentry *ccieth_debugfs_root;
 #endif
 
-extern int ccieth_destroy_connection_idrforeach_cb(int id, void *p, void *data);
+extern void ccieth_destroy_endpoint_connections(struct ccieth_endpoint *ep);
+
 extern int ccieth_connect_request(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_request *arg);
 extern int ccieth_connect_accept(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_accept *arg);
 extern int ccieth_connect_reject(struct ccieth_endpoint *ep, struct ccieth_ioctl_connect_reject *arg);

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2011-2012 UT-Battelle, LLC.  All rights reserved.
- * Copyright (c) 2011-2012 Oak Ridge National Labs.  All rights reserved.
+ * Copyright (c) 2011-2013 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2011-2013 Oak Ridge National Labs.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -51,6 +51,7 @@ int ignore_os_handle = 0;
 int blocking = 0;
 int nfds = 0;
 fd_set rfds;
+int attempts = 0;
 
 typedef struct options {
 	struct cci_rma_handle rma_handle;
@@ -208,8 +209,21 @@ static void poll_events(void)
 			}
 		case CCI_EVENT_CONNECT:
 			if (!is_server) {
-				connect_done = 1;
-				connection = event->connect.connection;
+				if (event->connect.status == CCI_SUCCESS) {
+					connect_done = 1;
+					connection = event->connect.connection;
+				} else {
+					fprintf(stderr, "client: connect failed with %s\n",
+							cci_strerror(endpoint,
+								event->connect.status));
+					attempts = attempts == 0 ? 1 : attempts * 2;
+					sleep(attempts);
+
+					ret = cci_connect(endpoint, server_uri,
+							&opts, sizeof(opts), attr,
+							NULL, 0, NULL);
+					check_return(endpoint, "cci_connect", ret, 1);
+				}
 			}
 			break;
 		default:
@@ -396,7 +410,7 @@ static void do_server(void)
 					check_return(endpoint, "cci_accept", ret, 1);
 				} else {
 					ret = cci_reject(event);
-					check_return(endpoint, "cci_accept", ret, 1);
+					check_return(endpoint, "cci_reject", ret, 1);
 				}
 				break;
 			case CCI_EVENT_ACCEPT:
@@ -576,8 +590,8 @@ int main(int argc, char *argv[])
 	/* create an endpoint */
 	ret = cci_create_endpoint(NULL, 0, &endpoint, os_handle);
 	if (ret) {
-		fprintf(stderr, "cci_create_endpoint() failed with %s\n",
-			cci_strerror(NULL, ret));
+		fprintf(stderr, "cci_create_endpoint() failed with %s (%d)\n",
+			cci_strerror(NULL, ret), ret);
 		exit(EXIT_FAILURE);
 	}
 

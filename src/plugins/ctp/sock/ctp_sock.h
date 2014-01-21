@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
- * Copyright © 2010-2012 UT-Battelle, LLC. All rights reserved.
- * Copyright © 2010-2012 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2010-2013 UT-Battelle, LLC. All rights reserved.
+ * Copyright © 2010-2013 Oak Ridge National Laboratory.  All rights reserved.
  * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
@@ -26,16 +26,16 @@
 
 BEGIN_C_DECLS
 #define SOCK_UDP_MAX            (65508)	/* 64 KB - 8 B UDP - 20 B IP */
-#define SOCK_MAX_HDR_SIZE       (52)	/* max sock header size (RMA) */
+#define SOCK_MAX_HDR_SIZE       (56)	/* max sock header size (RMA) */
 #define SOCK_MAX_HDRS           (SOCK_MAX_HDR_SIZE + 20 + 8)	/* IP + UDP */
 #define SOCK_DEFAULT_MSS        (SOCK_UDP_MAX - SOCK_MAX_HDR_SIZE)	/* assume jumbo frames */
-#define SOCK_DEFAULT_RMA_MSS	(SOCK_DEFAULT_MSS - 20)
+#define SOCK_DEFAULT_RMA_MSS    (SOCK_DEFAULT_MSS - 20)
 #define SOCK_MIN_MSS            (1500 - SOCK_MAX_HDR_SIZE)
 #define SOCK_MAX_SACK           (4)	/* pairs of start/end acks */
 #define SOCK_ACK_DELAY          (1)	/* send an ack after every Nth send */
 #define SOCK_EP_TX_TIMEOUT_SEC  (64)	/* seconds for now */
-#define SOCK_EP_RX_CNT          (16*1024)	/* number of rx active messages */
 #define SOCK_EP_TX_CNT          (16*1024)	/* number of tx active messages */
+#define SOCK_EP_RX_CNT          (2*SOCK_EP_TX_CNT)      /* number of rx active messages */
 #define SOCK_EP_HASH_SIZE       (256)	/* nice round number */
 #define SOCK_MAX_EPS            (256)	/* max sock fd value - 1 */
 #define SOCK_BLOCK_SIZE         (64)	/* use 64b blocks for id storage */
@@ -423,7 +423,7 @@ static inline void sock_pack_conn_ack(sock_header_t * header, uint32_t id)
     <---------- 32 bits ---------->
     <- 8 -> <- 8 -> <---- 16 ----->
    +-------+-------+---------------+
-   | type  | rsvd  |   data len    |
+   | type  | rsvd  |   data_len    |
    +-------+-------+---------------+
    |              id               |
    +-------------------------------+
@@ -560,9 +560,10 @@ typedef union sock_u64 {
 
 static inline uint64_t sock_ntohll(uint64_t val)
 {
-	sock_u64_t net = {.ull = val };
+	sock_u64_t net;
 	sock_u64_t host;
 
+	net.ull = val;
 	host.ul[0] = ntohl(net.ul[1]);
 	host.ul[1] = ntohl(net.ul[0]);
 
@@ -571,9 +572,10 @@ static inline uint64_t sock_ntohll(uint64_t val)
 
 static inline uint64_t sock_htonll(uint64_t val)
 {
-	sock_u64_t host = {.ull = val };
+	sock_u64_t host;
 	sock_u64_t net;
 
+	host.ull = val;
 	net.ul[0] = htonl(host.ul[1]);
 	net.ul[1] = htonl(host.ul[0]);
 
@@ -604,6 +606,10 @@ static inline void
 sock_pack_rma_handle_offset(sock_rma_handle_offset_t * ho,
 			uint64_t handle, uint64_t offset)
 {
+#if CCI_DEBUG
+	assert (ho);
+	assert (handle);
+#endif
 	ho->handle = sock_htonll(handle);
 	ho->offset = sock_htonll(offset);
 }
@@ -614,6 +620,9 @@ sock_parse_rma_handle_offset(sock_rma_handle_offset_t * ho,
 {
 	*handle = sock_ntohll(ho->handle);
 	*offset = sock_ntohll(ho->offset);
+#if CCI_DEBUG
+	assert (*handle);
+#endif
 }
 
 typedef struct sock_rma_header {
@@ -735,12 +744,12 @@ sock_pack_rma_write(sock_rma_header_t * write, uint16_t data_len,
 
 static inline void
 sock_pack_rma_read_request(sock_rma_header_t * read, uint64_t data_len,
-						   uint32_t peer_id, uint32_t seq, uint32_t ts,
-						   uint64_t local_handle, uint64_t local_offset,
-						   uint64_t remote_handle, uint64_t remote_offset)
+                           uint32_t peer_id, uint32_t seq, uint32_t ts,
+                           uint64_t local_handle, uint64_t local_offset,
+                           uint64_t remote_handle, uint64_t remote_offset)
 {
 	sock_pack_header(&read->header_r.header, SOCK_MSG_RMA_READ_REQUEST,
-			 0, data_len, peer_id);
+	                 0, data_len, peer_id);
 	sock_pack_seq_ts(&read->header_r.seq_ts, seq, ts);
 	sock_pack_rma_handle_offset(&read->local, local_handle, local_offset);
 	sock_pack_rma_handle_offset(&read->remote, remote_handle, remote_offset);
@@ -754,7 +763,7 @@ sock_pack_rma_read_reply (sock_rma_header_t * read, uint64_t data_len,
 		uint64_t remote_handle, uint64_t remote_offset)
 {
 	sock_pack_header(&read->header_r.header, SOCK_MSG_RMA_READ_REPLY, 0,
-					data_len, peer_id);
+	                 data_len, peer_id);
 	sock_pack_seq_ts(&read->header_r.seq_ts, seq, ts);
 	sock_pack_rma_handle_offset(&read->local, local_handle, local_offset);
 	sock_pack_rma_handle_offset(&read->remote, remote_handle, remote_offset);
@@ -766,7 +775,7 @@ sock_pack_rma_read_reply (sock_rma_header_t * read, uint64_t data_len,
     <---------- 32 bits ---------->
     <- 8 -> <- 8 -> <---- 16 ----->
    +-------+-----------------------+
-   | type  |   a   |    context    |
+   | type  |   a   |       b       |
    +-------+-----------------------+
    |            peer id            |
    +-------------------------------+
@@ -777,13 +786,28 @@ sock_pack_rma_read_reply (sock_rma_header_t * read, uint64_t data_len,
    |           timestamp           |
    +-------------------------------+
 
-   TODO: description
+   +-------------------------------+
+   |        ACK Piggyback          |
+   +-------------------------------+
+
+   +-------------------------------+
+   |            msg_len            |
+   +-------------------------------+
+
+   a, b: unused
+   seq: sequence number
+   ts: timestamp
+   msg_len: length of the remote completion message
  */
 
 static inline void
 sock_pack_rma_write_done(sock_rma_header_t * write, uint16_t data_len,
             uint32_t peer_id, uint32_t seq, uint32_t ts)
 {
+#if CCI_DEBUG
+	assert (write);
+#endif
+
 	sock_pack_header(&write->header_r.header, SOCK_MSG_RMA_WRITE_DONE,
 			 0, data_len, peer_id);
 	sock_pack_seq_ts(&write->header_r.seq_ts, seq, ts);
@@ -812,10 +836,18 @@ typedef enum sock_tx_state_t {
 	SOCK_TX_COMPLETED
 } sock_tx_state_t;
 
+typedef enum sock_ctx {
+	SOCK_CTX_TX,
+	SOCK_CTX_RX
+} sock_ctx_t;
+
 /*! Send active message context.
 *
 * \ingroup messages */
 typedef struct sock_tx {
+	/*! Must be SOCK_CTX_TX */
+	sock_ctx_t ctx;
+
 	/*! Associated event (includes public cci_event_t) */
 	cci__evt_t evt;
 
@@ -839,9 +871,6 @@ typedef struct sock_tx {
 
 	/*! Entry for hanging on ep->idle_txs, dev->queued, dev->pending */
 	 TAILQ_ENTRY(sock_tx) dentry;
-
-	/*! Entry for hanging on ep->txs */
-	 TAILQ_ENTRY(sock_tx) tentry;
 
 	/*! Entry for sconn->tx_seqs */
 	 TAILQ_ENTRY(sock_tx) tx_seq;
@@ -874,6 +903,9 @@ typedef struct sock_tx {
  *
  * \ingroup messages */
 typedef struct sock_rx {
+	/*! Must be SOCK_CTX_RX */
+	sock_ctx_t ctx;
+
 	/*! Associated event (includes public cci_event_t) */
 	cci__evt_t evt;
 
@@ -884,10 +916,7 @@ typedef struct sock_rx {
 	uint16_t len;
 
 	/*! Entry for hanging on ep->idle_rxs, ep->loaned */
-	 TAILQ_ENTRY(sock_rx) entry;
-
-	/*! Entry for hanging on ep->rxs */
-	 TAILQ_ENTRY(sock_rx) gentry;
+	TAILQ_ENTRY(sock_rx) entry;
 
 	/*! Peer's sockaddr_in for connection requests */
 	struct sockaddr_in sin;
@@ -988,14 +1017,20 @@ typedef struct sock_ep {
 	/*! Array of conn lists hased over IP/port */
 	TAILQ_HEAD(s_conns, sock_conn) conn_hash[SOCK_EP_HASH_SIZE];
 
+	/*! TX common buffer */
+	void *tx_buf;
+
 	/*! List of all txs */
-	TAILQ_HEAD(s_txs, sock_tx) txs;
+	sock_tx_t *txs;
 
 	/*! List of idle txs */
 	TAILQ_HEAD(s_txsi, sock_tx) idle_txs;
 
+	/*! RX common buffer */
+	void *rx_buf;
+
 	/*! List of all rxs */
-	TAILQ_HEAD(s_rxs, sock_rx) rxs;
+	sock_rx_t *rxs;
 
 	/*! List of idle rxs */
 	TAILQ_HEAD(s_rxsi, sock_rx) idle_rxs;
@@ -1003,16 +1038,16 @@ typedef struct sock_ep {
 	/*! Connection id blocks */
 	uint64_t *ids;
 
-    /*! Queued sends */
-    TAILQ_HEAD(s_queued, cci__evt) queued;
+	/*! Queued sends */
+	TAILQ_HEAD(s_queued, cci__evt) queued;
 
-    /*! Pending (in-flight) sends */
-    TAILQ_HEAD(s_pending, cci__evt) pending;
+	/*! Pending (in-flight) sends */
+	TAILQ_HEAD(s_pending, cci__evt) pending;
 
-    /*! List of all connections with keepalive enabled */
-    /* FIXME: revisit the code to use this 
-    TAILQ_HEAD(s_ka, tcp_conn) ka_conns;
-    */
+	/*! List of all connections with keepalive enabled */
+	/* FIXME: revisit the code to use this 
+	TAILQ_HEAD(s_ka, tcp_conn) ka_conns;
+	*/
 
 	/*! List of active connections awaiting replies */
 	TAILQ_HEAD(s_active, sock_conn) active_hash[SOCK_EP_HASH_SIZE];
@@ -1105,6 +1140,9 @@ typedef struct sock_conn {
 	/*! Peer's last contiguous seqno acked (ACK_UP_TO) */
 	uint32_t acked;
 
+	/*! Peer's last seq received */
+	uint32_t last_recvd_seq;
+
 	/*! Peer's last timestamp received */
 	uint32_t ts;
 
@@ -1130,14 +1168,38 @@ typedef struct sock_conn {
 	uint32_t rnr;
 } sock_conn_t;
 
-/* Only call if holding the ep->lock and sconn->acks is not empty
+/*
+ * Only call if holding the ep->lock and sconn->acks is not empty
  *
- * If only one item, return 0
- * If more than one item, return 1
+ * For ordered connections:
+ * - If only one item, return 0
+ * - If more than one item, return 1
+ * For unordered connections, even if we have a single item, we need to issue
+ * a SACK, because we limit the tracking of acked message, ACK_UP_TO is not
+ * usable.
  */
 static inline int sock_need_sack(sock_conn_t * sconn)
 {
-	return TAILQ_FIRST(&sconn->acks) != TAILQ_LAST(&sconn->acks, s_acks);
+	
+
+	if (sconn->conn->connection.attribute == CCI_CONN_ATTR_RU) {
+		sock_ack_t *ack = NULL;
+
+		/* If there are more than 1 msg to ACK, we should
+		   issue a SACK, otherwise ACK a single msg */
+		ack = TAILQ_FIRST(&sconn->acks);
+		if (TAILQ_FIRST(&sconn->acks) == TAILQ_LAST(&sconn->acks, s_acks))
+		{
+			if (ack->start == ack->end)
+				return 0;
+			else
+				return 1;
+		} else 
+			return 1;
+	} else {
+		/* Ordered connection */
+		return TAILQ_FIRST(&sconn->acks) != TAILQ_LAST(&sconn->acks, s_acks);
+	}
 }
 
 typedef struct sock_dev {
@@ -1153,7 +1215,7 @@ typedef struct sock_dev {
 
 typedef enum sock_fd_type {
 	SOCK_FD_UNUSED = 0,
-	SOCK_FD_EP,
+	SOCK_FD_EP
 } sock_fd_type_t;
 
 typedef struct sock_fd_idx {
@@ -1169,16 +1231,19 @@ typedef struct sock_globals {
 	int count;
 
 	/*! Array of sock devices */
-	cci_device_t const **const devices;
+	cci_device_t **devices;
 } sock_globals_t;
 
 /* We try to stay page aligned when we send RMA data */
-#define RMA_PAYLOAD_SIZE(c, max) do { \
-	if ((c->max_send_size - sizeof(sock_rma_header_t)) > (4*1024))          \
-		max = (c->max_send_size - sizeof(sock_rma_header_t))                \
-			- ((c->max_send_size - sizeof(sock_rma_header_t)) % (4*1024));  \
-	else                                                                    \
-		max = c->max_send_size - sizeof(sock_rma_header_t);                 \
+#define RMA_PAYLOAD_SIZE(c, max) do {                                         \
+	const size_t hdr_size = sizeof(sock_rma_header_t) /* CCI header */    \
+	                        + sizeof(struct msghdr) /* Used by sendmsg */ \
+	                        + sizeof(struct sockaddr_in);                 \
+	if ((c->max_send_size - hdr_size) > (4*1024)) {                       \
+		max = (c->max_send_size - hdr_size)                           \
+		      - ((c->max_send_size - hdr_size) % (4*1024));           \
+	} else                                                                \
+		max = c->max_send_size - hdr_size;                            \
 	} while(0)
 
 typedef enum device_state {
@@ -1189,6 +1254,14 @@ typedef enum device_state {
 #ifndef FD_COPY
 #define FD_COPY(a,b) memcpy(a,b,sizeof(fd_set))
 #endif
+
+
+#define QUEUE_MSG(tx,ep,sep) do {					\
+	tx->state = SOCK_TX_QUEUED;					\
+	pthread_mutex_lock(&ep->lock);					\
+	TAILQ_INSERT_TAIL(&sep->queued, evt, entry);			\
+	pthread_mutex_unlock(&ep->lock);				\
+} while(0)
 
 extern sock_globals_t *sglobals;
 

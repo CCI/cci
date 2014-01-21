@@ -31,7 +31,9 @@
     mtu = 9000
 
   The tcp transport will then set the endpoint->max_send_size to this size
-  less what it needs for headers.
+  less what it needs for headers. If the OS supports MTU discovery (i.e.
+  recent Linux), then CCI will use the actual MTU (less headers) and ignore
+  this keyword.
 
     bufsize = 20971520
 
@@ -59,7 +61,7 @@
 Not implemented:
 
   Create endpoint cannot return an OS handle (i.e. no blocking support)
-  Fence
+  RMA Fence
 
 
 = CCI Performance Tuning =======================================================

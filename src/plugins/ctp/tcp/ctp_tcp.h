@@ -518,6 +518,13 @@ tcp_pack_rma_read_reply(tcp_rma_header_t * read, uint64_t data_len, uint32_t tx_
 
 /************* TCP private structures ****************/
 
+typedef struct tcp_globals tcp_globals_t;
+typedef struct tcp_dev tcp_dev_t;
+typedef struct tcp_ep tcp_ep_t;
+typedef struct tcp_conn tcp_conn_t;
+typedef struct tcp_tx tcp_tx_t;
+typedef struct tcp_rx tcp_rx_t;
+
 typedef enum tcp_tx_state_t {
 	/*! available, held by endpoint */
 	TCP_TX_IDLE = 0,
@@ -540,7 +547,7 @@ typedef enum tcp_ctx {
 /*! Send message context.
 *
 * \ingroup messages */
-typedef struct tcp_tx {
+struct tcp_tx {
 	/*! Must be TCP_CTX_TX */
 	tcp_ctx_t ctx;
 
@@ -585,12 +592,12 @@ typedef struct tcp_tx {
 
 	/*! Peer address if connect reject message (i.e. no conn) */
 	struct sockaddr_in sin;
-} tcp_tx_t;
+};
 
 /*! Receive message context.
  *
  * \ingroup messages */
-typedef struct tcp_rx {
+struct tcp_rx {
 	/*! Must be TCP_CTX_RX */
 	tcp_ctx_t ctx;
 
@@ -603,12 +610,9 @@ typedef struct tcp_rx {
 	/*! Buffer length */
 	uint16_t len;
 
-	/*! rx ID */
-	uint32_t id;
-
-	/*! Peer's sockaddr_in for connection requests */
-	struct sockaddr_in sin;
-} tcp_rx_t;
+	/*! Amount read (header + payload (including RMA) */
+	uintptr_t offset;
+};
 
 typedef struct tcp_rma_handle {
 	/*! Owning endpoint */
@@ -681,27 +685,18 @@ typedef struct tcp_rma_op {
 	char *msg_ptr;
 } tcp_rma_op_t;
 
-typedef struct tcp_ep {
+struct tcp_ep {
 	/*! Socket for listen */
 	cci_os_handle_t sock;
 
-	/*! List of open connections */
+	/*! List of all connections */
 	TAILQ_HEAD(s_conns, tcp_conn) conns;
 
-	/*! Set when polling - only one poll at a time.
-	 *  The poller will need to access fds, nfds, c and they cannot change
-	 *  while is_polling is set. We need to queue any changes and the
-	 *  poller can perform them after processing the poll results. */
-	uint32_t is_polling;
-
-	/*! For polling connection sockets */
-	struct pollfd *fds;
+	/*! Last conn polled */
+	tcp_conn_t *poll_conn;
 
 	/*! Number of pollfds */
 	nfds_t nfds;
-
-	/*! Array of conns indexed by fds */
-	cci__conn_t **c;
 
 	/*! TX common buffer */
 	void *tx_buf;
@@ -724,33 +719,13 @@ typedef struct tcp_ep {
 	/*! Pipe for OS handle */
 	int pipe[2];
 
-	/*! Connection id blocks */
-	uint64_t *ids;
-
 	/* Our IP and port */
 	struct sockaddr_in sin;
-
-#if 0
-	/*! Queued sends */
-	TAILQ_HEAD(s_queued, cci__evt) queued;
-
-	/*! Pending (in-flight) sends */
-	TAILQ_HEAD(s_pending, cci__evt) pending;
-#endif
 
 	/*! List of all connections with keepalive enabled */
 	/* FIXME: revisit the code to use this
 	TAILQ_HEAD(s_ka, tcp_conn) ka_conns;
 	*/
-
-	/*! List of active connections awaiting replies */
-	TAILQ_HEAD(s_active, tcp_conn) active;
-
-	/*! List of passive connections awaiting requests and acks */
-	TAILQ_HEAD(s_passive, tcp_conn) passive;
-
-	/*! List of closing connections */
-	TAILQ_HEAD(ss_conns, tcp_conn) closing;
 
 	/*! List of RMA registrations */
 	TAILQ_HEAD(s_handles, tcp_rma_handle) handles;
@@ -760,15 +735,15 @@ typedef struct tcp_ep {
 
 	/*! ID of the recv thread for the endpoint */
 	pthread_t tid;
-} tcp_ep_t;
+};
 
 /* Connection info */
 
 typedef enum tcp_conn_status {
-	/*! Shutdown */
+	/*! Disconnect called, free resources */
 	TCP_CONN_CLOSED = -2,
 
-	/*! Disconnect called */
+	/*! Error detected */
 	TCP_CONN_CLOSING = -1,
 
 	/*! NULL (intial) state */
@@ -816,32 +791,29 @@ tcp_conn_status_str(tcp_conn_status_t status)
 	return NULL;
 }
 
-typedef struct tcp_conn {
+struct tcp_conn {
 	/*! Owning conn */
 	cci__conn_t *conn;
 
 	/*! Status */
 	tcp_conn_status_t status;
 
-	/*! Peer's sockaddr_in (IP, port) */
-	struct sockaddr_in sin;
+	/*! Reference count */
+	int refcnt;
 
-	/*! socket for this connection */
-	uint32_t fd;
+	/*! poll fd */
+	struct pollfd pfd;
 
-	/*! Lock for receiving */
-	pthread_mutex_t rlock;
+	/*! partial receive */
+	tcp_rx_t *rx;
 
-	/*! Lock for sending */
-	pthread_mutex_t slock;
+	/*! Lock */
+	pthread_mutex_t lock;
 
-	/*! Index in tep->fds */
-	uint32_t index;
+	/*! Is this the endpoint's listening socket? */
+	int is_listener;
 
-	/*! Max sends in flight to this peer (i.e. rwnd) */
-	uint32_t max_tx_cnt;
-
-	/*! Entry to hang on tcp_ep->conns[hash] */
+	/*! Entry to hang on tcp_ep->conns */
 	 TAILQ_ENTRY(tcp_conn) entry;
 
 	/*! Queued sends */
@@ -853,11 +825,17 @@ typedef struct tcp_conn {
 	/*! List of RMA ops in process in case of fence */
 	TAILQ_HEAD(s_rmas, tcp_rma_op) rmas;
 
+	/*! Peer's sockaddr_in (IP, port) */
+	struct sockaddr_in sin;
+
+	/*! Max sends in flight to this peer (i.e. rwnd) */
+	uint32_t max_tx_cnt;
+
 	/*! Flag to know if the receiver is ready or not */
 	uint32_t rnr;
-} tcp_conn_t;
+};
 
-typedef struct tcp_dev {
+struct tcp_dev {
 	/*! Our IP address in network order */
 	in_addr_t ip;
 
@@ -866,7 +844,7 @@ typedef struct tcp_dev {
 
 	/*! Set socket buffers sizes */
 	uint32_t bufsize;
-} tcp_dev_t;
+};
 
 typedef enum tcp_fd_type {
 	TCP_FD_UNUSED = 0,
@@ -878,7 +856,7 @@ typedef struct tcp_fd_idx {
 	cci__ep_t *ep;
 } tcp_fd_idx_t;
 
-typedef struct tcp_globals {
+struct tcp_globals {
 	/*! Mutex */
 	pthread_mutex_t lock;
 
@@ -887,7 +865,7 @@ typedef struct tcp_globals {
 
 	/*! Array of sock devices */
 	cci_device_t **devices;
-} tcp_globals_t;
+};
 
 /* Macro to initialize the structure of a device */
 #define INIT_CCI_DEVICE_STRUCT(device) { \
