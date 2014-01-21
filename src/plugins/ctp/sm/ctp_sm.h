@@ -126,8 +126,8 @@ typedef union sm_hdr {
 	/* Connect reply */
 	struct sm_hdr_reply {
 		unsigned int type	: 4;	/* SM_MSG_CONN_REPLY */
-		unsigned int accept	: 2;	/* ACCEPT=1 or REJECT=0 */
-		unsigned int pad26	: 26;	/* reserved */
+		unsigned int accept	: 8;	/* ACCEPT=0 or errno */
+		unsigned int pad26	: 20;	/* reserved */
 		/* 32b */
 	} reply;
 
@@ -175,9 +175,9 @@ typedef union sm_hdr {
 	/* Generic RMA write (without data ptr) */
 	struct _sm_hdr_rma_write {
 		unsigned int type	: 4;	/* SM_MSG_RMA_WRITE */
-		unsigned int slot	: 4;	/* SM_MSG_RMA_WRITE */
-		unsigned int len	: 20;	/* payload length */
-		unsigned int pad	: 4;	/* reserved */
+		unsigned int slot	: 8;	/* RMA mmap slot */
+		unsigned int msg_len	: 14;	/* Completion msg payload length */
+		unsigned int pad	: 6;	/* reserved */
 		/* 32b */
 		uint32_t handle;		/* ID of target's RMA handle */
 		/* 64b */
@@ -193,6 +193,7 @@ typedef union sm_hdr {
 		unsigned int slot	: 8;	/* RMA mmap slot */
 		unsigned int msg_len	: 14;	/* Completion msg payload length */
 		unsigned int pad	: 6;	/* reserved */
+		/* 32b */
 		uint32_t len;			/* RMA payload len */
 		/* 32b */
 		uint32_t handle;		/* ID of target's RMA handle */
