@@ -20,14 +20,17 @@ BEGIN_C_DECLS
 #define SM_BLOCK_SIZE		(64)		/* uint64_t sized ep id blocks */
 #define SM_NUM_BLOCKS		(1)		/* start with one block for 64 ep ids */
 
-#define SM_DEFAULT_MSS		(1024)
-#define SM_MIN_MSS		(128)		/* cache line size */
-#define SM_MAX_MSS		(4096)		/* page size */
-
 #define SM_EP_RX_CNT		(1024)		/* number of rx messages */
 #define SM_EP_TX_CNT		(1024)		/* number of tx messages */
 
+#define SM_DEFAULT_MTU		(1024)
+#define SM_MIN_MTU		(128)		/* cache line size */
+#define SM_MAX_MTU		(4096)		/* page size */
+
 #define SM_HDR_LEN		(4)		/* common header size */
+
+#define SM_MSS(mtu)		((mtu) - SM_HDR_LEN)
+						/* max send size */
 
 #define SM_RMA_DEPTH		(16)		/* how many in-flight msgs per RMA */
 #define SM_RMA_FRAG_SIZE	(16*1024)	/* optimal for POSIX shmem */
@@ -35,7 +38,7 @@ BEGIN_C_DECLS
 
 #define SM_EP_MAX_CONNS		(1024)		/* Number of cores? */
 
-#define SM_DEFAULT_PATH		"/var/run/cci/sm"
+#define SM_DEFAULT_PATH		"/tmp/cci/sm"
 
 /* Valid URI include:
  *
@@ -74,11 +77,11 @@ BEGIN_C_DECLS
 			  try to create it. If not succesful, the transport
 			  will not load.
 
-			  For example, sm:///tmp/cci/1234/1 would be bound to:
+			  For example, sm:///tmp/cci/sm/1234/1 would be bound to:
 
-			  /tmp/cci/1234/1
+			  /tmp/cci/sm/1234/1
 
-			  The default path is /var/run/cci/sm.
+			  The default path is /tmp/cci/sm.
  */
 
 typedef enum sm_msg_type {
