@@ -1,0 +1,115 @@
+Each endpoint uses the following resources:
+
+* Unix domain socket (UDS)
+* FIFO file
+* MMAP MSG send buffer
+* MMAP RMA buffer (optional)
+
+The sm transport uses the UDS for connection setup.  During connection setup,
+the peers will exchange information including their FIFO path, MSG send buffer
+and information for RMA support and handling.
+
+The endpoint URI will be:
+
+sm://path/pid/id
+
+where path is a valid, absolute directory path in the file system, the pid is
+the process id of the caller to cci_init(), and id is the id of endpoint. The
+complete URI without the sm:// prefix is a directory which includes the UDS
+socket file, the FIFO file, the MMAP send buffer, and the MMAP RAM buffer, if
+used.
+
+For example, the URI "sm:///tmp/cci/sm/4567/2" represents a directory at:
+
+/tmp/cci/sm/4567/2/
+
+which will include these files:
+
+sock
+fifo
+msgs
+rmas (if used)
+
+Using the directory for all the resources allows for easier cleanup internally
+as well as by users and/or admins.
+
+The socket will use the SOCK_DGRAM to allow connection handshake messages to be
+sent without the need to maintain message markers for each connection. While UDS
+datagrams are reliable, we will need to maintain timeouts and attempt
+retransmission as needed.
+
+The sm transport uses the FIFO for receiving message headers, message acks, and
+RMA headers. The FIFO has a larger capacity and lower latency than UDS datagram
+sockets. Like a socket (and unlike the MMAP buffer), it has a file handle that
+can be monitored via poll(), etc. All headers sent over the FIFO must be 8-byte
+and the first four bits in the header must be the header type and the next 16
+bits must be the connection ID.  Without using a per-peer FIFO, messages will
+need a peer ID in every message and a look up of the ID on the receiver.  Writes
+to a pipe are atomic as long as the size is less than PIPE_BUFF (i.e. 512
+bytes), so no locking is required.
+
+A sender stores the payload in his MMAP send buffer and includes the offset in
+the MSG header written to the receiver's FIFO. The sender will allocate the send
+buffer in cacheline size segments. The receiver will copy the data and ack the
+send (offset and length or send ID), thus freeing the sender's buffer.
+
+We will need to ignore SIGPIPE. When writing headers to the receiver's FIFO, we
+will get EPIPE if the receiver has closed their end of the pipe (or exited or
+crashed).
+
+RMA is handled by one of the these methods (in this order of preference):
+
+* KNEM (Linux 2.6.18+ only)
+* cross-memory attach (CMA) (Linux 3.5+ only)
+* mmap
+
+If either KNEM or CMA exist, then RMAs will be handled solely by the initiator
+without sending a RMA header to the target. If not, the initiator will send a
+RMA header and descriptor to the target using the FIFO. The target will parse
+the header and descriptor, handle accordingly, and send the response (see below
+description). The RMA payload will be transferred using the MMAP buffer of the
+initiator and the target will perform the memcpy().
+
+Each RMA fragment will have a self-describing header. The payload will start on
+the next cacheline.
+
+* RMA Write
+
+- KNEM
+
+- CMA
+
+- MMAP
+
+The initiator reserves N+1 cachelines in the RMA buffer. It writes the RMA
+header into the first slot and the payload into the remaining slots. It packs
+the sm_hdr_t and writes it to the target's FIFO.
+
+The target reads the header and then reads the inline RMA header from the first
+slot. It looks up the RMA handle and verifies it. It them memcpy()s the data
+from the sender's RMA buffer to the destination buffer. Lastly, it packs the RMA
+ack and writes it to the initiator's FIFO.
+
+The initiator reads the ack from the FIFO, looks up the sm_rma_t * from the
+first slot, and completes the fragment.
+
+* RMA Read
+
+- KNEM
+
+- CMA
+
+- MMAP
+
+The initiator reserves N+1 cachelines in the RMA buffer. It writes the RMA
+header into the first slot and reserves the remaining slots for the target. It
+packs the sm_hdr_t and writes it to the target's FIFO.
+
+The target reads the header and then reads the inline RMA header from the first
+slot. It looks up the RMA handle and verifies it. It them memcpy()s the data
+from its memory to the sender's RMA buffer. Lastly, it packs the RMA ack and
+writes it to the initiator's FIFO.
+
+The initiator reads the ack from the FIFO, looks up the sm_rma_t * from the
+first slot, memcpy()s the data to the local buffer, and completes the fragment.
+

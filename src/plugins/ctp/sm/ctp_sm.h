@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 UT-Battelle, LLC. All rights reserved.
+ * Copyright (c) 2013 UT-Battelle, LLC. All rights Reserved.
  * $COPYRIGHT$
  */
 
@@ -23,18 +23,15 @@ BEGIN_C_DECLS
 #define SM_EP_RX_CNT		(1024)		/* number of rx messages */
 #define SM_EP_TX_CNT		(1024)		/* number of tx messages */
 
-#define SM_DEFAULT_MTU		(1024)
-#define SM_MIN_MTU		(128)		/* cache line size */
-#define SM_MAX_MTU		(4096)		/* page size */
+#define SM_DEFAULT_MSS		(128)
+#define SM_MIN_MSS		(64)		/* cache line size */
+#define SM_MAX_MSS		(4096)		/* page size */
 
-#define SM_HDR_LEN		(4)		/* common header size */
+#define SM_HDR_LEN		(8)		/* MSG and RMA header size */
 
-#define SM_MSS(mtu)		((mtu) - SM_HDR_LEN)
-						/* max send size */
-
-#define SM_RMA_DEPTH		(16)		/* how many in-flight msgs per RMA */
-#define SM_RMA_FRAG_SIZE	(16*1024)	/* optimal for POSIX shmem */
-#define SM_RMA_FRAG_MAX		(128*1024)	/* optimal for knem and CMA */
+#define SM_RMA_DEPTH		(4)		/* how many in-flight msgs per RMA */
+#define SM_RMA_FRAG_SIZE	(8*1024)	/* optimal for POSIX shmem */
+#define SM_RMA_FRAG_MAX		(64*1024)	/* optimal for knem and CMA */
 
 #define SM_EP_MAX_CONNS		(1024)		/* Number of cores? */
 
@@ -63,8 +60,8 @@ BEGIN_C_DECLS
  *
  * A sm device may have these items:
  *
- * mtu = 128		# MTU less headers will become max_send_size.
- *                        The default it 1 KB.
+ * mss = 128		# Set max_send_size.
+ *                        The default is 128 bytes. The min is 64 and max is 4096.
  *
  * id = 32		# Base ep_id for this process. The default is 0.
  *
@@ -84,130 +81,154 @@ BEGIN_C_DECLS
 			  The default path is /tmp/cci/sm.
  */
 
-typedef enum sm_msg_type {
-	SM_MSG_INVALID	= 0,
-	SM_MSG_CONNECT,
-	SM_MSG_CONN_REPLY,
-	SM_MSG_CONN_ACK,	/* do we need this? */
-	SM_MSG_SEND,
-	SM_MSG_ACK,
-	SM_MSG_RNR,
-	SM_MSG_KEEPALIVE,
-	SM_MSG_RMA_WRITE,
-	SM_MSG_RMA_READ_REQUEST,
-	SM_MSG_RMA_READ_REPLY,
-	SM_MSG_MAX
-} sm_msg_type_t;
+typedef enum sm_conn_msg_type {
+	SM_CMSG_CONNECT,
+	SM_CMSG_CONN_REPLY,
+	SM_CMSG_CONN_ACK
+} sm_conn_msg_type_t;
 
-typedef union sm_hdr {
+/* The connection messages are sent via the UDS only */
+/* This is a 4-byte aligned structure */
+typedef union sm_conn_hdr {
 	/* Generic header used by all messages */
-	struct sm_hdr_generic {
-		unsigned int type	: 4;	/* header type */
-		unsigned int pad	: 28;	/* fill to 32 bits */
+	struct sm_conn_hdr_generic {
+		uint32_t type		:  2;	/* header type */
+		uint32_t pad		: 30;	/* fill to 32 bits */
 		/* 32b */
 	} generic;
 
 	/* Generic connect request (without data ptr) */
-	struct sm_hdr_connect_generic {
-		unsigned int type	: 4;	/* SM_MSG_CONNECT */
-		unsigned int pad	: 4;	/* reserved */
-		unsigned int version	: 8;	/* version */
-		unsigned int len	: 16;	/* payload length */
+	struct sm_conn_hdr_connect_generic {
+		uint32_t type		:  2;	/* SM_CMSG_CONNECT */
+		uint32_t version	:  6;	/* version */
+		uint32_t len		: 12;	/* payload length */
+		uint32_t pad		: 12;	/* Reserved */
 		/* 32b */
 	} _connect;
 
 	/* Connect request */
-	struct sm_hdr_connect {
-		unsigned int type	: 4;	/* SM_MSG_CONNECT */
-		unsigned int pad	: 4;	/* reserved */
-		unsigned int version	: 8;	/* version */
-		unsigned int len	: 16;	/* payload length */
+	struct sm_conn_hdr_connect {
+		uint32_t type		:  2;	/* SM_CMSG_CONNECT */
+		uint32_t version	:  6;	/* version */
+		uint32_t len		: 12;	/* payload length */
+		uint32_t pad		: 12;	/* Reserved */
 		/* 32b */
-		char data[1];
 	} connect;
 
 	/* Connect reply */
-	struct sm_hdr_reply {
-		unsigned int type	: 4;	/* SM_MSG_CONN_REPLY */
-		unsigned int accept	: 8;	/* ACCEPT=0 or errno */
-		unsigned int pad26	: 20;	/* reserved */
+	struct sm_conn_hdr_connect_reply {
+		uint32_t type		:  2;	/* SM_CMSG_CONN_REPLY */
+		uint32_t accept		:  8;	/* ACCEPT=0 or errno */
+		uint32_t pad		: 22;	/* Reserved */
 		/* 32b */
 	} reply;
+} sm_conn_hdr_t;
 
-	/* Generic send (without data ptr) */
-	struct sm_hdr_send_generic {
-		unsigned int type	: 4;	/* SM_MSG_SEND */
-		unsigned int len	: 14;	/* payload length */
-		unsigned int id		: 14;	/* tx id */
+typedef enum sm_msg_type {
+	SM_MSG_INVALID	= 0,
+	SM_MSG_SEND,
+	SM_MSG_SEND_ACK,
+	SM_MSG_KEEPALIVE,
+	SM_MSG_KEEPALIVE_ACK,
+	SM_MSG_RMA_WRITE,
+	SM_MSG_RMA_READ,
+	SM_MSG_RMA_ACK,
+	SM_MSG_MAX
+} sm_msg_type_t;
+
+/* The message headers are sent via the FIFO only and act as a doorbell */
+/* This is a 8-byte aligned structure */
+typedef union sm_hdr {
+	/* Generic header used by all messages */
+	struct sm_hdr_generic {
+		uint32_t type		:  4;	/* header type */
+		uint32_t id		: 16;	/* Connection ID */
+		uint32_t pad1		: 12;	/* fill to 32 bits */
 		/* 32b */
-	} _send;
+		uint32_t pad2;			/* fill to 64 bits */
+		/* 64b */
+	} generic;
 
-	/* Send */
+	/* Send (header only, payload in sender's MMAP MSG buffer) */
 	struct sm_hdr_send {
-		unsigned int type	: 4;	/* SM_MSG_SEND */
-		unsigned int id		: 14;	/* tx id */
-		unsigned int len	: 14;	/* payload length */
+		uint32_t type		:  4;	/* SM_MSG_SEND[_ACK] */
+		uint32_t id		: 16;	/* Connection ID */
+		uint32_t offset		: 12;	/* MMAP cacheline index */
 		/* 32b */
-		char data[1];
+		uint32_t seq		: 14;	/* Sequence or msg ID */
+		uint32_t len		: 12;	/* payload length */
+		uint32_t pad		: 6;	/* Reserved */
+		/* 64b */
 	} send;
-
-	/* Ack */
-	struct sm_hdr_ack {
-		unsigned int type	: 4;	/* SM_MSG_ACK */
-		unsigned int id		: 14;	/* tx id */
-		unsigned int pad	: 14;	/* reserved */
-		/* 32b */
-	} ack;
-
-	/* RNR */
-	struct sm_hdr_rnr {
-		unsigned int type	: 4;	/* SM_MSG_RNR */
-		unsigned int id		: 14;	/* tx id */
-		unsigned int pad	: 14;	/* reserved */
-		/* 32b */
-	} rnr;
 
 	/* Keepalive */
 	struct sm_hdr_keepalive {
-		unsigned int type	: 4;	/* SM_MSG_KEEPALIVE */
-		unsigned int id		: 14;	/* tx id */
-		unsigned int pad	: 14;	/* reserved */
+		uint32_t type		:  4;	/* SM_MSG_KEEPALIVE[_ACK] */
+		uint32_t id		: 16;	/* Connection ID */
+		uint32_t pad1		: 12;	/* Reserved */
 		/* 32b */
+		uint32_t seq		: 14;	/* Sequence or msg ID */
+		uint32_t pad2		: 18;	/* Reserved */
+		/* 64b */
 	} keepalive;
 
-	/* Generic RMA write (without data ptr) */
-	struct _sm_hdr_rma_write {
-		unsigned int type	: 4;	/* SM_MSG_RMA_WRITE */
-		unsigned int slot	: 8;	/* RMA mmap slot */
-		unsigned int msg_len	: 14;	/* Completion msg payload length */
-		unsigned int pad	: 6;	/* reserved */
+	/* RMA request (used by MMAP RMA only) */
+	struct sm_hdr_rma {
+		uint32_t type		:  4;	/* SM_MSG_RMA_[WRITE|_READ] */
+		uint32_t id		: 16;	/* Connection ID */
+		uint32_t offset		: 12;	/* MMAP cacheline offset */
 		/* 32b */
-		uint32_t handle;		/* ID of target's RMA handle */
+		uint32_t len		: 16;	/* Length of payload */
+		uint32_t pad		: 16;	/* Reserved */
 		/* 64b */
-		uint32_t offset_hi;		/* Offset into target's RMA handle */
-		/* 96b */
-		uint32_t offset_lo;		/* Upper 32 and lower 32 bits */
-		/* 128b */
-	} _write;
+	} rma;
 
-	/* RMA write */
-	struct sm_hdr_rma_write {
-		unsigned int type	: 4;	/* SM_MSG_RMA_WRITE */
-		unsigned int slot	: 8;	/* RMA mmap slot */
-		unsigned int msg_len	: 14;	/* Completion msg payload length */
-		unsigned int pad	: 6;	/* reserved */
+	/* RMA ack (used by MMAP RMA only) */
+	struct sm_hdr_rma_ack {
+		uint32_t type		:  4;	/* SM_MSG_RMA_ACK */
+		uint32_t id		: 16;	/* Connection ID */
+		uint32_t offset		: 12;	/* MMAP cacheline offset */
 		/* 32b */
-		uint32_t len;			/* RMA payload len */
-		/* 32b */
-		uint32_t handle;		/* ID of target's RMA handle */
+		uint32_t len		: 16;	/* Length of payload */
+		uint32_t status		:  8;	/* Status (0 for success, else errno) */
+		uint32_t pad		:  8;	/* Reserved */
 		/* 64b */
-		uint32_t offset_hi;		/* Offset into target's RMA handle */
-		/* 96b */
-		uint32_t offset_lo;		/* Upper 32 and lower 32 bits */
-		/* 128b */
-		char data[1];			/* For completion msg, if needed */
-	} write;
+	} rma_ack;
+
+	/* Force alignment for all members */
+	uint64_t align;
 } sm_hdr_t;
+
+/* This is an 8-byte aligned structure */
+typedef struct sm_rma_hdr {
+	uint64_t local_handle;			/* Initiator's sm_rma_handle_t * */
+	/*  8 B */
+	uint64_t local_offset;			/* Initiator's offset */
+	/* 16 B */
+	uint64_t remote_handle;			/* Target's sm_rma_handle_t * */
+	/* 24 B */
+	uint64_t remote_offset;			/* Target's offset */
+	/* 32 B */
+	uint64_t len;				/* Total RMA length */
+	/* 40 B */
+	uint64_t rma;				/* Initiator's sm_rma_t * */
+	/* 48 B */
+} sm_rma_hdr_t;
+
+static inline char *
+sm_conn_msg_str(sm_conn_msg_type_t type)
+{
+	switch (type) {
+	case SM_CMSG_CONNECT:
+		return "SM_CMSG_CONNECT";
+	case SM_CMSG_CONN_REPLY:
+		return "SM_CMSG_CONN_REPLY";
+	case SM_CMSG_CONN_ACK:
+		return "SM_CMSG_CONN_ACK";
+	}
+	/* never reached */
+	return NULL;
+}
 
 static inline char *
 sm_msg_str(sm_msg_type_t type)
@@ -215,26 +236,20 @@ sm_msg_str(sm_msg_type_t type)
 	switch (type) {
 	case SM_MSG_INVALID:
 		return "SM_MSG_INVALID";
-	case SM_MSG_CONNECT:
-		return "SM_MSG_CONNECT";
-	case SM_MSG_CONN_REPLY:
-		return "SM_MSG_CONN_REPLY";
-	case SM_MSG_CONN_ACK:
-		return "SM_MSG_CONN_ACK";
 	case SM_MSG_SEND:
 		return "SM_MSG_SEND";
-	case SM_MSG_ACK:
-		return "SM_MSG_ACK";
-	case SM_MSG_RNR:
-		return "SM_MSG_RNR";
+	case SM_MSG_SEND_ACK:
+		return "SM_MSG_SEND_ACK";
 	case SM_MSG_KEEPALIVE:
 		return "SM_MSG_KEEPALIVE";
+	case SM_MSG_KEEPALIVE_ACK:
+		return "SM_MSG_KEEPALIVE_ACK";
 	case SM_MSG_RMA_WRITE:
 		return "SM_MSG_RMA_WRITE";
-	case SM_MSG_RMA_READ_REQUEST:
-		return "SM_MSG_RMA_READ_REQUEST";
-	case SM_MSG_RMA_READ_REPLY:
-		return "SM_MSG_RMA_READ_REPLY";
+	case SM_MSG_RMA_READ:
+		return "SM_MSG_RMA_READ";
+	case SM_MSG_RMA_ACK:
+		return "SM_MSG_RMA_ACK";
 	case SM_MSG_MAX:
 		return "SM_MSG_MAX";
 	}
@@ -289,6 +304,21 @@ typedef struct sm_rx {
 	cci__evt_t		evt;		/* CCI event - private and public) */
 	void			*buf;		/* Pointer into sep->rx_buf */
 } sm_rx_t;
+
+typedef struct sm_rma_handle {
+	void *addr;
+	uint64_t len;
+	int flags;
+} sm_rma_handle_t;
+
+typedef struct sm_rma {
+	cci__evt_t evt;
+	sm_rma_hdr_t hdr;
+	sm_tx_t *tx;
+	uint32_t num_frags;
+	uint32_t next_frag;
+	uint32_t completed;
+} sm_rma_t;
 
 typedef struct sm_ep {
 	cci_os_handle_t		sock;		/* For listen socket */

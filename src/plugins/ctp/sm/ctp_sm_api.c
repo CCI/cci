@@ -179,7 +179,7 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 		device->pci.dev = -1;		/* per CCI spec */
 		device->pci.func = -1;		/* per CCI spec */
 
-		device->max_send_size = SM_DEFAULT_MSS - SM_HDR_LEN;
+		device->max_send_size = SM_DEFAULT_MSS;
 
 		debug(CCI_DB_INFO, "%s: device %s path is %s", __func__,
 			device->name, sdev->path);
@@ -288,7 +288,7 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 			/* TODO make directory for sdev->path */
 
 			if (device->max_send_size == 0)
-				device->max_send_size = SM_DEFAULT_MSS - SM_HDR_LEN;
+				device->max_send_size = SM_DEFAULT_MSS;
 
 			debug(CCI_DB_INFO, "%s: device %s path is %s", __func__,
 				device->name, sdev->path);
