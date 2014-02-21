@@ -3353,6 +3353,47 @@ static void sock_handle_rnr(sock_conn_t * sconn, uint32_t seq, uint32_t ts)
 }
 
 /*!
+Handle incoming nack
+
+*/
+static void
+sock_handle_nack (sock_conn_t * sconn,
+                  cci__ep_t *ep,
+                  sock_ep_t *sep,
+                  uint32_t seq)
+{
+	sock_tx_t *tx	= NULL;
+	sock_tx_t *tmp	= NULL;
+	
+	debug_ep (ep,
+	          CCI_DB_MSG,
+	          "%s: Received NACK (seq: %u)",
+	          __func__,
+	          seq);
+	/* If the message is still in the pending queue, we resend it,
+	   otherwise it means the message has been acked meanwhile and
+	   therefore we can ignore the NACK */
+	TAILQ_FOREACH_SAFE (tx, &sconn->tx_seqs, tx_seq, tmp) {
+		if (tx->seq == seq) {
+			/* Resend and return */
+			debug_ep (ep,
+			          CCI_DB_MSG,
+			          "Resending NACKed msg (seq %u)",
+			          seq); 
+			sock_sendto (sep->sock,
+			             tx->buffer,
+			             tx->len,
+			             tx->rma_ptr,
+			             tx->rma_len,
+			             sconn->sin);
+			return;
+		}
+	}
+
+	return;
+}
+
+/*!
 Handle incoming ack
 
 Check the device pending list for the matching tx
@@ -5031,11 +5072,35 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 				sconn->last_recvd_seq = seq;
 
 			if (seq > sconn->last_recvd_seq + 1) {
+				char buffer[SOCK_MAX_HDR_SIZE];
+				sock_header_r_t *nack_hdr;
+				int len;
+
+				/* We are receiving a message out of order.
+				   We keep the message to avoid retransmission
+				   and we send a NACK to make sure we get the
+				   message resent. */
 				debug (CCI_DB_INFO,
-				       "%s: Drop msg, recvd seq %u when %u is expected",
+				       "%s: recvd seq %u when %u is expected; sending NACK",
 				       __func__, seq, sconn->last_recvd_seq + 1);
-				drop_msg = 1;
-				q_rx = 1;
+				
+				nack_hdr = (sock_header_r_t*)buffer;
+				sock_pack_nack (nack_hdr,
+				                SOCK_MSG_NACK,
+				                sconn->peer_id,
+				                sconn->last_recvd_seq + 1,
+				                ts, 1);
+				len = sizeof (*nack_hdr);
+				ret = sock_sendto (sep->sock,
+				                   buffer, len,
+				                   NULL,
+				                   0,
+				                   sconn->sin);
+				if (ret == -1)
+					debug (CCI_DB_MSG,
+					       "%s: NACK send failed",
+					       __func__);
+				
 				goto out;
 			}
 		}
@@ -5128,18 +5193,18 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 		break;
 	}
 	case SOCK_MSG_RNR:{
-			sock_header_r_t *hdr_r = rx->buffer;
+		sock_header_r_t *hdr_r = rx->buffer;
 
-			debug (CCI_DB_INFO,
-			       "%s: Receiver not ready", __func__);
+		debug (CCI_DB_INFO,
+		       "%s: Receiver not ready", __func__);
 
-			sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
-			sock_handle_rnr(sconn, seq, ts);
-			/* No event is directly generated from the msg
-			   so we can reuse the RX buffer */
-			q_rx = 1;
-			break;
-		}
+		sock_parse_seq_ts(&hdr_r->seq_ts, &seq, &ts);
+		sock_handle_rnr(sconn, seq, ts);
+		/* No event is directly generated from the msg
+		   so we can reuse the RX buffer */
+		q_rx = 1;
+		break;
+	}
 	case SOCK_MSG_KEEPALIVE:
 		/* Nothing to do? */
 		break;
@@ -5157,6 +5222,20 @@ static int sock_recvfrom_ep(cci__ep_t * ep)
 #endif
 		sock_handle_ack(sconn, type, rx, (uint32_t)a, id);
 		/* sock_handle_ack already requeue the RXs in the idle list */
+		break;
+	}
+	case SOCK_MSG_NACK: {
+		uint32_t total_size 	= sizeof (sock_header_r_t);
+
+		/* We just need to the data from the header */
+		recv_len = sock_recv_msg (sep->sock, rx->buffer,
+                                          total_size, 0, NULL);
+                debug (CCI_DB_EP, "%s: We now have %u/%u bytes",
+                       __func__, (unsigned int)recv_len, total_size);
+#if CCI_DEBUG
+                assert (recv_len == total_size);
+#endif
+		sock_handle_nack (sconn, ep, sep, seq);
 		break;
 	}
 	case SOCK_MSG_RMA_WRITE: {
@@ -5313,7 +5392,6 @@ static void sock_keepalive(cci__ep_t *ep)
 			cci__evt_t *evt = NULL;
 			cci__ep_t *ep = NULL;
 			sock_ep_t *sep = NULL;
-			sock_tx_t *tx = NULL;
 
 			/*
 			* We generate a keepalive event
