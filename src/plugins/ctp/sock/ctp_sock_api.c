@@ -265,6 +265,8 @@ static inline const char *sock_msg_type(sock_msg_type_t type)
 		return "ack_up_to";
 	case SOCK_MSG_SACK:
 		return "selective ack";
+    case SOCK_MSG_NACK:
+        return "negative ack";
 	case SOCK_MSG_RMA_WRITE:
 		return "RMA write";
 	case SOCK_MSG_RMA_WRITE_DONE:
