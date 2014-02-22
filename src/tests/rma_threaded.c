@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2011-2014 UT-Battelle, LLC.  All rights reserved.
- * Copyright (c) 2011-2014 Oak Ridge National Labs.  All rights reserved.
+ * Copyright (c) 2011-2013 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2011-2013 Oak Ridge National Labs.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -16,8 +16,13 @@
 #include <unistd.h>
 #include <inttypes.h>
 #include <assert.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/select.h>
+#include <pthread.h>
+#include <semaphore.h>
+#include <errno.h>
 
 #include "cci.h"
 
@@ -25,12 +30,14 @@
 #define RMA_REG_LEN	(4 * 1024 * 1024)
 
 /* Globals */
+int verbose = 0;
 int connect_done = 0, done = 0;
 int ready = 0;
 int is_server = 0;
 int is_client = 0;
-int count = 0;
-int iters = ITERS;
+int32_t count = 0;
+int32_t *tcount = NULL;
+int32_t iters = ITERS;
 char *name = NULL;
 char *server_uri = NULL;
 char *buffer = NULL;
@@ -52,15 +59,21 @@ int ignore_os_handle = 0;
 int blocking = 0;
 int nfds = 0;
 fd_set rfds;
-#define RMA_CTX_CNT	(1024)
-int *rma_context = NULL;
+int client_threads = 1;
+int server_threads = 1;
+pthread_t *tid = NULL;	/* client: RMA thread(s) */
+sem_t **sem = NULL;	/* client: to notify RMA thread of completion */
+int running = 1;
+pthread_mutex_t lock;
 
 typedef struct options {
+	uint64_t length;
 	uint64_t reg_len;
 #define RMA_WRITE 1
 #define RMA_READ  2
 	uint32_t method;
 	int flags;
+	int threads;
 } options_t;
 
 options_t opts;
@@ -93,17 +106,22 @@ typedef union hdr {
 		uint64_t offset;
 		uint64_t len;
 		uint32_t crc;
-		int pad;
+		uint32_t thread;
+		int32_t iter;
 	} check;
 
 	struct status_hdr {
 		msg_type_t type;
+		uint64_t offset;
+		uint64_t len;
 		uint32_t crc;
+		uint32_t thread;
+		int32_t iter;
 	} status;
 } hdr_t;
 
-hdr_t msg;
-uint32_t msg_len = 0;
+hdr_t *msg;
+uint32_t *msg_len = 0;
 
 extern uint32_t
 crc32(uint32_t crc, const void *buf, size_t size);
@@ -112,11 +130,12 @@ static void print_usage(void)
 {
 	fprintf(stderr, "usage: %s -h <server_uri> [-s] [-i <iters>] "
 		"[-c <type>] [-B|-I] [-o <local_offset>] [-O <remote_offset>"
-		"[[-w | -r] [-R <reg_len>] [-l <max_len>]]\n", name);
+		"[[-w | -r] [-R <reg_len>] [-l <max_len>]] "
+		"[-T <client_threads>]\n", name);
 	fprintf(stderr, "where:\n");
 	fprintf(stderr, "\t-h\tServer's URI\n");
 	fprintf(stderr, "\t-s\tSet to run as the server\n");
-	fprintf(stderr, "\t-i\tRun this number of iterations\n");
+	fprintf(stderr, "\t-i\tRun this number of iterations (default %d)\n", iters);
 	fprintf(stderr, "\t-c\tConnection type (RU or RO) set by client only\n");
 	fprintf(stderr, "\t-w\tUse RMA WRITE (default)\n");
 	fprintf(stderr, "\t-r\tUse RMA READ instead of RMA WRITE\n");
@@ -126,6 +145,8 @@ static void print_usage(void)
 	fprintf(stderr, "\t-O\tRMA remote offset (default 0)\n");
 	fprintf(stderr, "\t-B\tBlock using the OS handle instead of polling\n");
 	fprintf(stderr, "\t-I\tGet OS handle but ignore it\n\n");
+	fprintf(stderr, "\t-T\tNumber of client RMA threads (default 1)\n");
+	fprintf(stderr, "\t-t\tNumber of server threads (default 1) set by server only\n");
 	fprintf(stderr, "Example:\n");
 	fprintf(stderr, "server$ %s -h sock://foo -p 2211 -s\n", name);
 	fprintf(stderr, "client$ %s -h sock://foo -p 2211\n", name);
@@ -145,14 +166,17 @@ static void check_return(cci_endpoint_t * endpoint, char *func, int ret, int nee
 static void
 init_buffer(int is_client)
 {
-	int i = 0, count = opts.reg_len / sizeof(uint32_t);
+	int i = 0, len = 0, cnt = 0;
 	uint32_t *r = (uint32_t*)buffer;
 
-	memset(buffer, 0, opts.reg_len);
+	len = opts.reg_len * opts.threads;
+	cnt = len / sizeof(uint32_t);
+
+	memset(buffer, 0, len);
 
 	if ((is_client && opts.method == RMA_WRITE) ||
 		(!is_client && opts.method == RMA_READ)) {
-		for (i = 0; i < count; i++) {
+		for (i = 0; i < cnt; i++) {
 			*r = random();
 			r++;
 		}
@@ -162,25 +186,25 @@ init_buffer(int is_client)
 }
 
 static void
-print_buffer(void *buf, int len)
+print_buffer(int id, void *buf, int len)
 {
 	int i = 0;
 	uint8_t *c = (uint8_t *)buf;
 
-	if (len > 128)
+	if (len > 128 || !verbose)
 		return;
 
-	fprintf(stderr, "** ");
+	fprintf(stderr, "%d: ** ", id);
 	for (i = 0; i < len; i++) {
 		fprintf(stderr, "0x%02x ", *c);
-		if ((i % 16) == 15) fprintf(stderr, "\n** ");
+		if ((i % 16) == 15) fprintf(stderr, "\n%d: ** ", id);
 		c++;
 	}
 	fprintf(stderr, "\n");
 	return;
 }
 
-static void poll_events(void)
+static void poll_events(int id)
 {
 	int ret;
 	cci_event_t *event;
@@ -200,7 +224,7 @@ static void poll_events(void)
 		switch (event->type) {
 		case CCI_EVENT_SEND:
 			if (event->send.status != CCI_SUCCESS) {
-				fprintf(stderr, "RMA failed with %s.\n",
+				fprintf(stderr, "thread %2d: RMA failed with %s.\n", id,
 					cci_strerror(endpoint, event->send.status));
 				cci_disconnect(test);
 				test = NULL;
@@ -212,15 +236,10 @@ static void poll_events(void)
 			if (event->send.context == (void *)0xdeadbeef) {
 				done = 1;
 				break;
-			} else {
-				int i = 0;
-
-				for (i = 0; i < RMA_CTX_CNT; i++) {
-					int *ctx = (int *)event->send.context;
-
-					assert(ctx[i] == rma_context[i]);
-				}
 			}
+			if (verbose)
+				fprintf(stderr, "Thread %2d: RMA from %d completed\n", id,
+					(int)((uintptr_t)event->send.context));
 			break;
 		case CCI_EVENT_RECV:
 			if (is_client) {
@@ -232,78 +251,121 @@ static void poll_events(void)
 						&h->reply.handle,
 						sizeof(remote_rma_handle));
 				} else {
+					int i = h->status.thread;
+					hdr_t *m = &msg[i];
+
 					/* RMA status msg */
 					if (opts.method == RMA_WRITE) {
-						if (h->status.crc != msg.check.crc) {
-							fprintf(stderr, "Server reported "
+						if (h->status.crc != m->check.crc) {
+							fprintf(stderr, "Thread %2d: "
+								"Server reported "
 								"CRC failed.\n"
 								"Local CRC 0x%x != "
 								"remote CRC 0x%x.\n"
-								"count=%d current_size=%u\n",
-								msg.check.crc, h->status.crc,
-								count, current_size);
+								"count=%d current_size=%u "
+								"m_len = %u "
+								"status_len=%u "
+								"tcount=%d m_iter=%d "
+								"status_iter=%d "
+								"client %d\n",
+								id,
+								m->check.crc, h->status.crc,
+								count, current_size,
+								(uint32_t) m->check.len,
+								(uint32_t) h->status.len,
+								tcount[i], m->check.iter,
+								h->status.iter, i);
 						}
-					} else {
+					} else { /* RMA_READ */
 						uint32_t crc = 0;
-						void *ptr = (void*)((uintptr_t)buffer
-							+ local_offset);
+						void *ptr = (void*)((uintptr_t)buffer +
+							(i * length) + local_offset);
 
 						/* Compute the CRC only on a valid buffer */
-						if (current_size + local_offset <= opts.reg_len)
-							crc = crc32(0, ptr, current_size);
-						else
+						if (m->check.len + local_offset <= opts.reg_len) {
+							pthread_mutex_lock(&lock);
+							crc = crc32(0, ptr, m->check.len);
+							pthread_mutex_unlock(&lock);
+						} else {
 							crc = 0;
+						}
 						if (crc != h->status.crc) {
-							fprintf(stderr, "Server reported "
+							hdr_t *m = &msg[i];
+
+							fprintf(stderr, "Thread %2d: "
+								"Server reported "
 								"CRC failed.\n"
 								"Local CRC 0x%x != "
 								"remote CRC 0x%x.\n"
-								"count=%d current_size=%u\n",
+								"count=%d current_size=%u "
+								"m_len=%u "
+								"status_len=%u tcount=%d "
+								"m_iter=%d status_iter=%d "
+								"client %d\n",
+								id,
 								crc, h->status.crc,
-								count, current_size);
+								count, current_size,
+								(uint32_t) h->status.len,
+								(uint32_t) m->check.len,
+								tcount[i], m->check.iter,
+								h->status.iter, i);
 						}
 					}
 					/* RMA completed */
+					pthread_mutex_lock(&lock);
 					count++;
-					if (count < iters) {
-						ret = cci_rma(test,
-								&msg,
-								msg_len,
-								local_rma_handle,
-								local_offset,
-								&remote_rma_handle,
-								remote_offset,
-								current_size,
-								rma_context,
-								opts.flags);
-						check_return(endpoint, "cci_rma", ret, 1);
+					tcount[i] += 1;
+					if (tcount[i] < iters) {
+						sem_t *s = sem[i];
+						if (verbose)
+							fprintf(stderr, "waking thread %d "
+									"tcount %d\n",
+									i, tcount[i]);
+						sem_post(s);
 					}
+					pthread_mutex_unlock(&lock);
 				}
-			} else {
+			} else { /* is_server */
 				hdr_t *h = (void*)event->recv.ptr;
+				int i = h->check.thread;
 
-				/* is_server */
 				if (event->recv.len == 3) {
 					done = 1;
 				} else {
 					uint32_t crc = 0;
-					void *ptr = (void*)((uintptr_t)buffer
-							+ h->check.offset);
+					void *ptr = (void*)((uintptr_t)buffer +
+							(i * opts.length) +
+							h->check.offset);
+					hdr_t m;
 
 					/* RMA check request */
-					if ((h->check.len + h->check.offset) <= opts.reg_len)
+					if ((h->check.len + h->check.offset) <= opts.reg_len) {
+						pthread_mutex_lock(&lock);
 						crc = crc32(0, ptr, h->check.len);
-					else
+						pthread_mutex_unlock(&lock);
+					} else {
 						crc = 0;
-					msg.status.type = MSG_RMA_STATUS;
-					msg.status.crc = crc;
-					if (opts.method == RMA_WRITE) {
-						fprintf(stderr, "server: client crc=0x%x "
-							"server crc=0x%x\n", h->check.crc,
-							crc);
 					}
-					print_buffer(ptr, h->check.len);
-					ret = cci_send(test, &msg, sizeof(msg.status),
+					m.status.type = MSG_RMA_STATUS;
+					m.status.crc = crc;
+					m.status.thread = i;
+					m.status.len = h->check.len;
+					m.status.iter = h->check.iter;
+					if (opts.method == RMA_WRITE) {
+						if (crc != h->check.crc || verbose) {
+						fprintf(stderr, "Thread %2d: server: "
+							"client %d crc=0x%08x "
+							"server crc=0x%08x %s length %u "
+							"iter=%d\n",
+							id, i, h->check.crc,
+							crc, crc == h->check.crc ?
+							"(ok)" : "(FAIL)",
+							(uint32_t) h->check.len,
+							h->check.iter);
+						}
+					}
+					print_buffer(0, ptr, h->check.len);
+					ret = cci_send(test, &m, sizeof(m.status),
 							NULL, CCI_FLAG_SILENT);
 					check_return(endpoint, "cci_send", ret, 1);
 				}
@@ -312,7 +374,7 @@ static void poll_events(void)
 		case CCI_EVENT_CONNECT:
 			if (event->connect.status != CCI_SUCCESS)
 			{
-				fprintf(stderr, "Connection rejected.\n");
+				fprintf(stderr, "Thread %2d: Connection rejected.\n", id);
 				exit(0);
 			}
 			if ((uintptr_t)event->connect.context == (uintptr_t)CONTROL) {
@@ -324,11 +386,11 @@ static void poll_events(void)
 				connect_done = 1;
 			break;
 		case CCI_EVENT_CONNECT_REQUEST:
-			fprintf(stderr, "Peer is reconnecting? Rejecting.\n");
+			fprintf(stderr, "Thread %2d: Peer is reconnecting? Rejecting.\n", id);
 			cci_reject(event);
 			break;
 		default:
-			fprintf(stderr, "ignoring event type %s\n",
+			fprintf(stderr, "Thread %2d: ignoring event type %s\n", id,
 				cci_event_type_str(event->type));
 		}
 		cci_return_event(event);
@@ -336,29 +398,63 @@ static void poll_events(void)
 	return;
 }
 
+static void *rma_thread(void *arg)
+{
+	int i = (int)((uintptr_t)arg), ret = 0;
+	sem_t *s = sem[i];
+	hdr_t *m = &msg[i];
+	uint32_t *mlen = &msg_len[i];
+	uint64_t loffset = local_offset + (length * i);
+	uint64_t roffset = remote_offset + (length * i);
+
+	while (running) {
+		sem_wait(s);
+
+		if (!running)
+			break;
+
+		pthread_mutex_lock(&lock);
+		m->check.iter = tcount[i];
+
+		if (verbose)
+			fprintf(stderr, "Thread %2d: RMA len %u iter %d %s\n", i,
+				(uint32_t) m->check.len, (uint32_t) m->check.iter,
+				m->check.iter > iters ? "***" : "");
+		pthread_mutex_unlock(&lock);
+
+		ret = cci_rma(test, m, *mlen,
+			      local_rma_handle, loffset,
+			      &remote_rma_handle, roffset,
+			      current_size, (void*)((uintptr_t)i), opts.flags);
+		check_return(endpoint, "cci_rma", ret, 1);
+	}
+
+	pthread_exit(NULL);
+}
+
 static void do_client(void)
 {
-	int ret = 0, i = 0;
+	int ret, i = 0;
 	uint32_t min = 1;
 
 	/* initiate connect */
-	msg.request.type = MSG_CONTROL;
+	msg[0].request.type = MSG_CONTROL;
 
 	ret =
-	    cci_connect(endpoint, server_uri, &msg, sizeof(msg.generic), attr,
+	    cci_connect(endpoint, server_uri, msg, sizeof(msg[0].generic), attr,
 			(void*)(uintptr_t)CONTROL, 0, NULL);
 	check_return(endpoint, "cci_connect", ret, 1);
 
-	msg.request.type = MSG_CONN_REQ;
-	msg.request.opts = opts;
+	msg[0].request.type = MSG_CONN_REQ;
+	msg[0].request.opts = opts;
 
 	ret =
-	    cci_connect(endpoint, server_uri, &msg, sizeof(msg.request), attr,
+	    cci_connect(endpoint, server_uri, msg, sizeof(msg[0].request), attr,
 			(void*)(uintptr_t)TEST, 0, NULL);
 	check_return(endpoint, "cci_connect", ret, 1);
 	/* poll for connect completion */
 	while (!connect_done)
-		poll_events();
+		poll_events(-1);
 
 	if (!test) {
 		fprintf(stderr, "no connection\n");
@@ -366,19 +462,20 @@ static void do_client(void)
 	}
 
 	while (!ready)
-		poll_events();
+		poll_events(-1);
 
-	ret = posix_memalign((void **)&buffer, 4096, opts.reg_len);
+	ret = posix_memalign((void **)&buffer, 4096, opts.reg_len * client_threads);
 	check_return(endpoint, "memalign buffer", ret, 1);
 
-	memset(buffer, 0xaa, opts.reg_len);
+	memset(buffer, 0xaa, opts.reg_len * client_threads);
 
 	init_buffer(1);
-	print_buffer(buffer, (int) opts.reg_len);
+	print_buffer(0, buffer, (int) opts.reg_len);
 
 	/* for the client, we do not need remote access flags */
 
-	ret = cci_rma_register(endpoint, buffer, opts.reg_len, 0, &local_rma_handle);
+	ret = cci_rma_register(endpoint, buffer, opts.reg_len * client_threads,
+			0, &local_rma_handle);
 	check_return(endpoint, "cci_rma_register", ret, 1);
 
 	if (opts.method == RMA_WRITE)
@@ -386,58 +483,81 @@ static void do_client(void)
 	else
 		opts.flags = CCI_FLAG_READ;
 
-	rma_context = calloc(RMA_CTX_CNT, sizeof(*rma_context));
-	check_return(endpoint, "calloc rma_context", rma_context ? 0 : ENOMEM, 1);
-
-	for (i = 0; i < RMA_CTX_CNT; i++)
-		rma_context[i] = i;
+	/* spawn RMA threads */
+	for (i = 0; i < client_threads; i++) {
+		ret = pthread_create(&tid[i], NULL, &rma_thread,
+				(void*)((uintptr_t)i));
+		if (ret) {
+			fprintf(stderr, "failed to create thread %d with %s\n",
+				i, strerror(ret));
+			exit(EXIT_FAILURE);
+		}
+	}
 
 	/* begin communication with server */
 	for (current_size = min; current_size <= length;) {
-		void *ptr = (void*)((uintptr_t)buffer + local_offset);
+		uint32_t total = 0;
 
-		msg.check.type = MSG_RMA_CHK;
-		msg.check.offset = remote_offset;
-		msg.check.len = current_size;
-		/* Compute the CRC only on a valid buffer */
-		if (current_size + local_offset <= opts.reg_len)
-			msg.check.crc = crc32(0, ptr, current_size);
-		else
-			msg.check.crc = 0;
-		msg_len = sizeof(msg.check);
-		print_buffer(ptr, current_size);
+		fprintf(stderr, "Testing length %9u ... \n", current_size);
 
-		fprintf(stderr, "Testing length %9u ... ", current_size);
+		for (i = 0; i < client_threads; i++) {
+			sem_t *s = sem[i];
+			hdr_t *m = &msg[i];
+			uint32_t *mlen = &msg_len[i];
+			void *ptr = (void*)((uintptr_t)buffer + local_offset +
+					(i * length));
 
-		ret = cci_rma(test, &msg, msg_len,
-			      local_rma_handle, local_offset,
-			      &remote_rma_handle, remote_offset,
-			      current_size, rma_context, opts.flags);
-		check_return(endpoint, "cci_rma", ret, 1);
 
-		while (count < iters)
-			poll_events();
+			m->check.type = MSG_RMA_CHK;
+			m->check.offset = remote_offset;
+			m->check.len = current_size;
+			m->check.thread = i;
+			m->check.iter = 0;
+
+			if (current_size + local_offset <= opts.reg_len) {
+				pthread_mutex_lock(&lock);
+				m->check.crc = crc32(0, ptr, current_size);
+				pthread_mutex_unlock(&lock);
+			} else {
+				m->check.crc = 0;
+			}
+			*mlen = sizeof(m->check);
+			print_buffer(i, ptr, current_size);
+
+			sem_post(s);
+		}
+
+		while (count < (iters * client_threads))
+			poll_events(-1);
 
 		if (test)
 			fprintf(stderr, "success.\n");
 		else
 			goto out;
 
+		if (verbose) {
+			fprintf(stderr, "tcount ");
+			for (i = 0; i < client_threads; i++) {
+				fprintf(stderr, "%u ", tcount[i]);
+				total += tcount[i];
+			}
+			fprintf(stderr, " total %u\n", total);
+		}
+
+		pthread_mutex_lock(&lock);
+		memset(tcount, 0, sizeof(*tcount) * client_threads);
 		count = 0;
 		current_size *= 2;
-
-		if (current_size >= 64 * 1024) {
-			if (iters >= 32)
-				iters /= 2;
-		}
+		pthread_mutex_unlock(&lock);
 	}
+	running = 0;
 
 out:
 	ret = cci_send(control, "bye", 3, (void *)0xdeadbeef, 0);
 	check_return(endpoint, "cci_send", ret, 0);
 
 	while (!done)
-		poll_events();
+		poll_events(-1);
 
 	ret = cci_rma_deregister(endpoint, local_rma_handle);
 	check_return(endpoint, "cci_rma_deregister", ret, 1);
@@ -448,9 +568,21 @@ out:
 	return;
 }
 
+static void *server_thread(void *arg)
+{
+	int i = (int)((uintptr_t)arg);
+
+	while (!done)
+		poll_events(i);
+
+	fprintf(stderr, "Thread %d exiting\n", i);
+
+	pthread_exit(NULL);
+}
+
 static void do_server(void)
 {
-	int ret = 0;
+	int ret = 0, i = 0;
 	hdr_t *h = NULL;
 
 	while (!ready) {
@@ -488,11 +620,11 @@ static void do_server(void)
 				if ((uintptr_t)event->accept.context == (uintptr_t)CONTROL) {
 					control = event->accept.connection;
 				} else {
-					int len;
+					uint64_t len;
 
 					test = event->accept.connection;
 
-					len = opts.reg_len;
+					len = opts.reg_len * opts.threads;
 
 					ret =
 					    posix_memalign((void **)&buffer,
@@ -500,25 +632,25 @@ static void do_server(void)
 					check_return(endpoint, "memalign buffer", ret, 1);
 
 					init_buffer(0);
-					print_buffer(buffer, opts.reg_len);
+					print_buffer(0, buffer, opts.reg_len);
 
 					ret = cci_rma_register(endpoint,
 							     buffer,
-							     opts.reg_len,
-							     opts.method == RMA_WRITE ? CCI_FLAG_WRITE : CCI_FLAG_READ,
+							     len,
+							     opts.method,
 							     &local_rma_handle);
 					check_return(endpoint, "cci_rma_register",
 							     ret, 1);
 				}
 				if (test && control) {
-					hdr_t msg;
+					hdr_t m;
 
 					ready = 1;
-					msg.reply.type = MSG_CONN_REPLY;
-					msg.reply.handle = *local_rma_handle;
+					m.reply.type = MSG_CONN_REPLY;
+					m.reply.handle = *local_rma_handle;
 
-					ret = cci_send(test, &msg,
-						     sizeof(msg.reply), NULL, 0);
+					ret = cci_send(test, &m,
+						     sizeof(m.reply), NULL, 0);
 					check_return(endpoint, "cci_send", ret, 1);
 				}
 				break;
@@ -536,8 +668,19 @@ static void do_server(void)
 		}
 	}
 
+	/* spawn server threads */
+	for (i = 1; i < server_threads; i++) {
+		ret = pthread_create(&tid[i], NULL, &server_thread,
+				(void*)((uintptr_t)i));
+		if (ret) {
+			fprintf(stderr, "failed to create thread %d with %s\n",
+				i, strerror(ret));
+			exit(EXIT_FAILURE);
+		}
+	}
+
 	while (!done)
-		poll_events();
+		poll_events(0);
 
 	ret = cci_rma_deregister(endpoint, local_rma_handle);
 	check_return(endpoint, "cci_rma_deregister", ret, 1);
@@ -559,11 +702,9 @@ int main(int argc, char *argv[])
 	pid = getpid();
 	srandom(pid);
 
-	memset(&msg, 0, sizeof(msg));
-
 	name = argv[0];
 
-	while ((c = getopt(argc, argv, "h:si:c:wrl:o:O:R:BI")) != -1) {
+	while ((c = getopt(argc, argv, "h:si:c:wrl:o:O:R:BIT:t:v")) != -1) {
 		switch (c) {
 		case 'h':
 			server_uri = strdup(optarg);
@@ -611,6 +752,15 @@ int main(int argc, char *argv[])
 			ignore_os_handle = 1;
 			os_handle = &fd;
 			break;
+		case 'T':
+			opts.threads = client_threads = strtoul(optarg, NULL, 0);
+			break;
+		case 't':
+			server_threads = strtoul(optarg, NULL, 0);
+			break;
+		case 'v':
+			verbose = 1;
+			break;
 		default:
 			print_usage();
 		}
@@ -633,6 +783,9 @@ int main(int argc, char *argv[])
 		print_usage();
 	}
 
+	if (!opts.threads)
+		opts.threads = 1;
+
 	if (!opts.method)
 		opts.method = RMA_WRITE;
 
@@ -650,6 +803,7 @@ int main(int argc, char *argv[])
 		else
 			length = opts.reg_len;
 	}
+	opts.length = length;
 
 	if (opts.reg_len == length) {
 		if (local_offset || remote_offset) {
@@ -659,11 +813,70 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (is_client)
+	pthread_mutex_init(&lock, NULL);
+
+	/* Default is one which allows the server to have one as well */
+	msg = calloc(client_threads, sizeof(*msg));
+	if (!msg) {
+		fprintf(stderr, "no memory for msgs\n");
+		exit(EXIT_FAILURE);
+	}
+
+	msg_len = calloc(client_threads, sizeof(*msg_len));
+	if (!msg_len) {
+		fprintf(stderr, "no memory for msg lens\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if (is_client) {
+		int i = 0;
+
+		tcount = calloc(client_threads, sizeof(*tcount));
+		if (!tcount) {
+			fprintf(stderr, "Unable to alloc memory for thread counts\n");
+			exit(EXIT_FAILURE);
+		}
+
+		tid = calloc(client_threads, sizeof(*tid));
+		if (!tid) {
+			fprintf(stderr, "Unable to alloc memory for thread ids\n");
+			exit(EXIT_FAILURE);
+		}
+
+		sem = calloc(client_threads, sizeof(*sem));
+		if (!sem) {
+			fprintf(stderr, "Unable to alloc memory for semaphore pointers\n");
+			exit(EXIT_FAILURE);
+		}
+
+		for (i = 0; i < client_threads; i++) {
+			char sem_name[128];
+			sem_t *s = NULL;
+
+			memset(sem_name, 0, sizeof(sem_name));
+			sprintf(sem_name, "/rma_threaded-%d-%d", getpid(), i);
+
+			sem_unlink(sem_name);
+
+			s = sem_open(sem_name, O_CREAT, 0555, 0);
+			if (s == SEM_FAILED) {
+				fprintf(stderr, "sem_open(%d) failed with %s\n",
+					i, strerror(errno));
+			}
+			sem[i] = s;
+		}
+
 		fprintf(stderr, "Testing with local_offset %"PRIu64" "
 				"remote_offset %"PRIu64" "
 				"reg_len %"PRIu64" length %"PRIu64"\n",
 				local_offset, remote_offset, opts.reg_len, length);
+	} else { /* is server */
+		tid = calloc(server_threads, sizeof(*tid));
+		if (!tid) {
+			fprintf(stderr, "Unable to alloc memory for thread ids\n");
+			exit(EXIT_FAILURE);
+		}
+	}
 
 	ret = cci_init(CCI_ABI_VERSION, 0, &caps);
 	if (ret) {
@@ -698,6 +911,18 @@ int main(int argc, char *argv[])
 		do_server();
 	else
 		do_client();
+
+	if (is_client) {
+		int i = 0;
+
+		for (i = 0; i < client_threads; i++) {
+			char sem_name[128];
+
+			memset(sem_name, 0, sizeof(sem_name));
+			sprintf(sem_name, "/rma_threaded-%d-%d", getpid(), i);
+			sem_unlink(sem_name);
+		}
+	}
 
 	/* clean up */
 	ret = cci_destroy_endpoint(endpoint);

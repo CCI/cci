@@ -54,6 +54,8 @@
 #define CCI_DECLSPEC
 #endif
 
+BEGIN_C_DECLS
+
 /* ================================================================== */
 /*                                                                    */
 /*                               INIT                                 */
@@ -1696,5 +1698,7 @@ CCI_DECLSPEC int cci_rma(cci_connection_t * connection,
 			 cci_rma_handle_t * local_handle, uint64_t local_offset,
 			 cci_rma_handle_t * remote_handle, uint64_t remote_offset,
 			 uint64_t data_len, const void *context, int flags);
+
+END_C_DECLS
 
 #endif				/* CCI_H */

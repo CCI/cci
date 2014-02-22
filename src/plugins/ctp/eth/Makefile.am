@@ -11,5 +11,6 @@ cci_ctp_eth_la_SOURCES = \
         ctp_eth.h \
         ctp_eth_module.c \
         ctp_eth_api.c
+cci_ctp_eth_la_LIBADD = $(top_builddir)/src/libcci.la
 
 AM_CPPFLAGS = -I@abs_top_srcdir@/contrib/driver/ccieth/linux

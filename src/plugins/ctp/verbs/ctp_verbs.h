@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
- * Copyright (c) 2011-2012 UT-Battelle, LLC.  All rights reserved.
- * Copyright (c) 2011-2012 Oak Ridge National Labs.  All rights reserved.
+ * Copyright (c) 2011-2014 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2011-2014 Oak Ridge National Labs.  All rights reserved.
  * $COPYRIGHT$
  */
 
@@ -54,7 +54,8 @@ BEGIN_C_DECLS
 
 #define VERBS_EP_RMSG_CONNS	(16)
 #define VERBS_CONN_RMSG_DEPTH	(16)	/* NOTE: limited to 31 due to vconn->avail */
-#define VERBS_INLINE_BYTES	(128)
+#define VERBS_CONN_TX_CNT	(32)	/* qp max_send_wr */
+#define VERBS_INLINE_BYTES	(0)
 
 #define VERBS_ACK_CNT		(512)
 #define VERBS_PROGRESS_TIMEOUT	(10000) /* microseconds */
@@ -376,6 +377,7 @@ typedef struct verbs_conn {
 	verbs_conn_state_t state;	/* current state */
 	uint32_t mss;		/* max send size */
 	uint32_t max_tx_cnt;	/* max sends in flight */
+	uint32_t tx_pending;	/* sends in flight */
 	uint32_t inline_size;	/* largest inline msg */
 
 	/* for RDMA SEND enabled connections */

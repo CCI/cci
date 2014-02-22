@@ -10,4 +10,4 @@ cci_ctp_gni_la_SOURCES = ctp_gni.h        \
                           ctp_gni_module.c \
                           ctp_gni_api.c
 
-cci_ctp_gni_la_LIBADD = $(ctp_gni_LIBS)
+cci_ctp_gni_la_LIBADD = $(ctp_gni_LIBS) $(top_builddir)/src/libcci.la

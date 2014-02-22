@@ -11,3 +11,4 @@ cci_ctp_sock_la_SOURCES = \
         ctp_sock.h \
         ctp_sock_module.c \
         ctp_sock_api.c
+cci_ctp_sock_la_LIBADD = $(top_builddir)/src/libcci.la
