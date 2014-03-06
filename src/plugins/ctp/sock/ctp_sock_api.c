@@ -2752,11 +2752,16 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 			return CCI_SUCCESS;
 		}
 
-		/* if error, fall through. If in debug mode, display a warning
-		   help tracing things. */
-		if (ret == -1)
+		/* if error, fall through but generate a send error event
+		   since the send did not locally complete */ 
+		if (ret == -1) {
+			/* If in debug mode, display a warning help tracing
+			   things. */
 			debug (CCI_DB_WARN, "%s: Send failed (%s)",
 			       __func__, strerror (errno));
+			evt->event.send.status = CCI_ERROR;
+			sock_queue_event (ep, evt);
+		}
 	}
 
 	/* insert at tail of sock device's queued list */
@@ -2767,7 +2772,6 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 	pthread_mutex_unlock(&ep->lock);
 
 	/* try to progress txs */
-
 	if (!sep->closing) {
 		pthread_mutex_lock(&sep->progress_mutex);
 		pthread_cond_signal(&sep->wait_condition);
@@ -2784,7 +2788,6 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 	ret = CCI_SUCCESS;
 
 	/* if blocking, wait for completion */
-
 	if (tx->flags & CCI_FLAG_BLOCKING) {
 		struct timeval tv = { 0, SOCK_PROG_TIME_US / 2 };
 
