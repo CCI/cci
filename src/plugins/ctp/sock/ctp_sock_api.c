@@ -2614,22 +2614,24 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 			const struct iovec *data, uint32_t iovcnt,
 			const void *context, int flags)
 {
-	int ret, is_reliable = 0, data_len = 0;
-	uint32_t i;
-	size_t s = 0;
+	int 		ret		= CCI_SUCCESS;
+	int 		is_reliable 	= 0;
+	int		data_len 	= 0;
+	uint32_t 	i;
+	size_t 		s 		= 0;
 #if CCI_DEBUG
-	char *func = iovcnt < 2 ? "send" : "sendv";
+	char 		*func 		= iovcnt < 2 ? "send" : "sendv";
 #endif
-	cci_endpoint_t *endpoint = connection->endpoint;
-	cci__ep_t *ep;
-	cci__conn_t *conn;
-	sock_ep_t *sep;
-	sock_conn_t *sconn;
-	sock_tx_t *tx = NULL;
-	sock_header_t *hdr;
-	void *ptr;
-	cci__evt_t *evt;
-	union cci_event *event;	/* generic CCI event */
+	cci_endpoint_t 	*endpoint 	= connection->endpoint;
+	cci__ep_t 	*ep;
+	cci__conn_t 	*conn;
+	sock_ep_t 	*sep;
+	sock_conn_t 	*sconn;
+	sock_tx_t 	*tx 		= NULL;
+	sock_header_t 	*hdr;
+	void 		*ptr;
+	cci__evt_t 	*evt;
+	union cci_event	*event;	/* generic CCI event */
 
 	debug(CCI_DB_FUNC, "entering %s", func);
 
@@ -2725,8 +2727,12 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 
 	/* if unreliable, try to send */
 	if (!is_reliable) {
-		ret = sock_sendto(sep->sock, tx->buffer, tx->len, tx->rma_ptr,
-						tx->rma_len, sconn->sin);
+		ret = sock_sendto (sep->sock,
+		                   tx->buffer,
+		                   tx->len,
+		                   tx->rma_ptr,
+		                   tx->rma_len,
+		                   sconn->sin);
 		if (ret == tx->len) {
 			/* queue event on enpoint's completed queue */
 			tx->state = SOCK_TX_COMPLETED;
@@ -2752,20 +2758,19 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 			return CCI_SUCCESS;
 		}
 
-		/* if error, fall through but generate a send error event
-		   since the send did not locally complete */ 
+		/* if error, fall through and set the return code to CCI_ERROR
+		   to make sure the application is notified that the send()
+		   could not be locally completed */
 		if (ret == -1) {
 			/* If in debug mode, display a warning help tracing
 			   things. */
 			debug (CCI_DB_WARN, "%s: Send failed (%s)",
 			       __func__, strerror (errno));
-			evt->event.send.status = CCI_ERROR;
-			sock_queue_event (ep, evt);
+			return (CCI_ERROR);
 		}
 	}
 
 	/* insert at tail of sock device's queued list */
-
 	tx->state = SOCK_TX_QUEUED;
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&sep->queued, evt, entry);
@@ -2776,13 +2781,6 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 		pthread_mutex_lock(&sep->progress_mutex);
 		pthread_cond_signal(&sep->wait_condition);
 		pthread_mutex_unlock(&sep->progress_mutex);
-	}
-
-	/* if unreliable, we are done since it is buffered internally */
-	if (!is_reliable) {
-		/* FIXME: do not return the event? */
-		debug(CCI_DB_FUNC, "exiting %s", func);
-		return CCI_SUCCESS;
 	}
 
 	ret = CCI_SUCCESS;
