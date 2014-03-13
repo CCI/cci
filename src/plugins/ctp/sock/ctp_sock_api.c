@@ -923,12 +923,12 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 #else
 	if (fd) {
 		/* We will have poll on the receive thread so we just need to create a
-		pipe so the receive and send thread can wake up the application
-		thread */
+		   pipe so the receive and send thread can wake up the application
+		   thread */
 		pipe (sep->fd);
 		*fd = sep->fd[0];
 		/* We set event_fd to value different than zero to know that we are
-		in blocking mode at the application level */
+		   in blocking mode at the application level */
 		sep->event_fd = 1;
 	}
 #endif /* HAVE_SYS_EPOLL_H */
@@ -2396,6 +2396,7 @@ static void sock_progress_queued(cci__ep_t * ep)
 					      "%s: timeout of %s msg",
 					      __func__,
 					      sock_msg_type(tx->msg_type));
+					pthread_mutex_lock(&ep->lock);
 					CCI_EXIT;
 					return;
 				}
@@ -5701,13 +5702,12 @@ int progress_recv (cci__ep_t *ep)
 	}
 #endif /* HAVE_SYS_EPOLL_H */
 
-wait4signal:
+ wait4signal:
 /*
- 		pthread_mutex_lock(&sep->progress_mutex);
- 		pthread_cond_signal(&sep->wait_condition);
- 		pthread_mutex_unlock(&sep->progress_mutex);
+ 	pthread_mutex_lock(&sep->progress_mutex);
+ 	pthread_cond_signal(&sep->wait_condition);
+ 	pthread_mutex_unlock(&sep->progress_mutex);
 */
-
 	return CCI_SUCCESS;
 }
 
