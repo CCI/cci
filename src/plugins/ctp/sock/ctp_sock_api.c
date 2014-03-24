@@ -3188,7 +3188,7 @@ static inline void sock_handle_seq(sock_conn_t * sconn, uint32_t seq)
 		if (SOCK_SEQ_GTE(seq, ack->start) &&
 			SOCK_SEQ_LTE(seq, ack->end)) {
 			/* seq exists in this entry,
-			do nothing */
+			   do nothing */
 			debug(CCI_DB_MSG, "%s: seq %u exists between %u-%u",
 			      __func__, seq, ack->start, ack->end);
 			done = 1;
@@ -5445,18 +5445,10 @@ static void sock_keepalive(cci__ep_t *ep)
 static inline int sock_ack_sconn (sock_ep_t *sep, sock_conn_t *sconn)
 {
 	uint64_t now = 0ULL;
-	static uint64_t last = 0ULL;
 	int count = 0;
 
 	now = sock_get_usecs();
 
-	if (last == 0ULL)
-		last = now;
-	else if (last + 10ULL > now)
-		return 0;
-
-	last = now;
-	
 	if (!TAILQ_EMPTY(&sconn->acks)) {
 		sock_header_r_t *hdr_r;
 		uint32_t acks[SOCK_MAX_SACK * 2];
@@ -5541,19 +5533,9 @@ static void sock_ack_conns(cci__ep_t * ep)
 	int i;
 	sock_ep_t *sep = ep->priv;
 	sock_conn_t *sconn = NULL;
-	static uint64_t last = 0ULL;
 	uint64_t now = 0ULL;
 
 	CCI_ENTER;
-
-	now = sock_get_usecs();
-
-	if (last == 0ULL)
-		last = now;
-	else if (last + 10ULL > now)
-		return;
-
-	last = now;
 
 	pthread_mutex_lock(&ep->lock);
 	for (i = 0; i < SOCK_EP_HASH_SIZE; i++) {
