@@ -173,7 +173,7 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 		sdev->id = 0;
 
 		device->up = 1;
-		device->rate = 0;
+		device->rate = UINT64_C(64000000000);
 		device->pci.domain = -1;	/* per CCI spec */
 		device->pci.bus = -1;		/* per CCI spec */
 		device->pci.dev = -1;		/* per CCI spec */
@@ -216,7 +216,7 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 			sdev->num_blocks = 1;
 
 			device->up = 1;
-			device->rate = 0;
+			device->rate = UINT64_C(64000000000);
 			device->pci.domain = -1;	/* per CCI spec */
 			device->pci.bus = -1;		/* per CCI spec */
 			device->pci.dev = -1;		/* per CCI spec */
@@ -259,9 +259,9 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 						goto out;
 					}
 					sdev->id = id;
-				} else if (0 == strncmp("mtu=", *arg, 4)) {
-					const char *mtu_str = *arg + 4;
-					uint32_t mtu = strtoul(mtu_str, NULL, 0);
+				} else if (0 == strncmp("mss=", *arg, 4)) {
+					const char *mss_str = *arg + 4;
+					uint32_t mss = strtoul(mss_str, NULL, 0);
 					if (device->max_send_size) {
 						debug(CCI_DB_WARN,
 							"%s: device %s already "
@@ -269,13 +269,14 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 							"and the configfile also "
 							"has %u", __func__,
 							device->name,
-							device->max_send_size, mtu);
+							device->max_send_size, mss);
 						ret = CCI_EINVAL;
 						goto out;
 					}
-					device->max_send_size = mtu - SM_HDR_LEN;
+					device->max_send_size = mss;
 				}
 			}
+
 			if (sdev->path == NULL) {
 				memset(dname, 0, sizeof(dname));
 				snprintf(dname, sizeof(dname), "%s/%u", SM_DEFAULT_PATH, pid);
