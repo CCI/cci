@@ -71,7 +71,7 @@ BEGIN_C_DECLS
 			  is the endpoint's id.
 
 			  If the path does not exist, the SM transport will
-			  try to create it. If not succesful, the transport
+			  try to create it. If not successful, the transport
 			  will not load.
 
 			  For example, sm:///tmp/cci/sm/1234/1 would be bound to:
@@ -257,9 +257,20 @@ sm_msg_str(sm_msg_type_t type)
 	return NULL;
 }
 
+typedef struct sm_globals	sm_globals_t;
+typedef struct sm_dev		sm_dev_t;
+typedef struct sm_ep		sm_ep_t;
+typedef struct sm_conn		sm_conn_t;
+typedef struct sm_tx		sm_tx_t;
+typedef struct sm_rx		sm_rx_t;
+typedef struct sm_rma		sm_rma_t;
+typedef struct sm_rma_op	sm_rma_op_t;
+typedef struct sm_rma_handle	sm_rma_handle_t;
+
 typedef enum sm_ctx {
 	SM_TX,
-	SM_RX
+	SM_RX,
+	SM_RMA
 } sm_ctx_t;
 
 typedef enum sm_tx_state {
@@ -286,41 +297,40 @@ sm_tx_state_str(sm_tx_state_t state)
 	return NULL;
 }
 
-typedef struct sm_tx {
+struct sm_tx {
 	sm_ctx_t		ctx;		/* SM_TX */
 	cci__evt_t		evt;		/* CCI event - private and public) */
 	sm_tx_state_t		state;
 	sm_msg_type_t		type;
 	uint32_t		id;		/* TX id */
 	int			flags;		/* CCI_FLAG_* */
-	void			*buf;		/* Pointer into sep->tx_buf */
+	uint32_t		offset;		/* MMAP cacheline index */
 	uint32_t		len;		/* Msg len */
-	struct sm_rma_op	*rma_op;	/* Owning RMA if completion msg */
+	sm_rma_op_t		*rma_op;	/* Owning RMA if completion msg */
 	uint32_t		rma_id;		/* RMA fragment ID */
-} sm_tx_t;
+};
 
-typedef struct sm_rx {
-	sm_ctx_t		ctx;		/* SM_TX */
+struct sm_rx {
+	sm_ctx_t		ctx;		/* SM_RX */
 	cci__evt_t		evt;		/* CCI event - private and public) */
-	void			*buf;		/* Pointer into sep->rx_buf */
-} sm_rx_t;
+};
 
-typedef struct sm_rma_handle {
+struct sm_rma_handle {
 	void *addr;
 	uint64_t len;
 	int flags;
-} sm_rma_handle_t;
+};
 
-typedef struct sm_rma {
+struct sm_rma {
 	cci__evt_t evt;
 	sm_rma_hdr_t hdr;
 	sm_tx_t *tx;
 	uint32_t num_frags;
 	uint32_t next_frag;
 	uint32_t completed;
-} sm_rma_t;
+};
 
-typedef struct sm_ep {
+struct sm_ep {
 	cci_os_handle_t		sock;		/* For listen socket */
 	uint32_t		is_polling;	/* Serialize accept to sockets
 						   and polling strctures */
@@ -329,9 +339,11 @@ typedef struct sm_ep {
 	struct pollfd		*fds;		/* For UNIX sockets */
 	cci__conn_t		**c;		/* Array of conns indexed by fds */
 
-	void			*tx_buf;	/* TX common buffer */
+	void			*tx_buf;	/* TX common buffer (MMAP buffer) */
 	sm_tx_t			*txs;		/* All txs */
 	TAILQ_HEAD(itx, sm_tx)	idle_txs;	/* List of idle txs */
+	uint32_t		*lines;		/* Bit mask for MSG MMAP cachelines */
+
 	void			*rx_buf;	/* RX common buffer */
 	sm_rx_t			*rxs;		/* All rxs */
 	TAILQ_HEAD(irx, sm_rx)	idle_rxs;	/* List of idle rxs */
@@ -340,7 +352,7 @@ typedef struct sm_ep {
 	TAILQ_HEAD(act, sm_conn) active;	/* Active conns */
 	TAILQ_HEAD(psv, sm_conn) passive;	/* Passive conns */
 	TAILQ_HEAD(cls, sm_conn) closing;	/* Closing conns */
-} sm_ep_t;
+};
 
 typedef enum sm_conn_state {
 	SM_CONN_CLOSED = -2,
@@ -378,7 +390,7 @@ sm_conn_state_str(sm_conn_state_t state)
 	return NULL;
 }
 
-typedef struct sm_conn {
+struct sm_conn {
 	cci__conn_t		*conn;		/* Owning conn */
 	sm_conn_state_t		state;		/* State */
 	cci_os_handle_t		fd;		/* Socket for this conn */
@@ -388,19 +400,19 @@ typedef struct sm_conn {
 	TAILQ_HEAD(qd, sm_tx)	queued;		/* Queued sends */
 	TAILQ_HEAD(pd, sm_tx)	pending;	/* Pending (in-flight) sends */
 	struct sockaddr_un	sun;		/* UNIX name */
-} sm_conn_t;
+};
 
-typedef struct sm_dev {
+struct sm_dev {
 	char			*path;		/* Path to URI base */
 	uint64_t		*ids;		/* Bit mask of ids starting at sdev->id */
 	uint32_t		id;		/* Starting endpoint id */
 	uint32_t		num_blocks;	/* Number of ids blocks */
-} sm_dev_t;
+};
 
-typedef struct sm_globals {
+struct sm_globals {
 	int			count;		/* Number of sm devices = 1 */
 	cci_device_t		**devices;	/* Array of sm devices */
-} sm_globals_t;
+};
 
 extern sm_globals_t		*sglobals;
 
