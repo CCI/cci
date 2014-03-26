@@ -392,6 +392,12 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 						ret = CCI_EINVAL;
 						goto out;
 					}
+					if (mss & (mss - 1)) {
+						debug(CCI_DB_WARN,
+							"%s: configfile has mss="
+							"%u which is not a power "
+							"of two.", __func__, mss);
+					}
 					device->max_send_size = mss;
 				}
 			}
