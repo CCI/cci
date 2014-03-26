@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <assert.h>
 
 #include "cci.h"
@@ -108,6 +109,122 @@ cci_plugin_ctp_t cci_ctp_sm_plugin = {
 	ctp_sm_rma
 };
 
+static int
+sm_check_path(const char *path)
+{
+	int ret = 0;
+	struct stat stat_buf;
+
+	/* Does the path already exist? */
+	ret = stat(path, &stat_buf);
+	if (ret) {
+		if (errno == ENOENT) {
+			ret = errno;
+		} else {
+			/* No, but we got another error.
+			 * Report it and bail.
+			 */
+			debug(CCI_DB_WARN, "%s: stat(%s) failed with %s",
+					__func__, path,
+					strerror(errno));
+			ret = CCI_ERROR;
+			goto out;
+		}
+	} else {
+		/* Yes, is it a directory and can we read/write? */
+		if (!(stat_buf.st_mode & S_IFDIR)) {
+			debug(CCI_DB_WARN, "%s: %s is not a directory",
+					__func__, path);
+			ret = CCI_ERROR;
+			goto out;
+		}
+		if (!(stat_buf.st_mode & S_IRUSR)) {
+			debug(CCI_DB_WARN, "%s: %s is not readable",
+					__func__, path);
+			ret = CCI_ERROR;
+			goto out;
+		}
+		if (!(stat_buf.st_mode & S_IWUSR)) {
+			debug(CCI_DB_WARN, "%s: %s is not writable",
+					__func__, path);
+			ret = CCI_ERROR;
+			goto out;
+		}
+		if (!(stat_buf.st_mode & S_IXUSR)) {
+			debug(CCI_DB_WARN, "%s: %s is not searchable",
+					__func__, path);
+			ret = CCI_ERROR;
+			goto out;
+		}
+	}
+    out:
+
+	return ret;
+}
+
+static int
+sm_create_path(const char *path)
+{
+	int ret = 0, len = 0;
+	char *tmp = NULL, *dir = NULL, *new = NULL;
+
+	if (!path || (len = strlen(path)) == 0)
+		return CCI_EINVAL;
+
+	tmp = strdup(path);
+	new = calloc(1, len + 1);
+	if (!tmp || !new) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	if (path[0] == '/') {
+		new[0] = '/';
+		tmp++;
+	}
+
+	while ((dir = strsep(((char **)&tmp), "/"))) {
+		int dir_len = strlen(dir);
+
+		if (!dir_len)
+			continue;
+
+		strcat(new, dir);
+
+		/* Does the path already exist? */
+		ret = sm_check_path(new);
+		if (ret) {
+			if (errno == ENOENT) {
+				/* No, try to create it */
+				ret = mkdir(new, 0700);
+				if (ret) {
+					debug(CCI_DB_WARN, "%s: mkdir(%s) failed with %s",
+							__func__, new,
+							strerror(errno));
+					ret = CCI_ERROR;
+					goto out;
+				}
+			} else {
+				/* No, but we got another error.
+				 * Report it and bail.
+				 */
+				debug(CCI_DB_WARN, "%s: stat(%s) failed with %s",
+						__func__, new,
+						strerror(errno));
+				ret = CCI_ERROR;
+				goto out;
+			}
+		}
+		strcat(new, "/");
+	}
+
+    out:
+	free(tmp);
+	free(new);
+
+	return ret;
+}
+
 static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 {
 	int ret = CCI_SUCCESS;
@@ -168,7 +285,9 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 			goto out;
 		}
 
-		/* TODO make directory for sdev->path */
+		ret = sm_create_path(sdev->path);
+		if (ret)
+			goto out;
 
 		sdev->id = 0;
 
@@ -286,7 +405,11 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 					goto out;
 				}
 			}
-			/* TODO make directory for sdev->path */
+
+			ret = sm_create_path(sdev->path);
+			if (ret)
+				goto out;
+
 
 			if (device->max_send_size == 0)
 				device->max_send_size = SM_DEFAULT_MSS;
@@ -324,6 +447,8 @@ out:
 				dev = container_of(device, cci__dev_t, device);
 				if (dev->priv) {
 					sm_dev_t *sdev = dev->priv;
+
+					rmdir(sdev->path);
 					free(sdev->path);
 					free(sdev->ids);
 					free(sdev);
@@ -356,6 +481,8 @@ static int ctp_sm_finalize(cci_plugin_ctp_t * plugin)
 		if (!strcmp(dev->device.transport, "sm")) {
 			if (dev->priv) {
 				sm_dev_t *sdev = dev->priv;
+
+				rmdir(sdev->path);
 				free(sdev->path);
 				free(sdev->ids);
 			}
