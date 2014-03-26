@@ -626,6 +626,7 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 		CCI_EXIT;
 		return CCI_EINVAL;
 	}
+	sdev = dev->priv;
 
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 	ep->priv = calloc(1, sizeof(*sep));
@@ -652,7 +653,12 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	memset(name, 0, sizeof(name));
 	snprintf(name, sizeof(name), "%s/%u", sdev->path, sep->id);
 
-	sdev = dev->priv;
+	ret = sm_create_path(name);
+	if (ret)
+		goto out;
+
+	ep->uri = strdup(name);
+
 	memset(&sun, 0, sizeof(sun));
 	sun.sun_family = AF_UNIX;
 
@@ -669,9 +675,20 @@ out:
 
 static int ctp_sm_destroy_endpoint(cci_endpoint_t * endpoint)
 {
+	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
+	cci__dev_t *dev = ep->dev;
+
 	CCI_ENTER;
 
-	debug(CCI_DB_INFO, "%s", "In sm_destroy_endpoint\n");
+	free(ep->uri);
+
+	if (ep->priv) {
+		sm_ep_t *sep = ep->priv;
+
+		sm_put_ep_id(dev, sep->id);
+		free(sep);
+		ep->priv = NULL;
+	}
 
 	CCI_EXIT;
 	return CCI_ERR_NOT_IMPLEMENTED;
