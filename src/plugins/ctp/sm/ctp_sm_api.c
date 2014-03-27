@@ -9,7 +9,9 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 #include <assert.h>
 
 #include "cci.h"
@@ -172,7 +174,7 @@ sm_create_path(const char *path)
 		return CCI_EINVAL;
 
 	tmp = strdup(path);
-	new = calloc(1, len + 1);
+	new = calloc(1, len + 2); /* one for trailing / and one for NULL */
 	if (!tmp || !new) {
 		ret = CCI_ENOMEM;
 		goto out;
@@ -642,32 +644,115 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	ep->tx_timeout = 0;
 
 	sep = ep->priv;
-	sep->sock = socket(PF_LOCAL, SOCK_STREAM, 0);
-	if (sep->sock == -1) {
-		ret = errno;
-		goto out;
-	}
 
 	ret = sm_get_ep_id(dev, &sep->id);
 	if (ret) goto out;
 
+	/* If the path length plus enough room for a uint32_t and NULL
+	 * exceeds the sizeof name (sun.sun_path) length, bail */
+	if ((strlen(sdev->path) + 12) > sizeof(name)) {
+		ret = CCI_EINVAL;
+		goto out;
+	}
+
 	memset(name, 0, sizeof(name));
 	snprintf(name, sizeof(name), "%s/%u", sdev->path, sep->id);
 
-	ret = sm_create_path(name);
+	ep->uri = strdup(name);
+	if (!ep->uri) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	ret = sm_create_path(ep->uri);
 	if (ret)
 		goto out;
 
-	ep->uri = strdup(name);
+	/* Create FIFO for receiving headers */
+
+	/* If there is not enough space to append "/fifo", bail */
+	if (strlen(ep->uri) >= (sizeof(name) - 6)) {
+		ret = CCI_EINVAL;
+		goto out;
+	}
+
+	memset(name, 0, sizeof(name));
+	snprintf(name, sizeof(name), "%s/fifo", ep->uri);
+
+	unlink(name);
+	ret = mkfifo(name, 0622);
+	if (ret) {
+		debug(CCI_DB_WARN, "%s: mkfifo(%s) failed with %s", __func__,
+				name, strerror(errno));
+		ret = CCI_ERROR;
+		goto out;
+	}
+
+	ret = open(name, O_RDWR);
+	if (ret == -1) {
+		debug(CCI_DB_WARN, "%s: open(%s) failed with %s", __func__,
+				name, strerror(errno));
+		ret = CCI_ERROR;
+		goto out;
+	}
+	sep->fifo = ret;
+
+	/* Create listening socket for connection setup */
+
+	/* If there is not enough space to append "/sock", bail */
+	if (strlen(ep->uri) >= (sizeof(name) - 6)) {
+		ret = CCI_EINVAL;
+		goto out;
+	}
+
+	memset(name, 0, sizeof(name));
+	snprintf(name, sizeof(name), "%s/sock", ep->uri);
 
 	memset(&sun, 0, sizeof(sun));
+	sun.sun_len = strlen(name);
 	sun.sun_family = AF_UNIX;
+	memcpy(sun.sun_path, name, sun.sun_len);
+
+	ret = socket(PF_UNIX, SOCK_DGRAM, 0);
+	if (ret == -1) {
+		debug(CCI_DB_WARN, "%s: socket() failed with %s", __func__,
+				strerror(errno));
+		ret = CCI_ERROR;
+		goto out;
+	}
+	sep->sock = ret;
+
+	ret = bind(sep->sock, (const struct sockaddr *)&sun, sizeof(sun));
+	if (ret) {
+		debug(CCI_DB_WARN, "%s: bind() failed with %s", __func__,
+				strerror(errno));
+		ret = CCI_ERROR;
+		goto out;
+	}
 
 out:
 	if (ret) {
-		if (ep->priv) {
-			sep = ep->priv;
+		if (sep) {
+			char name[104];
+
+			if (sep->sock) {
+				close(sep->sock);
+				memset(name, 0, sizeof(name));
+				snprintf(name, sizeof(name), "%s/sock", ep->uri);
+				unlink(name);
+			}
+			if (sep->fifo) {
+				close(sep->fifo);
+				memset(name, 0, sizeof(name));
+				snprintf(name, sizeof(name), "%s/fifo", ep->uri);
+				unlink(name);
+			}
+			if (ep->uri) {
+				rmdir(ep->uri);
+				free(ep->uri);
+			}
 			sm_put_ep_id(dev, sep->id);
+			free(sep);
 		}
 	}
 	CCI_EXIT;
