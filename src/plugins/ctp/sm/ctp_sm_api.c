@@ -361,6 +361,33 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 						ret = CCI_EINVAL;
 						goto out;
 					}
+					if (path[0] != '/') {
+						struct sockaddr_un sun;
+
+						debug(CCI_DB_INFO, "%s: converting "
+							"relative path to absolute "
+							"path", __func__);
+
+						c = getcwd(cwd, sizeof(cwd));
+						if (!c) {
+							debug(CCI_DB_WARN, "%s: getcwd() "
+								" failed with %s", __func__,
+								strerror(errno));
+							ret = CCI_ERROR;
+							goto out;
+						}
+						if ((strlen(c) + strlen(path) + 2) >
+							(sizeof(sun.sun_path) - 6)) {
+							debug(CCI_DB_WARN, "%s: the path "
+								"%s/%s is too long", __func__,
+								c, path);
+							ret = CCI_ERROR;
+							goto out;
+						}
+						strcat(cwd, "/");
+						strcat(cwd, path);
+						path = cwd;
+					}
 
 					memset(dname, 0, sizeof(dname));
 					snprintf(dname, sizeof(dname), "%s/%u", path, pid);
