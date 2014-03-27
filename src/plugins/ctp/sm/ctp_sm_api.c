@@ -764,7 +764,7 @@ sm_buffer_init(sm_buffer_t **sbp, uint64_t total_len, int min_len)
 }
 
 static int
-sm_buffer_reserve(sm_buffer_t *sb, int len, void **addrp)
+sm_buffer_reserve(sm_buffer_t *sb, int len, uint32_t *offset, void **addrp)
 {
 	int ret = EAGAIN, i = sb->last_block, j = 0, k = 0;
 	int cnt = 0, block_offset = sb->block_offset;
@@ -841,8 +841,9 @@ sm_buffer_reserve(sm_buffer_t *sb, int len, void **addrp)
 			if (!ret)
 				ret = unset_bits(&sb->blocks[j], 0, cnt - k);
 		}
+		*offset = i * 64 + block_offset;
 		*addrp = (void*) ((uintptr_t)sb->addr +
-				(((uintptr_t)i * 64 + block_offset) * sb->min_len));
+				(((uintptr_t)*offset) * sb->min_len));
 	}
 
 	return ret;
