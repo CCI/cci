@@ -414,7 +414,7 @@ struct sm_globals {
 	cci_device_t		**devices;	/* Array of sm devices */
 };
 
-extern sm_globals_t		*sglobals;
+extern sm_globals_t		*smglobals;
 
 int cci_ctp_sm_post_load(cci_plugin_t * me);
 int cci_ctp_sm_pre_unload(cci_plugin_t * me);

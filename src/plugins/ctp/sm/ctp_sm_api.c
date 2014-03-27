@@ -16,7 +16,7 @@
 #include "plugins/ctp/ctp.h"
 #include "ctp_sm.h"
 
-sm_globals_t *sglobals = NULL;
+sm_globals_t *smglobals = NULL;
 
 /*
  * Local functions
@@ -239,13 +239,13 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 
 	pid = getpid();
 
-	sglobals = calloc(1, sizeof(*sglobals));
-	if (!sglobals) {
+	smglobals = calloc(1, sizeof(*smglobals));
+	if (!smglobals) {
 		ret = CCI_ENOMEM;
 		goto out;
 	}
 
-	devices = calloc(CCI_MAX_DEVICES, sizeof(*sglobals->devices));
+	devices = calloc(CCI_MAX_DEVICES, sizeof(*smglobals->devices));
 	if (!devices) {
 		ret = CCI_ENOMEM;
 		goto out;
@@ -308,7 +308,7 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 			__func__, device->name, device->max_send_size);
 
 		cci__add_dev(dev);
-		devices[sglobals->count++] = device;
+		devices[smglobals->count++] = device;
 	} else {
 		/* find devices that we own */
 		TAILQ_FOREACH_SAFE(dev, &globals->configfile_devs, entry, ndev) {
@@ -430,16 +430,16 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 			/* queue to the main device list now */
 			TAILQ_REMOVE(&globals->configfile_devs, dev, entry);
 			cci__add_dev(dev);
-			devices[sglobals->count++] = device;
+			devices[smglobals->count++] = device;
 		}
 		}
 	}
 
 	devices =
-		realloc(devices, (sglobals->count + 1) * sizeof(cci_device_t *));
-	devices[sglobals->count + 1] = NULL;
+		realloc(devices, (smglobals->count + 1) * sizeof(cci_device_t *));
+	devices[smglobals->count] = NULL;
 
-	*((cci_device_t ***)&sglobals->devices) = devices;
+	*((cci_device_t ***)&smglobals->devices) = devices;
 
 out:
 	if (ret) {
@@ -463,9 +463,9 @@ out:
 		}
 		free((void*)devices);
 
-		if (sglobals) {
-			free(sglobals);
-			sglobals = NULL;
+		if (smglobals) {
+			free(smglobals);
+			smglobals = NULL;
 		}
 	}
 	CCI_EXIT;
@@ -478,7 +478,7 @@ static int ctp_sm_finalize(cci_plugin_ctp_t * plugin)
 
 	CCI_ENTER;
 
-	if (!sglobals) {
+	if (!smglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
@@ -496,8 +496,9 @@ static int ctp_sm_finalize(cci_plugin_ctp_t * plugin)
 		}
 	}
 
-	free(sglobals->devices);
-	free((void*)sglobals);
+	free(smglobals->devices);
+	free((void*)smglobals);
+	smglobals = NULL;
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -605,7 +606,7 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 
 	CCI_ENTER;
 
-	if (!sglobals) {
+	if (!smglobals) {
 		CCI_EXIT;
 		return CCI_ENODEV;
 	}
