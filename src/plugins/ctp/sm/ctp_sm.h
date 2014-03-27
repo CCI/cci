@@ -335,7 +335,9 @@ struct sm_ep {
 	uint32_t		is_polling;	/* Serialize accept to sockets
 						   and polling strctures */
 	uint32_t		id;		/* Endpoint id */
-	int			fifo;		/* FIFO for receiving headers */
+	int			fifo;		/* FIFO fd for receiving headers */
+	int			msgs;		/* File descriptor for send buffer */
+
 	nfds_t			nfds;		/* Numbder of pollfds */
 	struct pollfd		*fds;		/* For UNIX sockets */
 	cci__conn_t		**c;		/* Array of conns indexed by fds */

@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/param.h>
 #include <fcntl.h>
 #include <assert.h>
 
@@ -234,7 +235,7 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 	cci_device_t **devices;
 	struct cci_device *device = NULL;
 	sm_dev_t *sdev = NULL;
-	char dname[104];
+	char dname[MAXPATHLEN];
 	pid_t pid;
 
 	CCI_ENTER;
@@ -347,6 +348,8 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 			for (arg = device->conf_argv; *arg != NULL; arg++) {
 				if (0 == strncmp("path=", *arg, 5)) {
 					const char *path = *arg + 5;
+					char cwd[MAXPATHLEN], *c = NULL;
+
 
 					if (sdev->path) {
 						debug(CCI_DB_WARN,
@@ -597,14 +600,14 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 				    cci_endpoint_t ** endpointp,
 				    cci_os_handle_t * fd)
 {
-	int ret = CCI_SUCCESS;
+	int ret = CCI_SUCCESS, len = 0;
 	cci__dev_t *dev = NULL;
 	cci__ep_t *ep = NULL;
 	sm_ep_t *sep = NULL;
 	struct cci_endpoint *endpoint = (struct cci_endpoint *) *endpointp;
 	sm_dev_t *sdev = NULL;
 	struct sockaddr_un sun;
-	char name[104]; /* max UNIX domain socket name */
+	char name[MAXPATHLEN]; /* max UNIX domain socket name */
 
 	CCI_ENTER;
 
@@ -733,8 +736,14 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 out:
 	if (ret) {
 		if (sep) {
-			char name[104];
+			char name[MAXPATHLEN];
 
+			if (sep->msgs) {
+				memset(name, 0, sizeof(name));
+				snprintf(name, sizeof(name), "/cci-sm-%u-%u",
+						getpid(), sep->id);
+				shm_unlink(name);
+			}
 			if (sep->sock) {
 				close(sep->sock);
 				memset(name, 0, sizeof(name));
