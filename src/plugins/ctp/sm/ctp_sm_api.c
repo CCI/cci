@@ -727,6 +727,47 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	}
 	sep->fifo = ret;
 
+	/* Create mmap send buffer */
+
+	/* If there is not enough space to append "/msgs", bail */
+	if (strlen(ep->uri) >= (sizeof(name) - 6)) {
+		debug(CCI_DB_WARN, "%s: path %s/msgs is too long", __func__, ep->uri);
+		ret = CCI_EINVAL;
+		goto out;
+	}
+
+	memset(name, 0, sizeof(name));
+	snprintf(name, sizeof(name), "/cci-sm-%u-%u", getpid(), sep->id);
+
+	shm_unlink(name);
+
+	ret = shm_open(name, O_CREAT | O_RDWR, 0666);
+	if (ret == -1) {
+		debug(CCI_DB_WARN, "%s: shm_open(%s) failed with %s", __func__,
+				name, strerror(errno));
+		ret = CCI_ERROR;
+		goto out;
+	}
+	sep->msgs = ret;
+
+	len = ep->tx_buf_cnt * device->max_send_size;
+
+	ret = ftruncate(sep->msgs, len);
+	if (ret) {
+		debug(CCI_DB_WARN, "%s: ftruncate(%s, %d) failed with %s", __func__,
+				name, len, strerror(errno));
+		ret = CCI_ERROR;
+		goto out;
+	}
+
+	sep->tx_buf = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, sep->msgs, 0);
+	if (sep->tx_buf == MAP_FAILED) {
+		debug(CCI_DB_WARN, "%s: mmap() failed with %s", __func__,
+				strerror(errno));
+		ret = CCI_ERROR;
+		goto out;
+	}
+
 	/* Create listening socket for connection setup */
 
 	/* If there is not enough space to append "/sock", bail */
