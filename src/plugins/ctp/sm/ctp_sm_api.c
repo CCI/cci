@@ -622,6 +622,296 @@ sm_put_ep_id(cci__dev_t *dev, uint32_t id)
 	return ret;
 }
 
+static inline int
+check_block(uint64_t block, int cnt, int shift, int *offset)
+{
+	int ret = 0, i = 0;
+	uint64_t bits = ((uint64_t)1 << cnt) - 1;
+
+	if (cnt + *offset >= 64)
+		return EAGAIN;
+
+	bits = bits << *offset;
+
+	if ((block & bits) == bits) {
+		goto out;
+	} else if (!shift) {
+		goto failed;
+	}
+
+	for (i = *offset + 1; i <= (64 - cnt); i++) {
+		bits = bits << 1;
+		if ((block & bits) == bits) {
+			if (offset)
+				*offset = i;
+			goto out;
+		}
+	}
+    failed:
+	ret = EAGAIN;
+    out:
+	return ret;
+}
+
+static int
+unset_bits(uint64_t *block, uint32_t offset, int cnt)
+{
+	int ret = 0;
+	uint64_t bits = (((uint64_t)1 << cnt) - 1) << offset;
+
+	if (!bits)
+		bits = ~((uint64_t)0);
+
+	if ((*block & bits) != bits) {
+		printf("%s: *block=0x%llx bits=0x%llx\n", __func__, *block, bits);
+		ret = EINVAL;
+		goto out;
+	}
+
+	*block = *block & ~bits;
+
+    out:
+	return ret;
+}
+
+static void
+sm_buffer_destroy(sm_buffer_t *sb)
+{
+	if (sb) {
+		pthread_mutex_destroy(&sb->lock);
+		free(sb->blocks);
+	}
+	free(sb);
+	return;
+}
+
+static int
+sm_buffer_init(sm_buffer_t **sbp, uint64_t total_len, int min_len)
+{
+	int ret = 0;
+	sm_buffer_t *s = NULL;
+	pthread_mutexattr_t ma;
+
+	if (!sbp || !total_len) {
+		ret = CCI_EINVAL;
+		goto out;
+	}
+
+	if (min_len & (min_len - 1)) {
+		ret = CCI_EINVAL;
+		goto out;
+	}
+
+	s = calloc(1, sizeof(*s));
+	if (!s) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	/* TODO if total_len is not multiple of block size, add one */
+
+	s->len = total_len;
+	/* total_len / min_len / bits per block */;
+	s->num_blocks = (int) (total_len / (uint64_t)min_len / UINT64_C(64));
+
+	s->blocks = malloc(s->num_blocks * sizeof(*s->blocks));
+	if (!s->blocks) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	memset(s->blocks, 0xFF, s->num_blocks * sizeof(*s->blocks));
+
+	ret = pthread_mutexattr_init(&ma);
+	if (ret)
+		goto out;
+
+#ifdef NDEBUG
+	ret = pthread_mutexattr_settype(&ma, PTHREAD_MUTEX_NORMAL);
+#else
+	ret = pthread_mutexattr_settype(&ma, PTHREAD_MUTEX_ERRORCHECK);
+#endif
+	if (ret) {
+		debug(CCI_DB_WARN, "%s: pthread_mutexattr_settype() failed "
+				"with %s", __func__, strerror(ret));
+		ret = CCI_ERROR;
+		goto out;
+	}
+
+	ret = pthread_mutex_init(&s->lock, &ma);
+	if (ret) {
+		debug(CCI_DB_WARN, "%s: pthread_mutex_init() failed "
+				"with %s", __func__, strerror(ret));
+		ret = CCI_ERROR;
+		goto out;
+	}
+
+	s->min_len = min_len;
+	s->mask = min_len - 1;
+	min_len--;
+	do {
+		min_len = min_len >> 1;
+		s->shift++;
+	} while (min_len);
+
+	*sbp = s;
+
+    out:
+	if (ret)
+		sm_buffer_destroy(s);
+
+	return ret;
+}
+
+static int
+sm_buffer_reserve(sm_buffer_t *sb, int len, void **addrp)
+{
+	int ret = EAGAIN, i = sb->last_block, j = 0, k = 0;
+	int cnt = 0, block_offset = sb->block_offset;
+
+	if (!sb || !len ||!addrp)
+		return EINVAL;
+
+	cnt = (len & sb->mask ? 1 : 0) + (len >> sb->shift);
+
+	/* If length is greater than 64 (bits) cache lines,
+	 * return error */
+	if (len > (sb->min_len * 64))
+		return EMSGSIZE;
+
+	do {
+		uint64_t tmp = sb->blocks[i], next = 0, top = (uint64_t)1 << 63;
+
+		/* get the next block index */
+		if (i < sb->num_blocks - 1)
+			j = i + 1;
+		else
+			j = 0;
+
+		/* if no bits available, check next block */
+		if (tmp == 0)
+			goto increment;
+
+		/* look within the current block */
+		ret = check_block(tmp, cnt, 1, &block_offset);
+		if (ret == 0)
+			goto done;
+
+		/* perhaps the bits overlap this and the next block... */
+
+		/* how many bits are at the end of this block? */
+		k = 0;
+
+		while (tmp & top) {
+			k++;
+			tmp = tmp << 1;
+		}
+		if (k == 0)
+			goto increment;
+
+		next = sb->blocks[j];
+
+		block_offset = 0;
+		ret = check_block(next, cnt - k, 0, &block_offset);
+		if (ret == 0) {
+			block_offset = 64 - k;
+			goto done;
+		}
+
+		increment:
+		i = j;
+		block_offset = 0;
+
+	} while (i != sb->last_block);
+
+    done:
+	if (!ret) {
+		if (block_offset + cnt < 64) {
+			sb->last_block = i;
+			sb->block_offset = block_offset + cnt;
+			ret = unset_bits(&sb->blocks[i], block_offset, cnt);
+		} else if (block_offset + cnt == 64) {
+			sb->last_block = j;
+			sb->block_offset = 0;
+			ret = unset_bits(&sb->blocks[i], block_offset, cnt);
+		} else {
+			sb->last_block = j;
+			sb->block_offset = cnt - k;
+			ret = unset_bits(&sb->blocks[i], block_offset, k);
+			if (!ret)
+				ret = unset_bits(&sb->blocks[j], 0, cnt - k);
+		}
+		*addrp = (void*) ((uintptr_t)sb->addr +
+				(((uintptr_t)i * 64 + block_offset) * sb->min_len));
+	}
+
+	return ret;
+}
+
+static int
+sm_buffer_release(sm_buffer_t *sb, void *addr, int len)
+{
+	int ret = 0, i = 0, j = 0, cnt = 0;
+	int offset = 0;
+	uint64_t bits = 0, *b = NULL;
+
+	if (!len)
+		return EINVAL;
+
+	cnt = (len & sb->mask ? 1 : 0) + (len >> sb->shift);
+	bits = ((uint64_t)1 << cnt) - 1;
+
+	/* if cnt == 64, shift left bits = 0 */
+	if (!bits)
+		bits = ~((uint64_t)0);
+
+	/* convert addr to cache line index */
+	i = (int) (((uintptr_t)addr - (uintptr_t)sb->addr) >> sb->shift);
+
+	/* get offset within the block */
+	offset = i & 63;
+
+	/* determine which block has the starting cache line */
+	i = i >> 6;
+
+	b = &sb->blocks[i];
+
+	if (i < sb->num_blocks - 1)
+		j = i + 1;
+	else
+		j = 0;
+
+	if (offset + cnt <= 64) {
+		bits = bits << offset;
+		if (*b & bits) {
+			printf("%s: *b=0x%llx bits=0x%llx\n", __func__, *b, bits);
+			ret = EINVAL;
+			goto out;
+		}
+		*b = *b | bits;
+	} else {
+		int k = 64 - offset;
+		uint64_t *n = &sb->blocks[j];
+		uint64_t hi_bits = bits << offset;
+		uint64_t lo_bits = bits >> k;
+
+		if (*b & hi_bits || *n & lo_bits) {
+			printf("%s: offset=%d len=%d\n", __func__,
+					(int)((uintptr_t)addr - (uintptr_t)sb->addr), len);
+			printf("%s: *b=0x%llx hi_bits=0x%llx\n", __func__, *b, hi_bits);
+			printf("%s: *n=0x%llx lo_bits=0x%llx\n", __func__, *n, lo_bits);
+			ret = EINVAL;
+			goto out;
+		}
+
+		*b = *b | hi_bits;
+		*n = *n | lo_bits;
+	}
+
+    out:
+	return ret;
+}
+
 static int ctp_sm_create_endpoint(cci_device_t * device,
 				    int flags,
 				    cci_endpoint_t ** endpointp,
@@ -760,8 +1050,16 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 
-	sep->tx_buf = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, sep->msgs, 0);
-	if (sep->tx_buf == MAP_FAILED) {
+	ret = sm_buffer_init(&sep->tx_buf, len, SM_LINE);
+	if (ret) {
+		debug(CCI_DB_WARN, "%s: sm_buffer_init() failed with %s",
+				__func__, strerror(ret));
+		ret = CCI_ERROR;
+		goto out;
+	}
+
+	sep->tx_buf->addr = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, sep->msgs, 0);
+	if (sep->tx_buf->addr == MAP_FAILED) {
 		debug(CCI_DB_WARN, "%s: mmap() failed with %s", __func__,
 				strerror(errno));
 		ret = CCI_ERROR;

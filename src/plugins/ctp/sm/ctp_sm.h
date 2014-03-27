@@ -23,8 +23,12 @@ BEGIN_C_DECLS
 #define SM_EP_RX_CNT		(1024)		/* number of rx messages */
 #define SM_EP_TX_CNT		(1024)		/* number of tx messages */
 
-#define SM_DEFAULT_MSS		(128)
-#define SM_MIN_MSS		(64)		/* cache line size */
+#define SM_SHIFT		(7)		/* 6 = 64B, 7 = 128B, 8 = 256B */
+#define SM_LINE			(1 << SM_SHIFT)	/* Cache line size */
+#define SM_MASK			(SM_LINE - 1)	/* Mask bits for line size */
+
+#define SM_DEFAULT_MSS		(SM_LINE)	/* Default max send size */
+#define SM_MIN_MSS		(64)		/* Minimum cache line size */
 #define SM_MAX_MSS		(4096)		/* page size */
 
 #define SM_HDR_LEN		(8)		/* MSG and RMA header size */
@@ -266,6 +270,7 @@ typedef struct sm_rx		sm_rx_t;
 typedef struct sm_rma		sm_rma_t;
 typedef struct sm_rma_op	sm_rma_op_t;
 typedef struct sm_rma_handle	sm_rma_handle_t;
+typedef struct sm_buffer	sm_buffer_t;
 
 typedef enum sm_ctx {
 	SM_TX,
@@ -342,10 +347,9 @@ struct sm_ep {
 	struct pollfd		*fds;		/* For UNIX sockets */
 	cci__conn_t		**c;		/* Array of conns indexed by fds */
 
-	void			*tx_buf;	/* TX common buffer (MMAP buffer) */
+	sm_buffer_t		*tx_buf;	/* Cache line management */
 	sm_tx_t			*txs;		/* All txs */
 	TAILQ_HEAD(itx, sm_tx)	idle_txs;	/* List of idle txs */
-	uint32_t		*lines;		/* Bit mask for MSG MMAP cachelines */
 
 	void			*rx_buf;	/* RX common buffer */
 	sm_rx_t			*rxs;		/* All rxs */
@@ -355,6 +359,19 @@ struct sm_ep {
 	TAILQ_HEAD(act, sm_conn) active;	/* Active conns */
 	TAILQ_HEAD(psv, sm_conn) passive;	/* Passive conns */
 	TAILQ_HEAD(cls, sm_conn) closing;	/* Closing conns */
+};
+
+struct sm_buffer {
+	void *addr;		/* base address of buffer */
+	uint64_t *blocks;	/* bit mask of available cache lines */
+	pthread_mutex_t lock;	/* lock */
+	uint64_t len;		/* length of buffer in bytes */
+	int last_block;		/* last offset's block */
+	int block_offset;	/* last offset's block offset */
+	int num_blocks;		/* number of blocks in bit mask */
+	int min_len;		/* length of minimal allocation - must be power of two */
+	int mask;		/* len - 1 */
+	int shift;		/* 1 << shift == min_len */
 };
 
 typedef enum sm_conn_state {
