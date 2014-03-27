@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
- * Copyright © 2010-2012 UT-Battelle, LLC. All rights reserved.
- * Copyright © 2010-2012 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2010-2014 UT-Battelle, LLC. All rights reserved.
+ * Copyright © 2010-2014 Oak Ridge National Labs.  All rights reserved.
  * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
@@ -493,6 +493,7 @@ static int ctp_tcp_finalize(cci_plugin_ctp_t * plugin)
 
 	free(tglobals->devices);
 	free((void *)tglobals);
+	tglobals = NULL;
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -555,7 +556,7 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 
 	/* TODO support blocking mode
 	 * in the meantime, fail if the fd is requested */
-	if (fd) {
+	if (0 && fd) {
 		debug(CCI_DB_WARN, "%s: The TCP transport does not yet support "
 			"blocking mode via the OS handle.\n", __func__);
 		debug(CCI_DB_WARN, "%s: Either choose another transport or set "
@@ -1295,6 +1296,8 @@ tcp_monitor_fd(cci__ep_t *ep, cci__conn_t *conn, int events)
 		ret = setsockopt(tconn->pfd.fd, SOL_SOCKET, SO_RCVBUF, &bufsize, opt_len);
 		if (ret) debug(CCI_DB_EP, "%s: unable to set SO_RCVBUF (%s)",
 				__func__, strerror(errno));
+
+		ret = 0;
 	}
 
 	pthread_mutex_lock(&ep->lock);
