@@ -493,6 +493,7 @@ static int ctp_tcp_finalize(cci_plugin_ctp_t * plugin)
 
 	free(tglobals->devices);
 	free((void *)tglobals);
+	tglobals = NULL;
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
