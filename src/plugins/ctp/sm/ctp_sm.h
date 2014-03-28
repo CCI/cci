@@ -23,7 +23,10 @@ BEGIN_C_DECLS
 #define SM_EP_RX_CNT		(1024)		/* number of rx messages */
 #define SM_EP_TX_CNT		(1024)		/* number of tx messages */
 
-#define SM_SHIFT		(7)		/* 6 = 64B, 7 = 128B, 8 = 256B */
+/* Define minimal cache line sizes.
+ * The cache line must be larger than the size of sm_tx_t.
+ */
+#define SM_SHIFT		(7)		/* 7 = 128B, 8 = 256B */
 #define SM_LINE			(1 << SM_SHIFT)	/* Cache line size */
 #define SM_MASK			(SM_LINE - 1)	/* Mask bits for line size */
 
