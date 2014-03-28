@@ -648,6 +648,7 @@ static int ctp_sock_finalize(cci_plugin_ctp_t * plugin)
 
 	free(sglobals->devices);
 	free((void *)sglobals);
+	sglobals = NULL;
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
