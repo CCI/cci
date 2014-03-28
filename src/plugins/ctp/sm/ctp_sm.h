@@ -343,20 +343,20 @@ struct sm_ep {
 	uint32_t		is_polling;	/* Serialize accept to sockets
 						   and polling strctures */
 	uint32_t		id;		/* Endpoint id */
-	int			fifo;		/* FIFO fd for receiving headers */
-	int			msgs;		/* File descriptor for send buffer */
+	cci_os_handle_t		fifo;		/* FIFO fd for receiving headers */
+	cci_os_handle_t		msgs;		/* File descriptor for send buffer */
 
 	nfds_t			nfds;		/* Numbder of pollfds */
 	struct pollfd		*fds;		/* For UNIX sockets */
 	cci__conn_t		**c;		/* Array of conns indexed by fds */
 
-	sm_buffer_t		*tx_buf;	/* Cache line management */
+	sm_buffer_t		*tx_buf;	/* TX common buffer */
 	sm_tx_t			*txs;		/* All txs */
-	TAILQ_HEAD(itx, sm_tx)	idle_txs;	/* List of idle txs */
+	TAILQ_HEAD(itx, cci__evt) idle_txs;	/* List of idle txs */
 
-	void			*rx_buf;	/* RX common buffer */
+	sm_buffer_t		*rx_buf;	/* RX common buffer */
 	sm_rx_t			*rxs;		/* All rxs */
-	TAILQ_HEAD(irx, sm_rx)	idle_rxs;	/* List of idle rxs */
+	TAILQ_HEAD(irx, cci__evt) idle_rxs;	/* List of idle rxs */
 
 	TAILQ_HEAD(cns, sm_conn) conns;		/* Connected conns */
 	TAILQ_HEAD(act, sm_conn) active;	/* Active conns */

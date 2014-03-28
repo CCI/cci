@@ -525,6 +525,7 @@ static int ctp_sm_finalize(cci_plugin_ctp_t * plugin)
 				free(sdev->ids);
 			}
 			free(dev->priv);
+			dev->priv = NULL;
 		}
 	}
 
@@ -918,12 +919,14 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 				    cci_endpoint_t ** endpointp,
 				    cci_os_handle_t * fd)
 {
-	int ret = CCI_SUCCESS, len = 0;
+	int ret = CCI_SUCCESS, len = 0, i = 0;
+	struct cci_endpoint *endpoint = (struct cci_endpoint *) *endpointp;
 	cci__dev_t *dev = NULL;
 	cci__ep_t *ep = NULL;
-	sm_ep_t *sep = NULL;
-	struct cci_endpoint *endpoint = (struct cci_endpoint *) *endpointp;
 	sm_dev_t *sdev = NULL;
+	sm_ep_t *sep = NULL;
+	sm_tx_t *tx = NULL;
+	sm_rx_t *rx = NULL;
 	struct sockaddr_un sun;
 	char name[MAXPATHLEN]; /* max UNIX domain socket name */
 
@@ -961,10 +964,18 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 
 	ep->rx_buf_cnt = SM_EP_RX_CNT;
 	ep->tx_buf_cnt = SM_EP_TX_CNT;
-	ep->buffer_len = dev->device.max_send_size + SM_HDR_LEN;
+	ep->buffer_len = dev->device.max_send_size;
 	ep->tx_timeout = 0;
 
 	sep = ep->priv;
+
+	TAILQ_INIT(&sep->idle_txs);
+	TAILQ_INIT(&sep->idle_rxs);
+
+	TAILQ_INIT(&sep->conns);
+	TAILQ_INIT(&sep->active);
+	TAILQ_INIT(&sep->passive);
+	TAILQ_INIT(&sep->closing);
 
 	ret = sm_get_ep_id(dev, &sep->id);
 	if (ret) goto out;
@@ -1067,6 +1078,64 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 
+	/* Allocate receive buffer */
+
+	len = ep->rx_buf_cnt * device->max_send_size;
+
+	ret = sm_buffer_init(&sep->rx_buf, len, SM_LINE);
+	if (ret) {
+		debug(CCI_DB_WARN, "%s: sm_buffer_init() failed with %s",
+				__func__, strerror(ret));
+		ret = CCI_ERROR;
+		goto out;
+	}
+
+	ret = posix_memalign(&sep->rx_buf->addr, SM_LINE, len);
+	if (ret) {
+		debug(CCI_DB_WARN, "%s: posix_memalign() failed with %s", __func__,
+				strerror(errno));
+		ret = CCI_ERROR;
+		goto out;
+	}
+
+	/* Allocate txs and rxs
+	 *
+	 * To avoid false-sharing, align each item on a cache line boundary.
+	 */
+
+	assert(sizeof(*tx) <= SM_LINE);
+	len = ep->tx_buf_cnt * SM_LINE;
+
+	ret = posix_memalign((void**)&sep->txs, SM_LINE, len);
+	if (ret)
+		goto out;
+
+	for (i = 0; i < (int) ep->tx_buf_cnt; i++) {
+		uintptr_t offset = i * SM_LINE;
+
+		tx = (void*)((uintptr_t)sep->txs + offset);
+		tx->evt.ep = ep;
+		tx->id = i;
+		tx->state = SM_TX_INIT;
+		TAILQ_INSERT_TAIL(&sep->idle_txs, &tx->evt, entry);
+	}
+
+	assert(sizeof(*rx) <= SM_LINE);
+	len = ep->rx_buf_cnt * SM_LINE;
+
+	ret = posix_memalign((void**)&sep->rxs, SM_LINE, len);
+	if (ret)
+		goto out;
+
+	for (i = 0; i < (int) ep->rx_buf_cnt; i++) {
+		uintptr_t offset = i * SM_LINE;
+
+		rx = (void*)((uintptr_t)sep->rxs + offset);
+		rx->evt.ep = ep;
+		TAILQ_INSERT_TAIL(&sep->idle_rxs, &rx->evt, entry);
+	}
+
+
 	/* Create listening socket for connection setup */
 
 	/* If there is not enough space to append "/sock", bail */
@@ -1101,59 +1170,89 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	}
 
 out:
-	if (ret) {
-		if (sep) {
-			char name[MAXPATHLEN];
+	if (ret)
+		ctp_sm_destroy_endpoint(endpoint);
 
-			if (sep->msgs) {
-				memset(name, 0, sizeof(name));
-				snprintf(name, sizeof(name), "/cci-sm-%u-%u",
-						getpid(), sep->id);
-				shm_unlink(name);
-			}
-			if (sep->sock) {
-				close(sep->sock);
-				memset(name, 0, sizeof(name));
-				snprintf(name, sizeof(name), "%s/sock", ep->uri);
-				unlink(name);
-			}
-			if (sep->fifo) {
-				close(sep->fifo);
-				memset(name, 0, sizeof(name));
-				snprintf(name, sizeof(name), "%s/fifo", ep->uri);
-				unlink(name);
-			}
-			if (ep->uri) {
-				rmdir(ep->uri);
-				free(ep->uri);
-			}
-			sm_put_ep_id(dev, sep->id);
-			free(sep);
-		}
-	}
 	CCI_EXIT;
 	return ret;
 }
 
 static int ctp_sm_destroy_endpoint(cci_endpoint_t * endpoint)
 {
-	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
-	cci__dev_t *dev = ep->dev;
+	int ret = 0;
+	cci__dev_t *dev = NULL;
+	cci__ep_t *ep = NULL;
+	sm_ep_t *sep = NULL;
 
 	CCI_ENTER;
 
-	free(ep->uri);
+	if (!endpoint) {
+		ret = CCI_EINVAL;
+		goto out;
+	}
 
-	if (ep->priv) {
-		sm_ep_t *sep = ep->priv;
+	ep = container_of(endpoint, cci__ep_t, endpoint);
+	dev = ep->dev;
+	sep = ep->priv;
+
+	if (sep) {
+		int len = 0;
+		char name[MAXPATHLEN];
+
+		if (sep->sock) {
+			close(sep->sock);
+			memset(name, 0, sizeof(name));
+			snprintf(name, sizeof(name), "%s/sock", ep->uri);
+			unlink(name);
+		}
+
+		/* TODO: Close all open connections */
+
+		/* Free txs, rxs, and buffers */
+		free(sep->rxs);
+		if (sep->rx_buf)
+			free(sep->rx_buf->addr);
+		sm_buffer_destroy(sep->rx_buf);
+
+		free(sep->txs);
+		if (sep->tx_buf) {
+			if (sep->tx_buf->addr) {
+				len = ep->tx_buf_cnt * endpoint->device->max_send_size;
+				munmap(sep->tx_buf->addr, len);
+			}
+		}
+		sm_buffer_destroy(sep->tx_buf);
+
+		/* Munmap send FIFO */
+		if (sep->msgs) {
+			memset(name, 0, sizeof(name));
+			snprintf(name, sizeof(name), "/cci-sm-%u-%u",
+					getpid(), sep->id);
+			shm_unlink(name);
+		}
+
+		/* Close FIFO */
+		if (sep->fifo) {
+			close(sep->fifo);
+			memset(name, 0, sizeof(name));
+			snprintf(name, sizeof(name), "%s/fifo", ep->uri);
+			unlink(name);
+		}
 
 		sm_put_ep_id(dev, sep->id);
 		free(sep);
 		ep->priv = NULL;
 	}
 
+	if (ep->uri) {
+		rmdir(ep->uri);
+		free((char *)ep->uri);
+		ep->uri = NULL;
+	}
+
+    out:
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 static int ctp_sm_accept(cci_event_t *event, const void *context)
