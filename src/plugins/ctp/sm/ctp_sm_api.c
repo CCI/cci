@@ -545,7 +545,7 @@ static const char *ctp_sm_strerror(cci_endpoint_t * endpoint, enum cci_status st
 }
 
 /* Get the first available endpoint id.
- * Available ids do not have a bit set.
+ * Available ids are not set; used ids are set.
  * If none are available, allocate a new block.
  */
 static int
@@ -553,23 +553,18 @@ sm_get_ep_id(cci__dev_t *dev, uint32_t *id)
 {
 	int ret = CCI_SUCCESS, i = 0, found = 0;
 	uint32_t shift = 0;
-	uint64_t *b = NULL, inverted = 0;
+	uint64_t *b = NULL;
 	sm_dev_t *sdev = dev->priv;
 
 	pthread_mutex_lock(&dev->lock);
 	for (i = 0; i < (int) sdev->num_blocks; i++) {
 		b = &sdev->ids[i];
-		if (*b != ~((uint64_t)0)) {
-			/* There is a bit available in this block.
-			 * We will use find-first-set-long (ffsl) since
-			 * there is no first-first-zero so we need to
-			 * invert the block. */
-			inverted = ~(*b);
-			shift = (uint32_t) ffsl(inverted);
+		if (*b) {
+			shift = (uint32_t) ffsl(*b);
 			assert(shift);	/* it must find a bit */
 			shift--;
-			assert((*b & ((uint64_t)1 << shift)) == 0);
-			*b |= (((uint64_t)1) << shift);
+			assert((*b & ((uint64_t)1 << shift)) == 1);
+			*b = *b & ~(((uint64_t)1) << shift);
 			found = 1;
 			break;
 		}
@@ -588,13 +583,13 @@ sm_get_ep_id(cci__dev_t *dev, uint32_t *id)
 		sdev->ids = new;
 		shift = 0;
 		b = &sdev->ids[sdev->num_blocks - 1];
-		*b |= (uint64_t)1;
+		*b = ~((uint64_t)1);
 	}
 out:
 	pthread_mutex_unlock(&dev->lock);
 
 	if (!ret)
-		*id = shift + sdev->id;
+		*id = (i * 64) + shift + sdev->id; /* block + offset + base id */
 
 	return ret;
 }
