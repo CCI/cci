@@ -609,12 +609,12 @@ sm_put_ep_id(cci__dev_t *dev, uint32_t id)
 	i = id / SM_BLOCK_SIZE;
 
 	/* determine the shift */
-	shift = (id % SM_BLOCK_SIZE);
+	shift = (id & (SM_BLOCK_SIZE - 1));
 
 	pthread_mutex_lock(&dev->lock);
 	b = &sdev->ids[i];
-	assert(*b & ((uintptr_t)1 << shift));
-	*b &= ~((uint64_t)1 << shift);
+	assert((*b & ((uintptr_t)1 << shift)) == 0);
+	*b |= (uint64_t)1 << shift;
 	pthread_mutex_unlock(&dev->lock);
 
 	return ret;
