@@ -3,10 +3,12 @@
  * $COPYRIGHT$
  */
 
+#define _GNU_SOURCE
 #include "cci/private_config.h"
 
 #include <stdio.h>
 #include <unistd.h>
+#include <inttypes.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -664,7 +666,8 @@ unset_bits(uint64_t *block, uint32_t offset, int cnt)
 		bits = ~((uint64_t)0);
 
 	if ((*block & bits) != bits) {
-		printf("%s: *block=0x%llx bits=0x%llx\n", __func__, *block, bits);
+		debug(CCI_DB_INFO, "%s: *block=0x%"PRIx64" bits=0x%"PRIx64"\n",
+				__func__, *block, bits);
 		ret = EINVAL;
 		goto out;
 	}
@@ -886,7 +889,8 @@ sm_buffer_release(sm_buffer_t *sb, void *addr, int len)
 	if (offset + cnt <= 64) {
 		bits = bits << offset;
 		if (*b & bits) {
-			printf("%s: *b=0x%llx bits=0x%llx\n", __func__, *b, bits);
+			debug(CCI_DB_INFO, "%s: *b=0x%"PRIx64" bits=0x%"PRIx64"\n",
+					__func__, *b, bits);
 			ret = EINVAL;
 			goto out;
 		}
@@ -898,10 +902,12 @@ sm_buffer_release(sm_buffer_t *sb, void *addr, int len)
 		uint64_t lo_bits = bits >> k;
 
 		if (*b & hi_bits || *n & lo_bits) {
-			printf("%s: offset=%d len=%d\n", __func__,
+			debug(CCI_DB_INFO, "%s: offset=%d len=%d\n", __func__,
 					(int)((uintptr_t)addr - (uintptr_t)sb->addr), len);
-			printf("%s: *b=0x%llx hi_bits=0x%llx\n", __func__, *b, hi_bits);
-			printf("%s: *n=0x%llx lo_bits=0x%llx\n", __func__, *n, lo_bits);
+			debug(CCI_DB_INFO, "%s: *b=0x%"PRIx64" hi_bits=0x%"PRIx64"\n",
+					__func__, *b, hi_bits);
+			debug(CCI_DB_INFO, "%s: *n=0x%"PRIx64" lo_bits=0x%"PRIx64"\n",
+					__func__, *n, lo_bits);
 			ret = EINVAL;
 			goto out;
 		}
@@ -1135,7 +1141,6 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 		TAILQ_INSERT_TAIL(&sep->idle_rxs, &rx->evt, entry);
 	}
 
-
 	/* Create listening socket for connection setup */
 
 	/* If there is not enough space to append "/sock", bail */
@@ -1148,9 +1153,8 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	snprintf(name, sizeof(name), "%s/sock", ep->uri);
 
 	memset(&sun, 0, sizeof(sun));
-	sun.sun_len = strlen(name);
 	sun.sun_family = AF_UNIX;
-	memcpy(sun.sun_path, name, sun.sun_len);
+	memcpy(sun.sun_path, name, strlen(name));
 
 	ret = socket(PF_UNIX, SOCK_DGRAM, 0);
 	if (ret == -1) {
