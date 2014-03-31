@@ -337,6 +337,7 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 				ret = CCI_ENOMEM;
 				goto out;
 			}
+			sdev->ids[0] = ~((uint64_t)0);
 			sdev->num_blocks = 1;
 
 			device->up = 1;
@@ -930,6 +931,7 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	sm_rx_t *rx = NULL;
 	struct sockaddr_un sun;
 	char name[MAXPATHLEN]; /* max UNIX domain socket name */
+	char uri[MAXPATHLEN]; /* sm:// + name */
 
 	CCI_ENTER;
 
@@ -991,7 +993,9 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	memset(name, 0, sizeof(name));
 	snprintf(name, sizeof(name), "%s/%u", sdev->path, sep->id);
 
-	ep->uri = strdup(name);
+	memset(uri, 0, sizeof(uri));
+	snprintf(uri, sizeof(uri), "sm://%s", name);
+	ep->uri = strdup(uri);
 	if (!ep->uri) {
 		ret = CCI_ENOMEM;
 		goto out;
