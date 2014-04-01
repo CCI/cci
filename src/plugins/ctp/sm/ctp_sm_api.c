@@ -1282,17 +1282,160 @@ static int ctp_sm_reject(cci_event_t *event)
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
+static int
+sm_get_conn_id(sm_conn_t *sconn)
+{
+	int ret = 0;
+	cci__conn_t *conn = sconn->conn;
+	cci_connection_t *connection = &conn->connection;
+	cci__ep_t *ep = container_of(connection->endpoint, cci__ep_t, endpoint);
+
+	pthread_mutex_lock(&ep->lock);
+	pthread_mutex_unlock(&ep->lock);
+
+	return ret;
+}
+
+static int
+sm_put_conn_id(sm_conn_t *sconn)
+{
+	int ret = 0;
+
+	return ret;
+}
+
 static int ctp_sm_connect(cci_endpoint_t * endpoint, const char *server_uri,
 			    const void *data_ptr, uint32_t data_len,
 			    cci_conn_attribute_t attribute,
 			    const void *context, int flags, const struct timeval *timeout)
 {
+	int ret = 0;
+	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
+	cci__dev_t *dev = ep->dev;
+	cci__conn_t *conn = NULL;
+	sm_ep_t *sep = ep->priv;
+	sm_conn_t *sconn = NULL;
+	sm_conn_params_t *params = NULL;
+	sm_conn_hdr_t hdr;
+	struct sockaddr_un sun;
+	struct iovec iov[2];
+	struct msghdr msg;
+	char name[MAXPATHLEN], *path = NULL;
+
 	CCI_ENTER;
 
-	debug(CCI_DB_INFO, "%s", "In sm_connect\n");
+	conn = calloc(1, sizeof(*conn));
+	sconn = calloc(1, sizeof(*sconn));
+	if (!conn || !sconn) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	conn->priv = sconn;
+	sconn->id = -1;		/* for now, to aid in cleanup */
+
+	conn->plugin = dev->plugin;
+
+	conn->connection.max_send_size = dev->device.max_send_size;
+	conn->connection.endpoint = endpoint;
+	conn->connection.attribute = attribute;
+	conn->connection.context = (void*) context;
+
+	conn->uri = strdup(server_uri);
+	if (!conn->uri) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	conn->tx_timeout = ep->tx_timeout;
+	conn->keepalive_timeout = ep->keepalive_timeout;
+
+	sconn->conn = conn;
+	sconn->state = SM_CONN_ACTIVE;
+	ret = sm_get_conn_id(sconn);
+	if (ret) goto out;
+	TAILQ_INIT(&sconn->queued);
+	TAILQ_INIT(&sconn->pending);
+
+	path = (char *) server_uri + 5; /* sm:// */
+	memset(name, 0, sizeof(name));
+	snprintf(name, sizeof(name), "%s/sock", path);
+	sconn->name = strdup(name);
+	if (!sconn->name) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	params = calloc(1, sizeof(*params));
+	if (!params) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	sconn->params = params;
+
+	if (data_ptr && data_len) {
+		params->data_ptr = malloc(data_len);
+		if (!params->data_ptr) {
+			ret = CCI_ENOMEM;
+			goto out;
+		}
+		memcpy(params->data_ptr, data_ptr, data_len);
+		params->data_len = data_len;
+	}
+	params->flags = flags;
+
+	memset(&sun, 0, sizeof(sun));
+	sun.sun_family = AF_UNIX;
+	memcpy(sun.sun_path, sconn->name, strlen(sconn->name));
+
+	memset(&hdr, 0, sizeof(hdr));
+	hdr.connect.type = SM_CMSG_CONNECT;
+	hdr.connect.version = 0;
+	hdr.connect.len = data_len;
+	hdr.connect.server_id = sconn->id;
+
+	memset(&iov, 0, sizeof(iov));
+	iov[0].iov_base = &hdr;
+	iov[0].iov_len = sizeof(hdr);
+	iov[1].iov_base = params->data_ptr;
+	iov[1].iov_len = params->data_len;
+
+	memset(&msg, 0, sizeof(msg));
+	msg.msg_name = &sun;
+	msg.msg_namelen = sizeof(sun);
+	msg.msg_iov = iov;
+	msg.msg_iovlen = 2;
+
+	ret = sendmsg(sep->sock, &msg, 0);
+	if (ret == -1) {
+		ret = errno;
+		goto out;
+	} else if(ret != (int)(iov[0].iov_len + iov[1].iov_len)) {
+		ret = CCI_ENOBUFS;
+		goto out;
+	} else {
+		ret = 0;
+	}
+
+    out:
+	if (ret) {
+		if (params) {
+			free(params->data_ptr);
+			free(params);
+		}
+		if (sconn) {
+			free(sconn->name);
+			if (sconn->id != -1) {
+				sm_put_conn_id(sconn);
+			}
+			free(sconn);
+		}
+		if (conn) {
+			free((void*)conn->uri);
+			free(conn);
+		}
+	}
 
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 static int ctp_sm_disconnect(cci_connection_t * connection)

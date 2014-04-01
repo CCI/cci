@@ -314,17 +314,18 @@ sm_tx_state_str(sm_tx_state_t state)
 	return NULL;
 }
 
+/* Try to align on 8 byte boundaries */
 struct sm_tx {
 	sm_ctx_t		ctx;		/* SM_TX */
+	sm_msg_type_t		type;
 	cci__evt_t		evt;		/* CCI event - private and public) */
 	sm_tx_state_t		state;
-	sm_msg_type_t		type;
 	uint32_t		id;		/* TX id */
 	int			flags;		/* CCI_FLAG_* */
 	uint32_t		offset;		/* MMAP cacheline index */
 	uint32_t		len;		/* Msg len */
-	sm_rma_op_t		*rma_op;	/* Owning RMA if completion msg */
 	uint32_t		rma_id;		/* RMA fragment ID */
+	sm_rma_op_t		*rma_op;	/* Owning RMA if completion msg */
 };
 
 struct sm_rx {
@@ -390,10 +391,8 @@ typedef enum sm_conn_state {
 	SM_CONN_CLOSED = -2,
 	SM_CONN_CLOSING = -1,
 	SM_CONN_INIT = 0,
-	SM_CONN_ACTIVE1,
-	SM_CONN_ACTIVE2,
-	SM_CONN_PASSIVE1,
-	SM_CONN_PASSIVE2,
+	SM_CONN_ACTIVE,
+	SM_CONN_PASSIVE,
 	SM_CONN_READY
 } sm_conn_state_t;
 
@@ -405,14 +404,10 @@ sm_conn_state_str(sm_conn_state_t state)
 		return "SM_CONN_READY";
 	case SM_CONN_INIT:
 		return "SM_CONN_INIT";
-	case SM_CONN_ACTIVE1:
-		return "SM_CONN_ACTIVE1";
-	case SM_CONN_ACTIVE2:
-		return "SM_CONN_ACTIVE2";
-	case SM_CONN_PASSIVE1:
-		return "SM_CONN_PASSIVE1";
-	case SM_CONN_PASSIVE2:
-		return "SM_CONN_PASSIVE2";
+	case SM_CONN_ACTIVE:
+		return "SM_CONN_ACTIVE";
+	case SM_CONN_PASSIVE:
+		return "SM_CONN_PASSIVE";
 	case SM_CONN_CLOSING:
 		return "SM_CONN_CLOSING";
 	case SM_CONN_CLOSED:
@@ -422,16 +417,22 @@ sm_conn_state_str(sm_conn_state_t state)
 	return NULL;
 }
 
+typedef struct sm_conn_params {
+	void			*data_ptr;	/* Buffered payload */
+	uint32_t		data_len;	/* Payload length */
+	int			flags;		/* Flags */
+} sm_conn_params_t;
+
 struct sm_conn {
 	cci__conn_t		*conn;		/* Owning conn */
 	sm_conn_state_t		state;		/* State */
-	cci_os_handle_t		fd;		/* Socket for this conn */
-	pthread_mutex_t		lock;		/* Sending lock */
-	uint32_t		index;		/* Index in sep->fds */
+	int			id;		/* Peer-assigned ID */
 	TAILQ_ENTRY(sm_conn)	entry;		/* Entry in sep->conns|active|passive */
 	TAILQ_HEAD(qd, sm_tx)	queued;		/* Queued sends */
 	TAILQ_HEAD(pd, sm_tx)	pending;	/* Pending (in-flight) sends */
-	struct sockaddr_un	sun;		/* UNIX name */
+	char			*name;		/* sockaddr_un.sun_path */
+	/* The following are only used by the client during setup */
+	sm_conn_params_t	*params;	/* Params */
 };
 
 struct sm_dev {
