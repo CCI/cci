@@ -95,40 +95,49 @@ typedef enum sm_conn_msg_type {
 } sm_conn_msg_type_t;
 
 /* The connection messages are sent via the UDS only */
-/* This is a 4-byte aligned structure */
+/* This is a 8-byte structure aligned on 4 bytes */
 typedef union sm_conn_hdr {
 	/* Generic header used by all messages */
 	struct sm_conn_hdr_generic {
 		uint32_t type		:  2;	/* header type */
-		uint32_t pad		: 30;	/* fill to 32 bits */
+		uint32_t pad1		: 30;	/* fill to 32 bits */
 		/* 32b */
+		uint32_t pad2		: 32;	/* fill to 64 bits */
+		/* 64b */
 	} generic;
-
-	/* Generic connect request (without data ptr) */
-	struct sm_conn_hdr_connect_generic {
-		uint32_t type		:  2;	/* SM_CMSG_CONNECT */
-		uint32_t version	:  6;	/* version */
-		uint32_t len		: 12;	/* payload length */
-		uint32_t pad		: 12;	/* Reserved */
-		/* 32b */
-	} _connect;
 
 	/* Connect request */
 	struct sm_conn_hdr_connect {
 		uint32_t type		:  2;	/* SM_CMSG_CONNECT */
-		uint32_t version	:  6;	/* version */
+		uint32_t version	:  8;	/* version */
 		uint32_t len		: 12;	/* payload length */
-		uint32_t pad		: 12;	/* Reserved */
+		uint32_t pad1		: 10;	/* Reserved */
 		/* 32b */
+		uint32_t server_id	: 16;	/* Client-assigned ID for server */
+		uint32_t pad		: 16;	/* Reserved */
+		/* 64b */
 	} connect;
 
 	/* Connect reply */
 	struct sm_conn_hdr_connect_reply {
 		uint32_t type		:  2;	/* SM_CMSG_CONN_REPLY */
 		uint32_t accept		:  8;	/* ACCEPT=0 or errno */
-		uint32_t pad		: 22;	/* Reserved */
+		uint32_t pad1		: 22;	/* Reserved */
 		/* 32b */
+		uint32_t server_id	: 16;	/* Client-assigned ID for server */
+		uint32_t client_id	: 16;	/* Server-assigned ID for client */
+		/* 64b */
 	} reply;
+
+	/* Connect ack */
+	struct sm_conn_hdr_connect_ack {
+		uint32_t type		:  2;	/* SM_CMSG_CONN_REPLY */
+		uint32_t pad		: 30;	/* Reserved */
+		/* 32b */
+		uint32_t server_id	: 16;	/* Client-assigned ID for server */
+		uint32_t client_id	: 16;	/* Server-assigned ID for client */
+		/* 64b */
+	} ack;
 } sm_conn_hdr_t;
 
 typedef enum sm_msg_type {

@@ -16,8 +16,9 @@ sm://path/pid/id
 where path is a valid, absolute directory path in the file system, the pid is
 the process id of the caller to cci_init(), and id is the id of endpoint. The
 complete URI without the sm:// prefix is a directory which includes the UDS
-socket file, the FIFO file, the MMAP send buffer, and the MMAP RAM buffer, if
-used.
+socket file and the FIFO file. The MMAP send buffer and the MMAP RAM buffer, if
+used, will be in the shared memory name space with the name "/cci-sm-pid-id"
+where pid and id are the same as in the URI.
 
 For example, the URI "sm:///tmp/cci/sm/4567/2" represents a directory at:
 
@@ -27,16 +28,18 @@ which will include these files:
 
 sock
 fifo
-msgs
-rmas (if used)
 
-Using the directory for all the resources allows for easier cleanup internally
-as well as by users and/or admins.
+Using the directory for most of the resources allows for easier cleanup
+internally as well as by users and/or admins.
 
 The socket will use the SOCK_DGRAM to allow connection handshake messages to be
 sent without the need to maintain message markers for each connection. While UDS
 datagrams are reliable, we will need to maintain timeouts and attempt
-retransmission as needed.
+retransmission as needed. The messages are 8 bytes. The server will determine
+the client's URI from the sockaddr_un's sun_path (less the /sock suffix). Thus,
+the connect_request will only contain version and optional payload length as
+well as the client-assigned server ID. The reply and ack messages include both
+the client-assigned server ID and the server-assigned client ID.
 
 The sm transport uses the FIFO for receiving message headers, message acks, and
 RMA headers. The FIFO has a larger capacity and lower latency than UDS datagram
