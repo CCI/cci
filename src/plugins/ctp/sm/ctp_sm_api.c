@@ -1001,9 +1001,13 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 
-	ret = sm_create_path(ep->uri);
+	ret = sm_create_path(name);
 	if (ret)
 		goto out;
+
+	/* store the directory name in uri */
+	memset(uri, 0, sizeof(uri));
+	snprintf(uri, sizeof(uri), "%s", name);
 
 	/* Create FIFO for receiving headers */
 
@@ -1014,7 +1018,7 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	}
 
 	memset(name, 0, sizeof(name));
-	snprintf(name, sizeof(name), "%s/fifo", ep->uri);
+	snprintf(name, sizeof(name), "%s/fifo", uri);
 
 	unlink(name);
 	ret = mkfifo(name, 0622);
@@ -1037,8 +1041,8 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	/* Create mmap send buffer */
 
 	/* If there is not enough space to append "/msgs", bail */
-	if (strlen(ep->uri) >= (sizeof(name) - 6)) {
-		debug(CCI_DB_WARN, "%s: path %s/msgs is too long", __func__, ep->uri);
+	if (strlen(name) >= (sizeof(name) - 6)) {
+		debug(CCI_DB_WARN, "%s: path %s/msgs is too long", __func__, uri);
 		ret = CCI_EINVAL;
 		goto out;
 	}
@@ -1149,7 +1153,7 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	}
 
 	memset(name, 0, sizeof(name));
-	snprintf(name, sizeof(name), "%s/sock", ep->uri);
+	snprintf(name, sizeof(name), "%s/sock", uri);
 
 	memset(&sun, 0, sizeof(sun));
 	sun.sun_family = AF_UNIX;
