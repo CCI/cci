@@ -356,9 +356,10 @@ struct sm_ep {
 	cci_os_handle_t		fifo;		/* FIFO fd for receiving headers */
 	cci_os_handle_t		msgs;		/* File descriptor for send buffer */
 
-	nfds_t			nfds;		/* Numbder of pollfds */
-	struct pollfd		*fds;		/* For UNIX sockets */
-	cci__conn_t		**c;		/* Array of conns indexed by fds */
+	void			*conns;		/* Tree of conns sorted by IDs */
+	pthread_rwlock_t	conns_lock;	/* Lock for conns tree */
+	uint64_t		*conn_ids;	/* Bitmask of conn IDs */
+	uint32_t		last_id;	/* Last ID assigned */
 
 	sm_buffer_t		*tx_buf;	/* TX common buffer */
 	sm_tx_t			*txs;		/* All txs */
@@ -368,7 +369,6 @@ struct sm_ep {
 	sm_rx_t			*rxs;		/* All rxs */
 	TAILQ_HEAD(irx, cci__evt) idle_rxs;	/* List of idle rxs */
 
-	TAILQ_HEAD(cns, sm_conn) conns;		/* Connected conns */
 	TAILQ_HEAD(act, sm_conn) active;	/* Active conns */
 	TAILQ_HEAD(psv, sm_conn) passive;	/* Passive conns */
 	TAILQ_HEAD(cls, sm_conn) closing;	/* Closing conns */

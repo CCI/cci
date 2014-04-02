@@ -15,6 +15,7 @@
 #include <sys/stat.h>
 #include <sys/param.h>
 #include <fcntl.h>
+#include <search.h>
 #include <assert.h>
 
 #include "cci.h"
@@ -916,6 +917,16 @@ sm_buffer_release(sm_buffer_t *sb, void *addr, int len)
 	return ret;
 }
 
+static int
+sm_compare_int(const void *pa, const void *pb)
+{
+	if (*(int*)pa < *(int*)pb)
+		return -1;
+	if (*(int*)pa > *(int*)pb)
+		return -1;
+	return 0;
+}
+
 static int ctp_sm_create_endpoint(cci_device_t * device,
 				    int flags,
 				    cci_endpoint_t ** endpointp,
@@ -972,10 +983,14 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 
 	sep = ep->priv;
 
+	ret = pthread_rwlock_init(&sep->conns_lock, NULL);
+	if (ret) {
+		goto out;
+	}
+
 	TAILQ_INIT(&sep->idle_txs);
 	TAILQ_INIT(&sep->idle_rxs);
 
-	TAILQ_INIT(&sep->conns);
 	TAILQ_INIT(&sep->active);
 	TAILQ_INIT(&sep->passive);
 	TAILQ_INIT(&sep->closing);
@@ -1060,6 +1075,13 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 	sep->msgs = ret;
+
+	sep->conn_ids = malloc(SM_EP_MAX_CONNS / sizeof(*sep->conn_ids));
+	if (!sep->conn_ids) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	memset(sep->conn_ids, 0xFF, SM_EP_MAX_CONNS / sizeof(*sep->conn_ids));
 
 	len = ep->tx_buf_cnt * device->max_send_size;
 
@@ -1230,6 +1252,8 @@ static int ctp_sm_destroy_endpoint(cci_endpoint_t * endpoint)
 		}
 		sm_buffer_destroy(sep->tx_buf);
 
+		free(sep->conn_ids);
+
 		/* Munmap send FIFO */
 		if (sep->msgs) {
 			memset(name, 0, sizeof(name));
@@ -1262,6 +1286,63 @@ static int ctp_sm_destroy_endpoint(cci_endpoint_t * endpoint)
 	return ret;
 }
 
+#define ID_SHIFT	(6)
+#define ID_MASK		((1 << ID_SHIFT) - 1)
+
+static int
+sm_get_conn_id(sm_conn_t *sconn)
+{
+	int ret = CCI_EAGAIN;
+	cci__conn_t *conn = sconn->conn;
+	cci_connection_t *connection = &conn->connection;
+	cci__ep_t *ep = container_of(connection->endpoint, cci__ep_t, endpoint);
+	sm_ep_t *sep = ep->priv;
+	uint32_t block = sep->last_id >> ID_SHIFT; /* divide by 64 */
+	uint32_t offset = sep->last_id & ID_MASK;
+	uint32_t last = block;
+
+	pthread_mutex_lock(&ep->lock);
+	do {
+		uint64_t b = sep->conn_ids[block];
+
+		offset = ffsl(b);
+		if (offset) {
+			offset--;
+			sep->conn_ids[block] =
+				sep->conn_ids[block] & ~((uint64_t)1 << offset);
+			sep->last_id = sconn->id = (block << ID_SHIFT) + offset;
+			ret = 0;
+			break;
+		}
+
+		block++;
+		if (block == SM_EP_MAX_CONNS >> ID_SHIFT)
+			block = 0;
+	} while (block != last);
+
+	pthread_mutex_unlock(&ep->lock);
+
+	return ret;
+}
+
+static int
+sm_put_conn_id(sm_conn_t *sconn)
+{
+	int ret = 0;
+	cci__conn_t *conn = sconn->conn;
+	cci_connection_t *connection = &conn->connection;
+	cci__ep_t *ep = container_of(connection->endpoint, cci__ep_t, endpoint);
+	sm_ep_t *sep = ep->priv;
+	uint32_t block = sconn->id >> ID_SHIFT;
+	uint32_t offset = sconn->id & ID_MASK;
+
+	pthread_mutex_lock(&ep->lock);
+	sep->conn_ids[block] = sep->conn_ids[block] | ((uint64_t)1 << offset);
+	pthread_mutex_unlock(&ep->lock);
+
+	return ret;
+}
+
 static int ctp_sm_accept(cci_event_t *event, const void *context)
 {
 	CCI_ENTER;
@@ -1283,24 +1364,87 @@ static int ctp_sm_reject(cci_event_t *event)
 }
 
 static int
-sm_get_conn_id(sm_conn_t *sconn)
+sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 {
 	int ret = 0;
-	cci__conn_t *conn = sconn->conn;
-	cci_connection_t *connection = &conn->connection;
-	cci__ep_t *ep = container_of(connection->endpoint, cci__ep_t, endpoint);
+	cci__conn_t *conn = NULL;
+	sm_ep_t *sep = ep->priv;
+	sm_conn_t *sconn = NULL, *tmp = NULL;
+	char name[MAXPATHLEN];
+	const char *path = NULL;
+	void *node = NULL;
+	int *id = NULL;
 
-	pthread_mutex_lock(&ep->lock);
-	pthread_mutex_unlock(&ep->lock);
+	CCI_ENTER;
 
-	return ret;
-}
+	if (memcmp(uri, "sm://", 5)) {
+		ret = CCI_EINVAL;
+		goto out;
+	}
 
-static int
-sm_put_conn_id(sm_conn_t *sconn)
-{
-	int ret = 0;
+	conn = calloc(1, sizeof(*conn));
+	sconn = calloc(1, sizeof(*sconn));
+	if (!conn || !sconn) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	conn->priv = sconn;
 
+	conn->plugin = ep->plugin;
+
+	conn->uri = strdup(uri);
+	if (!conn->uri) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	conn->tx_timeout = ep->tx_timeout;
+	conn->keepalive_timeout = ep->keepalive_timeout;
+
+	sconn->conn = conn;
+	sconn->id = -1;		/* for now, to aid in cleanup */
+	ret = sm_get_conn_id(sconn);
+	if (ret) goto out;
+
+	TAILQ_INIT(&sconn->queued);
+	TAILQ_INIT(&sconn->pending);
+
+	path = uri + 5; /* sm:// */
+	memset(name, 0, sizeof(name));
+	snprintf(name, sizeof(name), "%s/sock", path);
+	sconn->name = strdup(name);
+	if (!sconn->name) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	/* Add new conn to the conns tree */
+	ret = pthread_rwlock_wrlock(&sep->conns_lock);
+	if (ret) {
+		debug(CCI_DB_WARN, "%s: pthread_rwlock_wrlock() failed with %s",
+				__func__, strerror(ret));
+		goto out;
+	}
+
+	node = tsearch(&sconn->id, &sep->conns, sm_compare_int);
+	if (!node) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	/* No need to check the return here - it can only fail with EINVAL if
+	 * the lock is invalid or EPERM if we do not hold it.
+	 */
+	pthread_rwlock_unlock(&sep->conns_lock);
+
+	id = *((int**)node);
+	tmp = container_of(id, sm_conn_t, id);
+	if (tmp != sconn) {
+		debug(CCI_DB_WARN, "%s: id %d already exists for conn %p (%s)",
+				__func__, *id, (void*)tmp, tmp->name);
+		ret = CCI_ERROR;
+		goto out;
+	}
+
+    out:
 	return ret;
 }
 
@@ -1320,49 +1464,19 @@ static int ctp_sm_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	struct sockaddr_un sun;
 	struct iovec iov[2];
 	struct msghdr msg;
-	char name[MAXPATHLEN], *path = NULL;
 
 	CCI_ENTER;
 
-	conn = calloc(1, sizeof(*conn));
-	sconn = calloc(1, sizeof(*sconn));
-	if (!conn || !sconn) {
-		ret = CCI_ENOMEM;
-		goto out;
-	}
-	conn->priv = sconn;
-	sconn->id = -1;		/* for now, to aid in cleanup */
-
-	conn->plugin = dev->plugin;
+	ret = sm_create_conn(ep, server_uri, &conn);
+	if (ret) goto out;
 
 	conn->connection.max_send_size = dev->device.max_send_size;
 	conn->connection.endpoint = endpoint;
 	conn->connection.attribute = attribute;
 	conn->connection.context = (void*) context;
 
-	conn->uri = strdup(server_uri);
-	if (!conn->uri) {
-		ret = CCI_ENOMEM;
-		goto out;
-	}
-	conn->tx_timeout = ep->tx_timeout;
-	conn->keepalive_timeout = ep->keepalive_timeout;
-
-	sconn->conn = conn;
+	sconn = conn->priv;
 	sconn->state = SM_CONN_ACTIVE;
-	ret = sm_get_conn_id(sconn);
-	if (ret) goto out;
-	TAILQ_INIT(&sconn->queued);
-	TAILQ_INIT(&sconn->pending);
-
-	path = (char *) server_uri + 5; /* sm:// */
-	memset(name, 0, sizeof(name));
-	snprintf(name, sizeof(name), "%s/sock", path);
-	sconn->name = strdup(name);
-	if (!sconn->name) {
-		ret = CCI_ENOMEM;
-		goto out;
-	}
 
 	params = calloc(1, sizeof(*params));
 	if (!params) {
@@ -1406,7 +1520,14 @@ static int ctp_sm_connect(cci_endpoint_t * endpoint, const char *server_uri,
 
 	ret = sendmsg(sep->sock, &msg, 0);
 	if (ret == -1) {
-		ret = errno;
+		switch (errno) {
+		case ENOENT:
+		case ENOTDIR:
+			ret = EHOSTUNREACH;
+			break;
+		default:
+			ret = CCI_ERROR;
+		}
 		goto out;
 	} else if(ret != (int)(iov[0].iov_len + iov[1].iov_len)) {
 		ret = CCI_ENOBUFS;
@@ -1424,6 +1545,28 @@ static int ctp_sm_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		if (sconn) {
 			free(sconn->name);
 			if (sconn->id != -1) {
+				ret = pthread_rwlock_wrlock(&sep->conns_lock);
+				if (ret) {
+					debug(CCI_DB_WARN, "%s: pthread_rwlock_wrlock() "
+						"failed with %s", __func__, strerror(ret));
+				} else {
+					int *id = NULL;
+					void *node = NULL;
+
+					/* We have the lock */
+					node = tfind(&sconn->id, &sep->conns, sm_compare_int);
+					if (node) {
+						sm_conn_t *tmp = NULL;
+
+						id = *((int**)node);
+						tmp = container_of(id, sm_conn_t, id);
+						if (tmp == sconn) {
+							tdelete(id, &sep->conns,
+									sm_compare_int);
+						}
+					}
+					pthread_rwlock_unlock(&sep->conns_lock);
+				}
 				sm_put_conn_id(sconn);
 			}
 			free(sconn);
