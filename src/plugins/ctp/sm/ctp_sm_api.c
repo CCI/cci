@@ -932,7 +932,7 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 				    cci_endpoint_t ** endpointp,
 				    cci_os_handle_t * fd)
 {
-	int ret = CCI_SUCCESS, len = 0, i = 0;
+	int ret = CCI_SUCCESS, len = 0, i = 0, msgs_fd = 0;
 	struct cci_endpoint *endpoint = (struct cci_endpoint *) *endpointp;
 	cci__dev_t *dev = NULL;
 	cci__ep_t *ep = NULL;
@@ -1044,7 +1044,7 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 
-	ret = open(name, O_RDWR);
+	ret = open(name, O_RDWR|O_NONBLOCK);
 	if (ret == -1) {
 		debug(CCI_DB_WARN, "%s: open(%s) failed with %s", __func__,
 				name, strerror(errno));
@@ -1055,10 +1055,32 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 
 	/* Create mmap send buffer */
 
+	/* Store the length of the MMAP buffer in /path/msgs.
+	 * The peer will need this to correctly mmap the buffer. */
+
+	len = ep->tx_buf_cnt * device->max_send_size;
+
 	/* If there is not enough space to append "/msgs", bail */
 	if (strlen(name) >= (sizeof(name) - 6)) {
 		debug(CCI_DB_WARN, "%s: path %s/msgs is too long", __func__, uri);
 		ret = CCI_EINVAL;
+		goto out;
+	}
+	memset(name, 0, sizeof(name));
+	snprintf(name, sizeof(name), "%s/msgs", uri);
+	unlink(name);
+
+	ret = open(name, O_WRONLY|O_CREAT|O_TRUNC, 0666);
+	if (ret == -1) {
+		ret = CCI_ERROR;
+		goto out;
+	}
+	msgs_fd = ret;
+
+	ret = write(msgs_fd, &len, sizeof(len));
+	close(msgs_fd);
+	if (ret == -1) {
+		ret = CCI_ERROR;
 		goto out;
 	}
 
@@ -1082,8 +1104,6 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 	memset(sep->conn_ids, 0xFF, SM_EP_MAX_CONNS / sizeof(*sep->conn_ids));
-
-	len = ep->tx_buf_cnt * device->max_send_size;
 
 	ret = ftruncate(sep->msgs, len);
 	if (ret) {
@@ -1364,9 +1384,51 @@ static int ctp_sm_reject(cci_event_t *event)
 }
 
 static int
+sm_parse_uri(const char *uri, int *pidp, int *idp)
+{
+	int ret = 0, pid = 0, id = 0;
+	char buffer[MAXPATHLEN], *ptr = NULL;
+
+	if (memcmp(uri, "sm://", 5)) {
+		ret = CCI_EINVAL;
+		goto out;
+	}
+
+	memset(buffer, 0, sizeof(buffer));
+	strcpy(buffer, uri);
+
+	ptr = strrchr(buffer, '/');
+	if (!ptr) {
+		ret = CCI_EINVAL;
+		goto out;
+	}
+
+	ptr++;
+	id = strtol(ptr, NULL, 0);
+
+	ptr--;
+	*ptr = '\0';
+
+	ptr = strrchr(buffer, '/');
+	if (!ptr) {
+		ret = CCI_EINVAL;
+		goto out;
+	}
+
+	ptr++;
+	pid = strtol(ptr, NULL, 0);
+
+	*pidp = pid;
+	*idp = id;
+
+    out:
+	return ret;
+}
+
+static int
 sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 {
-	int ret = 0;
+	int ret = 0, peer_pid = 0, peer_id = 0, len = 0, msgs_fd = 0;
 	cci__conn_t *conn = NULL;
 	sm_ep_t *sep = ep->priv;
 	sm_conn_t *sconn = NULL, *tmp = NULL;
@@ -1377,10 +1439,8 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 
 	CCI_ENTER;
 
-	if (memcmp(uri, "sm://", 5)) {
-		ret = CCI_EINVAL;
-		goto out;
-	}
+	ret = sm_parse_uri(uri, &peer_pid, &peer_id);
+	if (ret) goto out;
 
 	conn = calloc(1, sizeof(*conn));
 	sconn = calloc(1, sizeof(*sconn));
@@ -1391,6 +1451,7 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 	conn->priv = sconn;
 
 	conn->plugin = ep->plugin;
+	conn->connection.endpoint = &ep->endpoint;
 
 	conn->uri = strdup(uri);
 	if (!conn->uri) {
@@ -1417,6 +1478,57 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 		goto out;
 	}
 
+	/* Can we open their FIFO? */
+	memset(name, 0, sizeof(name));
+	snprintf(name, sizeof(name), "%s/fifo", path);
+	ret = open(name, O_WRONLY|O_NONBLOCK);
+	if (ret == -1) {
+		debug(CCI_DB_CONN, "%s: unable to open %s's FIFO", __func__, uri);
+		ret = EHOSTUNREACH;
+	}
+	sconn->fifo = ret;
+
+	/* Open their shared memory object */
+	memset(name, 0, sizeof(name));
+	snprintf(name, sizeof(name), "/cci-sm-%d-%d", peer_pid, peer_id);
+
+	ret = shm_open(name, O_RDWR);
+	if (ret == -1) {
+		debug(CCI_DB_WARN, "%s: shm_open(%s) failed with %s", __func__,
+				name, strerror(errno));
+		ret = EHOSTUNREACH;
+		goto out;
+	}
+	sconn->msgs = ret;
+
+	memset(name, 0, sizeof(name));
+	snprintf(name, sizeof(name), "%s/msgs", path);
+	ret = open(name, O_RDONLY);
+	if (ret == -1) {
+		debug(CCI_DB_CONN, "%s: unable to open %s's msgs", __func__, uri);
+		ret = EHOSTUNREACH;
+		goto out;
+	}
+	msgs_fd = ret;
+
+	ret = read(msgs_fd, &len, sizeof(len));
+	close(msgs_fd);
+	if (ret == -1) {
+		debug(CCI_DB_CONN, "%s: unable to read %s's msgs", __func__, uri);
+		ret = EHOSTUNREACH;
+		goto out;
+	}
+
+	/* MMAP their FIFO */
+	sconn->base = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, sconn->msgs, 0);
+	if (sconn->base == MAP_FAILED) {
+		debug(CCI_DB_WARN, "%s: mmap() failed with %s", __func__,
+				strerror(errno));
+		ret = CCI_ERROR;
+		goto out;
+	}
+
+
 	/* Add new conn to the conns tree */
 	ret = pthread_rwlock_wrlock(&sep->conns_lock);
 	if (ret) {
@@ -1425,26 +1537,47 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 		goto out;
 	}
 
-	node = tsearch(&sconn->id, &sep->conns, sm_compare_int);
-	if (!node) {
-		ret = CCI_ENOMEM;
-		goto out;
-	}
-	/* No need to check the return here - it can only fail with EINVAL if
-	 * the lock is invalid or EPERM if we do not hold it.
-	 */
-	pthread_rwlock_unlock(&sep->conns_lock);
-
-	id = *((int**)node);
-	tmp = container_of(id, sm_conn_t, id);
-	if (tmp != sconn) {
+	node = tfind(&sconn->id, &sep->conns, sm_compare_int);
+	if (node) {
+		pthread_rwlock_unlock(&sep->conns_lock);
 		debug(CCI_DB_WARN, "%s: id %d already exists for conn %p (%s)",
 				__func__, *id, (void*)tmp, tmp->name);
 		ret = CCI_ERROR;
 		goto out;
 	}
 
+	node = tsearch(&sconn->id, &sep->conns, sm_compare_int);
+	if (!node) {
+		pthread_rwlock_unlock(&sep->conns_lock);
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	/* No need to check the return here - it can only fail with EINVAL if
+	 * the lock is invalid or EPERM if we do not hold it.
+	 */
+	pthread_rwlock_unlock(&sep->conns_lock);
+
+	*connp = conn;
+
     out:
+	if (ret) {
+		if (sconn) {
+			if (sconn->base)
+				munmap(sconn->base, len);
+			if (sconn->msgs)
+				close(sconn->msgs);
+			if (sconn->fifo)
+				close(sconn->fifo);
+			free(sconn->name);
+			sm_put_conn_id(sconn);
+			free(sconn);
+		}
+		if (conn) {
+			free(conn->uri);
+			free(conn):
+		}
+	}
 	return ret;
 }
 

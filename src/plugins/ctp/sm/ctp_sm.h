@@ -426,7 +426,12 @@ typedef struct sm_conn_params {
 struct sm_conn {
 	cci__conn_t		*conn;		/* Owning conn */
 	sm_conn_state_t		state;		/* State */
+
 	int			id;		/* Peer-assigned ID */
+	cci_os_handle_t		fifo;		/* FIFO fd for sending headers */
+	cci_os_handle_t		msgs;		/* File descriptor for peer's MMAP buffer */
+	void			*base;		/* Base addr of the peer's MMAP buffer */
+
 	TAILQ_ENTRY(sm_conn)	entry;		/* Entry in sep->conns|active|passive */
 	TAILQ_HEAD(qd, sm_tx)	queued;		/* Queued sends */
 	TAILQ_HEAD(pd, sm_tx)	pending;	/* Pending (in-flight) sends */
