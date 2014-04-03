@@ -1574,8 +1574,8 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 			free(sconn);
 		}
 		if (conn) {
-			free(conn->uri);
-			free(conn):
+			free((char*)conn->uri);
+			free(conn);
 		}
 	}
 	return ret;
