@@ -360,6 +360,7 @@ struct sm_ep {
 	pthread_rwlock_t	conns_lock;	/* Lock for conns tree */
 	uint64_t		*conn_ids;	/* Bitmask of conn IDs */
 	uint32_t		last_id;	/* Last ID assigned */
+	int			pipe[2];	/* Pipe to notify app */
 
 	sm_buffer_t		*tx_buf;	/* TX common buffer */
 	sm_tx_t			*txs;		/* All txs */
@@ -372,6 +373,8 @@ struct sm_ep {
 	TAILQ_HEAD(act, sm_conn) active;	/* Active conns */
 	TAILQ_HEAD(psv, sm_conn) passive;	/* Passive conns */
 	TAILQ_HEAD(cls, sm_conn) closing;	/* Closing conns */
+
+	cci_os_handle_t		fd;		/* File descriptor passed to user */
 };
 
 struct sm_buffer {

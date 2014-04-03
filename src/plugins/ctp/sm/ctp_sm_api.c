@@ -1759,12 +1759,58 @@ static int ctp_sm_arm_os_handle(cci_endpoint_t * endpoint, int flags)
 static int ctp_sm_get_event(cci_endpoint_t * endpoint,
 			      cci_event_t ** event)
 {
+	int ret = CCI_EAGAIN;
+	cci__ep_t *ep = NULL;
+	cci__evt_t *e = NULL;
+	cci__evt_t *ev = NULL;
+
 	CCI_ENTER;
 
-	debug(CCI_DB_INFO, "%s", "In sm_get_event\n");
+	ep = container_of(endpoint, cci__ep_t, endpoint);
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_FOREACH(e, &ep->evts, entry) {
+		if (e->event.type == CCI_EVENT_SEND) {
+			/* NOTE: if it is blocking, skip it since sendv()
+			 *       is waiting on it
+			 */
+			sm_tx_t *tx = container_of(e, sm_tx_t, evt);
+			if (tx->flags & CCI_FLAG_BLOCKING) {
+				continue;
+			} else {
+				ev = e;
+				break;
+			}
+		} else {
+			ev = e;
+			break;
+		}
+	}
+
+	if (ev) {
+#if 1
+		TAILQ_REMOVE(&ep->evts, ev, entry);
+#else
+		char one = 0;
+		sm_ep_t *sep = ep->priv;
+
+		TAILQ_REMOVE(&ep->evts, ev, entry);
+		if (sep->fd && TAILQ_EMPTY(&ep->evts)) {
+			debug(CCI_DB_EP, "%s: reading from pipe", __func__);
+			read(sep->pipe[0], &one, 1);
+			assert(one == 1);
+		}
+#endif
+	} else {
+		ret = CCI_EAGAIN;
+	}
+
+	pthread_mutex_unlock(&ep->lock);
+
+	*event = &ev->event;
 
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 static int ctp_sm_return_event(cci_event_t * event)
