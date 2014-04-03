@@ -933,6 +933,7 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 				    cci_os_handle_t * fd)
 {
 	int ret = CCI_SUCCESS, len = 0, i = 0, msgs_fd = 0;
+	uint32_t id = 0;
 	struct cci_endpoint *endpoint = (struct cci_endpoint *) *endpointp;
 	cci__dev_t *dev = NULL;
 	cci__ep_t *ep = NULL;
@@ -995,8 +996,10 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	TAILQ_INIT(&sep->passive);
 	TAILQ_INIT(&sep->closing);
 
-	ret = sm_get_ep_id(dev, &sep->id);
+	ret = sm_get_ep_id(dev, &id);
 	if (ret) goto out;
+
+	sep->id = id;
 
 	/* If the path length plus enough room for a uint32_t and NULL
 	 * exceeds the sizeof name (sun.sun_path) length, bail */
@@ -1209,6 +1212,16 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 	sep->sock = ret;
+
+	ret = fcntl(sep->sock, F_GETFL, 0);
+	if (-1 == flags)
+		flags = 0;
+	ret = fcntl(sep->sock, F_SETFL, flags | O_NONBLOCK);
+	if (ret == -1) {
+		ret = CCI_ERROR;
+		goto out;
+	}
+
 
 	ret = bind(sep->sock, (const struct sockaddr *)&sun, sizeof(sun));
 	if (ret) {
@@ -1452,6 +1465,7 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 
 	conn->plugin = ep->plugin;
 	conn->connection.endpoint = &ep->endpoint;
+	conn->connection.max_send_size = ep->endpoint.device->max_send_size;
 
 	conn->uri = strdup(uri);
 	if (!conn->uri) {
@@ -1581,6 +1595,50 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 	return ret;
 }
 
+static void
+sm_free_conn(cci__conn_t *conn)
+{
+	int ret = 0;
+	cci_connection_t *connection = &conn->connection;
+	cci__ep_t *ep = container_of(connection->endpoint, cci__ep_t, endpoint);
+	sm_ep_t *sep = ep->priv;
+	sm_conn_t *sconn = conn->priv;
+
+	if (sconn) {
+		free(sconn->name);
+		if (sconn->id != -1) {
+			ret = pthread_rwlock_wrlock(&sep->conns_lock);
+			if (ret) {
+				debug(CCI_DB_WARN, "%s: pthread_rwlock_wrlock() "
+					"failed with %s", __func__, strerror(ret));
+			} else {
+				int *id = NULL;
+				void *node = NULL;
+
+				/* We have the lock */
+				node = tfind(&sconn->id, &sep->conns, sm_compare_int);
+				if (node) {
+					sm_conn_t *tmp = NULL;
+
+					id = *((int**)node);
+					tmp = container_of(id, sm_conn_t, id);
+					if (tmp == sconn) {
+						tdelete(id, &sep->conns,
+								sm_compare_int);
+					}
+				}
+				pthread_rwlock_unlock(&sep->conns_lock);
+			}
+			sm_put_conn_id(sconn);
+		}
+		free(sconn);
+	}
+	free((void*)conn->uri);
+	free(conn);
+
+	return;
+}
+
 static int ctp_sm_connect(cci_endpoint_t * endpoint, const char *server_uri,
 			    const void *data_ptr, uint32_t data_len,
 			    cci_conn_attribute_t attribute,
@@ -1588,7 +1646,6 @@ static int ctp_sm_connect(cci_endpoint_t * endpoint, const char *server_uri,
 {
 	int ret = 0;
 	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
-	cci__dev_t *dev = ep->dev;
 	cci__conn_t *conn = NULL;
 	sm_ep_t *sep = ep->priv;
 	sm_conn_t *sconn = NULL;
@@ -1603,8 +1660,6 @@ static int ctp_sm_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	ret = sm_create_conn(ep, server_uri, &conn);
 	if (ret) goto out;
 
-	conn->connection.max_send_size = dev->device.max_send_size;
-	conn->connection.endpoint = endpoint;
 	conn->connection.attribute = attribute;
 	conn->connection.context = (void*) context;
 
@@ -1675,39 +1730,7 @@ static int ctp_sm_connect(cci_endpoint_t * endpoint, const char *server_uri,
 			free(params->data_ptr);
 			free(params);
 		}
-		if (sconn) {
-			free(sconn->name);
-			if (sconn->id != -1) {
-				ret = pthread_rwlock_wrlock(&sep->conns_lock);
-				if (ret) {
-					debug(CCI_DB_WARN, "%s: pthread_rwlock_wrlock() "
-						"failed with %s", __func__, strerror(ret));
-				} else {
-					int *id = NULL;
-					void *node = NULL;
-
-					/* We have the lock */
-					node = tfind(&sconn->id, &sep->conns, sm_compare_int);
-					if (node) {
-						sm_conn_t *tmp = NULL;
-
-						id = *((int**)node);
-						tmp = container_of(id, sm_conn_t, id);
-						if (tmp == sconn) {
-							tdelete(id, &sep->conns,
-									sm_compare_int);
-						}
-					}
-					pthread_rwlock_unlock(&sep->conns_lock);
-				}
-				sm_put_conn_id(sconn);
-			}
-			free(sconn);
-		}
-		if (conn) {
-			free((void*)conn->uri);
-			free(conn);
-		}
+		sm_free_conn(conn);
 	}
 
 	CCI_EXIT;
@@ -1756,10 +1779,170 @@ static int ctp_sm_arm_os_handle(cci_endpoint_t * endpoint, int flags)
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
+static int
+sm_handle_connect(cci__ep_t *ep, const char *path, void *buffer, int len)
+{
+	int ret = 0;
+	cci__conn_t *conn = NULL;
+	sm_conn_t *sconn = NULL;
+	sm_conn_hdr_t *hdr = buffer;
+	sm_rx_t *rx = NULL;
+	char uri[MAXPATHLEN], *suffix = NULL;
+	void *p = (void*)((uintptr_t)buffer + sizeof(*hdr));
+
+	memset(uri, 0, sizeof(uri));
+	snprintf(uri, sizeof(uri), "sm://%s", path);
+	suffix = strstr(uri, "/sock");
+	*suffix = '\0';
+
+	if (hdr->connect.len != len) {
+		debug(CCI_DB_CONN, "%s: recv'd %d bytes from %s, but header "
+			"declares %d bytes - dropping message", __func__, len,
+			uri, hdr->connect.len);
+		goto out;
+	}
+
+	rx = calloc(1, sizeof(*rx));
+	if (!rx) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	rx->evt.event.request.type = CCI_EVENT_CONNECT_REQUEST;
+	rx->evt.ep = ep;
+
+	if (len) {
+		rx->evt.event.request.data_len = len;
+		rx->evt.event.request.data_ptr = calloc(1, len);
+		if (!rx->evt.event.request.data_ptr) {
+			ret = CCI_ENOMEM;
+			goto out;
+		}
+		memcpy(*((void**)&rx->evt.event.request.data_ptr), p, len);
+	}
+
+	ret = sm_create_conn(ep, uri, &conn);
+	if (ret) goto out;
+
+	rx->evt.conn = conn;
+	conn->connection.attribute = hdr->connect.attribute;
+
+	sconn = conn->priv;
+	sconn->state = SM_CONN_PASSIVE;
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
+	pthread_mutex_unlock(&ep->lock);
+
+    out:
+	if (ret) {
+		debug(CCI_DB_CONN, "%s: unable to service connect request from "
+			"%s (%s) - dropping message", __func__, uri,
+			cci_strerror(&ep->endpoint, ret));
+		if (conn) {
+			sm_free_conn(conn);
+		}
+		if (rx) {
+			free((void*)rx->evt.event.request.data_ptr);
+			free(rx);
+		}
+	}
+	return ret;
+}
+
+static int
+sm_handle_connect_reply(cci__ep_t *ep, void *buffer)
+{
+	int ret = 0;
+
+	return ret;
+}
+
+static int
+sm_handle_connect_ack(cci__ep_t *ep, void *buffer)
+{
+	int ret = 0;
+
+	return ret;
+}
+
+static int
+sm_progress_sock(cci__ep_t *ep)
+{
+	int ret = 0, len = 0;
+	sm_ep_t *sep = ep->priv;
+	sm_conn_hdr_t *hdr = NULL;
+	struct sockaddr_un sun;
+	socklen_t slen = sizeof(sun);
+	char buffer[1024 + sizeof(*hdr)];
+
+	pthread_mutex_lock(&ep->lock);
+	if (sep->sock_busy) {
+		pthread_mutex_unlock(&ep->lock);
+		return CCI_EAGAIN;
+	}
+	sep->sock_busy = 1;
+	pthread_mutex_unlock(&ep->lock);
+
+	memset(&sun, 0, slen);
+
+	ret = recvfrom(sep->sock, buffer, sizeof(buffer), 0, (struct sockaddr*)&sun, &slen);
+	if (ret == -1) {
+		ret = errno;
+		debug(CCI_DB_CONN, "%s: recvfrom() failed with %s", __func__, strerror(ret));
+		goto out;
+	}
+
+	hdr = (void*)buffer;
+	len = ret - sizeof(*hdr);
+
+	debug(CCI_DB_CONN, "%s: recv'd %d bytes from sm://%s", __func__, len, sun.sun_path);
+
+	switch (hdr->generic.type) {
+	case SM_CMSG_CONNECT:
+		ret = sm_handle_connect(ep, sun.sun_path, buffer, len);
+		break;
+	case SM_CMSG_CONN_REPLY:
+		ret = sm_handle_connect_reply(ep, buffer);
+		break;
+	case SM_CMSG_CONN_ACK:
+		ret = sm_handle_connect_ack(ep, buffer);
+		break;
+	default:
+		debug(CCI_DB_CONN, "%s: recv'd unknown connection message type %d "
+			"from sm://%s - dropping message", __func__,
+			hdr->generic.type, sun.sun_path);
+		goto out;
+	}
+
+    out:
+	pthread_mutex_lock(&ep->lock);
+	sep->sock_busy = 0;
+	pthread_mutex_unlock(&ep->lock);
+
+	return ret;
+}
+
+static int
+sm_progress_fifo(cci__ep_t *ep)
+{
+	int ret = 0;
+
+	return ret;
+}
+
+static int
+sm_progress_ep(cci__ep_t *ep)
+{
+	sm_progress_sock(ep);
+	sm_progress_fifo(ep);
+
+	return 0;
+}
+
 static int ctp_sm_get_event(cci_endpoint_t * endpoint,
 			      cci_event_t ** event)
 {
-	int ret = CCI_EAGAIN;
+	int ret = 0;
 	cci__ep_t *ep = NULL;
 	cci__evt_t *e = NULL;
 	cci__evt_t *ev = NULL;
@@ -1767,6 +1950,7 @@ static int ctp_sm_get_event(cci_endpoint_t * endpoint,
 	CCI_ENTER;
 
 	ep = container_of(endpoint, cci__ep_t, endpoint);
+	sm_progress_ep(ep);
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_FOREACH(e, &ep->evts, entry) {

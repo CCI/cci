@@ -41,6 +41,8 @@ BEGIN_C_DECLS
 #define SM_RMA_FRAG_MAX		(64*1024)	/* optimal for knem and CMA */
 
 #define SM_EP_MAX_CONNS		(1024)		/* Number of cores? */
+#define SM_EP_MAX_ID		((1 << 14) - 1)	/* Largest supported endpoint ID -
+						   base + index */
 
 #define SM_DEFAULT_PATH		"/tmp/cci/sm"
 
@@ -111,10 +113,11 @@ typedef union sm_conn_hdr {
 		uint32_t type		:  2;	/* SM_CMSG_CONNECT */
 		uint32_t version	:  8;	/* version */
 		uint32_t len		: 12;	/* payload length */
+		uint32_t attribute	:  2;	/* CCI_CONN_ATTR_* */
 		uint32_t pad1		: 10;	/* Reserved */
 		/* 32b */
 		uint32_t server_id	: 16;	/* Client-assigned ID for server */
-		uint32_t pad		: 16;	/* Reserved */
+		uint32_t pad2		: 16;	/* Reserved */
 		/* 64b */
 	} connect;
 
@@ -350,9 +353,11 @@ struct sm_rma {
 
 struct sm_ep {
 	cci_os_handle_t		sock;		/* For listen socket */
-	uint32_t		is_polling;	/* Serialize accept to sockets
-						   and polling strctures */
-	uint32_t		id;		/* Endpoint id */
+	uint32_t		sock_busy :  1;	/* Serialize access to sock */
+	uint32_t		fifo_busy :  1;	/* Serialize access to fifo */
+	uint32_t		id        : 14;	/* Large enough to handle SM_EP_MAX_ID */
+	uint32_t		pad       : 16;	/* Reserved */
+
 	cci_os_handle_t		fifo;		/* FIFO fd for receiving headers */
 	cci_os_handle_t		msgs;		/* File descriptor for send buffer */
 
