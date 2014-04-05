@@ -2159,9 +2159,112 @@ sm_progress_sock(cci__ep_t *ep)
 }
 
 static int
-sm_progress_fifo(cci__ep_t *ep)
+sm_handle_send(cci__ep_t *ep, sm_hdr_t hdr)
 {
 	int ret = 0;
+
+	return ret;
+}
+
+static int
+sm_handle_send_ack(cci__ep_t *ep, sm_hdr_t hdr)
+{
+	int ret = 0;
+
+	return ret;
+}
+
+static int
+sm_handle_rma_write(cci__ep_t *ep, sm_hdr_t hdr)
+{
+	int ret = 0;
+
+	return ret;
+}
+
+static int
+sm_handle_rma_read(cci__ep_t *ep, sm_hdr_t hdr)
+{
+	int ret = 0;
+
+	return ret;
+}
+
+static int
+sm_handle_rma_ack(cci__ep_t *ep, sm_hdr_t hdr)
+{
+	int ret = 0;
+
+	return ret;
+}
+
+static int
+sm_progress_fifo(cci__ep_t *ep)
+{
+	int ret = 0, len = 0;
+	sm_ep_t *sep = ep->priv;
+	sm_hdr_t hdr;
+
+	pthread_mutex_lock(&ep->lock);
+	if (sep->fifo_busy) {
+		pthread_mutex_unlock(&ep->lock);
+		return CCI_EAGAIN;
+	}
+	sep->fifo_busy = 1;
+	pthread_mutex_unlock(&ep->lock);
+
+	len = sizeof(hdr);
+	memset(&hdr, 0, len);
+
+	ret = read(sep->fifo, &hdr, len);
+	if (ret == -1) {
+		switch (errno) {
+		case EAGAIN:
+		case EINTR:
+		case ENOBUFS:
+		case ENOMEM:
+			break;
+		default:
+			debug(CCI_DB_WARN, "%s: read(fifo) failed with %s",
+					__func__, strerror(errno));
+			break;
+		}
+		ret = CCI_EAGAIN;
+		goto out;
+	} else if (ret != len) {
+		debug(CCI_DB_WARN, "%s: read(fifo) only returned %d of %d bytes requested",
+				__func__, ret, len);
+		ret = CCI_EAGAIN;
+		goto out;
+	}
+
+	switch (hdr.generic.type) {
+	case SM_MSG_SEND:
+		ret = sm_handle_send(ep, hdr);
+		break;
+	case SM_MSG_SEND_ACK:
+		ret = sm_handle_send_ack(ep, hdr);
+		break;
+	case SM_MSG_RMA_WRITE:
+		ret = sm_handle_rma_write(ep, hdr);
+		break;
+	case SM_MSG_RMA_READ:
+		ret = sm_handle_rma_read(ep, hdr);
+		break;
+	case SM_MSG_RMA_ACK:
+		ret = sm_handle_rma_ack(ep, hdr);
+		break;
+	default:
+		debug(CCI_DB_WARN, "%s: received unknown message type %d",
+				__func__, hdr.generic.type);
+		ret = CCI_ERROR;
+		break;
+	}
+
+    out:
+	pthread_mutex_lock(&ep->lock);
+	sep->fifo_busy = 0;
+	pthread_mutex_unlock(&ep->lock);
 
 	return ret;
 }
