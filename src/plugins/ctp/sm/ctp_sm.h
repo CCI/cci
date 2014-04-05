@@ -124,7 +124,7 @@ typedef union sm_conn_hdr {
 	/* Connect reply */
 	struct sm_conn_hdr_connect_reply {
 		uint32_t type		:  2;	/* SM_CMSG_CONN_REPLY */
-		uint32_t accept		:  8;	/* ACCEPT=0 or errno */
+		uint32_t status		:  8;	/* ACCEPT=0 or errno */
 		uint32_t pad1		: 22;	/* Reserved */
 		/* 32b */
 		uint32_t server_id	: 16;	/* Client-assigned ID for server */
@@ -435,7 +435,8 @@ struct sm_conn {
 	cci__conn_t		*conn;		/* Owning conn */
 	sm_conn_state_t		state;		/* State */
 
-	int			id;		/* Peer-assigned ID */
+	int			id;		/* ID we assigned to peer */
+	int			peer_id;	/* ID peer assigned to us */
 	cci_os_handle_t		fifo;		/* FIFO fd for sending headers */
 	cci_os_handle_t		msgs;		/* File descriptor for peer's MMAP buffer */
 	void			*base;		/* Base addr of the peer's MMAP buffer */

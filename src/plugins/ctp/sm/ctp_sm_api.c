@@ -1378,22 +1378,186 @@ sm_put_conn_id(sm_conn_t *sconn)
 
 static int ctp_sm_accept(cci_event_t *event, const void *context)
 {
+	int ret = 0, len = 0;
+	cci__evt_t *evt = NULL;
+	cci__ep_t *ep = NULL;
+	cci__conn_t *conn = NULL;
+	sm_ep_t *sep = NULL;
+	sm_conn_t *sconn = NULL;
+	sm_conn_hdr_t hdr;
+	struct sockaddr_un sun;
+	socklen_t slen = sizeof(sun);
+
 	CCI_ENTER;
 
-	debug(CCI_DB_INFO, "%s", "In sm_accept\n");
+	evt = container_of(event, cci__evt_t, event);
+	ep = evt->ep;
+	conn = evt->conn;
+	sep = ep->priv;
+	sconn = conn->priv;
 
+	evt = calloc(1, sizeof(*evt));
+	if (!evt) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	evt->event.type = CCI_EVENT_ACCEPT;
+	evt->event.accept.status = CCI_SUCCESS;
+	evt->event.accept.context = (void*)context;
+	evt->event.accept.connection = &conn->connection;
+	evt->ep = ep;
+	evt->conn = conn;
+
+	len = sizeof(hdr);
+
+	memset(&hdr, 0, len);
+	hdr.reply.type = SM_CMSG_CONN_REPLY;
+	hdr.reply.status = CCI_SUCCESS;
+	hdr.reply.server_id = sconn->peer_id;
+	hdr.reply.client_id = sconn->id;
+
+	memset(&sun, 0, slen);
+	sun.sun_family = AF_UNIX;
+	memcpy(sun.sun_path, sconn->name, strlen(sconn->name));
+
+	ret = sendto(sep->sock, &hdr, len, 0, (struct sockaddr*)&sun, slen);
+	if (ret == -1) {
+		switch (errno) {
+		case EAGAIN:
+		case EINTR:
+			ret = CCI_EAGAIN;
+			break;
+		default:
+			debug(CCI_DB_CONN, "%s: sendto(%s) failed with %s",
+				__func__, sconn->name, strerror(errno));
+			ret = CCI_ERROR;
+			break;
+		}
+		goto out;
+	} else if (ret != len) {
+		debug(CCI_DB_CONN, "%s: sendto(%s) returned only %d of expected %d bytes",
+			__func__, sconn->name, ret, len);
+		ret = CCI_ENOBUFS;
+		goto out;
+	}
+	ret = 0;
+
+	sconn->state = SM_CONN_READY;
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+	pthread_mutex_unlock(&ep->lock);
+
+    out:
+	if (ret) {
+		/* TODO cleanup conn or queue for retry depending on error */
+	}
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
+}
+
+static void
+sm_free_conn(cci__conn_t *conn)
+{
+	int ret = 0;
+	cci_connection_t *connection = &conn->connection;
+	cci__ep_t *ep = container_of(connection->endpoint, cci__ep_t, endpoint);
+	sm_ep_t *sep = ep->priv;
+	sm_conn_t *sconn = conn->priv;
+
+	if (sconn) {
+		free(sconn->name);
+		if (sconn->id != -1) {
+			ret = pthread_rwlock_wrlock(&sep->conns_lock);
+			if (ret) {
+				debug(CCI_DB_WARN, "%s: pthread_rwlock_wrlock() "
+					"failed with %s", __func__, strerror(ret));
+			} else {
+				int *id = NULL;
+				void *node = NULL;
+
+				/* We have the lock */
+				node = tfind(&sconn->id, &sep->conns, sm_compare_int);
+				if (node) {
+					sm_conn_t *tmp = NULL;
+
+					id = *((int**)node);
+					tmp = container_of(id, sm_conn_t, id);
+					if (tmp == sconn) {
+						tdelete(id, &sep->conns,
+								sm_compare_int);
+					}
+				}
+				pthread_rwlock_unlock(&sep->conns_lock);
+			}
+			sm_put_conn_id(sconn);
+		}
+		free(sconn);
+	}
+	free((void*)conn->uri);
+	free(conn);
+
+	return;
 }
 
 static int ctp_sm_reject(cci_event_t *event)
 {
+	int ret = 0, len = 0;
+	cci__evt_t *evt = NULL;
+	cci__ep_t *ep = NULL;
+	cci__conn_t *conn = NULL;
+	sm_ep_t *sep = NULL;
+	sm_conn_t *sconn = NULL;
+	sm_conn_hdr_t hdr;
+	struct sockaddr_un sun;
+	socklen_t slen = sizeof(sun);
+
 	CCI_ENTER;
 
-	debug(CCI_DB_INFO, "%s", "In sm_reject\n");
+	evt = container_of(event, cci__evt_t, event);
+	ep = evt->ep;
+	conn = evt->conn;
+	sep = ep->priv;
+	sconn = conn->priv;
+
+	len = sizeof(hdr);
+
+	memset(&hdr, 0, len);
+	hdr.reply.type = SM_CMSG_CONN_REPLY;
+	hdr.reply.status = CCI_ECONNREFUSED;
+	hdr.reply.server_id = sconn->peer_id;
+	hdr.reply.client_id = 0;
+
+	memset(&sun, 0, slen);
+	sun.sun_family = AF_UNIX;
+	memcpy(sun.sun_path, sconn->name, strlen(sconn->name));
+
+	ret = sendto(sep->sock, &hdr, len, 0, (struct sockaddr*)&sun, slen);
+	if (ret == -1) {
+		switch (errno) {
+		case EAGAIN:
+		case EINTR:
+			ret = CCI_EAGAIN;
+			break;
+		default:
+			debug(CCI_DB_CONN, "%s: sendto(%s) failed with %s",
+				__func__, sconn->name, strerror(errno));
+			ret = CCI_ERROR;
+			break;
+		}
+	} else if (ret != len) {
+		debug(CCI_DB_CONN, "%s: sendto(%s) returned only %d of expected %d bytes",
+			__func__, sconn->name, ret, len);
+		ret = CCI_ENOBUFS;
+		goto out;
+	}
+	ret = 0;
+
+    out:
+	sm_free_conn(conn);
 
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 static int
@@ -1595,50 +1759,6 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 	return ret;
 }
 
-static void
-sm_free_conn(cci__conn_t *conn)
-{
-	int ret = 0;
-	cci_connection_t *connection = &conn->connection;
-	cci__ep_t *ep = container_of(connection->endpoint, cci__ep_t, endpoint);
-	sm_ep_t *sep = ep->priv;
-	sm_conn_t *sconn = conn->priv;
-
-	if (sconn) {
-		free(sconn->name);
-		if (sconn->id != -1) {
-			ret = pthread_rwlock_wrlock(&sep->conns_lock);
-			if (ret) {
-				debug(CCI_DB_WARN, "%s: pthread_rwlock_wrlock() "
-					"failed with %s", __func__, strerror(ret));
-			} else {
-				int *id = NULL;
-				void *node = NULL;
-
-				/* We have the lock */
-				node = tfind(&sconn->id, &sep->conns, sm_compare_int);
-				if (node) {
-					sm_conn_t *tmp = NULL;
-
-					id = *((int**)node);
-					tmp = container_of(id, sm_conn_t, id);
-					if (tmp == sconn) {
-						tdelete(id, &sep->conns,
-								sm_compare_int);
-					}
-				}
-				pthread_rwlock_unlock(&sep->conns_lock);
-			}
-			sm_put_conn_id(sconn);
-		}
-		free(sconn);
-	}
-	free((void*)conn->uri);
-	free(conn);
-
-	return;
-}
-
 static int ctp_sm_connect(cci_endpoint_t * endpoint, const char *server_uri,
 			    const void *data_ptr, uint32_t data_len,
 			    cci_conn_attribute_t attribute,
@@ -1828,6 +1948,7 @@ sm_handle_connect(cci__ep_t *ep, const char *path, void *buffer, int len)
 
 	sconn = conn->priv;
 	sconn->state = SM_CONN_PASSIVE;
+	sconn->peer_id = hdr->connect.server_id;
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
@@ -1850,10 +1971,121 @@ sm_handle_connect(cci__ep_t *ep, const char *path, void *buffer, int len)
 }
 
 static int
+sm_find_conn(cci__ep_t *ep, int id, cci__conn_t **connp)
+{
+	int ret = 0, *idp = NULL;
+	sm_ep_t *sep = ep->priv;
+	void *node = NULL;
+
+	CCI_ENTER;
+
+	/* Add new conn to the conns tree */
+	ret = pthread_rwlock_rdlock(&sep->conns_lock);
+	if (ret) {
+		debug(CCI_DB_WARN, "%s: pthread_rwlock_rdlock() failed with %s",
+				__func__, strerror(ret));
+		goto out;
+	}
+
+	node = tfind(&id, &sep->conns, sm_compare_int);
+	if (node) {
+		sm_conn_t *sconn = NULL;
+
+		idp = *((int**)node);
+		sconn = container_of(idp, sm_conn_t, id);
+		*connp = sconn->conn;
+	} else {
+		debug((CCI_DB_CONN|CCI_DB_MSG), "%s: unable to find conn with ID %d",
+			__func__, id);
+		ret = CCI_ERROR;
+	}
+	pthread_rwlock_unlock(&sep->conns_lock);
+
+    out:
+	CCI_EXIT;
+	return ret;
+}
+
+static int
 sm_handle_connect_reply(cci__ep_t *ep, void *buffer)
 {
-	int ret = 0;
+	int ret = 0, id = 0, len = 0;
+	cci__evt_t *evt = NULL;
+	cci__conn_t *conn = NULL;
+	sm_ep_t *sep = ep->priv;
+	sm_conn_t *sconn = NULL;
+	sm_conn_hdr_t *hdr = buffer;
+	sm_conn_params_t *params = NULL;
+	struct sockaddr_un sun;
+	socklen_t slen = sizeof(sun);
 
+	evt = calloc(1, sizeof(*evt));
+	if (!evt) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+	evt->ep = ep;
+
+	id = hdr->reply.server_id;
+
+	ret = sm_find_conn(ep, id, &conn);
+	if (ret) goto out;
+
+	sconn = conn->priv;
+	params = sconn->params;
+
+	free(params->data_ptr);
+	free(params);
+
+	evt->event.type = CCI_EVENT_CONNECT;
+
+	memset(&sun, 0, slen);
+	sun.sun_family = AF_UNIX;
+	memcpy(sun.sun_path, sconn->name, strlen(sconn->name));
+
+	if (hdr->reply.status == CCI_SUCCESS) {
+		sconn->peer_id = hdr->reply.client_id;
+		evt->conn = conn;
+		evt->event.connect.status = CCI_SUCCESS;
+		evt->event.connect.connection = &conn->connection;
+		sconn->state = SM_CONN_READY;
+	} else {
+		evt->event.connect.status = hdr->reply.status;
+		sm_free_conn(conn);
+	}
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+	pthread_mutex_unlock(&ep->lock);
+
+	hdr->ack.type = SM_CMSG_CONN_ACK;
+	hdr->ack.pad = 0;
+
+	len = sizeof(*hdr);
+
+	ret = sendto(sep->sock, hdr, len, 0, (struct sockaddr*)&sun, slen);
+	if (ret == -1 ) {
+		switch (errno) {
+		case EAGAIN:
+		case EINTR:
+			ret = CCI_EAGAIN;
+			break;
+		default:
+			debug(CCI_DB_CONN, "%s: sendto(%s) failed with %s",
+				__func__, sconn->name, strerror(errno));
+			ret = CCI_ERROR;
+			break;
+		}
+	} else if (ret != len) {
+		debug(CCI_DB_CONN, "%s: sendto(%s) returned only %d of expected %d bytes",
+			__func__, sconn->name, ret, len);
+		ret = CCI_ENOBUFS;
+		goto out;
+	}
+
+	ret = 0;
+   out:
+	CCI_EXIT;
 	return ret;
 }
 
@@ -1888,17 +2120,21 @@ sm_progress_sock(cci__ep_t *ep)
 	ret = recvfrom(sep->sock, buffer, sizeof(buffer), 0, (struct sockaddr*)&sun, &slen);
 	if (ret == -1) {
 		ret = errno;
-		debug(CCI_DB_CONN, "%s: recvfrom() failed with %s", __func__, strerror(ret));
+		if (ret != EAGAIN)
+			debug(CCI_DB_CONN, "%s: recvfrom() failed with %s",
+					__func__, strerror(ret));
 		goto out;
 	}
 
 	hdr = (void*)buffer;
-	len = ret - sizeof(*hdr);
+	len = ret;
 
-	debug(CCI_DB_CONN, "%s: recv'd %d bytes from sm://%s", __func__, len, sun.sun_path);
+	debug(CCI_DB_CONN, "%s: recv'd %s with %d bytes from sm://%s", __func__,
+		sm_conn_msg_str(hdr->generic.type), len, sun.sun_path);
 
 	switch (hdr->generic.type) {
 	case SM_CMSG_CONNECT:
+		len -= sizeof(*hdr);
 		ret = sm_handle_connect(ep, sun.sun_path, buffer, len);
 		break;
 	case SM_CMSG_CONN_REPLY:
@@ -1997,14 +2233,69 @@ static int ctp_sm_get_event(cci_endpoint_t * endpoint,
 	return ret;
 }
 
+static int
+sm_return_connect_request(cci_event_t *event)
+{
+	int ret = 0;
+	cci__evt_t *evt = container_of(event, cci__evt_t, event);
+	sm_rx_t *rx = container_of(evt, sm_rx_t, evt);
+
+	free((void*)evt->event.request.data_ptr);
+	free(rx);
+
+	return ret;
+}
+
+static int
+sm_return_connect(cci_event_t *event)
+{
+	int ret = 0;
+	cci__evt_t *evt = container_of(event, cci__evt_t, event);
+
+	free(evt);
+
+	return ret;
+}
+
+static int
+sm_return_accept(cci_event_t *event)
+{
+	int ret = 0;
+	cci__evt_t *evt = container_of(event, cci__evt_t, event);
+
+	free(evt);
+
+	return ret;
+}
+
 static int ctp_sm_return_event(cci_event_t * event)
 {
+	int ret = CCI_SUCCESS;
+
 	CCI_ENTER;
 
-	debug(CCI_DB_INFO, "%s", "In sm_return_event\n");
+	switch (event->type) {
+	case CCI_EVENT_CONNECT_REQUEST:
+		ret = sm_return_connect_request(event);
+		break;
+	case CCI_EVENT_CONNECT:
+		ret = sm_return_connect(event);
+		break;
+	case CCI_EVENT_ACCEPT:
+		ret = sm_return_accept(event);
+		break;
+	case CCI_EVENT_SEND:
+		break;
+	case CCI_EVENT_RECV:
+		break;
+	default:
+		debug(CCI_DB_INFO, "%s: ignoring %s", __func__,
+				cci_event_type_str(event->type));
+		break;
+	}
 
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 static int ctp_sm_send(cci_connection_t * connection,
