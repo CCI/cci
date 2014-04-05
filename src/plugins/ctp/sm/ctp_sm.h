@@ -114,7 +114,7 @@ typedef union sm_conn_hdr {
 		uint32_t version	:  8;	/* version */
 		uint32_t len		: 12;	/* payload length */
 		uint32_t attribute	:  2;	/* CCI_CONN_ATTR_* */
-		uint32_t pad1		: 10;	/* Reserved */
+		uint32_t pad1		:  8;	/* Reserved */
 		/* 32b */
 		uint32_t server_id	: 16;	/* Client-assigned ID for server */
 		uint32_t pad2		: 16;	/* Reserved */
