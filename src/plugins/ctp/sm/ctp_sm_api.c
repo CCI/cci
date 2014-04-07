@@ -767,18 +767,20 @@ sm_buffer_init(sm_buffer_t **sbp, uint64_t total_len, int min_len)
 static int
 sm_buffer_reserve(sm_buffer_t *sb, int len, uint32_t *offset, void **addrp)
 {
-	int ret = EAGAIN, i = sb->last_block, j = 0, k = 0;
+	int ret = CCI_ENOBUFS, i = sb->last_block, j = 0, k = 0;
 	int cnt = 0, block_offset = sb->block_offset;
 
 	if (!sb || !len ||!addrp)
-		return EINVAL;
+		return CCI_EINVAL;
 
 	cnt = (len & sb->mask ? 1 : 0) + (len >> sb->shift);
 
 	/* If length is greater than 64 (bits) cache lines,
 	 * return error */
 	if (len > (sb->min_len * 64))
-		return EMSGSIZE;
+		return CCI_EMSGSIZE;
+
+	pthread_mutex_lock(&sb->lock);
 
 	do {
 		uint64_t tmp = sb->blocks[i], next = 0, top = (uint64_t)1 << 63;
@@ -847,6 +849,8 @@ sm_buffer_reserve(sm_buffer_t *sb, int len, uint32_t *offset, void **addrp)
 				(((uintptr_t)*offset) * sb->min_len));
 	}
 
+	pthread_mutex_unlock(&sb->lock);
+
 	return ret;
 }
 
@@ -857,7 +861,7 @@ sm_buffer_release(sm_buffer_t *sb, void *addr, int len)
 	int offset = 0;
 	uint64_t bits = 0, *b = NULL;
 
-	if (!len)
+	if (!sb || !addr || !len)
 		return EINVAL;
 
 	cnt = (len & sb->mask ? 1 : 0) + (len >> sb->shift);
@@ -875,6 +879,8 @@ sm_buffer_release(sm_buffer_t *sb, void *addr, int len)
 
 	/* determine which block has the starting cache line */
 	i = i >> 6;
+
+	pthread_mutex_lock(&sb->lock);
 
 	b = &sb->blocks[i];
 
@@ -914,6 +920,8 @@ sm_buffer_release(sm_buffer_t *sb, void *addr, int len)
 	}
 
     out:
+	pthread_mutex_unlock(&sb->lock);
+
 	return ret;
 }
 
