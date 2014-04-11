@@ -731,8 +731,8 @@ out:
 				close(tconn->pfd.fd);
 		}
 		free((char*)conn->uri);
+		free(conn->priv);
 	}
-	free(conn->priv);
 	free(conn);
 
 	pthread_mutex_lock(&dev->lock);
