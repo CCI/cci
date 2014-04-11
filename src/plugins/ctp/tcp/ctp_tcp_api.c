@@ -2262,7 +2262,7 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 		}
 		rma_op->msg_ptr = rma_op->tx->buffer;
 		rma_op->msg_len = msg_len;
-		memcpy(rma_op->msg_ptr + sizeof(tcp_header_t), msg_ptr, msg_len);
+		memcpy(rma_op->msg_ptr, msg_ptr, msg_len);
 	} else {
 		rma_op->msg_ptr = NULL;
 	}
@@ -2972,9 +2972,9 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 						1,
 						rma_op->context,
 						rma_op->flags,
-						rma_op);
+						NULL);
 			if (ret) {
-				rma_op->status = ret;
+				tx->evt.event.send.status = ret;
 				pthread_mutex_lock(&ep->lock);
 				TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
 				pthread_mutex_unlock(&ep->lock);
