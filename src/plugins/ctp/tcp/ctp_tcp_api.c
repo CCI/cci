@@ -585,6 +585,13 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 
 	tep = ep->priv;
 
+	TAILQ_INIT(&tep->conns);
+
+	TAILQ_INIT(&tep->idle_txs);
+	TAILQ_INIT(&tep->idle_rxs);
+	TAILQ_INIT(&tep->handles);
+	TAILQ_INIT(&tep->rma_ops);
+
 	sock = socket(PF_INET, SOCK_STREAM, 0);
 	if (sock == -1) {
 		ret = errno;
@@ -624,13 +631,6 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 	sprintf(name, "tcp://");
 	tcp_sin_to_name(tep->sin, name + (uintptr_t) 6, sizeof(name) - 6);
 	ep->uri = strdup(name);
-
-	TAILQ_INIT(&tep->conns);
-
-	TAILQ_INIT(&tep->idle_txs);
-	TAILQ_INIT(&tep->idle_rxs);
-	TAILQ_INIT(&tep->handles);
-	TAILQ_INIT(&tep->rma_ops);
 
 	ret = tcp_new_conn(ep, sin, sock, &conn);
 	if (ret)
@@ -735,11 +735,6 @@ out:
 	}
 	free(conn);
 
-	pthread_mutex_lock(&dev->lock);
-	if (!TAILQ_EMPTY(&dev->eps)) {
-		TAILQ_REMOVE(&dev->eps, ep, entry);
-	}
-	pthread_mutex_unlock(&dev->lock);
 	if (tep) {
 		free(tep->txs);
 		free(tep->tx_buf);
@@ -750,10 +745,10 @@ out:
 		if (sock)
 			tcp_close_socket(sock);
 		free(tep);
+		ep->priv = NULL;
 	}
 	if (ep) {
 		free(ep->uri);
-		free(ep);
 	}
 	*endpointp = NULL;
 	CCI_EXIT;
