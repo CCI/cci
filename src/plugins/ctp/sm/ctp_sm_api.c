@@ -861,7 +861,7 @@ sm_buffer_release(sm_buffer_t *sb, void *addr, int len)
 	int offset = 0;
 	uint64_t bits = 0, *b = NULL;
 
-	if (!sb || !addr || !len)
+	if (!sb || !len || (!addr && offset < 0))
 		return EINVAL;
 
 	cnt = (len & sb->mask ? 1 : 0) + (len >> sb->shift);
@@ -1655,6 +1655,10 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 	ret = sm_get_conn_id(sconn);
 	if (ret) goto out;
 
+	ret = pthread_mutexattr_init(&ma);
+	if (ret)
+		goto out;
+
 #ifdef NDEBUG
 	ret = pthread_mutexattr_settype(&ma, PTHREAD_MUTEX_NORMAL);
 #else
@@ -2264,8 +2268,19 @@ sm_get_rx(cci__ep_t *ep)
 static inline void
 sm_put_rx(sm_rx_t *rx)
 {
+	int ret = 0;
 	cci__ep_t *ep = rx->evt.ep;
 	sm_ep_t *sep = ep->priv;
+
+	if (rx->evt.event.recv.len) {
+		ret = sm_buffer_release(sep->rx_buf, (void *)rx->evt.event.recv.ptr,
+				rx->evt.event.recv.len);
+		if (ret) {
+			debug(CCI_DB_MSG, "%s: rx %p from %s failed to release buffer %p ",
+				__func__, (void*)rx, rx->evt.conn->uri,
+				rx->evt.event.recv.ptr);
+		}
+	}
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_HEAD(&sep->idle_rxs, &rx->evt, entry);
@@ -2301,6 +2316,9 @@ sm_write(cci__ep_t *ep, cci__conn_t *conn, void *buf, int len)
 
 	ret = 0;
     out:
+	debug(CCI_DB_MSG, "%s: writing %d bytes to %s's fifo %s (ret %d)",
+		__func__, len, conn->uri, ret ? "failed" : "succeeded", ret);
+
 	return ret;
 }
 
@@ -2320,21 +2338,24 @@ sm_handle_send(cci__ep_t *ep, sm_hdr_t hdr)
 		goto out;
 	sconn = conn->priv;
 
-	msg_len = hdr.send.len;
-
-	ret = sm_buffer_reserve(sep->rx_buf, msg_len, &unused, &addr);
-	if (ret) {
-		goto out;
-	}
-
 	rx = sm_get_rx(ep);
 	if (!rx) {
 		ret = CCI_ENOBUFS;
 		goto out;
 	}
 
-	peer_addr = (void*)((uintptr_t)sconn->base + (hdr.send.offset * SM_LINE));
-	memcpy(addr, peer_addr, msg_len);
+	msg_len = hdr.send.len;
+
+	if (msg_len) {
+		ret = sm_buffer_reserve(sep->rx_buf, msg_len, &unused, &addr);
+		if (ret) {
+			goto out;
+		}
+
+		peer_addr = (void*)((uintptr_t)sconn->base + (hdr.send.offset * SM_LINE));
+		memcpy(addr, peer_addr, msg_len);
+	}
+
 	rx->evt.event.type = CCI_EVENT_RECV;
 	rx->evt.event.recv.ptr = addr;
 	rx->evt.event.recv.len = msg_len;
@@ -2345,6 +2366,10 @@ sm_handle_send(cci__ep_t *ep, sm_hdr_t hdr)
 	pthread_mutex_unlock(&ep->lock);
 
     out:
+	debug(CCI_DB_MSG, "%s: received SEND from %s (conn id %u) len %u ret %d",
+		__func__, conn ? conn->uri : "unknown conn", hdr.send.id,
+		msg_len, ret);
+
 	if (!ret) {
 		hdr.send.type = SM_MSG_SEND_ACK;
 		hdr.send.id = sconn->peer_id;
@@ -2366,6 +2391,42 @@ static int
 sm_handle_send_ack(cci__ep_t *ep, sm_hdr_t hdr)
 {
 	int ret = 0;
+	sm_ep_t *sep = ep->priv;
+	cci__conn_t *conn = NULL;
+	sm_conn_t *sconn = NULL;
+	sm_tx_t *tx = NULL;
+	uintptr_t addr = (uintptr_t) sep->txs;
+
+	ret = sm_find_conn(ep, hdr.send.id, &conn);
+	if (ret)
+		goto out;
+	sconn = conn->priv;
+
+	tx = (void *)(addr + (hdr.send.seq * SM_LINE));
+
+	assert(tx->hdr.send.offset == hdr.send.offset);
+	assert(tx->hdr.send.seq == hdr.send.seq);
+	assert(tx->hdr.send.len == hdr.send.len);
+
+	tx->evt.event.send.status = CCI_SUCCESS;
+
+	if (tx->hdr.send.len) {
+		ret = sm_buffer_release(sep->tx_buf, tx->evt.priv, tx->hdr.send.len);
+		if (ret) {
+			debug(CCI_DB_MSG, "%s: tx %u to %s failed to release buffer %p "
+				"(offset %u)", __func__, tx->id, conn->uri, tx->evt.priv,
+				tx->hdr.send.offset);
+		}
+	}
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
+	pthread_mutex_unlock(&ep->lock);
+
+    out:
+	debug(CCI_DB_MSG, "%s: received SEND_ACK from %s (conn id %u) tx %d ret %d",
+		__func__, conn ? conn->uri : "unknown conn", hdr.send.id,
+		tx ? tx->id : -1, ret);
 
 	return ret;
 }
@@ -2714,13 +2775,13 @@ sm_progress_queued(cci__ep_t *ep, cci__conn_t *conn)
 
 		TAILQ_REMOVE(&sconn->queued, evt, entry);
 		tx = container_of(evt, sm_tx_t, evt);
+		tx->attempt++;
+		tx->timestamp = now;
 		ret = sm_write(ep, conn, &tx->hdr, len);
 		if (ret) {
 			TAILQ_INSERT_HEAD(&sconn->queued, &tx->evt, entry);
 			break;
 		}
-		tx->attempt++;
-		tx->timestamp = now;
 		TAILQ_INSERT_TAIL(&sconn->pending, &tx->evt, entry);
 		evt = TAILQ_FIRST(&sconn->queued);
 	}
@@ -2748,21 +2809,18 @@ sm_progress_pending(cci__ep_t *ep, cci__conn_t *conn)
 		int ret = 0, len = sizeof(sm_hdr_t);
 		sm_tx_t *tx = NULL;
 
-		TAILQ_REMOVE(&sconn->pending, evt, entry);
 		tx = container_of(evt, sm_tx_t, evt);
 		if (tx->timestamp + (tx->attempt * conn->tx_timeout) < now)
-			goto next;
-
-		ret = sm_write(ep, conn, &tx->hdr, len);
-		if (ret) {
-			TAILQ_INSERT_HEAD(&sconn->pending, evt, entry);
 			break;
-		}
+
 		tx->attempt++;
 		tx->timestamp = now;
 
-    next:
-		evt = TAILQ_FIRST(&sconn->queued);
+		ret = sm_write(ep, conn, &tx->hdr, len);
+		if (ret)
+			break;
+
+		evt = TAILQ_FIRST(&sconn->pending);
 	}
 
 	pthread_mutex_unlock(&sconn->lock);
@@ -2783,7 +2841,7 @@ static int ctp_sm_send(cci_connection_t * connection,
 			 const void *msg_ptr, uint32_t msg_len,
 			 const void *context, int flags)
 {
-	int ret = 0, len = 0;
+	int ret = 0;
 	cci_endpoint_t *endpoint = connection->endpoint;
 	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
 	cci__conn_t *conn = container_of(connection, cci__conn_t, connection);
@@ -2806,11 +2864,6 @@ static int ctp_sm_send(cci_connection_t * connection,
 		goto out;
 	}
 
-	ret = sm_buffer_reserve(sep->tx_buf, msg_len, &offset, &addr);
-	if (ret) {
-		goto out;
-	}
-
 	tx->type = SM_MSG_SEND;
 	tx->evt.event.type = CCI_EVENT_SEND;
 	tx->evt.event.send.status = CCI_SUCCESS; /* for now */
@@ -2821,6 +2874,11 @@ static int ctp_sm_send(cci_connection_t * connection,
 		tx->silent = 1;
 
 	if (msg_len) {
+		ret = sm_buffer_reserve(sep->tx_buf, msg_len, &offset, &addr);
+		if (ret) {
+			goto out;
+		}
+
 		if (((uintptr_t)addr + msg_len) <
 			((uintptr_t)sep->tx_buf->addr + sep->tx_buf->len)) {
 			/* the buffer does not wrap, copy the whole message */
@@ -2836,27 +2894,29 @@ static int ctp_sm_send(cci_connection_t * connection,
 			memcpy(sep->tx_buf->addr, tail, wrap);
 
 		}
-		memcpy(addr, msg_ptr, msg_len);
 	}
+	tx->evt.priv = addr; /* cache address to pass to sm_buffer_release() */
 
-	len = sizeof(tx->hdr);
-	memset(&tx->hdr, 0, len);
 	tx->hdr.send.type = SM_MSG_SEND;
 	tx->hdr.send.id = sconn->peer_id;
 	tx->hdr.send.offset = offset;
-	tx->hdr.send.seq = 0; /* TODO */
+	tx->hdr.send.seq = tx->id;
 	tx->hdr.send.len = msg_len;
 
-	pthread_mutex_lock(&ep->lock);
-	TAILQ_INSERT_TAIL(&sconn->pending, &tx->evt, entry);
-	pthread_mutex_unlock(&ep->lock);
+	pthread_mutex_lock(&sconn->lock);
+	TAILQ_INSERT_TAIL(&sconn->queued, &tx->evt, entry);
+	pthread_mutex_unlock(&sconn->lock);
 
 	sm_progress_conn(ep, conn);
 
     out:
+	debug(CCI_DB_MSG, "%s: tx %d sending %u bytes to %s %s (%d)", __func__,
+		tx ? tx->id : -1, msg_len, conn->uri, ret ? "failed" : "succeeded", ret);
+
 	if (ret) {
 		sm_buffer_release(sep->tx_buf, addr, msg_len);
-		sm_put_tx(tx);
+		if (tx)
+			sm_put_tx(tx);
 	}
 	CCI_EXIT;
 	return ret;
