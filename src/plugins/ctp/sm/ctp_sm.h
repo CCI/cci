@@ -147,6 +147,7 @@ typedef enum sm_msg_type {
 	SM_MSG_INVALID	= 0,
 	SM_MSG_SEND,
 	SM_MSG_SEND_ACK,
+	SM_MSG_SEND_NACK,		/* RNR */
 	SM_MSG_KEEPALIVE,
 	SM_MSG_KEEPALIVE_ACK,
 	SM_MSG_RMA_WRITE,
@@ -170,7 +171,7 @@ typedef union sm_hdr {
 
 	/* Send (header only, payload in sender's MMAP MSG buffer) */
 	struct sm_hdr_send {
-		uint32_t type		:  4;	/* SM_MSG_SEND[_ACK] */
+		uint32_t type		:  4;	/* SM_MSG_SEND[_ACK|_NACK] */
 		uint32_t id		: 16;	/* Connection ID */
 		uint32_t offset		: 12;	/* MMAP cacheline index */
 		/* 32b */
@@ -259,6 +260,8 @@ sm_msg_str(sm_msg_type_t type)
 		return "SM_MSG_SEND";
 	case SM_MSG_SEND_ACK:
 		return "SM_MSG_SEND_ACK";
+	case SM_MSG_SEND_NACK:
+		return "SM_MSG_SEND_NACK";
 	case SM_MSG_KEEPALIVE:
 		return "SM_MSG_KEEPALIVE";
 	case SM_MSG_KEEPALIVE_ACK:
@@ -319,16 +322,46 @@ sm_tx_state_str(sm_tx_state_t state)
 
 /* Try to align on 8 byte boundaries */
 struct sm_tx {
+	uint32_t		ctx	:  2;	/* SM_TX */
+	uint32_t		type	:  4;	/* SM_MSG_* */
+	uint32_t		offset	: 12;	/* MMAP cacheline index */
+	uint32_t		len	: 12;	/* MSG len */
+	uint32_t		state	:  2;	/* SM_TX_* */
+
+	uint32_t		silent	:  1;	/* CCI_FLAG_SILENT */
+	uint32_t		attempt	:  4;	/* Attempted sends */
+	uint32_t		id	: 16;	/* TX id */
+	uint32_t		pad	: 11;	/* Reserved */
+	/*   8 B */
+
+	cci__evt_t		evt;		/* CCI event - private and public) */
+	/*  80 B */
+
+	sm_hdr_t		hdr;		/* Cached hdr */
+	/*  88 B */
+
+	uint64_t		timestamp;	/* Absolute seconds when last sent */
+	/*  96 B */
+	sm_rma_op_t		*rma_op;	/* Owning RMA if completion msg */
+	/* 104 B */
+	uint32_t		rma_id;		/* RMA fragment ID */
+	/* 112 B after padding */
+
+#if 0
 	sm_ctx_t		ctx;		/* SM_TX */
 	sm_msg_type_t		type;
 	cci__evt_t		evt;		/* CCI event - private and public) */
+	sm_hdr_t		hdr;		/* Cached hdr */
 	sm_tx_state_t		state;
 	uint32_t		id;		/* TX id */
 	int			flags;		/* CCI_FLAG_* */
 	uint32_t		offset;		/* MMAP cacheline index */
 	uint32_t		len;		/* Msg len */
 	uint32_t		rma_id;		/* RMA fragment ID */
+	uint32_t		attempt;	/* Send attempts */
+	uint64_t		timestamp;	/* Absolute seconds when last sent */
 	sm_rma_op_t		*rma_op;	/* Owning RMA if completion msg */
+#endif
 };
 
 struct sm_rx {
@@ -441,9 +474,10 @@ struct sm_conn {
 	cci_os_handle_t		msgs;		/* File descriptor for peer's MMAP buffer */
 	void			*base;		/* Base addr of the peer's MMAP buffer */
 
+	pthread_mutex_t		lock;		/* Protects pending and queued */
 	TAILQ_ENTRY(sm_conn)	entry;		/* Entry in sep->conns|active|passive */
-	TAILQ_HEAD(qd, sm_tx)	queued;		/* Queued sends */
-	TAILQ_HEAD(pd, sm_tx)	pending;	/* Pending (in-flight) sends */
+	TAILQ_HEAD(qd, cci__evt) queued;	/* Queued sends */
+	TAILQ_HEAD(pd, cci__evt) pending;	/* Pending (in-flight) sends */
 	char			*name;		/* sockaddr_un.sun_path */
 	/* The following are only used by the client during setup */
 	sm_conn_params_t	*params;	/* Params */
