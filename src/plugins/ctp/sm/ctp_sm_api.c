@@ -926,12 +926,14 @@ sm_buffer_release(sm_buffer_t *sb, void *addr, int len)
 }
 
 static int
-sm_compare_int(const void *pa, const void *pb)
+sm_compare_conns(const void *pa, const void *pb)
 {
-	if (*(int*)pa < *(int*)pb)
+	const sm_conn_t *a = pa, *b = pb;
+
+	if (a->id < b->id)
 		return -1;
-	if (*(int*)pa > *(int*)pb)
-		return -1;
+	if (a->id > b->id)
+		return 1;
 	return 0;
 }
 
@@ -1483,19 +1485,17 @@ sm_free_conn(cci__conn_t *conn)
 				debug(CCI_DB_WARN, "%s: pthread_rwlock_wrlock() "
 					"failed with %s", __func__, strerror(ret));
 			} else {
-				int *id = NULL;
 				void *node = NULL;
 
 				/* We have the lock */
-				node = tfind(&sconn->id, &sep->conns, sm_compare_int);
+				node = tfind(sconn, &sep->conns, sm_compare_conns);
 				if (node) {
 					sm_conn_t *tmp = NULL;
 
-					id = *((int**)node);
-					tmp = container_of(id, sm_conn_t, id);
+					tmp = *((sm_conn_t **)node);
 					if (tmp == sconn) {
-						tdelete(id, &sep->conns,
-								sm_compare_int);
+						tdelete(sconn, &sep->conns,
+								sm_compare_conns);
 					}
 				}
 				pthread_rwlock_unlock(&sep->conns_lock);
@@ -1746,7 +1746,7 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 		goto out;
 	}
 
-	node = tfind(&sconn->id, &sep->conns, sm_compare_int);
+	node = tfind(sconn, &sep->conns, sm_compare_conns);
 	if (node) {
 		pthread_rwlock_unlock(&sep->conns_lock);
 		debug(CCI_DB_WARN, "%s: id %d already exists for conn %p (%s)",
@@ -1755,7 +1755,7 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 		goto out;
 	}
 
-	node = tsearch(&sconn->id, &sep->conns, sm_compare_int);
+	node = tsearch(sconn, &sep->conns, sm_compare_conns);
 	if (!node) {
 		pthread_rwlock_unlock(&sep->conns_lock);
 		ret = CCI_ENOMEM;
@@ -2005,11 +2005,14 @@ sm_handle_connect(cci__ep_t *ep, const char *path, void *buffer, int len)
 static int
 sm_find_conn(cci__ep_t *ep, int id, cci__conn_t **connp)
 {
-	int ret = 0, *idp = NULL;
+	int ret = 0;
 	sm_ep_t *sep = ep->priv;
+	sm_conn_t key;
 	void *node = NULL;
 
 	CCI_ENTER;
+
+	key.id = id;
 
 	/* Add new conn to the conns tree */
 	ret = pthread_rwlock_rdlock(&sep->conns_lock);
@@ -2019,12 +2022,9 @@ sm_find_conn(cci__ep_t *ep, int id, cci__conn_t **connp)
 		goto out;
 	}
 
-	node = tfind(&id, &sep->conns, sm_compare_int);
+	node = tfind(&key, &sep->conns, sm_compare_conns);
 	if (node) {
-		sm_conn_t *sconn = NULL;
-
-		idp = *((int**)node);
-		sconn = container_of(idp, sm_conn_t, id);
+		sm_conn_t *sconn = *((sm_conn_t**)node);
 		*connp = sconn->conn;
 	} else {
 		debug((CCI_DB_CONN|CCI_DB_MSG), "%s: unable to find conn with ID %d",
@@ -2476,11 +2476,69 @@ sm_progress_fifo(cci__ep_t *ep)
 	return ret;
 }
 
+static void
+sm_progress_conn(cci__ep_t *ep, cci__conn_t *conn);
+
+static void
+sm_progress_conn_tree(const void *nodep, const VISIT which, const int depth)
+{
+	cci_connection_t *connection = NULL;
+	cci__ep_t *ep = NULL;
+	cci__conn_t *conn = NULL;
+	sm_conn_t *sconn = NULL;
+
+	switch (which) {
+		case preorder:
+			sconn = *(sm_conn_t**)nodep;
+			conn = sconn->conn;
+			connection = &conn->connection;
+			ep = container_of(connection->endpoint, cci__ep_t, endpoint);
+			sm_progress_conn(ep, conn);
+			break;
+		case postorder:
+			break;
+		case endorder:
+			break;
+		case leaf:
+			sconn = *(sm_conn_t**)nodep;
+			conn = sconn->conn;
+			connection = &conn->connection;
+			ep = container_of(connection->endpoint, cci__ep_t, endpoint);
+			sm_progress_conn(ep, conn);
+			break;
+	}
+	return;
+}
+
+static void
+sm_progress_conns(cci__ep_t *ep)
+{
+	int ret = 0;
+	sm_ep_t *sep = ep->priv;
+
+	if (!sep->conns)
+		return;
+
+	ret = pthread_rwlock_rdlock(&sep->conns_lock);
+	if (ret) {
+		debug(CCI_DB_WARN, "%s: pthread_rwlock_rdlock() failed with %s",
+				__func__, strerror(ret));
+		goto out;
+	}
+
+	twalk(sep->conns, sm_progress_conn_tree);
+
+	pthread_rwlock_unlock(&sep->conns_lock);
+    out:
+	return;
+}
+
 static int
 sm_progress_ep(cci__ep_t *ep)
 {
 	sm_progress_sock(ep);
 	sm_progress_fifo(ep);
+	sm_progress_conns(ep);
 
 	return 0;
 }
