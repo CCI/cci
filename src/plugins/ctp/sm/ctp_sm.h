@@ -324,8 +324,8 @@ sm_tx_state_str(sm_tx_state_t state)
 struct sm_tx {
 	uint32_t		ctx	:  2;	/* SM_TX */
 	uint32_t		type	:  4;	/* SM_MSG_* */
-	uint32_t		offset	: 12;	/* MMAP cacheline index */
-	uint32_t		len	: 12;	/* MSG len */
+	uint32_t		pad1	: 12;	/* MMAP cacheline index */
+	uint32_t		pad2	: 12;	/* MSG len */
 	uint32_t		state	:  2;	/* SM_TX_* */
 
 	uint32_t		silent	:  1;	/* CCI_FLAG_SILENT */

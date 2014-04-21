@@ -2202,12 +2202,19 @@ sm_get_tx(cci__ep_t *ep)
 	if (evt) {
 		TAILQ_REMOVE(&sep->idle_txs, evt, entry);
 		tx = container_of(evt, sm_tx_t, evt);
-		tx->offset = 0;
-		tx->len = 0;
 		tx->state = SM_TX_INIT;
-
 		tx->silent = 0;
 		tx->attempt = 0;
+		/* tx->offset = 0; */
+		/* tx->len = 0; */
+
+		tx->evt.event.send.status = 0;
+		tx->evt.event.send.connection = NULL;
+		tx->evt.event.send.context = NULL;
+		tx->evt.conn = NULL;
+		tx->evt.priv = NULL;
+
+		memset(&tx->hdr, 0, sizeof(tx->hdr));
 
 		tx->timestamp = 0;
 		tx->rma_op = NULL;
@@ -2243,6 +2250,11 @@ sm_get_rx(cci__ep_t *ep)
 	if (evt) {
 		TAILQ_REMOVE(&sep->idle_rxs, evt, entry);
 		rx = container_of(evt, sm_rx_t, evt);
+		rx->evt.event.recv.ptr = NULL;
+		rx->evt.event.recv.len = 0;
+		rx->evt.event.recv.connection = NULL;
+		rx->evt.conn = NULL;
+		rx->evt.priv = NULL;
 	}
 	pthread_mutex_unlock(&ep->lock);
 
