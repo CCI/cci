@@ -235,7 +235,7 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 {
 	int ret = CCI_SUCCESS;
 	cci__dev_t *dev, *ndev;
-	cci_device_t **devices;
+	cci_device_t **devices = NULL;
 	struct cci_device *device = NULL;
 	sm_dev_t *sdev = NULL;
 	char dname[MAXPATHLEN];
@@ -628,6 +628,9 @@ check_block(uint64_t block, int cnt, int shift, int *offset)
 	int ret = 0, i = 0;
 	uint64_t bits = ((uint64_t)1 << cnt) - 1;
 
+	if (cnt < 1)
+		return EINVAL;
+
 	if (cnt + *offset >= 64)
 		return EAGAIN;
 
@@ -807,6 +810,8 @@ sm_buffer_reserve(sm_buffer_t *sb, int len, uint32_t *offset, void **addrp)
 
 		while (tmp & top) {
 			k++;
+			if (k == cnt - 1)
+				break;
 			tmp = tmp << 1;
 		}
 		if (k == 0)
@@ -1705,7 +1710,7 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 	memset(name, 0, sizeof(name));
 	snprintf(name, sizeof(name), "/cci-sm-%d-%d", peer_pid, peer_id);
 
-	ret = shm_open(name, O_RDWR);
+	ret = shm_open(name, O_RDWR, 0666);
 	if (ret == -1) {
 		debug(CCI_DB_WARN, "%s: shm_open(%s) failed with %s", __func__,
 				name, strerror(errno));
@@ -2914,7 +2919,8 @@ static int ctp_sm_send(cci_connection_t * connection,
 		tx ? tx->id : -1, msg_len, conn->uri, ret ? "failed" : "succeeded", ret);
 
 	if (ret) {
-		sm_buffer_release(sep->tx_buf, addr, msg_len);
+		if (addr)
+			sm_buffer_release(sep->tx_buf, addr, msg_len);
 		if (tx)
 			sm_put_tx(tx);
 	}

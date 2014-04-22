@@ -176,8 +176,8 @@ typedef union sm_hdr {
 		uint32_t offset		: 12;	/* MMAP cacheline index */
 		/* 32b */
 		uint32_t seq		: 14;	/* Sequence or msg ID */
-		uint32_t len		: 12;	/* payload length */
-		uint32_t pad		: 6;	/* Reserved */
+		uint32_t len		: 13;	/* payload length */
+		uint32_t pad		: 5;	/* Reserved */
 		/* 64b */
 	} send;
 
