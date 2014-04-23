@@ -471,7 +471,6 @@ struct sm_conn {
 	int			id;		/* ID we assigned to peer */
 	int			peer_id;	/* ID peer assigned to us */
 	cci_os_handle_t		fifo;		/* FIFO fd for sending headers */
-	cci_os_handle_t		msgs;		/* File descriptor for peer's MMAP buffer */
 	void			*base;		/* Base addr of the peer's MMAP buffer */
 
 	pthread_mutex_t		lock;		/* Protects pending and queued */

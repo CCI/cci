@@ -1073,19 +1073,19 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 
 	/* Create mmap send buffer */
 
-	/* Store the length of the MMAP buffer in /path/msgs.
+	/* Store the length of the MMAP buffer in /path/msgs-len.
 	 * The peer will need this to correctly mmap the buffer. */
 
 	len = ep->tx_buf_cnt * device->max_send_size;
 
-	/* If there is not enough space to append "/msgs", bail */
-	if (strlen(name) >= (sizeof(name) - 6)) {
-		debug(CCI_DB_WARN, "%s: path %s/msgs is too long", __func__, uri);
+	/* If there is not enough space to append "/msgs-len", bail */
+	if (strlen(name) >= (sizeof(name) - 10)) {
+		debug(CCI_DB_WARN, "%s: path %s/msgs-len is too long", __func__, uri);
 		ret = CCI_EINVAL;
 		goto out;
 	}
 	memset(name, 0, sizeof(name));
-	snprintf(name, sizeof(name), "%s/msgs", uri);
+	snprintf(name, sizeof(name), "%s/msgs-len", uri);
 	unlink(name);
 
 	ret = open(name, O_WRONLY|O_CREAT|O_TRUNC, 0666);
@@ -1103,14 +1103,11 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	}
 
 	memset(name, 0, sizeof(name));
-	snprintf(name, sizeof(name), "/cci-sm-%u-%u", getpid(), sep->id);
+	snprintf(name, sizeof(name), "%s/msgs", uri);
+	unlink(name);
 
-	shm_unlink(name);
-
-	ret = shm_open(name, O_CREAT | O_RDWR, 0666);
+	ret = open(name, O_RDWR|O_CREAT, 0666);
 	if (ret == -1) {
-		debug(CCI_DB_WARN, "%s: shm_open(%s) failed with %s", __func__,
-				name, strerror(errno));
 		ret = CCI_ERROR;
 		goto out;
 	}
@@ -1141,8 +1138,8 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 
 	sep->tx_buf->addr = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, sep->msgs, 0);
 	if (sep->tx_buf->addr == MAP_FAILED) {
-		debug(CCI_DB_WARN, "%s: mmap() failed with %s", __func__,
-				strerror(errno));
+		debug(CCI_DB_WARN, "%s: mmap() of %s failed with %s", __func__,
+				name, strerror(errno));
 		ret = CCI_ERROR;
 		goto out;
 	}
@@ -1708,22 +1705,10 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 
 	/* Open their shared memory object */
 	memset(name, 0, sizeof(name));
-	snprintf(name, sizeof(name), "/cci-sm-%d-%d", peer_pid, peer_id);
-
-	ret = shm_open(name, O_RDWR, 0666);
-	if (ret == -1) {
-		debug(CCI_DB_WARN, "%s: shm_open(%s) failed with %s", __func__,
-				name, strerror(errno));
-		ret = EHOSTUNREACH;
-		goto out;
-	}
-	sconn->msgs = ret;
-
-	memset(name, 0, sizeof(name));
-	snprintf(name, sizeof(name), "%s/msgs", path);
+	snprintf(name, sizeof(name), "%s/msgs-len", path);
 	ret = open(name, O_RDONLY);
 	if (ret == -1) {
-		debug(CCI_DB_CONN, "%s: unable to open %s's msgs", __func__, uri);
+		debug(CCI_DB_CONN, "%s: unable to open %s's msgs-len", __func__, uri);
 		ret = EHOSTUNREACH;
 		goto out;
 	}
@@ -1732,20 +1717,30 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 	ret = read(msgs_fd, &len, sizeof(len));
 	close(msgs_fd);
 	if (ret == -1) {
-		debug(CCI_DB_CONN, "%s: unable to read %s's msgs", __func__, uri);
+		debug(CCI_DB_CONN, "%s: unable to read %s's msgs-len", __func__, uri);
 		ret = EHOSTUNREACH;
 		goto out;
 	}
 
-	/* MMAP their FIFO */
-	sconn->base = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, sconn->msgs, 0);
+	memset(name, 0, sizeof(name));
+	snprintf(name, sizeof(name), "%s/msgs", path);
+	ret = open(name, O_RDWR, 0666);
+	if (ret == -1) {
+		debug(CCI_DB_CONN, "%s: unable to open %s's msgs", __func__, uri);
+		ret = EHOSTUNREACH;
+		goto out;
+	}
+	msgs_fd = ret;
+
+	/* MMAP their MSGs buffer */
+	sconn->base = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, msgs_fd, 0);
+	close(msgs_fd);
 	if (sconn->base == MAP_FAILED) {
 		debug(CCI_DB_WARN, "%s: mmap() failed with %s", __func__,
 				strerror(errno));
 		ret = CCI_ERROR;
 		goto out;
 	}
-
 
 	/* Add new conn to the conns tree */
 	ret = pthread_rwlock_wrlock(&sep->conns_lock);
@@ -1783,8 +1778,6 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 		if (sconn) {
 			if (sconn->base)
 				munmap(sconn->base, len);
-			if (sconn->msgs)
-				close(sconn->msgs);
 			if (sconn->fifo)
 				close(sconn->fifo);
 			pthread_mutex_destroy(&sconn->lock);
