@@ -392,7 +392,6 @@ struct sm_ep {
 	uint32_t		pad       : 16;	/* Reserved */
 
 	cci_os_handle_t		fifo;		/* FIFO fd for receiving headers */
-	cci_os_handle_t		msgs;		/* File descriptor for send buffer */
 
 	void			*conns;		/* Tree of conns sorted by IDs */
 	pthread_rwlock_t	conns_lock;	/* Lock for conns tree */

@@ -1111,7 +1111,7 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 		ret = CCI_ERROR;
 		goto out;
 	}
-	sep->msgs = ret;
+	msgs_fd = ret;
 
 	sep->conn_ids = malloc(SM_EP_MAX_CONNS / sizeof(*sep->conn_ids));
 	if (!sep->conn_ids) {
@@ -1120,7 +1120,7 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	}
 	memset(sep->conn_ids, 0xFF, SM_EP_MAX_CONNS / sizeof(*sep->conn_ids));
 
-	ret = ftruncate(sep->msgs, len);
+	ret = ftruncate(msgs_fd, len);
 	if (ret) {
 		debug(CCI_DB_WARN, "%s: ftruncate(%s, %d) failed with %s", __func__,
 				name, len, strerror(errno));
@@ -1136,7 +1136,8 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 
-	sep->tx_buf->addr = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, sep->msgs, 0);
+	sep->tx_buf->addr = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, msgs_fd, 0);
+	close(msgs_fd);
 	if (sep->tx_buf->addr == MAP_FAILED) {
 		debug(CCI_DB_WARN, "%s: mmap() of %s failed with %s", __func__,
 				name, strerror(errno));
@@ -1259,6 +1260,7 @@ static int ctp_sm_destroy_endpoint(cci_endpoint_t * endpoint)
 	cci__dev_t *dev = NULL;
 	cci__ep_t *ep = NULL;
 	sm_ep_t *sep = NULL;
+	char *path = NULL;
 
 	CCI_ENTER;
 
@@ -1271,6 +1273,9 @@ static int ctp_sm_destroy_endpoint(cci_endpoint_t * endpoint)
 	dev = ep->dev;
 	sep = ep->priv;
 
+	if (ep->uri)
+		path = (void*)((uintptr_t)ep->uri + strlen("sm://"));
+
 	if (sep) {
 		int len = 0;
 		char name[MAXPATHLEN];
@@ -1278,7 +1283,7 @@ static int ctp_sm_destroy_endpoint(cci_endpoint_t * endpoint)
 		if (sep->sock) {
 			close(sep->sock);
 			memset(name, 0, sizeof(name));
-			snprintf(name, sizeof(name), "%s/sock", ep->uri);
+			snprintf(name, sizeof(name), "%s/sock", path);
 			unlink(name);
 		}
 
@@ -1301,19 +1306,20 @@ static int ctp_sm_destroy_endpoint(cci_endpoint_t * endpoint)
 
 		free(sep->conn_ids);
 
-		/* Munmap send FIFO */
-		if (sep->msgs) {
-			memset(name, 0, sizeof(name));
-			snprintf(name, sizeof(name), "/cci-sm-%u-%u",
-					getpid(), sep->id);
-			shm_unlink(name);
-		}
+		/* Unlink msgs and msgs-len */
+		memset(name, 0, sizeof(name));
+		snprintf(name, sizeof(name), "%s/msgs", path);
+		unlink(name);
+
+		memset(name, 0, sizeof(name));
+		snprintf(name, sizeof(name), "%s/msgs-len", path);
+		unlink(name);
 
 		/* Close FIFO */
 		if (sep->fifo) {
 			close(sep->fifo);
 			memset(name, 0, sizeof(name));
-			snprintf(name, sizeof(name), "%s/fifo", ep->uri);
+			snprintf(name, sizeof(name), "%s/fifo", path);
 			unlink(name);
 		}
 
@@ -1323,7 +1329,7 @@ static int ctp_sm_destroy_endpoint(cci_endpoint_t * endpoint)
 	}
 
 	if (ep->uri) {
-		rmdir(ep->uri);
+		rmdir(path);
 		free((char *)ep->uri);
 		ep->uri = NULL;
 	}
