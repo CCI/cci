@@ -26,7 +26,7 @@
 #include "cci-api.h"
 
 BEGIN_C_DECLS
-#define TCP_DEFAULT_MSS        (8*1024)	/* assume jumbo frames */
+#define TCP_DEFAULT_MSS        (1024)
 #define TCP_MIN_MSS            (128)
 #define TCP_MAX_MSS            (9000)
 
@@ -37,7 +37,7 @@ BEGIN_C_DECLS
 #define TCP_HDR_LEN            (8)	/* common header size */
 
 #define TCP_RMA_DEPTH          (16)	/* how many in-flight msgs per RMA */
-#define TCP_RMA_FRAG_SIZE      (128*1024)
+#define TCP_RMA_FRAG_SIZE      (1024*1024)
 #define TCP_RMA_FRAG_MAX       (1024*1024)
 
 #define TCP_EP_MAX_CONNS       (1024)

@@ -961,11 +961,10 @@ out:
 		if (sep->sock)
 			sock_close_socket(sep->sock);
 		free(sep);
+		ep->priv = NULL;
 	}
 	if (ep) {
-		if (ep->uri)
-			free (ep->uri);
-		free (ep);
+		free (ep->uri);
 	}
 	*endpointp = NULL;
 	CCI_EXIT;

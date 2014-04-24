@@ -96,8 +96,11 @@ static void check_return(cci_endpoint_t * endpoint, char *func, int ret, int nee
 {
 	if (ret) {
 		fprintf(stderr, "%s() returned %s\n", func, cci_strerror(endpoint, ret));
-		if (need_exit)
+		if (need_exit) {
+			cci_send(connection, "bye", 3, (void *)0xdeadbeef, opts.flags);
+			cci_finalize();
 			exit(EXIT_FAILURE);
+		}
 	}
 	return;
 }
