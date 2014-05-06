@@ -1892,10 +1892,15 @@ ctp_sock_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
 		char a[1];
 		int rc;
 
-		/* Draining event */
-		rc = read (sep->fd[0], a, sizeof (a));
-		if (rc != sizeof (a))
-			ret = CCI_ERROR;
+		/* We bock again only and only if there is no more
+		   pending events */
+		if (event_queue_is_empty (ep)) {
+			/* Draining event */
+			rc = read (sep->fd[0], a, sizeof (a));
+			if (rc != sizeof (a)) {
+				ret = CCI_ERROR;
+			}
+		}
 	}
 
 	CCI_EXIT;
@@ -3266,15 +3271,15 @@ static inline void sock_handle_seq(sock_conn_t * sconn, uint32_t seq)
 
 static void
 sock_handle_active_message(sock_conn_t * sconn,
-			sock_rx_t * rx, uint16_t len, uint32_t id)
+                           sock_rx_t * rx,
+                           uint16_t len,
+                           uint32_t id)
 {
-	cci__evt_t *evt;
-	cci__conn_t *conn = sconn->conn;
-	sock_header_t *hdr;	/* wire header */
-	union cci_event *event;	/* generic CCI event */
-	cci_endpoint_t *endpoint;	/* generic CCI endpoint */
-	cci__ep_t *ep;
-	sock_ep_t *sep;
+	cci__evt_t	*evt;
+	cci__conn_t 	*conn 		= sconn->conn;
+	cci_endpoint_t	*endpoint;	/* generic CCI endpoint */
+	cci__ep_t 	*ep;
+	sock_ep_t 	*sep;
 	
 	CCI_ENTER;
 
@@ -3291,22 +3296,18 @@ sock_handle_active_message(sock_conn_t * sconn,
 		evt->conn = conn;
 
 	/* set wire header so we can find user header */
-
-	hdr = (sock_header_t *) rx->buffer;
+	if (cci_conn_is_reliable(conn)) {
+                sock_header_r_t *hdr_r = (sock_header_r_t *) rx->buffer;
+                evt->event.recv.ptr = (void *)&hdr_r->data;
+        } else {
+		sock_header_t *hdr = (sock_header_t *) rx->buffer;
+		evt->event.recv.ptr = (void *)&hdr->data;
+	}
 
 	/* setup the generic event for the application */
-	event = & evt->event;
-	event->type = CCI_EVENT_RECV;
-	event->recv.len = len;
-	event->recv.ptr = (void *)&hdr->data;
-	event->recv.connection = &conn->connection;
-
-	/* if a reliable connection, handle the ack */
-
-	if (cci_conn_is_reliable(conn)) {
-		sock_header_r_t *hdr_r = (sock_header_r_t *) rx->buffer;
-		event->recv.ptr = (void *)&hdr_r->data;
-	}
+	evt->event.type = CCI_EVENT_RECV;
+	evt->event.recv.len = len;
+	evt->event.recv.connection = &conn->connection;
 
 	/* queue event on endpoint's completed event queue */
 	sock_queue_event (ep, evt);

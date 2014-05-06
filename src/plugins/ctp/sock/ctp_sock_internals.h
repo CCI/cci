@@ -102,43 +102,26 @@ update_rnr_mode (sock_conn_t *sconn, uint32_t seq)
 	return CCI_SOCK_SUCCESS;
 }
 
-/* When using that function, make sure to get the lock on ep->lock first */
-#define SOCK_DB_EVENT 1
 static inline int
-get_event_queue_size (cci__ep_t *ep)
+event_queue_is_empty (cci__ep_t *ep)
 {
-	int size = 0;
-	cci__evt_t *e;
+	int ret;
+	pthread_mutex_lock(&ep->lock);
+	if (TAILQ_EMPTY (&ep->evts))
+		ret = 1;
+	else
+		ret = 0;
+	pthread_mutex_unlock(&ep->lock);
 
-	TAILQ_FOREACH(e, &ep->evts, entry) {
-#if SOCK_DB_EVENT
-		if (size == 0) {
-			debug (CCI_DB_EP, "%s: Event queue not empty", __func__);
-		}
-
-		debug (CCI_DB_EP, "%s: event queue size: %d ", __func__, size+1);
-#endif
-		size++;
-	}
-#if SOCK_DB_EVENT
-	if (size)
-		debug (CCI_DB_EP, "Event queue final size is: %u", size);
-#endif
-
-	return size;
+	return ret;
 }
 
 static inline void
 sock_queue_event (cci__ep_t *ep, cci__evt_t *evt)
 {
 	pthread_mutex_lock(&ep->lock);
-        /* debug (CCI_DB_EP, "%s:%d Adding event", __func__, __LINE__); */
         TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
-        evt->entry.tqe_next = NULL;
-/*
-        get_event_queue_size(ep);
-        debug (CCI_DB_EP, "%s: event successfully added", __func__);
-*/
+/*        evt->entry.tqe_next = NULL; */
         pthread_mutex_unlock(&ep->lock);
 }
 
