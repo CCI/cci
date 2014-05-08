@@ -5665,6 +5665,19 @@ int progress_recv (cci__ep_t *ep)
 			debug(CCI_DB_EP, "%s: epoll_wait() returned %s",
 			      __func__, strerror(errno));
 		}
+
+		/* We need to avoid the case where a message is lost and we do
+		   not handle a message timeout because we block */
+		pthread_mutex_lock(&ep->lock);
+		if (!TAILQ_EMPTY (&sep->queued) || !TAILQ_EMPTY (&sep->pending)) {
+			/* If the send queue is not empty, wake up the send
+			   thread */
+			pthread_mutex_lock(&sep->progress_mutex);
+			pthread_cond_signal(&sep->wait_condition);
+			pthread_mutex_unlock(&sep->progress_mutex);
+		}
+		pthread_mutex_unlock(&ep->lock);
+
 	}
 #else
 	else {
