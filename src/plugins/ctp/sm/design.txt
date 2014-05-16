@@ -1,13 +1,15 @@
 Each endpoint uses the following resources:
 
 * Unix domain socket (UDS)
-* FIFO file
-* MMAP MSG send buffer
+* Conns directory containing:
+  - Per connection subdirectory containing:
+    - mmapped MSG receive buffer
+    - mmapped MSG receive ring
 * MMAP RMA buffer (optional)
 
 The sm transport uses the UDS for connection setup.  During connection setup,
-the peers will exchange information including their FIFO path, MSG send buffer
-and information for RMA support and handling.
+the peers will exchange information including the connection ID, if FD support
+is requested, and information for RMA support and handling.
 
 The endpoint URI will be:
 
@@ -16,9 +18,8 @@ sm://path/pid/id
 where path is a valid, absolute directory path in the file system, the pid is
 the process id of the caller to cci_init(), and id is the id of endpoint. The
 complete URI without the sm:// prefix is a directory which includes the UDS
-socket file and the FIFO file. The MMAP send buffer and the MMAP RAM buffer, if
-used, will be in the shared memory name space with the name "/cci-sm-pid-id"
-where pid and id are the same as in the URI.
+socket file and the conns subdirectory. The MMAP RAM buffer, if used, will use a
+file-backed mmapped buffer.
 
 For example, the URI "sm:///tmp/cci/sm/4567/2" represents a directory at:
 
@@ -28,9 +29,10 @@ which will include these files:
 
 sock
 fifo
+conns/[conn_id]
 
-Using the directory for most of the resources allows for easier cleanup
-internally as well as by users and/or admins.
+Using the directory for the resources allows for easier cleanup internally as
+well as by users and/or admins.
 
 The socket will use the SOCK_DGRAM to allow connection handshake messages to be
 sent without the need to maintain message markers for each connection. While UDS
@@ -41,24 +43,27 @@ the connect_request will only contain version and optional payload length as
 well as the client-assigned server ID. The reply and ack messages include both
 the client-assigned server ID and the server-assigned client ID.
 
-The sm transport uses the FIFO for receiving message headers, message acks, and
-RMA headers. The FIFO has a larger capacity and lower latency than UDS datagram
-sockets. Like a socket (and unlike the MMAP buffer), it has a file handle that
-can be monitored via poll(), etc. All headers sent over the FIFO must be 8-byte
-and the first four bits in the header must be the header type and the next 16
-bits must be the connection ID.  Without using a per-peer FIFO, messages will
-need a peer ID in every message and a look up of the ID on the receiver.  Writes
-to a pipe are atomic as long as the size is less than PIPE_BUFF (i.e. 512
-bytes), so no locking is required.
+The sm transport uses a per-connection, mmapped ring buffer for headers and a
+separate payload buffer. The mmap ring has lower latency than UDS datagram
+sockets or a FIFO. The ring uses compare-and-swap to provide lock-free
+synchromization that can support multiple threads. By default, the sm transport
+polls the connection ring buffers looking for new headers. The endpoint's FIFO
+is used for keepalive messages (to detect closed peers) and to wake a peer that
+has requested wakeup notifications. The 4-byte FIFO headers will include the
+message type and sending peer's peer_id.
 
-A sender stores the payload in his MMAP send buffer and includes the offset in
-the MSG header written to the receiver's FIFO. The sender will allocate the send
-buffer in cacheline size segments. The receiver will copy the data and ack the
-send (offset and length or send ID), thus freeing the sender's buffer.
+All headers sent over the mmap ring must be 4-bytes and the first four bits in
+the header must be the header type. Using a per-peer ring, messages will not
+need a peer ID in every message nor a look up of the ID on the receiver.
 
-We will need to ignore SIGPIPE. When writing headers to the receiver's FIFO, we
-will get EPIPE if the receiver has closed their end of the pipe (or exited or
-crashed).
+A sender reserves one or more cache lines in the MMAP send buffer, memcpy()s the
+payload to those lines, prepares the header including the offset, writes the
+header to the receiver's ring, and generates the SEND event. The receiver will
+dequeue the header and generate a RECV event. When the event is returned, the
+receiver will release the reserved buffer bits.
+
+We will ignore SIGPIPE and rely on EPIPE when writing keepalive or wakeup
+messages to the peer's FIFO to detect when a peer has shutdown.
 
 RMA is handled by one of the these methods (in this order of preference):
 
