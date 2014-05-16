@@ -191,6 +191,7 @@ static void poll_events(void)
 							count++;
 					}
 					if (is_server || count < warmup + iters) {
+    again:
 						ret =
 						    cci_send(connection, buffer,
 							     current_size, NULL,
@@ -204,6 +205,8 @@ static void poll_events(void)
 								"client",
 								cci_strerror
 								(endpoint, ret));
+						if (ret == CCI_ENOBUFS)
+							goto again;
 						check_return(endpoint, "cci_send", ret,
 							     1);
 					}
