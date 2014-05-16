@@ -3346,7 +3346,7 @@ conn_decref_locked(cci__ep_t *ep, cci__conn_t *conn)
 	tconn->refcnt--;
 
 	if (tconn->refcnt == 0) {
-		assert(tconn->status == TCP_CONN_CLOSED);
+		assert(tconn->status < TCP_CONN_INIT);
 		TAILQ_REMOVE(&tep->conns, tconn, entry);
 		pthread_mutex_unlock(&tconn->lock);
 		delete_conn_locked(conn);
