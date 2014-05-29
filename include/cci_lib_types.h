@@ -159,7 +159,7 @@ typedef struct cci__evt {
 	cci__conn_t *conn;
 
 	/*! Entry to hang on ep->evts */
-	 TAILQ_ENTRY(cci__evt) entry;
+	TAILQ_ENTRY(cci__evt) entry;
 
 	/*! Pointer to device specific struct */
 	void *priv;

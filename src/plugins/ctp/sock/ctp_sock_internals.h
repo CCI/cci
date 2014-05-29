@@ -23,6 +23,73 @@ typedef enum cci_sock_status {
 	CCI_SOCK_RESUME_RNR
 } cci_sock_error_t;
 
+/** Try to put a message on the wire.
+ * @return -1   An error occured, the type of error is available via errno.
+ * @return      Any return code different than -1 gives the number of bytes
+ *              that were sent.
+ */
+static int sock_sendmsg(cci_os_handle_t sock, struct iovec iov[2],
+                        int count, const struct sockaddr_in sin)
+{
+        int ret, i;
+        struct msghdr msg;
+        ssize_t sent = 0;
+
+        for (i = 0; i < count; i++)
+                sent += iov[i].iov_len;
+
+        memset(&msg, 0, sizeof(msg));
+        msg.msg_name = (void *)&sin;
+        msg.msg_namelen = sizeof(sin);
+        msg.msg_iov = iov;
+        msg.msg_iovlen = count;
+
+        ret = sendmsg(sock, &msg, 0);
+        if (ret == -1) {
+                debug(CCI_DB_MSG,
+                      "%s: sendmsg() returned %d (%s) count %d iov[0] %p:%hu "
+                      "iov[1] %p:%hu",
+                      __func__, ret, strerror(errno), count,
+                      iov[0].iov_base, (int)iov[0].iov_len,
+                      iov[1].iov_base, (int)iov[1].iov_len);
+        }
+        debug (CCI_DB_EP, "%s: Wrote %d bytes on the socket", __func__, ret);
+
+        return ret;
+}
+
+/**
+ * @return      Return code from sock_sendmsg()
+ */
+static inline int
+sock_sendto(cci_os_handle_t sock, void *buf, int len,
+            void *rma_ptr, uint16_t rma_len,
+            const struct sockaddr_in sin)
+{
+        int ret;
+        int count = 0;
+        struct iovec iov[2];
+
+        memset(&iov, 0, sizeof(iov));
+        if (buf) {
+                iov[0].iov_base = buf;
+                iov[0].iov_len = len;
+                count = 1;
+                if (rma_ptr) {
+                        iov[1].iov_base = rma_ptr;
+                        iov[1].iov_len = rma_len;
+                        count = 2;
+                        len += rma_len;
+                }
+        }
+        ret = sock_sendmsg(sock, iov, count, sin);
+        if (ret != -1)
+                assert(ret == len);
+
+        return ret;
+}
+
+
 /**
  * Allocate and initialize a single RX buffer.
  */
@@ -155,6 +222,55 @@ sock_get_tx (cci__ep_t *ep)
 	INIT_TX (tx);
 
 	return tx;
+}
+
+static inline int
+send_nack (sock_conn_t *sconn, sock_ep_t *sep, uint32_t seq, uint32_t ts)
+{
+	char            buffer[SOCK_MAX_HDR_SIZE];
+	sock_header_r_t *nack_hdr;
+	int             len;
+	int             ret;
+
+	nack_hdr = (sock_header_r_t*)buffer;
+	if (sconn->conn->connection.attribute == CCI_CONN_ATTR_RO) {
+		/* We are receiving a message out of order.
+		   We keep the message to avoid retransmission
+		   and we send a NACK to make sure we get the
+		   message resent. */
+		debug (CCI_DB_INFO,
+		       "%s: recvd seq %u when %u is expected; sending NACK",
+		       __func__, seq, sconn->last_recvd_seq + 1);
+
+		sock_pack_nack (nack_hdr,
+		                SOCK_MSG_NACK,
+		                sconn->peer_id,
+		                sconn->last_recvd_seq + 1,
+		                ts, 1);
+	} else {
+		/* RU connection, we just want the sender to resend a specific
+		   seq */
+		debug (CCI_DB_INFO,
+		       "%s: sending NACK for seq %u",
+		       __func__, seq);
+
+		sock_pack_nack (nack_hdr,
+		                SOCK_MSG_NACK,
+		                sconn->peer_id,
+		                seq,
+		                ts, 1);
+	}
+
+	len = sizeof (*nack_hdr);
+	ret = sock_sendto (sep->sock,
+	                   buffer, len,
+	                   NULL,
+	                   0,
+	                   sconn->sin);
+	if (ret == -1)
+		debug (CCI_DB_MSG, "%s: NACK send failed", __func__);
+
+	return ret;
 }
 
 END_C_DECLS
