@@ -1889,7 +1889,7 @@ ctp_sock_get_event(cci_endpoint_t * endpoint, cci_event_t ** const event)
 		/* We bock again only and only if there is no more
 		   pending events */
 		if (event_queue_is_empty (ep)) {
-			/* Draining event */
+			/* Draining events so the app thread can block */
 			rc = read (sep->fd[0], a, sizeof (a));
 			if (rc != sizeof (a)) {
 				ret = CCI_ERROR;
@@ -1917,8 +1917,10 @@ static int ctp_sock_return_event(cci_event_t * event)
 		return CCI_ENODEV;
 	}
 
-	if (!event)
+	if (!event) {
+		CCI_EXIT;
 		return CCI_SUCCESS;
+	}
 
 	evt = container_of(event, cci__evt_t, event);
 
@@ -2569,10 +2571,10 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 	cci__evt_t 	*evt;
 	union cci_event	*event;	/* generic CCI event */
 
-	debug(CCI_DB_FUNC, "entering %s", func);
+	CCI_ENTER;
 
 	if (!sglobals) {
-		debug(CCI_DB_FUNC, "exiting %s", func);
+		CCI_EXIT;
 		return CCI_ENODEV;
 	}
 
@@ -2589,7 +2591,7 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 	/* get a tx */
 	tx = sock_get_tx (ep);
 	if (!tx) {
-		debug(CCI_DB_FUNC, "exiting %s", func);
+		CCI_EXIT;
 		return CCI_ENOBUFS;
 	}
 
@@ -2653,6 +2655,7 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 			       "Msg too big: %lu/%u\n",
 			       tx->len + data[i].iov_len,
 			       connection->max_send_size);
+			CCI_EXIT;
 			return CCI_EINVAL;
 		}
 		memcpy(ptr, data[i].iov_base, data[i].iov_len);
@@ -2679,8 +2682,10 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 			if (sep->event_fd) {
 				int rc;
 				rc = write (sep->fd[1], "a", 1);
-				if (rc != 1)
+				if (rc != 1) {
+					CCI_EXIT;
 					return CCI_ERROR;
+				}
 			}
 
 			if (!sep->closing) {
@@ -2689,8 +2694,7 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 				pthread_mutex_unlock(&sep->progress_mutex);
 			}
 
-			debug(CCI_DB_FUNC, "exiting %s", func);
-
+			CCI_EXIT;
 			return CCI_SUCCESS;
 		}
 
@@ -2702,6 +2706,7 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 			   things. */
 			debug (CCI_DB_WARN, "%s: Send failed (%s)",
 			       __func__, strerror (errno));
+			CCI_EXIT;
 			return (CCI_ERROR);
 		}
 	}
@@ -2747,7 +2752,7 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 		pthread_mutex_unlock(&ep->lock);
 	}
 
-	debug(CCI_DB_FUNC, "exiting %s", func);
+	CCI_EXIT;
 	return ret;
 }
 
@@ -4543,12 +4548,9 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 	sock_sendto(sep->sock, tx->buffer, tx->len, tx->rma_ptr,
 	            tx->rma_len, sconn->sin);
 
-	/* Emit an event */
-	tx->state = SOCK_TX_COMPLETED;
-	sock_queue_event (ep, &tx->evt);
-
 	/* Since RMA_READ_REPLY are acting like an ACK, we return the buffer
-	   right away */
+	   right away. No need to generate a SEND event, this is only a
+	   fragment of the RMA READ operation */
 	pthread_mutex_lock (&ep->lock);
 	TAILQ_INSERT_TAIL(&sep->idle_txs, tx, dentry);
 	pthread_mutex_unlock (&ep->lock);
@@ -5578,7 +5580,6 @@ int progress_recv (cci__ep_t *ep)
 					}
 				}
 			}
-
 		} else if (ret == -1) {
 			debug(CCI_DB_EP, "%s: epoll_wait() returned %s",
 			      __func__, strerror(errno));

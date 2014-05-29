@@ -187,9 +187,8 @@ static inline void
 sock_queue_event (cci__ep_t *ep, cci__evt_t *evt)
 {
 	pthread_mutex_lock(&ep->lock);
-        TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
-/*        evt->entry.tqe_next = NULL; */
-        pthread_mutex_unlock(&ep->lock);
+	TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+	pthread_mutex_unlock(&ep->lock);
 }
 
 #define INIT_TX(tx) do { \
