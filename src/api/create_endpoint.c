@@ -68,14 +68,19 @@ int cci_create_endpoint(cci_device_t * device,
 	*endpoint = &ep->endpoint;
 
 	ret = dev->plugin->create_endpoint(device, flags, endpoint, fd);
+	if (ret == CCI_SUCCESS) {
+		ep->plugin = dev->plugin;
+		pthread_mutex_unlock(&globals->lock);
 
-	ep->plugin = dev->plugin;
-	pthread_mutex_unlock(&globals->lock);
-
-	pthread_mutex_lock(&dev->lock);
-	/* TODO check dev's state */
-	TAILQ_INSERT_TAIL(&dev->eps, ep, entry);
-	pthread_mutex_unlock(&dev->lock);
+		pthread_mutex_lock(&dev->lock);
+		/* TODO check dev's state */
+		TAILQ_INSERT_TAIL(&dev->eps, ep, entry);
+		pthread_mutex_unlock(&dev->lock);
+	} else {
+		pthread_mutex_unlock(&globals->lock);
+		pthread_mutex_destroy(&ep->lock);
+		free(ep);
+	}
 
 #if ENABLE_E2E_ROUTING == 1
 	if (flags & CCI_EP_ROUTING) {

@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2011-2013 UT-Battelle, LLC.  All rights reserved.
- * Copyright (c) 2011-2013 Oak Ridge National Labs.  All rights reserved.
+ * Copyright (c) 2011-2014 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2011-2014 Oak Ridge National Labs.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -52,6 +52,8 @@ int ignore_os_handle = 0;
 int blocking = 0;
 int nfds = 0;
 fd_set rfds;
+#define RMA_CTX_CNT	(1024)
+int *rma_context = NULL;
 
 typedef struct options {
 	uint64_t reg_len;
@@ -210,6 +212,14 @@ static void poll_events(void)
 			if (event->send.context == (void *)0xdeadbeef) {
 				done = 1;
 				break;
+			} else {
+				int i = 0;
+
+				for (i = 0; i < RMA_CTX_CNT; i++) {
+					int *ctx = (int *)event->send.context;
+
+					assert(ctx[i] == rma_context[i]);
+				}
 			}
 			break;
 		case CCI_EVENT_RECV:
@@ -264,7 +274,7 @@ static void poll_events(void)
 								&remote_rma_handle,
 								remote_offset,
 								current_size,
-								NULL,
+								rma_context,
 								opts.flags);
 						check_return(endpoint, "cci_rma", ret, 1);
 					}
@@ -328,7 +338,7 @@ static void poll_events(void)
 
 static void do_client(void)
 {
-	int ret;
+	int ret = 0, i = 0;
 	uint32_t min = 1;
 
 	/* initiate connect */
@@ -376,6 +386,12 @@ static void do_client(void)
 	else
 		opts.flags = CCI_FLAG_READ;
 
+	rma_context = calloc(RMA_CTX_CNT, sizeof(*rma_context));
+	check_return(endpoint, "calloc rma_context", rma_context ? 0 : ENOMEM, 1);
+
+	for (i = 0; i < RMA_CTX_CNT; i++)
+		rma_context[i] = i;
+
 	/* begin communication with server */
 	for (current_size = min; current_size <= length;) {
 		void *ptr = (void*)((uintptr_t)buffer + local_offset);
@@ -396,7 +412,7 @@ static void do_client(void)
 		ret = cci_rma(test, &msg, msg_len,
 			      local_rma_handle, local_offset,
 			      &remote_rma_handle, remote_offset,
-			      current_size, NULL, opts.flags);
+			      current_size, rma_context, opts.flags);
 		check_return(endpoint, "cci_rma", ret, 1);
 
 		while (count < iters)

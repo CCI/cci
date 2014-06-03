@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
- * Copyright © 2010-2012 UT-Battelle, LLC. All rights reserved.
- * Copyright © 2010-2012 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2010-2014 UT-Battelle, LLC. All rights reserved.
+ * Copyright © 2010-2014 Oak Ridge National Labs.  All rights reserved.
  * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
@@ -26,7 +26,7 @@
 #include "cci-api.h"
 
 BEGIN_C_DECLS
-#define TCP_DEFAULT_MSS        (8*1024)	/* assume jumbo frames */
+#define TCP_DEFAULT_MSS        (1024)
 #define TCP_MIN_MSS            (128)
 #define TCP_MAX_MSS            (9000)
 
@@ -37,7 +37,7 @@ BEGIN_C_DECLS
 #define TCP_HDR_LEN            (8)	/* common header size */
 
 #define TCP_RMA_DEPTH          (16)	/* how many in-flight msgs per RMA */
-#define TCP_RMA_FRAG_SIZE      (128*1024)
+#define TCP_RMA_FRAG_SIZE      (1024*1024)
 #define TCP_RMA_FRAG_MAX       (1024*1024)
 
 #define TCP_EP_MAX_CONNS       (1024)

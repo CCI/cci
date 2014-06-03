@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2011-2013 UT-Battelle, LLC.  All rights reserved.
- * Copyright (c) 2011-2013 Oak Ridge National Labs.  All rights reserved.
+ * Copyright (c) 2011-2014 UT-Battelle, LLC.  All rights reserved.
+ * Copyright (c) 2011-2014 Oak Ridge National Labs.  All rights reserved.
  *
  * See COPYING in top-level directory
  *
@@ -52,6 +52,7 @@ int blocking = 0;
 int nfds = 0;
 fd_set rfds;
 cci_endpoint_flags_t ep_flags = 0;
+int attempts = 0;
 
 typedef struct options {
 	struct cci_rma_handle rma_handle;
@@ -97,8 +98,11 @@ static void check_return(cci_endpoint_t * endpoint, char *func, int ret, int nee
 {
 	if (ret) {
 		fprintf(stderr, "%s() returned %s\n", func, cci_strerror(endpoint, ret));
-		if (need_exit)
+		if (need_exit) {
+			cci_send(connection, "bye", 3, (void *)0xdeadbeef, opts.flags);
+			cci_finalize();
 			exit(EXIT_FAILURE);
+		}
 	}
 	return;
 }
@@ -189,6 +193,7 @@ static void poll_events(void)
 							count++;
 					}
 					if (is_server || count < warmup + iters) {
+    again:
 						ret =
 						    cci_send(connection, buffer,
 							     current_size, NULL,
@@ -202,6 +207,8 @@ static void poll_events(void)
 								"client",
 								cci_strerror
 								(endpoint, ret));
+						if (ret == CCI_ENOBUFS)
+							goto again;
 						check_return(endpoint, "cci_send", ret,
 							     1);
 					}
@@ -210,8 +217,21 @@ static void poll_events(void)
 			}
 		case CCI_EVENT_CONNECT:
 			if (!is_server) {
-				connect_done = 1;
-				connection = event->connect.connection;
+				if (event->connect.status == CCI_SUCCESS) {
+					connect_done = 1;
+					connection = event->connect.connection;
+				} else {
+					fprintf(stderr, "client: connect failed with %s\n",
+							cci_strerror(endpoint,
+								event->connect.status));
+					attempts = attempts == 0 ? 1 : attempts * 2;
+					sleep(attempts);
+
+					ret = cci_connect(endpoint, server_uri,
+							&opts, sizeof(opts), attr,
+							NULL, 0, NULL);
+					check_return(endpoint, "cci_connect", ret, 1);
+				}
 			}
 			break;
 		default:
@@ -581,8 +601,8 @@ int main(int argc, char *argv[])
 	/* create an endpoint */
 	ret = cci_create_endpoint(NULL, ep_flags, &endpoint, os_handle);
 	if (ret) {
-		fprintf(stderr, "cci_create_endpoint() failed with %s\n",
-			cci_strerror(NULL, ret));
+		fprintf(stderr, "cci_create_endpoint() failed with %s (%d)\n",
+			cci_strerror(NULL, ret), ret);
 		exit(EXIT_FAILURE);
 	}
 

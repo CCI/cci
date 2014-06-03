@@ -20,6 +20,10 @@
     --with-gni-ptag=NUM     # set CCI system PTAG
     --with-gni-cookie=NUM   # set CCI system COOKIE
 
+  You should be able to determine your ptag and cookie with:
+
+  $ apstat -P
+
 = Endpoint naming ==============================================================
 
   GNI endpoint URIs are host and port where host is a hostname or IPv4 address:
@@ -63,24 +67,23 @@
 
 = Run-time notes ===============================================================
 
-  1. The ipogif0 device must be configured and up. We use a scoket to exchange
+  1. The ipogif0 device must be configured and up. We use a socket to exchange
   the SMSG information to bring up of the connection.  Once the connection is
   established, all traffic then uses the native uGNI APIs and does not use any
   sockets.
 
-  2. The sock driver can use the ipogif0 devices. You probably don't want to do
-  this for performance reasons.
+  2. The sock and tcp transports can use the ipogif0 devices. You probably don't
+  want to do this for performance reasons.
 
   3. The GNI transport relies on "system dedicated protection domain
   identifiers" being enabled on the system. By default uGNI does not allow
   communication between separate jobs or between jobs and processes running on
   I/O nodes. The GNI transport requires this to be enabled and the ptag and
-  cookie must be set in ctp_gni.h:
+  cookie must be set in ctp_gni.h, via configure, or via the config file. Look
+  for the following in ctp_gni.h:
 
     #define GNI_DEFAULT_PTAG        (208)
     #define GNI_DEFAULT_COOKIE      (0x73e70000)
-
-  are the default values.
 
 = Known limitations ============================================================
 
@@ -94,6 +97,15 @@
 
      We do not catch all connection events so a connection may die and we think it
      is still up.
+
+  3. Multi-threading
+
+     The GNI transport is thread safe, but libugni requires all calls to be made
+     from the same thread. If you want to use multiple threads with CCI on GNI,
+     do not pass NULL for the OS handle in cci_create_endpoint(). You can use or
+     ignore the OS handle, but its presence will force the GNI transport to
+     create a progress thread. The progress thread will call into GNI and allow
+     multiple threads to call into CCI successfully.
 
 = Performance Tuning ===========================================================
 

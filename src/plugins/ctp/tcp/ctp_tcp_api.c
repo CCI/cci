@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
- * Copyright © 2010-2012 UT-Battelle, LLC. All rights reserved.
- * Copyright © 2010-2012 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2010-2014 UT-Battelle, LLC. All rights reserved.
+ * Copyright © 2010-2014 Oak Ridge National Labs.  All rights reserved.
  * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
@@ -493,6 +493,7 @@ static int ctp_tcp_finalize(cci_plugin_ctp_t * plugin)
 
 	free(tglobals->devices);
 	free((void *)tglobals);
+	tglobals = NULL;
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -555,7 +556,7 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 
 	/* TODO support blocking mode
 	 * in the meantime, fail if the fd is requested */
-	if (fd) {
+	if (0 && fd) {
 		debug(CCI_DB_WARN, "%s: The TCP transport does not yet support "
 			"blocking mode via the OS handle.\n", __func__);
 		debug(CCI_DB_WARN, "%s: Either choose another transport or set "
@@ -583,6 +584,13 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 	ep->tx_timeout = 0;
 
 	tep = ep->priv;
+
+	TAILQ_INIT(&tep->conns);
+
+	TAILQ_INIT(&tep->idle_txs);
+	TAILQ_INIT(&tep->idle_rxs);
+	TAILQ_INIT(&tep->handles);
+	TAILQ_INIT(&tep->rma_ops);
 
 	sock = socket(PF_INET, SOCK_STREAM, 0);
 	if (sock == -1) {
@@ -623,13 +631,6 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 	sprintf(name, "tcp://");
 	tcp_sin_to_name(tep->sin, name + (uintptr_t) 6, sizeof(name) - 6);
 	ep->uri = strdup(name);
-
-	TAILQ_INIT(&tep->conns);
-
-	TAILQ_INIT(&tep->idle_txs);
-	TAILQ_INIT(&tep->idle_rxs);
-	TAILQ_INIT(&tep->handles);
-	TAILQ_INIT(&tep->rma_ops);
 
 	ret = tcp_new_conn(ep, sin, sock, &conn);
 	if (ret)
@@ -730,15 +731,10 @@ out:
 				close(tconn->pfd.fd);
 		}
 		free((char*)conn->uri);
+		free(conn->priv);
 	}
-	free(conn->priv);
 	free(conn);
 
-	pthread_mutex_lock(&dev->lock);
-	if (!TAILQ_EMPTY(&dev->eps)) {
-		TAILQ_REMOVE(&dev->eps, ep, entry);
-	}
-	pthread_mutex_unlock(&dev->lock);
 	if (tep) {
 		free(tep->txs);
 		free(tep->tx_buf);
@@ -749,10 +745,10 @@ out:
 		if (sock)
 			tcp_close_socket(sock);
 		free(tep);
+		ep->priv = NULL;
 	}
 	if (ep) {
 		free(ep->uri);
-		free(ep);
 	}
 	*endpointp = NULL;
 	CCI_EXIT;
@@ -902,8 +898,8 @@ tcp_get_tx_locked(tcp_ep_t *tep)
 		tx->rma_id = 0;
 		tx->flags = 0;
 		tx->evt.conn = NULL;
-		debug(CCI_DB_MSG, "%s: getting tx %p buffer %p",
-			__func__, (void*)tx, (void*)tx->buffer);
+		debug(CCI_DB_MSG, "%s: getting tx %p buffer %p id %u",
+			__func__, (void*)tx, (void*)tx->buffer, tx->id);
 	}
 	return tx;
 }
@@ -936,8 +932,8 @@ tcp_put_tx_locked(tcp_ep_t *tep, tcp_tx_t *tx)
 {
 	assert(tx->ctx == TCP_CTX_TX);
 	tx->state = TCP_TX_IDLE;
-	debug(CCI_DB_MSG, "%s: putting tx %p buffer %p",
-		__func__, (void*)tx, (void*)tx->buffer);
+	debug(CCI_DB_MSG, "%s: putting tx %p buffer %p id %u",
+		__func__, (void*)tx, (void*)tx->buffer, tx->id);
 	TAILQ_INSERT_HEAD(&tep->idle_txs, &tx->evt, entry);
 
 	return;
@@ -1295,6 +1291,8 @@ tcp_monitor_fd(cci__ep_t *ep, cci__conn_t *conn, int events)
 		ret = setsockopt(tconn->pfd.fd, SOL_SOCKET, SO_RCVBUF, &bufsize, opt_len);
 		if (ret) debug(CCI_DB_EP, "%s: unable to set SO_RCVBUF (%s)",
 				__func__, strerror(errno));
+
+		ret = 0;
 	}
 
 	pthread_mutex_lock(&ep->lock);
@@ -2264,7 +2262,7 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 		}
 		rma_op->msg_ptr = rma_op->tx->buffer;
 		rma_op->msg_len = msg_len;
-		memcpy(rma_op->msg_ptr + sizeof(tcp_header_t), msg_ptr, msg_len);
+		memcpy(rma_op->msg_ptr, msg_ptr, msg_len);
 	} else {
 		rma_op->msg_ptr = NULL;
 	}
@@ -2294,8 +2292,7 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	if (err) {
 		for (i = 0; i < cnt; i++) {
 			if (txs[i])
-				TAILQ_INSERT_HEAD(&tep->idle_txs,
-						  &txs[i]->evt, entry);
+				tcp_put_tx_locked(tep, txs[i]);
 		}
 		local->refcnt--;
 	}
@@ -2975,9 +2972,9 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 						1,
 						rma_op->context,
 						rma_op->flags,
-						rma_op);
+						NULL);
 			if (ret) {
-				rma_op->status = ret;
+				tx->evt.event.send.status = ret;
 				pthread_mutex_lock(&ep->lock);
 				TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
 				pthread_mutex_unlock(&ep->lock);
@@ -3349,7 +3346,7 @@ conn_decref_locked(cci__ep_t *ep, cci__conn_t *conn)
 	tconn->refcnt--;
 
 	if (tconn->refcnt == 0) {
-		assert(tconn->status == TCP_CONN_CLOSED);
+		assert(tconn->status < TCP_CONN_INIT);
 		TAILQ_REMOVE(&tep->conns, tconn, entry);
 		pthread_mutex_unlock(&tconn->lock);
 		delete_conn_locked(conn);

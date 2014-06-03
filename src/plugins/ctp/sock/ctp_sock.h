@@ -120,6 +120,7 @@ typedef enum sock_msg_type {
 	SOCK_MSG_ACK_ONLY,	/* ack only this seqno */
 	SOCK_MSG_ACK_UP_TO,	/* ack up to and including this seqno */
 	SOCK_MSG_SACK,		/* ack these blocks of sequences */
+	SOCK_MSG_NACK,
 	SOCK_MSG_RMA_WRITE,
 	SOCK_MSG_RMA_WRITE_DONE,
 	SOCK_MSG_RMA_READ_REQUEST,
@@ -470,7 +471,7 @@ static inline void sock_pack_keepalive(sock_header_t * header, uint32_t id)
    |           timestamp           |
    +-------------------------------+
  
-   type: SOCK_MSG_RNR
+   type: SOCK_MSG_RNR or SOCK_MSG_NACK
 
  */
 /* FIXME: do we really need "count" */
@@ -480,6 +481,7 @@ sock_pack_nack(sock_header_r_t * header_r, sock_msg_type_t type,
 {
 	sock_pack_header(&header_r->header, type, (uint8_t) count, 0, peer_id);
 	sock_pack_seq_ts(&header_r->seq_ts, seq, ts);
+	header_r->pb_ack = 0;
 }
 
 static inline void
