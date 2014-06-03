@@ -1824,6 +1824,10 @@ static int ctp_verbs_accept(cci_event_t * event, const void *context)
 
 	vconn->state = VERBS_CONN_ESTABLISHED;
 
+	pthread_mutex_lock(&ep->lock);
+	vconn->tx_pending++;
+	pthread_mutex_unlock(&ep->lock);
+
 	ret = verbs_post_send(conn, (uintptr_t) tx, ptr, len, header);
 	if (ret) {
 		goto out;
@@ -2823,6 +2827,10 @@ static int verbs_conn_est_active(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 	if (cr && cr->len)
 		header |= (cr->len & 0xFFF) << 9;	/* magic number */
 
+	pthread_mutex_lock(&ep->lock);
+	vconn->tx_pending++;
+	pthread_mutex_unlock(&ep->lock);
+
 	ret = verbs_post_send(conn, (uintptr_t) tx, tx->buffer, len, header);
 
 	if (cr) {
@@ -3425,6 +3433,8 @@ static int verbs_handle_rma_completion(cci__ep_t * ep, struct ibv_wc wc)
 
 	pthread_mutex_lock(&rma_op->evt.ep->lock);
 	vconn->tx_pending--;
+	debug(CCI_DB_MSG, "%s: vconn->tx_pending decreased to %u", __func__,
+			vconn->tx_pending);
 	pthread_mutex_unlock(&rma_op->evt.ep->lock);
 
 	rma_op->status = verbs_wc_to_cci_status(wc.status);
@@ -3488,6 +3498,8 @@ static int verbs_handle_send_completion(cci__ep_t * ep, struct ibv_wc wc)
 	if (conn) {
 		vconn = conn->priv;
 		vconn->tx_pending--;
+		debug(CCI_DB_MSG, "%s: vconn->tx_pending decreased to %u", __func__,
+			vconn->tx_pending);
 	}
 	pthread_mutex_unlock(&ep->lock);
 
@@ -3980,20 +3992,6 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 		return CCI_ENODEV;
 	}
 
-	ep = container_of(endpoint, cci__ep_t, endpoint);
-	vep = ep->priv;
-	conn = container_of(connection, cci__conn_t, connection);
-	vconn = conn->priv;
-
-	pthread_mutex_lock(&ep->lock);
-	if (vconn->tx_pending == vconn->max_tx_cnt) {
-		pthread_mutex_unlock(&ep->lock);
-		return CCI_EAGAIN;
-	}
-	vconn->tx_pending++;
-	pthread_mutex_unlock(&ep->lock);
-
-
 	for (i = 0; i < (int)iovcnt; i++)
 		len += (uint32_t) iov[i].iov_len;
 
@@ -4004,8 +4002,25 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 		return CCI_EMSGSIZE;
 	}
 
+	ep = container_of(endpoint, cci__ep_t, endpoint);
+	vep = ep->priv;
+	conn = container_of(connection, cci__conn_t, connection);
+	vconn = conn->priv;
+
 	if (vconn->state == VERBS_CONN_CLOSED)
 		return CCI_ERR_DISCONNECTED;
+
+	pthread_mutex_lock(&ep->lock);
+	if (vconn->tx_pending == vconn->max_tx_cnt) {
+			debug(CCI_DB_MSG, "%s: vconn->tx_pending %u == max_tx_cnt",
+					__func__, vconn->tx_pending);
+		pthread_mutex_unlock(&ep->lock);
+		return CCI_EAGAIN;
+	}
+	vconn->tx_pending++;
+	debug(CCI_DB_MSG, "%s: vconn->tx_pending increased to %u", __func__,
+			vconn->tx_pending);
+	pthread_mutex_unlock(&ep->lock);
 
 	/* verbs_progress_ep(ep); */
 
@@ -4016,8 +4031,8 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 		tx = verbs_get_tx(ep);
 		if (!tx) {
 			debug(CCI_DB_MSG, "%s: no txs", __func__);
-			CCI_EXIT;
-			return CCI_ENOBUFS;
+			ret = CCI_ENOBUFS;
+			goto out;
 		}
 	} else {
 		tx = rma_op->tx;
@@ -4115,7 +4130,13 @@ verbs_send_common(cci_connection_t * connection, const struct iovec *iov,
 
 out:
 	if (ret) {
-		verbs_return_tx(tx);
+		pthread_mutex_lock(&ep->lock);
+		vconn->tx_pending--;
+		debug(CCI_DB_MSG, "%s: vconn->tx_pending decreased to %u", __func__,
+				vconn->tx_pending);
+		pthread_mutex_unlock(&ep->lock);
+		if (tx && !(rma_op && rma_op->tx == tx))
+			verbs_return_tx(tx);
 	}
 	CCI_EXIT;
 	return ret;
@@ -4315,14 +4336,6 @@ ctp_verbs_rma(cci_connection_t * connection,
 	ep = container_of(connection->endpoint, cci__ep_t, endpoint);
 	vep = ep->priv;
 
-	pthread_mutex_lock(&ep->lock);
-	if (vconn->tx_pending == vconn->max_tx_cnt) {
-		pthread_mutex_unlock(&ep->lock);
-		return CCI_EAGAIN;
-	}
-	vconn->tx_pending++;
-	pthread_mutex_unlock(&ep->lock);
-
 	if (!local || local->ep != ep) {
 		if (!local)
 			debug(CCI_DB_MSG, "%s [%s]: local is NULL", __func__, ep->uri);
@@ -4333,10 +4346,22 @@ ctp_verbs_rma(cci_connection_t * connection,
 		return CCI_EINVAL;
 	}
 
+	pthread_mutex_lock(&ep->lock);
+	if (vconn->tx_pending == vconn->max_tx_cnt) {
+		pthread_mutex_unlock(&ep->lock);
+		debug(CCI_DB_MSG, "%s: vconn->tx_pending %u == max_tx_cnt",
+				__func__, vconn->tx_pending);
+		return CCI_EAGAIN;
+	}
+	vconn->tx_pending++;
+	debug(CCI_DB_MSG, "%s: vconn->tx_pending increased to %u", __func__,
+			vconn->tx_pending);
+	pthread_mutex_unlock(&ep->lock);
+
 	rma_op = calloc(1, sizeof(*rma_op));
 	if (!rma_op) {
-		CCI_EXIT;
-		return CCI_ENOMEM;
+		ret = CCI_ENOMEM;
+		goto out;
 	}
 
 	rma_op->msg_type = VERBS_MSG_RMA;
@@ -4389,6 +4414,11 @@ ctp_verbs_rma(cci_connection_t * connection,
 
 out:
 	if (ret) {
+		pthread_mutex_lock(&ep->lock);
+		vconn->tx_pending--;
+		debug(CCI_DB_MSG, "%s: vconn->tx_pending decreased to %u", __func__,
+				vconn->tx_pending);
+		pthread_mutex_unlock(&ep->lock);
 		debug(CCI_DB_MSG, "%s: freeing rma_op %p", __func__, (void*)rma_op);
 		free(rma_op);
 	}

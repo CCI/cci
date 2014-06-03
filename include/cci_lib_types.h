@@ -234,22 +234,22 @@ extern int cci__debug;
 #define CCI_DEBUG     1		/* Turn on for developing */
 
 #if CCI_DEBUG
-#define debug(lvl,fmt,args...)                          \
-  do {                                                  \
-      if (lvl & cci__debug)                         \
-          fprintf(stderr, "cci:%d:" fmt "\n", \
-                  getpid(), ##args);    \
+#define debug(lvl,fmt,...)                           \
+  do {                                               \
+      if (lvl & cci__debug)                          \
+          fprintf(stderr, "cci:%d:" fmt "\n",        \
+                  getpid(), __VA_ARGS__);            \
   } while (0)
 #else /* ! CCI_DEBUG */
 #define debug(lvl,fmt,...) do { } while (0)
 #endif /* CCI_DEBUG */
 
 #if CCI_DEBUG
-#define debug_ep(ep,lvl,fmt,args...)                          \
-  do {                                                  \
-      if (lvl & cci__debug)                         \
-          fprintf(stderr, "cci:%d:ep %p:" fmt "\n", \
-                  getpid(), (void*)ep,##args);    \
+#define debug_ep(ep,lvl,fmt,...)                     \
+  do {                                               \
+      if (lvl & cci__debug)                          \
+          fprintf(stderr, "cci:%d:ep %p:" fmt "\n",  \
+                  getpid(), (void*)ep, __VA_ARGS__); \
   } while (0)
 #else /* ! CCI_DEBUG */
 #define debug_ep(ep,lvl,fmt,...) do { } while (0)

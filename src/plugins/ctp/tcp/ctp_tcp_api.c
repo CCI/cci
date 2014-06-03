@@ -493,6 +493,7 @@ static int ctp_tcp_finalize(cci_plugin_ctp_t * plugin)
 
 	free(tglobals->devices);
 	free((void *)tglobals);
+	tglobals = NULL;
 
 	CCI_EXIT;
 	return CCI_SUCCESS;
@@ -584,6 +585,13 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 
 	tep = ep->priv;
 
+	TAILQ_INIT(&tep->conns);
+
+	TAILQ_INIT(&tep->idle_txs);
+	TAILQ_INIT(&tep->idle_rxs);
+	TAILQ_INIT(&tep->handles);
+	TAILQ_INIT(&tep->rma_ops);
+
 	sock = socket(PF_INET, SOCK_STREAM, 0);
 	if (sock == -1) {
 		ret = errno;
@@ -623,13 +631,6 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 	sprintf(name, "tcp://");
 	tcp_sin_to_name(tep->sin, name + (uintptr_t) 6, sizeof(name) - 6);
 	ep->uri = strdup(name);
-
-	TAILQ_INIT(&tep->conns);
-
-	TAILQ_INIT(&tep->idle_txs);
-	TAILQ_INIT(&tep->idle_rxs);
-	TAILQ_INIT(&tep->handles);
-	TAILQ_INIT(&tep->rma_ops);
 
 	ret = tcp_new_conn(ep, sin, sock, &conn);
 	if (ret)
@@ -730,15 +731,10 @@ out:
 				close(tconn->pfd.fd);
 		}
 		free((char*)conn->uri);
+		free(conn->priv);
 	}
-	free(conn->priv);
 	free(conn);
 
-	pthread_mutex_lock(&dev->lock);
-	if (!TAILQ_EMPTY(&dev->eps)) {
-		TAILQ_REMOVE(&dev->eps, ep, entry);
-	}
-	pthread_mutex_unlock(&dev->lock);
 	if (tep) {
 		free(tep->txs);
 		free(tep->tx_buf);
@@ -749,10 +745,10 @@ out:
 		if (sock)
 			tcp_close_socket(sock);
 		free(tep);
+		ep->priv = NULL;
 	}
 	if (ep) {
 		free(ep->uri);
-		free(ep);
 	}
 	*endpointp = NULL;
 	CCI_EXIT;
@@ -2266,7 +2262,7 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 		}
 		rma_op->msg_ptr = rma_op->tx->buffer;
 		rma_op->msg_len = msg_len;
-		memcpy(rma_op->msg_ptr + sizeof(tcp_header_t), msg_ptr, msg_len);
+		memcpy(rma_op->msg_ptr, msg_ptr, msg_len);
 	} else {
 		rma_op->msg_ptr = NULL;
 	}
@@ -2976,9 +2972,9 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 						1,
 						rma_op->context,
 						rma_op->flags,
-						rma_op);
+						NULL);
 			if (ret) {
-				rma_op->status = ret;
+				tx->evt.event.send.status = ret;
 				pthread_mutex_lock(&ep->lock);
 				TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
 				pthread_mutex_unlock(&ep->lock);
@@ -3350,7 +3346,7 @@ conn_decref_locked(cci__ep_t *ep, cci__conn_t *conn)
 	tconn->refcnt--;
 
 	if (tconn->refcnt == 0) {
-		assert(tconn->status == TCP_CONN_CLOSED);
+		assert(tconn->status < TCP_CONN_INIT);
 		TAILQ_REMOVE(&tep->conns, tconn, entry);
 		pthread_mutex_unlock(&tconn->lock);
 		delete_conn_locked(conn);
