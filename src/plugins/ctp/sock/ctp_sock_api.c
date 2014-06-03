@@ -2557,9 +2557,6 @@ static int ctp_sock_sendv(cci_connection_t * connection,
 	int		data_len 	= 0;
 	uint32_t 	i;
 	size_t 		s 		= 0;
-#if CCI_DEBUG
-	char 		*func 		= iovcnt < 2 ? "send" : "sendv";
-#endif
 	cci_endpoint_t 	*endpoint 	= connection->endpoint;
 	cci__ep_t 	*ep;
 	cci__conn_t 	*conn;
@@ -3046,9 +3043,9 @@ static int ctp_sock_rma(cci_connection_t * connection,
 				debug_ep (ep, CCI_DB_INFO,
 				          "%s: Preparing RMA write -- "
 				          "local start: %p, "
-				          "remote: %lu, "
-				          "local offset: %lu, "
-				          "remote offset: %lu, "
+				          "remote: %"PRIu64", "
+				          "local offset: %"PRIu64", "
+				          "remote offset: %"PRIu64", "
 				          "len: %u, seq: %u",
 				          __func__,
 				          local->start,
@@ -3645,7 +3642,7 @@ sock_handle_ack(sock_conn_t * sconn,
 
 					debug_ep (ep, CCI_DB_INFO,
 					          "%s: Prepare RMA write -- "
-					          "start: %p, offset: %lu, "
+					          "start: %p, offset: %"PRIu64", "
 					          "len: %u, seq: %u",
 					          __func__, local->start,
 					          src_offset, tx->rma_len, tx->seq);
@@ -4495,16 +4492,16 @@ sock_handle_rma_read_request(sock_conn_t * sconn, sock_rx_t * rx,
 		/* offset exceeds remote handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
 		debug(CCI_DB_WARN,
-		      "%s: remote offset not valid (start: %p, offset: %lu, "
-		      "length: %lu)",
+		      "%s: remote offset not valid (start: %p, offset: %"PRIu64", "
+		      "length: %"PRIu64")",
 		      __func__, remote->start, remote_offset, remote->length);
 		goto out;
 	} else if ((remote_offset + len) > remote->length) {
 		/* length exceeds remote handle's range, send nak */
 		ret = CCI_ERR_RMA_HANDLE;
 		debug(CCI_DB_WARN,
-		      "%s: remote length not valid (remote offset: %lu, "
-		      "len: %d, length: %lu)",
+		      "%s: remote length not valid (remote offset: %"PRIu64", "
+		      "len: %d, length: %"PRIu64")",
 		      __func__, remote_offset, len, remote->length);
 		goto out;
 	}
@@ -4632,8 +4629,8 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 	if (remote_offset > remote->length) {
 		/* offset exceeds remote handle's range, send nak */
 		debug(CCI_DB_MSG,
-		      "%s: remote offset not valid (start: %p, offset: %lu, "
-		      "length: %lu)", __func__, remote->start, remote_offset,
+		      "%s: remote offset not valid (start: %p, offset: %"PRIu64", "
+		      "length: %"PRIu64")", __func__, remote->start, remote_offset,
 		      remote->length);
 		/* TODO
 		   Note: we have already handled the seq for this rx
@@ -4657,7 +4654,7 @@ sock_handle_rma_write(sock_conn_t * sconn, sock_rx_t * rx, uint16_t len)
 	/* valid remote handle, copy the data */
 	debug_ep (ep, CCI_DB_INFO,
 	          "%s: copying data into target buffer -- start: %p, "
-	          "offset: %lu, len: %d",
+	          "offset: %"PRIu64", len: %d",
 	          __func__, h->start, remote_offset, len);
 
 	/* We receive the entire message using an IOVEC: the first elt of the

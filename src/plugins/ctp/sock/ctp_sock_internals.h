@@ -47,8 +47,8 @@ static int sock_sendmsg(cci_os_handle_t sock, struct iovec iov[2],
         ret = sendmsg(sock, &msg, 0);
         if (ret == -1) {
                 debug(CCI_DB_MSG,
-                      "%s: sendmsg() returned %d (%s) count %d iov[0] %p:%hu "
-                      "iov[1] %p:%hu",
+                      "%s: sendmsg() returned %d (%s) count %d iov[0] %p:%u "
+                      "iov[1] %p:%u",
                       __func__, ret, strerror(errno), count,
                       iov[0].iov_base, (int)iov[0].iov_len,
                       iov[1].iov_base, (int)iov[1].iov_len);
