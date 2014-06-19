@@ -19,6 +19,9 @@
 #include <assert.h>
 #include <arpa/inet.h>
 #include <sys/select.h>
+#ifdef HAVE_SYS_EPOLL_H
+#include <sys/epoll.h>
+#endif /* HAVE_SYS_EPOLL_H */
 #include <poll.h>
 
 #include "cci.h"
@@ -686,6 +689,12 @@ typedef struct tcp_rma_op {
 } tcp_rma_op_t;
 
 struct tcp_ep {
+	/*! File descriptor for the implementation of the blocking mode */
+	int event_fd;
+
+	/*! Pipe to wakeup the app thread */
+	int fd[2];
+
 	/*! Socket for listen */
 	cci_os_handle_t sock;
 
@@ -901,6 +910,16 @@ typedef enum device_state {
 	IFACE_IS_DOWN = 0,
 	IFACE_IS_UP
 } core_tcp_device_state_t;
+
+#define WAKEUP_APP_THREAD(ep) do {					\
+	int 		write_rc;					\
+	tcp_ep_t	*my_tep;					\
+	my_tep = ep->priv;						\
+	write_rc = write (my_tep->pipe[1], "k", 1);			\
+	if (write_rc != 1) {						\
+		debug (CCI_DB_WARN, "%s: Write failed", __func__);	\
+	}								\
+}while (0)
 
 #ifndef FD_COPY
 #define FD_COPY(a,b) memcpy(a,b,sizeof(fd_set))
