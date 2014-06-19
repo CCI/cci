@@ -1460,14 +1460,14 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	}
 	tconn->pfd.fd = ret;
 
-        tx->state = TCP_TX_QUEUED;
+	tx->state = TCP_TX_QUEUED;
 
-        /* insert at tail of conn's queued list */
-        pthread_mutex_lock(&tconn->lock);
-        TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
-        pthread_mutex_unlock(&tconn->lock);
+	/* insert at tail of conn's queued list */
+	pthread_mutex_lock(&tconn->lock);
+	TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
+	pthread_mutex_unlock(&tconn->lock);
 
-        queue_conn(ep, conn);
+	queue_conn(ep, conn);
 
 	/* we will have to check for POLLOUT to determine when
 	 * the connect completed
@@ -1487,9 +1487,9 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 			printf ("epoll_ctl() failed (%s)\n", strerror (errno));
 		}
 
-                ret = tcp_monitor_fd(ep, conn, EPOLLOUT);
-                if (ret) 
-                        goto out;
+		ret = tcp_monitor_fd(ep, conn, EPOLLOUT);
+		if (ret) 
+			goto out;
 #else
 		assert (0);
 #endif /* HAVE_SYS_EPOLL_H */
@@ -1925,9 +1925,9 @@ tcp_queue_tx(tcp_ep_t *tep, tcp_conn_t *tconn, cci__evt_t *evt)
 }
 
 static int tcp_send_common(cci_connection_t * connection,
-		      const struct iovec *data, uint32_t iovcnt,
-		      const void *context, int flags,
-		      tcp_rma_op_t *rma_op)
+      const struct iovec *data, uint32_t iovcnt,
+      const void *context, int flags,
+      tcp_rma_op_t *rma_op)
 {
 	int i, ret = CCI_SUCCESS, is_reliable = 0, data_len = 0;
 	char *func = iovcnt < 2 ? "send" : "sendv";
@@ -2054,8 +2054,8 @@ static int tcp_send_common(cci_connection_t * connection,
 			debug(CCI_DB_MSG, "sent UU msg with %d bytes",
 			      tx->len - (int)sizeof(tcp_header_t));
 			if (tep->event_fd) {
-                                WAKEUP_APP_THREAD(ep);
-                        }
+				WAKEUP_APP_THREAD(ep);
+			}
 
 			debug(CCI_DB_FUNC, "exiting %s", func);
 
@@ -2112,7 +2112,7 @@ out:
 }
 
 static int ctp_tcp_send(cci_connection_t * connection,
-		     const void *msg_ptr, uint32_t msg_len, const void *context, int flags)
+     const void *msg_ptr, uint32_t msg_len, const void *context, int flags)
 {
 	int ret = CCI_SUCCESS;
 	uint32_t iovcnt = 0;
@@ -2133,8 +2133,8 @@ static int ctp_tcp_send(cci_connection_t * connection,
 }
 
 static int ctp_tcp_sendv(cci_connection_t * connection,
-		      const struct iovec *data, uint32_t iovcnt,
-		      const void *context, int flags)
+      const struct iovec *data, uint32_t iovcnt,
+      const void *context, int flags)
 {
 	int ret = CCI_SUCCESS;
 
@@ -2424,15 +2424,15 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 		/* Blocking mode */
 #ifdef HAVE_SYS_EPOLL_H
 		struct epoll_event ev;
-                ev.data.ptr = tconn->conn;
-                ev.events = EPOLLIN|EPOLLOUT;
-                ret = epoll_ctl (tep->event_fd, EPOLL_CTL_MOD, tconn->pfd.fd, &ev);
-                if (ret == -1) {
-                        debug_ep (ep, CCI_DB_EP, "epoll_ctl() failed (%s)\n",
+		ev.data.ptr = tconn->conn;
+		ev.events = EPOLLIN|EPOLLOUT;
+		ret = epoll_ctl (tep->event_fd, EPOLL_CTL_MOD, tconn->pfd.fd, &ev);
+		if (ret == -1) {
+			debug_ep (ep, CCI_DB_EP, "epoll_ctl() failed (%s)\n",
 			          strerror(errno));
 			ret = errno;
 			goto out;
-                }
+		}
 #else
 		assert (0);
 #endif /* HAVE_SYS_EPOLL_H */
@@ -2506,15 +2506,15 @@ tcp_handle_listen_socket(cci__ep_t *ep, cci__conn_t *listen_conn)
 		ev.events = EPOLLIN|EPOLLET;
 		ret = epoll_ctl (tep->event_fd, EPOLL_CTL_ADD, tconn->pfd.fd, &ev);
 		if (ret) {
-                        debug_ep (ep, CCI_DB_EP,
+			debug_ep (ep, CCI_DB_EP,
 			          "epoll_ctl() failed (%s)\n",
 			          strerror (errno));
-                }
+		}
 
 		/* Then we update the monitoring setup (which needs epoll to be setup) */
 		ret = tcp_monitor_fd(ep, conn, EPOLLIN|EPOLLET);
-                if (ret)
-                        goto out;
+		if (ret)
+			goto out;
 #else
 		assert (0);
 #endif
@@ -3102,8 +3102,8 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 				TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
 				pthread_mutex_unlock(&ep->lock);
 				if (tep->event_fd) {
-                         	       WAKEUP_APP_THREAD(ep);
-                        	}
+					WAKEUP_APP_THREAD(ep);
+				}
 			} else {
 				tcp_put_tx(tx);
 			}
@@ -3277,8 +3277,8 @@ tcp_handle_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 				tx->state = TCP_TX_COMPLETED;
 				TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
 				if (tep->event_fd) {
-                         	       WAKEUP_APP_THREAD(ep);
-                        	}
+					WAKEUP_APP_THREAD(ep);
+				}
 			}
 		} else {
 			/* We rejected this conn, clean it up */
@@ -3521,39 +3521,39 @@ get_next_conn(cci__ep_t *ep, cci__conn_t **connp)
 static void
 events_blocking_mode (uint32_t revents, char *str, int len)
 {
-        int bar = 0, offset = 0;
+	int bar = 0, offset = 0;
 
 #ifdef HAVE_SYS_EPOLL_H
-        memset(str, 0, len);
+	memset(str, 0, len);
 
-        if (revents & EPOLLIN) {
-                sprintf(str, "EPOLLIN");
-                bar = 1;
-                offset = strlen(str);
-                revents &= ~EPOLLIN;
-        }
-        if (revents & EPOLLOUT) {
-                sprintf((void*)((uintptr_t)str + offset), "%sEPOLLOUT", bar ? "|" : "");
-                bar = 1;
-                offset = strlen(str);
-                revents &= ~EPOLLOUT;
-        }
-        if (revents & EPOLLHUP) {
-                sprintf((void*)((uintptr_t)str + offset), "%sEPOLLHUP", bar ? "|" : "");
-                bar = 1;
-                offset = strlen(str);
-                revents &= ~EPOLLHUP;
-        }
-        if (revents & EPOLLERR) {
-                sprintf((void*)((uintptr_t)str + offset), "%sEPOLLERR", bar ? "|" : "");
-                bar = 1;
-                offset = strlen(str);
-                revents &= ~EPOLLERR;
-        }
-        if (revents) {
-                sprintf((void*)((uintptr_t)str + offset), "%s0x%x", bar ? "|" : "", revents);
-        }
-        return;
+	if (revents & EPOLLIN) {
+		sprintf(str, "EPOLLIN");
+		bar = 1;
+		offset = strlen(str);
+		revents &= ~EPOLLIN;
+	}
+	if (revents & EPOLLOUT) {
+		sprintf((void*)((uintptr_t)str + offset), "%sEPOLLOUT", bar ? "|" : "");
+		bar = 1;
+		offset = strlen(str);
+		revents &= ~EPOLLOUT;
+	}
+	if (revents & EPOLLHUP) {
+		sprintf((void*)((uintptr_t)str + offset), "%sEPOLLHUP", bar ? "|" : "");
+		bar = 1;
+		offset = strlen(str);
+		revents &= ~EPOLLHUP;
+	}
+	if (revents & EPOLLERR) {
+		sprintf((void*)((uintptr_t)str + offset), "%sEPOLLERR", bar ? "|" : "");
+		bar = 1;
+		offset = strlen(str);
+		revents &= ~EPOLLERR;
+	}
+	if (revents) {
+		sprintf((void*)((uintptr_t)str + offset), "%s0x%x", bar ? "|" : "", revents);
+	}
+return;
 #else
 	/* We only support epoll for the blocking mode at the moment */
 	assert (0);
@@ -3843,20 +3843,20 @@ tcp_poll_events(cci__ep_t *ep)
 		if (ep->closing == 1)
 			return CCI_SUCCESS;
 
-                if (ret > 0) {
-                        int i;
+		if (ret > 0) {
+			int i;
 
-                        for (i = 0; i < ret; i++) {
+			for (i = 0; i < ret; i++) {
 				conn = events[i].data.ptr;
 				revents = events[i].events;
 				tconn = conn->priv;
 				if (tconn != NULL && tconn->status > TCP_CONN_INIT) {
-                                	if ((tconn->status == TCP_CONN_READY && tconn->refcnt == 2) ||
-                                   	    (tconn->status < TCP_CONN_READY && tconn->refcnt == 1))
+					if ((tconn->status == TCP_CONN_READY && tconn->refcnt == 2) ||
+					    (tconn->status < TCP_CONN_READY && tconn->refcnt == 1))
 					{
 						pthread_mutex_lock(&tconn->lock);
-                                        	tconn->refcnt++;
-                                       		pthread_mutex_unlock(&tconn->lock);
+						tconn->refcnt++;
+						pthread_mutex_unlock(&tconn->lock);
 						handle_events (ep, revents, conn);
 					}
 				}
@@ -3870,12 +3870,12 @@ tcp_poll_events(cci__ep_t *ep)
 		/* Non-blocking mode */
 
 		ret = get_next_conn(ep, &conn);
-        	if (ret) {
-                	goto out;
-        	}
+		if (ret) {
+			goto out;
+		}
 
 		tconn = conn->priv;
-        	/* Note: we have a ref on this conn */
+		/* Note: we have a ref on this conn */
 
 		if (!tconn->is_listener && tconn->status > TCP_CONN_INIT)
 			tconn->pfd.events = POLLIN | POLLOUT;
@@ -3913,7 +3913,7 @@ static void *tcp_progress_thread(void *arg)
 	while (!ep->closing) {
 		tcp_progress_ep(ep);
 	}
-
+	
 	pthread_exit(NULL);
 	return (NULL);		/* make pgcc happy */
 }
