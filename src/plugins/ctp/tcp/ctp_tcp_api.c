@@ -2012,7 +2012,7 @@ static int tcp_send_common(cci_connection_t * connection,
 		pthread_mutex_unlock(&ep->lock);
 		if (tep->event_fd) {
 			WAKEUP_APP_THREAD(ep);
-                }
+		}
 		goto out;
 	}
 
@@ -3065,8 +3065,8 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 			TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
 			pthread_mutex_unlock(&ep->lock);
 			if (tep->event_fd) {
-                                WAKEUP_APP_THREAD(ep);
-                        }
+				WAKEUP_APP_THREAD(ep);
+			}
 			debug(CCI_DB_MSG, "%s: completed %s ***",
 				__func__, tcp_msg_type(msg_type));
 		} else {
