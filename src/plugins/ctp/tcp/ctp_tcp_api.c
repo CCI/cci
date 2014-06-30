@@ -717,6 +717,15 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 			ret = errno;
 			goto out;
 		}
+		flags = fcntl(tep->pipe[0], F_GETFL, 0);
+		if (-1 == flags)
+			flags = 0;
+		ret = fcntl(tep->pipe[0], F_SETFL, flags | O_NONBLOCK);
+		if (-1 == ret) {
+			ret = errno;
+			goto out;
+		}
+		tep->pipe_ops = 0;
 		*fd = tep->pipe[0];
 
 		ret = tcp_create_thread(ep);
@@ -1706,7 +1715,22 @@ static int ctp_tcp_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eve
 
 	pthread_mutex_unlock(&ep->lock);
 
-	/* TODO drain fd so that they can block again */
+	/* drain fd so that they can block again */
+	if (ev && tep->event_fd) {
+		int rc;
+		char a[1];
+
+		/* We bock again only and only if there is no more
+		   pending events */
+		pthread_mutex_lock(&ep->lock);
+		tep->pipe_ops--;
+		if (tep->pipe_ops == 0) {
+			do {
+				rc = read (tep->pipe[0], a, sizeof (a));
+			} while (rc > 0);
+		}
+		pthread_mutex_unlock(&ep->lock);
+	}
 
 	*event = &ev->event;
 
@@ -2628,8 +2652,9 @@ tcp_handle_conn_request(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx, uint32_t
 	TAILQ_INSERT_TAIL(&ep->evts, &rx->evt, entry);
 	pthread_mutex_unlock(&ep->lock);
 
-	if (tep->event_fd)
+	if (tep->event_fd) {
 		WAKEUP_APP_THREAD (ep);
+	}
 
 	return;
 out:
@@ -3277,7 +3302,7 @@ tcp_handle_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 				tx->state = TCP_TX_COMPLETED;
 				TAILQ_INSERT_TAIL(&ep->evts, &tx->evt, entry);
 				if (tep->event_fd) {
-					WAKEUP_APP_THREAD(ep);
+					WAKEUP_APP_THREAD_UNLOCKED(ep);
 				}
 			}
 		} else {

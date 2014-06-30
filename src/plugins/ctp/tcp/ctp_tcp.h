@@ -728,6 +728,9 @@ struct tcp_ep {
 	/*! Pipe for OS handle */
 	int pipe[2];
 
+	/*! Number of pending writes on the pipe */
+	uint32_t pipe_ops;
+
 	/* Our IP and port */
 	struct sockaddr_in sin;
 
@@ -911,14 +914,22 @@ typedef enum device_state {
 	IFACE_IS_UP
 } core_tcp_device_state_t;
 
-#define WAKEUP_APP_THREAD(ep) do {					\
+#define WAKEUP_APP_THREAD_UNLOCKED(ep) do {				\
 	int 		write_rc;					\
 	tcp_ep_t	*my_tep;					\
 	my_tep = ep->priv;						\
 	write_rc = write (my_tep->pipe[1], "k", 1);			\
 	if (write_rc != 1) {						\
 		debug (CCI_DB_WARN, "%s: Write failed", __func__);	\
+	} else {							\
+		my_tep->pipe_ops++;					\
 	}								\
+}while (0)
+
+#define WAKEUP_APP_THREAD(ep) do {					\
+	pthread_mutex_lock(&ep->lock);					\
+	WAKEUP_APP_THREAD_UNLOCKED(ep);					\
+	pthread_mutex_unlock(&ep->lock);				\
 }while (0)
 
 #ifndef FD_COPY
