@@ -184,7 +184,7 @@ typedef union cci_e2e_hdr {
 	struct cci_e2e_hdr_send_ack_many {
 		uint8_t type;		/* CCI_E2E_MSG_SEND_ACK_MANY */
 		uint8_t pad;		/* Unused for now */
-		uint16_t seq;		/* Ack this sequence number only */
+		uint16_t seq;		/* Ack up to the sequence number */
 		/* 32b */
 	} send_ack_many;
 
