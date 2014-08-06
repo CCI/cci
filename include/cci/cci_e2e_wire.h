@@ -497,7 +497,7 @@ typedef union cci_e2e_rma_request {
 		/* 640b / 80B */
 		uint32_t len;			/* Max size of 4 GB */
 		/* 672b / 84B */
-		uint32_t pad;			/* Unused for now */
+		uint32_t index;			/* Router buffer index */
 		/* 704b / 88B */
 	} request;
 
@@ -514,8 +514,8 @@ typedef union cci_e2e_rma_request {
 static inline int
 cci_e2e_pack_rma_request(cci_e2e_hdr_t *hdr, cci_rma_handle_t *initiator,
 		cci_rma_handle_t *target, uint64_t initiator_offset,
-		uint64_t target_offset, uint32_t len, uint16_t seq,
-		cci_e2e_msg_type_t type)
+		uint64_t target_offset, uint32_t len, uint32_t index,
+		uint16_t seq, cci_e2e_msg_type_t type)
 {
 	cci_e2e_rma_request_t *rma = (cci_e2e_rma_request_t *)&hdr->rma.data;
 
@@ -532,6 +532,7 @@ cci_e2e_pack_rma_request(cci_e2e_hdr_t *hdr, cci_rma_handle_t *initiator,
 	rma->request.initiator_offset = initiator_offset;
 	rma->request.target_offset = target_offset;
 	rma->request.len = len;
+	rma->request.index = index;
 
 	hdr->net = htonl(hdr->net);
 	/* rma->net[0] through rma->net[7] are already in network order */
@@ -545,8 +546,8 @@ cci_e2e_pack_rma_request(cci_e2e_hdr_t *hdr, cci_rma_handle_t *initiator,
 static inline void
 cci_e2e_parse_rma_request(cci_e2e_hdr_t *hdr, cci_rma_handle_t *initiator,
 		cci_rma_handle_t *target, uint64_t *initiator_offset,
-		uint64_t *target_offset, uint32_t *len, uint16_t *seq,
-		cci_e2e_msg_type_t *type)
+		uint64_t *target_offset, uint32_t *len, uint32_t *index,
+		uint16_t *seq, cci_e2e_msg_type_t *type)
 {
 	cci_e2e_rma_request_t *rma = (cci_e2e_rma_request_t *)&(hdr->rma.data);
 
@@ -564,6 +565,7 @@ cci_e2e_parse_rma_request(cci_e2e_hdr_t *hdr, cci_rma_handle_t *initiator,
 	*initiator_offset = rma->request.initiator_offset;
 	*target_offset = rma->request.target_offset;
 	*len = rma->request.len;
+	*index = rma->request.index;
 
 	return;
 }
