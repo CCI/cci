@@ -53,6 +53,7 @@ BEGIN_C_DECLS
 #define E2E_TX_CNT	(1024)
 #define E2E_RX_CNT	(1024)
 #define E2E_RMA_CNT	(E2E_TX_CNT)
+#define E2E_RMA_MTU	(1024 * 1024)
 
 typedef struct e2e_globals e2e_globals_t;	/* globals state */
 typedef struct e2e_ep e2e_ep_t;			/* endpoint */
@@ -132,6 +133,7 @@ struct e2e_conn {
 	cci_connection_t *real;		/* Underlying transport's real connection */
 	TAILQ_ENTRY(e2e_conn) entry;	/* To hang on eep->conns */
 	TAILQ_HEAD(c_txs, cci__evt) pending; /* pending reliable sends */
+	uint32_t rma_mtu;		/* RMA fragment for this connection */
 	uint16_t seq;
 };
 

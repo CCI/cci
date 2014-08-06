@@ -587,7 +587,7 @@ e2e_send_conn_reply(cci__ep_t *ep, cci__conn_t *conn, uint8_t status)
 	tx->msg_type = CCI_E2E_MSG_CONN_REPLY;
 	tx->state = E2E_TX_PENDING;
 
-	cci_e2e_pack_connect_reply(&reply, status, econn->real->max_send_size);
+	cci_e2e_pack_connect_reply(&reply, status, econn->real->max_send_size, E2E_RMA_MTU);
 
 	ret = cci_send(econn->real, &reply, sizeof(reply.conn_reply), (void*)tx, 0);
 	if (ret)
@@ -615,7 +615,7 @@ e2e_send_conn_ack(cci__ep_t *ep, cci__conn_t *conn)
 	tx->msg_type = CCI_E2E_MSG_CONN_ACK;
 	tx->state = E2E_TX_PENDING;
 
-	cci_e2e_pack_connect_ack(&ack, conn->connection.max_send_size);
+	cci_e2e_pack_connect_ack(&ack, conn->connection.max_send_size, econn->rma_mtu);
 
 	ret = cci_send(econn->real, &ack, sizeof(ack.conn_ack), (void*)tx, 0);
 	if (ret)
@@ -1094,6 +1094,7 @@ e2e_handle_conn_reply(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **ne
 	int ret = 0;
 	uint8_t status = 0;
 	uint16_t mss = 0;
+	uint32_t mtu = 0;
 	cci_connection_t *connection = native_event->recv.connection;
 	cci__conn_t *conn = connection->context;
 	e2e_conn_t *econn = conn->priv;
@@ -1111,9 +1112,9 @@ e2e_handle_conn_reply(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **ne
 		assert(native_event->recv.len == sizeof(hdr->conn_reply));
 	}
 
-	cci_e2e_parse_connect_reply(hdr, &status, &mss);
+	cci_e2e_parse_connect_reply(hdr, &status, &mss, &mtu);
 
-	conn->connection.max_send_size = mss - sizeof(*hdr);
+	conn->connection.max_send_size = mss - sizeof(hdr->net[0]);
 
 	evt = calloc(1, sizeof(*evt));
 	if (!evt) {
@@ -1169,6 +1170,7 @@ e2e_handle_conn_ack(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
 {
 	int ret = 0;
 	uint16_t mss = 0;
+	uint32_t mtu = 0;
 	cci_connection_t *connection = native_event->recv.connection;
 	cci__conn_t *conn = connection->context;
 	cci__evt_t *evt = NULL;
@@ -1186,9 +1188,10 @@ e2e_handle_conn_ack(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
 		assert(native_event->recv.len == sizeof(hdr->conn_ack));
 	}
 
-	cci_e2e_parse_connect_ack(hdr, &mss);
+	cci_e2e_parse_connect_ack(hdr, &mss, &mtu);
 
-	conn->connection.max_send_size = mss - sizeof(*hdr);
+	conn->connection.max_send_size = mss - sizeof(hdr->net[0]);
+	econn->rma_mtu = mtu;
 
 	evt = calloc(1, sizeof(*evt));
 	if (!evt) {
@@ -1322,7 +1325,7 @@ e2e_handle_native_recv(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **n
 		return CCI_EAGAIN;
 	}
 
-	hdr->net = ntohl(hdr->net);
+	hdr->net[0] = ntohl(hdr->net[0]);
 
 	switch (hdr->generic.type) {
 	case CCI_E2E_MSG_CONN_REPLY:
@@ -1339,7 +1342,7 @@ e2e_handle_native_recv(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **n
 		break;
 	default:
 		debug(CCI_DB_MSG, "%s: ignoring %s (0x%x) recv completion", __func__,
-			cci_e2e_msg_type_str(hdr->generic.type), hdr->net);
+			cci_e2e_msg_type_str(hdr->generic.type), hdr->net[0]);
 	}
 
 	return ret;

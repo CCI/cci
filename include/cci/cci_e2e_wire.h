@@ -106,6 +106,8 @@ cci_e2e_msg_type_str(cci_e2e_msg_type_t type)
 	return NULL;
 }
 
+
+
 typedef union cci_e2e_hdr {
 	/* Generic header type, used by all messages */
 	struct cci_e2e_hdr_generic {
@@ -138,6 +140,8 @@ typedef union cci_e2e_hdr {
 		uint8_t status;		/* 0 for success, else errno */
 		uint16_t mss;		/* Max send size */
 		/* 32b */
+		uint32_t rma_mtu;	/* RMA mtu */
+		/* 64b */
 	} conn_reply;
 
 	/* Connect ack */
@@ -146,6 +150,8 @@ typedef union cci_e2e_hdr {
 		uint8_t pad;		/* Unused for now */
 		uint16_t mss;		/* Max send size */
 		/* 32b */
+		uint32_t rma_mtu;	/* RMA mtu */
+		/* 64b */
 	} conn_ack;
 
 	/* Bye */
@@ -225,7 +231,7 @@ typedef union cci_e2e_hdr {
 	} rma;
 
 	/* For easy byte swapping to/from network order */
-	uint32_t net;
+	uint32_t net[2];
 } cci_e2e_hdr_t;
 
 typedef union cci_e2e_connect {
@@ -281,7 +287,7 @@ cci_e2e_pack_connect(cci_e2e_hdr_t *hdr, const char *dst, const char *src,
 	*total_len += connect->request.dst_len;
 	*total_len += connect->request.src_len;
 
-	hdr->net = htonl(hdr->net);
+	hdr->net[0] = htonl(hdr->net[0]);
 	connect->net[0] = htonl(connect->net[0]);
 	connect->net[1] = htonl(connect->net[1]);
 }
@@ -317,42 +323,49 @@ cci_e2e_parse_connect(cci_e2e_hdr_t *hdr, char *dst, char *src, void **ptr, uint
 }
 
 static inline void
-cci_e2e_pack_connect_reply(cci_e2e_hdr_t *hdr, uint8_t status, uint16_t mss)
+cci_e2e_pack_connect_reply(cci_e2e_hdr_t *hdr, uint8_t status, uint16_t mss, uint32_t mtu)
 {
 	memset(hdr, 0, sizeof(*hdr));
 	hdr->conn_reply.type = CCI_E2E_MSG_CONN_REPLY;
 	hdr->conn_reply.status = status;
 	hdr->conn_reply.mss = mss;
+	hdr->conn_reply.rma_mtu = mtu;
 
-	hdr->net = htonl(hdr->net);
+	hdr->net[0] = htonl(hdr->net[0]);
+	hdr->net[1] = htonl(hdr->net[1]);
 	return;
 }
 
 static inline void
-cci_e2e_parse_connect_reply(cci_e2e_hdr_t *hdr, uint8_t *status, uint16_t *mss)
+cci_e2e_parse_connect_reply(cci_e2e_hdr_t *hdr, uint8_t *status, uint16_t *mss, uint32_t *mtu)
 {
-	/* hdr already in host order */
+	/* hdr->net[0] is already in host order */
 	*status = hdr->conn_reply.status;
 	*mss = hdr->conn_reply.mss;
+	*mtu = ntohl(hdr->net[1]);
 	return;
 }
 
 static inline void
-cci_e2e_pack_connect_ack(cci_e2e_hdr_t *hdr, uint16_t mss)
+cci_e2e_pack_connect_ack(cci_e2e_hdr_t *hdr, uint16_t mss, uint32_t mtu)
 {
 	memset(hdr, 0, sizeof(*hdr));
 	hdr->conn_ack.type = CCI_E2E_MSG_CONN_ACK;
 	hdr->conn_ack.mss = mss;
+	hdr->conn_ack.rma_mtu = mtu;
 
-	hdr->net = htonl(hdr->net);
+	hdr->net[0] = htonl(hdr->net[0]);
+	hdr->net[1] = htonl(hdr->net[1]);
 	return;
 }
 
 static inline void
-cci_e2e_parse_connect_ack(cci_e2e_hdr_t *hdr, uint16_t *mss)
+cci_e2e_parse_connect_ack(cci_e2e_hdr_t *hdr, uint16_t *mss, uint32_t *mtu)
 {
 	/* hdr already in host order */
 	*mss = hdr->conn_ack.mss;
+	hdr->net[1] = ntohl(hdr->net[1]);
+	*mtu = hdr->conn_ack.rma_mtu;
 	return;
 }
 
@@ -362,7 +375,7 @@ cci_e2e_pack_bye(cci_e2e_hdr_t *hdr)
 	memset(hdr, 0, sizeof(*hdr));
 	hdr->bye.type = CCI_E2E_MSG_BYE;
 
-	hdr->net = htonl(hdr->net);
+	hdr->net[0] = htonl(hdr->net[0]);
 	return;
 }
 
@@ -375,7 +388,7 @@ cci_e2e_pack_send(cci_e2e_hdr_t *hdr, uint16_t seq)
 	hdr->send.type = CCI_E2E_MSG_SEND;
 	hdr->send.seq = seq;
 
-	hdr->net = htonl(hdr->net);
+	hdr->net[0] = htonl(hdr->net[0]);
 	return;
 }
 
@@ -394,7 +407,7 @@ cci_e2e_pack_send_ack(cci_e2e_hdr_t *hdr, uint16_t seq)
 	hdr->send_ack.type = CCI_E2E_MSG_SEND_ACK;
 	hdr->send_ack.seq = seq;
 
-	hdr->net = htonl(hdr->net);
+	hdr->net[0] = htonl(hdr->net[0]);
 	return;
 }
 
@@ -413,7 +426,7 @@ cci_e2e_pack_send_ack_many(cci_e2e_hdr_t *hdr, uint16_t seq)
 	hdr->send_ack_many.type = CCI_E2E_MSG_SEND_ACK_MANY;
 	hdr->send_ack_many.seq = seq;
 
-	hdr->net = htonl(hdr->net);
+	hdr->net[0] = htonl(hdr->net[0]);
 	return;
 }
 
@@ -432,7 +445,7 @@ cci_e2e_pack_send_sack(cci_e2e_hdr_t *hdr, uint8_t count)
 	hdr->send_sack.type = CCI_E2E_MSG_SEND_SACK;
 	hdr->send_sack.count = count;
 
-	hdr->net = htonl(hdr->net);
+	hdr->net[0] = htonl(hdr->net[0]);
 	return;
 }
 
@@ -472,7 +485,7 @@ cci_e2e_pack_send_nack(cci_e2e_hdr_t *hdr, uint8_t status, uint16_t seq)
 	hdr->send_nack.status = status;
 	hdr->send_nack.seq = seq;
 
-	hdr->net = htonl(hdr->net);
+	hdr->net[0] = htonl(hdr->net[0]);
 	return;
 }
 
@@ -534,7 +547,7 @@ cci_e2e_pack_rma_request(cci_e2e_hdr_t *hdr, cci_rma_handle_t *initiator,
 	rma->request.len = len;
 	rma->request.index = index;
 
-	hdr->net = htonl(hdr->net);
+	hdr->net[0] = htonl(hdr->net[0]);
 	/* rma->net[0] through rma->net[7] are already in network order */
 	rma->net[8] = cci_e2e_htonll(rma->net[8]);
 	rma->net[9] = cci_e2e_htonll(rma->net[9]);
@@ -598,7 +611,7 @@ cci_e2e_pack_rma_done(cci_e2e_hdr_t *hdr, cci_rma_handle_t *handle, uint64_t off
 	memcpy((void*)&rma->done.handle, handle, sizeof(*handle));
 	rma->done.offset = offset;
 
-	hdr->net = htonl(hdr->net);
+	hdr->net[0] = htonl(hdr->net[0]);
 	/* rma->net[0] through rma->net[3] are already in network order */
 	rma->net[4] = cci_e2e_htonll(rma->net[4]);
 
