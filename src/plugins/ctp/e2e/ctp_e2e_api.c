@@ -235,7 +235,7 @@ static int ctp_e2e_create_endpoint(cci_device_t * device,
 		goto out;
 	}
 
-	/* determine is device contains as, subnet, and at least one router */
+	/* determine if device contains as, subnet, and at least one router */
 	for (arg = (char **)device->conf_argv; *arg; arg++) {
 		if (0 == strncmp("as=", *arg, 3)) {
 			char *as_str = *arg + 3;
@@ -1648,18 +1648,30 @@ static int ctp_e2e_rma_register(cci_endpoint_t * endpoint,
 				 void *start, uint64_t length,
 				 int flags, cci_rma_handle_t ** rma_handle)
 {
+	int ret = 0;
+	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
+	e2e_ep_t *eep = ep->priv;
+
 	CCI_ENTER;
 
+	ret = cci_rma_register(eep->real, start, length, flags, rma_handle);
+
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 static int ctp_e2e_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * rma_handle)
 {
+	int ret = 0;
+	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
+	e2e_ep_t *eep = ep->priv;
+
 	CCI_ENTER;
 
+	ret = cci_rma_deregister(eep->real, rma_handle);
+
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 static int ctp_e2e_rma(cci_connection_t * connection,
