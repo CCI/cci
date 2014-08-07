@@ -203,6 +203,7 @@ union e2e_ctx {
 };
 
 struct e2e_rma {
+	cci__evt_t evt;			/* Associated event (including public event) */
 	cci_rma_handle_t *lh;		/* Local RMA handle pointer */
 	uint64_t loffset;		/* Local offset for RMA */
 	cci_rma_handle_t *rh;		/* Remote RMA handle pointer */

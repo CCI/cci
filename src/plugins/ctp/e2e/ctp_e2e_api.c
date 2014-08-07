@@ -512,6 +512,55 @@ e2e_put_rx(e2e_rx_t *rx)
 	return;
 }
 
+static inline e2e_rma_frag_t *
+e2e_get_rma_frag_locked(e2e_ep_t *eep)
+{
+	e2e_rma_frag_t *rma_frag = NULL;
+
+	if (!TAILQ_EMPTY(&eep->idle_rma_frags)) {
+		cci__evt_t *evt = TAILQ_FIRST(&eep->idle_rma_frags);
+		TAILQ_REMOVE(&eep->idle_rma_frags, evt, entry);
+		rma_frag = container_of(evt, e2e_rma_frag_t, evt);
+	}
+	return rma_frag;
+}
+
+static inline e2e_rma_frag_t *
+e2e_get_rma_frag(cci__ep_t *ep) {
+	e2e_ep_t *eep = ep->priv;
+	e2e_rma_frag_t *rma_frag = NULL;
+
+	pthread_mutex_lock(&ep->lock);
+	rma_frag = e2e_get_rma_frag_locked(eep);
+	pthread_mutex_unlock(&ep->lock);
+
+	return rma_frag;
+}
+
+static inline void
+e2e_put_rma_frag_locked(e2e_ep_t *eep, e2e_rma_frag_t *rma_frag)
+{
+	rma_frag->evt.conn = NULL;
+	rma_frag->rma = NULL;
+	rma_frag->id = 0;
+	TAILQ_INSERT_HEAD(&eep->idle_rma_frags, &(rma_frag->evt), entry);
+
+	return;
+}
+
+static inline void
+e2e_put_rma_frag(e2e_rma_frag_t *rma_frag)
+{
+	cci__ep_t *ep = rma_frag->evt.ep;
+	e2e_ep_t *eep = ep->priv;
+
+	pthread_mutex_lock(&ep->lock);
+	e2e_put_rma_frag_locked(eep, rma_frag);
+	pthread_mutex_unlock(&ep->lock);
+
+	return;
+}
+
 static int ctp_e2e_destroy_endpoint(cci_endpoint_t * endpoint)
 {
 	int ret = 0;
@@ -1680,8 +1729,117 @@ static int ctp_e2e_rma(cci_connection_t * connection,
 			cci_rma_handle_t * remote_handle, uint64_t remote_offset,
 			uint64_t data_len, const void *context, int flags)
 {
+	int ret = 0, i = 0;
+	cci__conn_t *conn = container_of(connection, cci__conn_t, connection);
+	e2e_conn_t *econn = conn->priv;
+	cci__ep_t *ep = container_of(connection->endpoint, cci__ep_t, endpoint);
+	e2e_rma_t *rma = NULL;
+	cci_e2e_hdr_t *hdr = NULL;
+	cci_e2e_rma_request_t *req = NULL;
+	int len = sizeof(*hdr) + sizeof(*req);
+	char buf[len];
+
 	CCI_ENTER;
 
+	if (!eglobals) {
+		CCI_EXIT;
+		return CCI_ENODEV;
+	}
+
+	memset(buf, 0, len);
+
+	rma = calloc(1, sizeof(*rma));
+	if (!rma) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	rma->evt.event.type = CCI_EVENT_SEND;
+	rma->evt.event.send.status = CCI_SUCCESS; /* for now */
+	rma->evt.event.send.connection = connection;
+	rma->evt.event.send.context = (void *)context;
+
+	rma->evt.ep = ep;
+	rma->evt.conn = conn;
+
+	rma->lh = local_handle;
+	rma->loffset = local_offset;
+	rma->rh = remote_handle;
+	rma->roffset = remote_offset;
+	rma->length = data_len;
+	rma->context = (void*)context;
+	rma->flags = flags;
+
+	if (msg_ptr && msg_len) {
+		rma->msg_ptr = calloc(1, msg_len);
+		if (!rma->msg_ptr) {
+			ret = CCI_ENOMEM;
+			goto out;
+		}
+		memcpy((void*)rma->msg_ptr, msg_ptr, msg_len);
+		rma->msg_len = msg_len;
+	}
+
+	rma->num_frags = data_len / econn->rma_mtu;
+	if (data_len != rma->num_frags * econn->rma_mtu)
+		rma->num_frags++;
+	rma->acked = -1;
+
+	for (i = 0; i < (int) rma->num_frags; i++) {
+		e2e_rma_frag_t *frag = NULL;
+
+		frag = e2e_get_rma_frag(ep);
+		if (!frag) {
+			if (i == 0) {
+				/* We were not able to launch a single fragment,
+				 * bail and cleanup.
+				 */
+				ret = CCI_EAGAIN;
+				goto out;
+			}
+		}
+
+		frag->loffset = i * econn->rma_mtu;
+		frag->roffset = i * econn->rma_mtu;
+		frag->len = econn->rma_mtu;
+		if (frag->loffset + frag->len > data_len) {
+			frag->len = data_len - frag->loffset;
+		}
+		frag->rma = rma;
+		frag->id = i;
+
+		cci_e2e_pack_rma_request(hdr, local_handle, remote_handle,
+				frag->loffset, frag->roffset, frag->len, 0, 0,
+				flags & CCI_FLAG_WRITE ? CCI_E2E_MSG_RMA_WRITE_REQ :
+				CCI_E2E_MSG_RMA_READ_REQ);
+
+		ret = cci_send(econn->real, buf, len, frag, 0);
+		if (ret) {
+			e2e_put_rma_frag(frag);
+
+			if (i == 0) {
+				/* We were unable to send a single fragment,
+				 * bail and cleanup.
+				 */
+				ret = CCI_EAGAIN;
+			} else {
+				ret = 0;
+			}
+			goto out;
+		}
+
+		/* We sent the frag, increment next */
+		rma->next++;
+	}
+
+    out:
+	if (ret) {
+		if (rma) {
+			free((void*)msg_ptr);
+		}
+		free(rma);
+	}
+
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
