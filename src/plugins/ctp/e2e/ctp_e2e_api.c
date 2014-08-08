@@ -1164,6 +1164,7 @@ e2e_handle_conn_reply(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **ne
 	cci_e2e_parse_connect_reply(hdr, &status, &mss, &mtu);
 
 	conn->connection.max_send_size = mss - sizeof(hdr->net[0]);
+	econn->rma_mtu = mtu;
 
 	evt = calloc(1, sizeof(*evt));
 	if (!evt) {
@@ -1747,6 +1748,7 @@ static int ctp_e2e_rma(cci_connection_t * connection,
 	}
 
 	memset(buf, 0, len);
+	hdr = (cci_e2e_hdr_t *)buf;
 
 	rma = calloc(1, sizeof(*rma));
 	if (!rma) {
