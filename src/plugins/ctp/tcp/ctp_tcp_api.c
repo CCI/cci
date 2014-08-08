@@ -2123,6 +2123,8 @@ static int ctp_tcp_rma_register(cci_endpoint_t * endpoint,
 	TAILQ_INSERT_TAIL(&tep->handles, handle, entry);
 	pthread_mutex_unlock(&ep->lock);
 
+	debug(CCI_DB_INFO, "%s: handle %p", __func__, handle);
+
 	*rma_handle = &handle->rma_handle;
 
 	CCI_EXIT;
@@ -2223,8 +2225,8 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	pthread_mutex_unlock(&ep->lock);
 
 	if (h != local) {
-		debug(CCI_DB_INFO, "%s: invalid endpoint for this RMA handle",
-		      __func__);
+		debug(CCI_DB_INFO, "%s: invalid endpoint for this RMA handle %p",
+		      __func__, local);
 		CCI_EXIT;
 		return CCI_EINVAL;
 	}
@@ -2848,7 +2850,7 @@ tcp_handle_rma_read_request(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 	if (h != remote) {
 		/* remote is no longer valid, send CCI_ERR_RMA_HANDLE */
 		ret = CCI_ERR_RMA_HANDLE;
-		debug(CCI_DB_MSG, "%s: remote handle not valid", __func__);
+		debug(CCI_DB_MSG, "%s: remote handle %p not valid", __func__, remote);
 		goto out;
 	} else if (remote_offset > remote->length) {
 		/* offset exceeds remote handle's range, send nak */
