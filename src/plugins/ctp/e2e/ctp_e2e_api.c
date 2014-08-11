@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <sys/types.h>
+#include <inttypes.h>
 
 #include "cci.h"
 #include "cci_lib_types.h"
@@ -778,6 +779,7 @@ static int ctp_e2e_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	econn->conn = conn;
 	econn->state = E2E_CONN_ACTIVE1;
 	TAILQ_INIT(&econn->pending);
+	TAILQ_INIT(&econn->rmas);
 
 	/* this is large by 4 bytes, it is ok */
 	total_len = sizeof(hdr->connect_size) + sizeof(cci_e2e_connect_t) + data_len;
@@ -981,6 +983,7 @@ e2e_handle_native_connect_request(cci__ep_t *ep, cci_event_t *native_event, cci_
 	econn->conn = conn;
 	econn->state = E2E_CONN_PASSIVE1;
 	TAILQ_INIT(&econn->pending);
+	TAILQ_INIT(&econn->rmas);
 
 	evt = calloc(1, sizeof(*evt));
 	if (!evt) {
@@ -1083,16 +1086,28 @@ e2e_handle_native_send(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **n
 {
 	int ret = CCI_EAGAIN;
 	e2e_tx_t *tx = native_event->send.context;
+	e2e_rma_t *rma = NULL;
 	cci__conn_t *conn = NULL;
+	e2e_ctx_type_t ctx_type = tx->type;
+	cci_e2e_msg_type_t msg_type;
+	e2e_conn_t *econn = NULL;
 
 	*new = NULL;
 
 	if (!tx)
 		return CCI_EAGAIN;
 
-	conn = tx->evt.conn;
+	if (ctx_type == E2E_CTX_RMA) {
+		rma = native_event->send.context;
+		conn = rma->evt.conn;
+		msg_type = CCI_E2E_MSG_RMA_WRITE_REQ;
+		tx = NULL;
+	} else {
+		msg_type = tx->msg_type;
+		conn = tx->evt.conn;
+	}
 
-	switch (tx->msg_type) {
+	switch (msg_type) {
 	case CCI_E2E_MSG_CONN_REPLY:
 		if (native_event->send.status != CCI_SUCCESS) {
 			/* The conn reply failed.
@@ -1127,6 +1142,18 @@ e2e_handle_native_send(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **n
 				TAILQ_REMOVE(&econn->pending, &(tx->evt), entry);
 				pthread_mutex_unlock(&ep->lock);
 			}
+		}
+		break;
+	case CCI_E2E_MSG_RMA_WRITE_REQ:
+		if (native_event->send.status != CCI_SUCCESS) {
+			/* complete now with error, otherwise wait for e2e ack */
+			rma->evt.event.send.status = native_event->send.status;
+			*new = &(rma->evt.event);
+			ret = CCI_SUCCESS;
+
+			pthread_mutex_lock(&ep->lock);
+			TAILQ_REMOVE(&econn->rmas, &(rma->evt), entry);
+			pthread_mutex_unlock(&ep->lock);
 		}
 		break;
 	default:
@@ -1310,6 +1337,9 @@ e2e_handle_send_ack(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
 }
 
 static int
+e2e_handle_rma_ack(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new);
+
+static int
 e2e_handle_recv(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new, int *recycle)
 {
 	int ret = CCI_EAGAIN;
@@ -1389,6 +1419,9 @@ e2e_handle_native_recv(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **n
 		break;
 	case CCI_E2E_MSG_SEND_ACK:
 		ret = e2e_handle_send_ack(ep, native_event, new);
+		break;
+	case CCI_E2E_MSG_RMA_ACK:
+		ret = e2e_handle_rma_ack(ep, native_event, new);
 		break;
 	default:
 		debug(CCI_DB_MSG, "%s: ignoring %s (0x%x) recv completion", __func__,
@@ -1523,8 +1556,15 @@ static int ctp_e2e_return_event(cci_event_t * event)
 	{
 		cci__evt_t *evt = container_of(event, cci__evt_t, event);
 		e2e_tx_t *tx = container_of(evt, e2e_tx_t, evt);
+		e2e_rma_t *rma = NULL;
 
-		e2e_put_tx(tx);
+		if (tx->type == E2E_CTX_TX) {
+			e2e_put_tx(tx);
+		} else {
+			rma = container_of(evt, e2e_rma_t, evt);
+			free(rma);
+		}
+
 		break;
 	}
 	default:
@@ -1536,13 +1576,13 @@ static int ctp_e2e_return_event(cci_event_t * event)
 }
 
 static inline uint16_t
-e2e_conn_next_seq(cci__ep_t *ep, cci__conn_t *conn)
+e2e_conn_next_msg_seq(cci__ep_t *ep, cci__conn_t *conn)
 {
 	uint16_t seq = 0;
 	e2e_conn_t *econn = conn->priv;
 
 	pthread_mutex_lock(&ep->lock);
-	seq = ++econn->seq;
+	seq = ++econn->tx_seq;
 	pthread_mutex_unlock(&ep->lock);
 
 	return seq;
@@ -1583,7 +1623,7 @@ static int ctp_e2e_send(cci_connection_t * connection,
 	tx->msg_type = CCI_E2E_MSG_SEND;
 	tx->state = E2E_TX_PENDING;
 	tx->flags = flags;
-	tx->seq = e2e_conn_next_seq(ep, conn);
+	tx->seq = e2e_conn_next_msg_seq(ep, conn);
 	/* tx->rma = NULL; already set */
 
 	cci_e2e_pack_send(&hdr, tx->seq);
@@ -1652,7 +1692,7 @@ static int ctp_e2e_sendv(cci_connection_t * connection,
 	tx->msg_type = CCI_E2E_MSG_SEND;
 	tx->state = E2E_TX_PENDING;
 	tx->flags = flags;
-	tx->seq = e2e_conn_next_seq(ep, conn);
+	tx->seq = e2e_conn_next_msg_seq(ep, conn);
 	/* tx->rma = NULL; already set */
 
 	cci_e2e_pack_send(&hdr, tx->seq);
@@ -1724,6 +1764,157 @@ static int ctp_e2e_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * 
 	return ret;
 }
 
+static inline uint16_t
+e2e_conn_next_rma_seq(cci__ep_t *ep, cci__conn_t *conn)
+{
+	uint16_t seq = 0;
+	e2e_conn_t *econn = conn->priv;
+
+	pthread_mutex_lock(&ep->lock);
+	seq = ++econn->rma_seq;
+	pthread_mutex_unlock(&ep->lock);
+
+	return seq;
+}
+
+static inline int
+e2e_post_rma_frag(e2e_rma_t *rma)
+{
+	int ret = 0, i = 0, first = rma->next;
+	cci__ep_t *ep = rma->evt.ep;
+	cci__conn_t *conn = rma->evt.conn;
+	e2e_conn_t *econn = conn->priv;
+	e2e_rma_frag_t *frag = NULL;
+	cci_e2e_hdr_t *hdr = NULL;
+	cci_e2e_rma_request_t *req = NULL;
+	int len = sizeof(*hdr) + sizeof(*req);
+	char buf[len];
+
+	memset(buf, 0, len);
+	hdr = (cci_e2e_hdr_t *)buf;
+
+	/* FIXME this whole function is racy */
+	i = rma->next;
+
+	frag = e2e_get_rma_frag(ep);
+	if (!frag) {
+		if (i == 0) {
+			/* We were not able to launch a single fragment,
+			 * bail and cleanup.
+			 */
+			ret = CCI_EAGAIN;
+			goto out;
+		}
+	}
+
+	frag->loffset = i * econn->rma_mtu;
+	frag->roffset = i * econn->rma_mtu;
+	frag->len = econn->rma_mtu;
+	if (frag->loffset + frag->len > rma->length) {
+		frag->len = rma->length - frag->loffset;
+	}
+	frag->loffset += rma->loffset;
+	frag->roffset += rma->roffset;
+	frag->rma = rma;
+	frag->id = i;
+
+	rma->pending++;
+
+	cci_e2e_pack_rma_request(hdr, rma->lh, rma->rh,
+			frag->loffset, frag->roffset, frag->len, 0, rma->seq,
+			rma->flags & CCI_FLAG_WRITE ? CCI_E2E_MSG_RMA_WRITE_REQ :
+			CCI_E2E_MSG_RMA_READ_REQ);
+
+	ret = cci_send(econn->real, buf, len, frag, 0);
+	if (ret) {
+		rma->pending--;
+		e2e_put_rma_frag(frag);
+
+		if (i == 0) {
+			/* We were unable to send a single fragment,
+			 * bail and cleanup.
+			 */
+			ret = CCI_EAGAIN;
+		} else {
+			ret = 0;
+		}
+		goto out;
+	}
+
+	/* We sent the frag, increment next */
+	rma->next++;
+
+    out:
+	if ((int) rma->next != first)
+		ret = CCI_SUCCESS;
+
+	return ret;
+}
+
+static int
+e2e_handle_rma_ack(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
+{
+	int ret = CCI_EAGAIN;
+	uint16_t seq = 0;
+	cci_connection_t *connection = native_event->recv.connection;
+	cci__conn_t *conn = connection->context;
+	cci__evt_t *evt = NULL;
+	e2e_conn_t *econn = conn->priv;
+	e2e_rma_t *rma = NULL;
+	cci_e2e_hdr_t *hdr = (void *)native_event->recv.ptr;
+	cci_e2e_rma_request_t *req = (cci_e2e_rma_request_t *)&hdr->rma.data[0];
+	cci_rma_handle_t local, remote;
+	uint64_t loffset = 0, roffset = 0;
+	uint32_t len = 0, index = 0;
+	cci_e2e_msg_type_t type;
+
+	*new = NULL;
+
+	if (native_event->recv.len != (sizeof(hdr->rma_size) + sizeof(*req))) {
+		debug(CCI_DB_CONN, "%s: invalid send ack size of %u", __func__,
+			native_event->recv.len);
+		/* TODO */
+		assert(native_event->recv.len == (sizeof(hdr->rma_size) + sizeof(*req)));
+	}
+
+	cci_e2e_parse_rma_request(hdr, &local, &remote, &loffset, &roffset,
+			&len, &index, &seq, &type);
+
+	debug(CCI_DB_INFO, "%s: loffset=%"PRIu64" roffset=%"PRIu64" len=%u "
+		"index=%u seq=%hu type=%d", __func__, loffset, roffset, len,
+		index, seq, type);
+
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_FOREACH(evt, &econn->rmas, entry) {
+		rma = container_of(evt, e2e_rma_t, evt);
+		if (rma->seq == seq) {
+#if 0
+			TAILQ_REMOVE(&econn->pending, evt, entry);
+			*new = &(evt->event);
+#endif
+			rma->acked++;
+			rma->pending--;
+			if (rma->pending) {
+				e2e_post_rma_frag(rma);
+			} else {
+				TAILQ_REMOVE(&econn->rmas, &rma->evt, entry);
+				rma->type = E2E_CTX_RMA;
+				*new = &rma->evt.event;
+			}
+			ret = CCI_SUCCESS;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&ep->lock);
+
+	if (ret) {
+		debug(CCI_DB_MSG, "%s: no matching rma for ack %u from %s", __func__,
+			seq, conn->uri);
+	}
+
+	return ret;
+}
+
 static int ctp_e2e_rma(cci_connection_t * connection,
 			const void *msg_ptr, uint32_t msg_len,
 			cci_rma_handle_t * local_handle, uint64_t local_offset,
@@ -1771,6 +1962,7 @@ static int ctp_e2e_rma(cci_connection_t * connection,
 	rma->length = data_len;
 	rma->context = (void*)context;
 	rma->flags = flags;
+	rma->seq = e2e_conn_next_rma_seq(ep, conn);
 
 	if (msg_ptr && msg_len) {
 		rma->msg_ptr = calloc(1, msg_len);
@@ -1787,51 +1979,14 @@ static int ctp_e2e_rma(cci_connection_t * connection,
 		rma->num_frags++;
 	rma->acked = -1;
 
+	pthread_mutex_lock(&ep->lock);
+	TAILQ_INSERT_TAIL(&econn->rmas, &(rma->evt), entry);
+	pthread_mutex_unlock(&ep->lock);
+
 	for (i = 0; i < (int) rma->num_frags; i++) {
-		e2e_rma_frag_t *frag = NULL;
-
-		frag = e2e_get_rma_frag(ep);
-		if (!frag) {
-			if (i == 0) {
-				/* We were not able to launch a single fragment,
-				 * bail and cleanup.
-				 */
-				ret = CCI_EAGAIN;
-				goto out;
-			}
-		}
-
-		frag->loffset = i * econn->rma_mtu;
-		frag->roffset = i * econn->rma_mtu;
-		frag->len = econn->rma_mtu;
-		if (frag->loffset + frag->len > data_len) {
-			frag->len = data_len - frag->loffset;
-		}
-		frag->rma = rma;
-		frag->id = i;
-
-		cci_e2e_pack_rma_request(hdr, local_handle, remote_handle,
-				frag->loffset, frag->roffset, frag->len, 0, 0,
-				flags & CCI_FLAG_WRITE ? CCI_E2E_MSG_RMA_WRITE_REQ :
-				CCI_E2E_MSG_RMA_READ_REQ);
-
-		ret = cci_send(econn->real, buf, len, frag, 0);
-		if (ret) {
-			e2e_put_rma_frag(frag);
-
-			if (i == 0) {
-				/* We were unable to send a single fragment,
-				 * bail and cleanup.
-				 */
-				ret = CCI_EAGAIN;
-			} else {
-				ret = 0;
-			}
+		ret = e2e_post_rma_frag(rma);
+		if (ret)
 			goto out;
-		}
-
-		/* We sent the frag, increment next */
-		rma->next++;
 	}
 
     out:

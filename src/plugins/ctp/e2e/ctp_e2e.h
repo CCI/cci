@@ -62,7 +62,7 @@ typedef struct e2e_rma e2e_rma_t;		/* Pipelined RMA state */
 typedef struct e2e_tx e2e_tx_t;			/* Send context */
 typedef struct e2e_rx e2e_rx_t;			/* Receive context */
 typedef struct e2e_rma_frag e2e_rma_frag_t;	/* RMA fragment context */
-typedef union e2e_ctx e2e_ctx_t;		/* MSG/RMA context */
+typedef union  e2e_ctx e2e_ctx_t;		/* MSG/RMA context */
 
 struct e2e_globals {
 	int count;		/* Number of e2e devices */
@@ -129,19 +129,22 @@ e2e_conn_state_str(e2e_conn_state_t state)
 
 struct e2e_conn {
 	cci__conn_t *conn;		/* Owning conn */
-	e2e_conn_state_t state;		/* State */
 	cci_connection_t *real;		/* Underlying transport's real connection */
 	TAILQ_ENTRY(e2e_conn) entry;	/* To hang on eep->conns */
 	TAILQ_HEAD(c_txs, cci__evt) pending; /* pending reliable sends */
+	TAILQ_HEAD(c_rma, cci__evt) rmas; /* pending RMAs */
+	e2e_conn_state_t state;		/* State */
 	uint32_t rma_mtu;		/* RMA fragment for this connection */
-	uint16_t seq;
+	uint16_t tx_seq;		/* MSG ID */
+	uint16_t rma_seq;		/* RMA ID */
 };
 
 typedef enum e2e_ctx_type {
 	E2E_CTX_INVALID = 0,
 	E2E_CTX_RX,
 	E2E_CTX_TX,
-	E2E_CTX_RMA
+	E2E_CTX_RMA,
+	E2E_CTX_RMA_FRAG
 } e2e_ctx_type_t;
 
 static inline char *
@@ -155,6 +158,8 @@ e2e_ctx_type_str(e2e_ctx_type_t type) {
 		return "E2E_CTX_TX";
 	case E2E_CTX_RMA:
 		return "E2E_CTX_RMA";
+	case E2E_CTX_RMA_FRAG:
+		return "E2E_CTX_RMA_FRAG";
 	}
 	/* silence picky compiler */
 	return NULL;
@@ -203,6 +208,7 @@ union e2e_ctx {
 };
 
 struct e2e_rma {
+	e2e_ctx_type_t type;		/* E2E_CTX_RMA */
 	cci__evt_t evt;			/* Associated event (including public event) */
 	cci_rma_handle_t *lh;		/* Local RMA handle pointer */
 	uint64_t loffset;		/* Local offset for RMA */
@@ -217,6 +223,7 @@ struct e2e_rma {
 	uint32_t next;			/* Next fragment ID */
 	int32_t acked;			/* Last fragment acked (starts at -1) */
 	uint32_t pending;		/* Number of fragments in-flight */
+	uint16_t seq;
 };
 
 extern e2e_globals_t *eglobals;
