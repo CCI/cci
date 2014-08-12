@@ -1907,13 +1907,9 @@ e2e_handle_rma_ack(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
 	TAILQ_FOREACH(evt, &econn->rmas, entry) {
 		rma = container_of(evt, e2e_rma_t, evt);
 		if (rma->seq == seq) {
-#if 0
-			TAILQ_REMOVE(&econn->pending, evt, entry);
-			*new = &(evt->event);
-#endif
 			rma->acked++;
 			rma->pending--;
-			if (rma->pending) {
+			if (rma->next + rma->pending < rma->num_frags) {
 				e2e_post_rma_frag(rma);
 			} else {
 				TAILQ_REMOVE(&econn->rmas, &rma->evt, entry);
