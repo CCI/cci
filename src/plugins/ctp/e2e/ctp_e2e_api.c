@@ -360,7 +360,7 @@ static int ctp_e2e_create_endpoint(cci_device_t * device,
 	for (i = 0; i < E2E_RMA_CNT; i++) {
 		e2e_rma_frag_t *rma_frag = &(eep->rma_frags[i]);
 
-		rma_frag->type = E2E_CTX_RMA;
+		rma_frag->type = E2E_CTX_RMA_FRAG;
 		rma_frag->evt.ep = ep_e2e;
 		TAILQ_INSERT_TAIL(&eep->idle_rma_frags, &(rma_frag->evt), entry);
 	}
@@ -1076,36 +1076,21 @@ e2e_handle_native_accept(cci__ep_t *ep, cci_event_t *native_event, cci_event_t *
 	return ret;
 }
 
-/* We have received a native send event.
- * If reliable and successful, ignore and return tx.
- * If reliable and failed, generate send event.
- * If unreliable, generate send event.
- */
 static int
-e2e_handle_native_send(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
+e2e_handle_native_send_tx(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
 {
 	int ret = CCI_EAGAIN;
 	e2e_tx_t *tx = native_event->send.context;
-	e2e_rma_t *rma = NULL;
 	cci__conn_t *conn = NULL;
-	e2e_ctx_type_t ctx_type = tx->type;
 	cci_e2e_msg_type_t msg_type;
-	e2e_conn_t *econn = NULL;
 
 	*new = NULL;
 
 	if (!tx)
 		return CCI_EAGAIN;
 
-	if (ctx_type == E2E_CTX_RMA) {
-		rma = native_event->send.context;
-		conn = rma->evt.conn;
-		msg_type = CCI_E2E_MSG_RMA_WRITE_REQ;
-		tx = NULL;
-	} else {
-		msg_type = tx->msg_type;
-		conn = tx->evt.conn;
-	}
+	msg_type = tx->msg_type;
+	conn = tx->evt.conn;
 
 	switch (msg_type) {
 	case CCI_E2E_MSG_CONN_REPLY:
@@ -1144,21 +1129,62 @@ e2e_handle_native_send(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **n
 			}
 		}
 		break;
-	case CCI_E2E_MSG_RMA_WRITE_REQ:
-		if (native_event->send.status != CCI_SUCCESS) {
-			/* complete now with error, otherwise wait for e2e ack */
-			rma->evt.event.send.status = native_event->send.status;
-			*new = &(rma->evt.event);
-			ret = CCI_SUCCESS;
+	default:
+		debug(CCI_DB_MSG, "%s: ignoring %s send completion", __func__,
+			cci_e2e_msg_type_str(msg_type));
+	}
 
-			pthread_mutex_lock(&ep->lock);
-			TAILQ_REMOVE(&econn->rmas, &(rma->evt), entry);
-			pthread_mutex_unlock(&ep->lock);
-		}
+	return ret;
+}
+
+static int
+e2e_handle_native_send_rma_frag(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
+{
+	int ret = CCI_EAGAIN;
+	e2e_rma_frag_t *frag = native_event->send.context;
+	e2e_rma_t *rma = frag->rma;
+	cci__conn_t *conn = rma->evt.conn;
+	e2e_conn_t *econn = conn->priv;
+
+	e2e_put_rma_frag(frag);
+
+	if (native_event->send.status != CCI_SUCCESS) {
+		/* complete now with error, otherwise wait for e2e ack */
+		rma->evt.event.send.status = native_event->send.status;
+		*new = &(rma->evt.event);
+		ret = CCI_SUCCESS;
+
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_REMOVE(&econn->rmas, &(rma->evt), entry);
+		pthread_mutex_unlock(&ep->lock);
+	}
+	return ret;
+}
+
+/* We have received a native send (CONN, MSG, or RMA) event.
+ * If reliable and successful, ignore and return tx.
+ * If reliable and failed, generate send event.
+ * If unreliable, generate send event.
+ */
+static int
+e2e_handle_native_send(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
+{
+	int ret = CCI_EAGAIN;
+	e2e_ctx_t *ctx = native_event->send.context;
+
+	*new = NULL;
+
+	switch (ctx->type) {
+	case E2E_CTX_TX:
+		ret = e2e_handle_native_send_tx(ep, native_event, new);
+		break;
+	case E2E_CTX_RMA_FRAG:
+		ret = e2e_handle_native_send_rma_frag(ep, native_event, new);
 		break;
 	default:
 		debug(CCI_DB_MSG, "%s: ignoring %s send completion", __func__,
-			cci_e2e_msg_type_str(tx->msg_type));
+			e2e_ctx_type_str(ctx->type));
+		break;
 	}
 
 	return ret;
@@ -1562,6 +1588,8 @@ static int ctp_e2e_return_event(cci_event_t * event)
 			e2e_put_tx(tx);
 		} else {
 			rma = container_of(evt, e2e_rma_t, evt);
+			debug(CCI_DB_MSG, "%s: freeing rma %p", __func__, rma);
+			rma = container_of(evt, e2e_rma_t, evt);
 			free(rma);
 		}
 
@@ -1780,7 +1808,7 @@ e2e_conn_next_rma_seq(cci__ep_t *ep, cci__conn_t *conn)
 static inline int
 e2e_post_rma_frag(e2e_rma_t *rma)
 {
-	int ret = 0, i = 0, first = rma->next;
+	int ret = 0, i = 0;
 	cci__ep_t *ep = rma->evt.ep;
 	cci__conn_t *conn = rma->evt.conn;
 	e2e_conn_t *econn = conn->priv;
@@ -1798,13 +1826,8 @@ e2e_post_rma_frag(e2e_rma_t *rma)
 
 	frag = e2e_get_rma_frag(ep);
 	if (!frag) {
-		if (i == 0) {
-			/* We were not able to launch a single fragment,
-			 * bail and cleanup.
-			 */
-			ret = CCI_EAGAIN;
-			goto out;
-		}
+		ret = CCI_EAGAIN;
+		goto out;
 	}
 
 	frag->loffset = i * econn->rma_mtu;
@@ -1828,16 +1851,7 @@ e2e_post_rma_frag(e2e_rma_t *rma)
 	ret = cci_send(econn->real, buf, len, frag, 0);
 	if (ret) {
 		rma->pending--;
-		e2e_put_rma_frag(frag);
-
-		if (i == 0) {
-			/* We were unable to send a single fragment,
-			 * bail and cleanup.
-			 */
-			ret = CCI_EAGAIN;
-		} else {
-			ret = 0;
-		}
+		ret = CCI_EAGAIN;
 		goto out;
 	}
 
@@ -1845,8 +1859,13 @@ e2e_post_rma_frag(e2e_rma_t *rma)
 	rma->next++;
 
     out:
-	if ((int) rma->next != first)
-		ret = CCI_SUCCESS;
+	if (ret) {
+		debug(CCI_DB_MSG, "%s: failed with %s frag=%p", __func__,
+			cci_strerror(&ep->endpoint, ret), frag);
+		if (frag) {
+			e2e_put_rma_frag(frag);
+		}
+	}
 
 	return ret;
 }
@@ -1985,8 +2004,13 @@ static int ctp_e2e_rma(cci_connection_t * connection,
 
 	for (i = 0; i < (int) rma->num_frags; i++) {
 		ret = e2e_post_rma_frag(rma);
-		if (ret)
-			goto out;
+		if (ret) {
+			debug(CCI_DB_MSG, "%s: post_rma_frag() returned %s i=%d",
+				__func__, cci_strerror(&ep->endpoint, ret), i);
+			if (i != 0)
+				ret = CCI_SUCCESS;
+			break;
+		}
 	}
 
     out:
