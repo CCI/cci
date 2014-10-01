@@ -1925,8 +1925,22 @@ e2e_handle_rma_ack(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
 	if (ret) {
 		debug(CCI_DB_MSG, "%s: no matching rma for ack %u from %s", __func__,
 			seq, conn->uri);
+		goto out;
 	}
 
+	if (*new && rma->msg_ptr) {
+		*new = NULL;
+		ret = cci_send(&conn->connection, rma->msg_ptr, rma->msg_len, rma->context, 0);
+		if (ret) {
+		} else {
+			/* free rma */
+			free(rma->msg_ptr);
+			free(rma);
+		}
+		ret = CCI_EAGAIN;
+	}
+
+    out:
 	return ret;
 }
 
