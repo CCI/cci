@@ -20,6 +20,7 @@
 #include <sys/select.h>
 
 #include "cci.h"
+#include "crc32.h"
 
 #define ITERS		(1)
 #define RMA_REG_LEN	(4 * 1024 * 1024)
@@ -54,6 +55,7 @@ int nfds = 0;
 fd_set rfds;
 #define RMA_CTX_CNT	(1024)
 int *rma_context = NULL;
+cci_endpoint_flags_t ep_flags = 0;
 
 typedef struct options {
 	uint64_t reg_len;
@@ -104,9 +106,6 @@ typedef union hdr {
 
 hdr_t msg;
 uint32_t msg_len = 0;
-
-extern uint32_t
-crc32(uint32_t crc, const void *buf, size_t size);
 
 static void print_usage(void)
 {
@@ -563,7 +562,7 @@ int main(int argc, char *argv[])
 
 	name = argv[0];
 
-	while ((c = getopt(argc, argv, "h:si:c:wrl:o:O:R:BI")) != -1) {
+	while ((c = getopt(argc, argv, "h:si:c:wrl:o:O:R:BIiE")) != -1) {
 		switch (c) {
 		case 'h':
 			server_uri = strdup(optarg);
@@ -610,6 +609,9 @@ int main(int argc, char *argv[])
 		case 'I':
 			ignore_os_handle = 1;
 			os_handle = &fd;
+			break;
+		case 'E':
+			ep_flags = CCI_EP_ROUTING;
 			break;
 		default:
 			print_usage();
@@ -673,7 +675,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* create an endpoint */
-	ret = cci_create_endpoint(NULL, 0, &endpoint, os_handle);
+	ret = cci_create_endpoint(NULL, ep_flags, &endpoint, os_handle);
 	if (ret) {
 		fprintf(stderr, "cci_create_endpoint() failed with %s\n",
 			cci_strerror(NULL, ret));
