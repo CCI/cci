@@ -1890,7 +1890,7 @@ e2e_handle_rma_ack(cci__ep_t *ep, cci_event_t *native_event, cci_event_t **new)
 	*new = NULL;
 
 	if (native_event->recv.len != (sizeof(hdr->rma_size) + sizeof(*req))) {
-		debug(CCI_DB_CONN, "%s: invalid send ack size of %u", __func__,
+		debug(CCI_DB_MSG, "%s: invalid send ack size of %u", __func__,
 			native_event->recv.len);
 		/* TODO */
 		assert(native_event->recv.len == (sizeof(hdr->rma_size) + sizeof(*req)));
