@@ -541,10 +541,6 @@ remove_path(char *path)
 		goto out;
 	}
 
-	ent = fts_children(fts, 0);
-	if (!ent)
-		goto out;
-
 	while (NULL != (ent = fts_read(fts))) {
 		int ret = 0;
 
