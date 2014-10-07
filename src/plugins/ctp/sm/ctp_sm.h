@@ -376,6 +376,7 @@ struct sm_conn {
 struct sm_dev {
 	char			*path;		/* Path to URI base */
 	uint64_t		*ids;		/* Bit mask of ids starting at sdev->id */
+	uint32_t		pid;		/* Process id */
 	uint32_t		id;		/* Starting endpoint id */
 	uint32_t		num_blocks;	/* Number of ids blocks */
 };

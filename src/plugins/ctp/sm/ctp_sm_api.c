@@ -322,6 +322,8 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 		TAILQ_FOREACH_SAFE(dev, &globals->configfile_devs, entry, ndev) {
 		if (0 == strcmp("sm", dev->device.transport)) {
 			const char * const *arg;
+			const char *path = NULL;
+			char cwd[MAXPATHLEN];
 
 			dev->plugin = plugin;
 			if (dev->priority == -1)
@@ -353,9 +355,9 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 			/* parse conf_argv */
 			for (arg = device->conf_argv; *arg != NULL; arg++) {
 				if (0 == strncmp("path=", *arg, 5)) {
-					const char *path = *arg + 5;
-					char cwd[MAXPATHLEN], *c = NULL;
+					char *c = NULL;
 
+					path = *arg + 5;
 
 					if (sdev->path) {
 						debug(CCI_DB_WARN,
@@ -394,14 +396,21 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 						strcat(cwd, path);
 						path = cwd;
 					}
+				} else if (0 == strncmp("pid=", *arg, 4)) {
+					const char *pid_str = *arg + 4;
 
-					memset(dname, 0, sizeof(dname));
-					snprintf(dname, sizeof(dname), "%s/%u", path, pid);
-					sdev->path = strdup(dname);
-					if (!sdev->path) {
-						ret = CCI_ENOMEM;
+					uint32_t new_pid = strtoul(pid_str, NULL, 0);
+					if (sdev->pid) {
+						debug(CCI_DB_WARN,
+							"%s: device %s already "
+							"has an pid %u and the "
+							"configfile also has %u",
+							__func__, device->name,
+							sdev->pid, new_pid);
+						ret = CCI_EINVAL;
 						goto out;
 					}
+					sdev->pid = new_pid;
 				} else if (0 == strncmp("id=", *arg, 3)) {
 					const char *id_str = *arg + 3;
 					uint32_t id = strtoul(id_str, NULL, 0);
@@ -440,14 +449,18 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 				}
 			}
 
-			if (sdev->path == NULL) {
-				memset(dname, 0, sizeof(dname));
-				snprintf(dname, sizeof(dname), "%s/%u", SM_DEFAULT_PATH, pid);
-				sdev->path = strdup(dname);
-				if (!sdev->path) {
-					ret = CCI_ENOMEM;
-					goto out;
-				}
+			if (!sdev->pid)
+				sdev->pid = pid;
+
+			if (!path)
+				path = SM_DEFAULT_PATH;
+
+			memset(dname, 0, sizeof(dname));
+			snprintf(dname, sizeof(dname), "%s/%u", path, sdev->pid);
+			sdev->path = strdup(dname);
+			if (!sdev->path) {
+				ret = CCI_ENOMEM;
+				goto out;
 			}
 
 			ret = sm_create_path(sdev->path);
