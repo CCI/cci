@@ -18,6 +18,7 @@
 #include <search.h>
 #include <assert.h>
 #include <sys/select.h>
+#include <fts.h>
 
 #include "cci.h"
 #include "plugins/ctp/ctp.h"
@@ -523,6 +524,55 @@ out:
 	return ret;
 }
 
+static void
+remove_path(char *path)
+{
+	char *argv[2];
+	FTS *fts = NULL;
+	FTSENT *ent = NULL;
+
+	argv[0] = path;
+	argv[1] = NULL;
+
+	fts = fts_open(argv, FTS_PHYSICAL | FTS_NOSTAT_TYPE, NULL);
+	if (!fts) {
+		debug(CCI_DB_EP, "%s: fts_open(%s) failed with %s", __func__,
+			path, strerror(errno));
+		goto out;
+	}
+
+	ent = fts_children(fts, 0);
+	if (!ent)
+		goto out;
+
+	while (NULL != (ent = fts_read(fts))) {
+		int ret = 0;
+
+		switch (ent->fts_info) {
+		case FTS_F:
+			debug(CCI_DB_INFO, "%s: FIL %s", __func__, ent->fts_name);
+			ret = unlink(ent->fts_name);
+			if (ret)
+				debug(CCI_DB_EP, "%s: FIL %s failed with %s", __func__,
+						ent->fts_name, strerror(errno));
+			break;
+		case FTS_DP:
+			debug(CCI_DB_INFO, "%s: DIR %s", __func__, ent->fts_path);
+			ret = rmdir(ent->fts_path);
+			if (ret)
+				debug(CCI_DB_EP, "%s: DIR %s failed with %s", __func__,
+						ent->fts_path, strerror(errno));
+		default:
+			break;
+		}
+	}
+
+	fts_close(fts);
+
+    out:
+	return;
+}
+
 static int ctp_sm_finalize(cci_plugin_ctp_t * plugin)
 {
 	cci__dev_t *dev = NULL;
@@ -538,8 +588,12 @@ static int ctp_sm_finalize(cci_plugin_ctp_t * plugin)
 		if (!strcmp(dev->device.transport, "sm")) {
 			if (dev->priv) {
 				sm_dev_t *sdev = dev->priv;
+				int ret = 0;
 
-				rmdir(sdev->path);
+				ret = rmdir(sdev->path);
+				if (ret)
+					debug(CCI_DB_INFO, "%s: rmdir(%s) failed with %s",
+						__func__, sdev->path, strerror(errno));
 				free(sdev->path);
 				free(sdev->ids);
 			}
@@ -937,6 +991,8 @@ static int ctp_sm_destroy_endpoint(cci_endpoint_t * endpoint)
 			snprintf(name, sizeof(name), "%s/fifo", path);
 			unlink(name);
 		}
+
+		remove_path(path);
 
 		sm_put_ep_id(dev, sep->id);
 		free(sep);
