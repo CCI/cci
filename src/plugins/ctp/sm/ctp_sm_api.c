@@ -550,6 +550,7 @@ remove_path(char *path)
 
 		switch (ent->fts_info) {
 		case FTS_F:
+		case FTS_DEFAULT:
 			debug(CCI_DB_INFO, "%s: FIL %s", __func__, ent->fts_name);
 			ret = unlink(ent->fts_name);
 			if (ret)
@@ -563,6 +564,8 @@ remove_path(char *path)
 				debug(CCI_DB_EP, "%s: DIR %s failed with %s", __func__,
 						ent->fts_path, strerror(errno));
 		default:
+			debug(CCI_DB_INFO, "%s: %s fts_info %d", __func__,
+				ent->fts_path, ent->fts_info);
 			break;
 		}
 	}
@@ -973,24 +976,16 @@ static int ctp_sm_destroy_endpoint(cci_endpoint_t * endpoint)
 	if (sep) {
 		char name[MAXPATHLEN];
 
-		if (sep->sock) {
+		if (sep->sock)
 			close(sep->sock);
-			memset(name, 0, sizeof(name));
-			snprintf(name, sizeof(name), "%s/sock", path);
-			unlink(name);
-		}
 
 		/* TODO: Close all open connections */
 
 		free(sep->conn_ids);
 
 		/* Close FIFO */
-		if (sep->fifo) {
+		if (sep->fifo)
 			close(sep->fifo);
-			memset(name, 0, sizeof(name));
-			snprintf(name, sizeof(name), "%s/fifo", path);
-			unlink(name);
-		}
 
 		remove_path(path);
 
