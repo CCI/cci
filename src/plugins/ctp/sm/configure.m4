@@ -29,7 +29,7 @@ AC_DEFUN([PLUGINS_cci_ctp_sm_CONFIG],[
                              [libc*],
                              [sys/mman.h],
                              [c],
-                             [shm_open],
+                             [fts_open],
                              [],
                              [$1],
                              [$2])
