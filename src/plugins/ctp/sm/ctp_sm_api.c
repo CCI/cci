@@ -534,7 +534,7 @@ remove_path(char *path)
 	argv[0] = path;
 	argv[1] = NULL;
 
-	fts = fts_open(argv, FTS_PHYSICAL | FTS_NOSTAT_TYPE, NULL);
+	fts = fts_open(argv, FTS_PHYSICAL, NULL);
 	if (!fts) {
 		debug(CCI_DB_EP, "%s: fts_open(%s) failed with %s", __func__,
 			path, strerror(errno));
