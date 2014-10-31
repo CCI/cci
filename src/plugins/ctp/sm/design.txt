@@ -5,7 +5,7 @@ Each endpoint uses the following resources:
   - Per connection subdirectory containing:
     - mmapped MSG receive buffer
     - mmapped MSG receive ring
-* MMAP RMA buffer (optional)
+    - MMAP RMA buffer (optional)
 
 The sm transport uses the UDS for connection setup.  During connection setup,
 the peers will exchange information including the connection ID, if FD support
@@ -94,7 +94,7 @@ header into the first slot and the payload into the remaining slots. It packs
 the sm_hdr_t and writes it to the target's FIFO.
 
 The target reads the header and then reads the inline RMA header from the first
-slot. It looks up the RMA handle and verifies it. It them memcpy()s the data
+slot. It looks up the RMA handle and verifies it. It then memcpy()s the data
 from the sender's RMA buffer to the destination buffer. Lastly, it packs the RMA
 ack and writes it to the initiator's FIFO.
 

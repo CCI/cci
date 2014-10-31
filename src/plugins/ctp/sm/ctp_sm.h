@@ -36,6 +36,7 @@ BEGIN_C_DECLS
 #define SM_MIN_MSS		(SM_LINE)	/* Minimum cache line size */
 #define SM_MAX_MSS		(4096)		/* page size */
 
+#define SM_RMA_MTU		(4096)		/* Common page size */
 #define SM_RMA_DEPTH		(4)		/* how many in-flight msgs per RMA */
 #define SM_RMA_FRAG_SIZE	(8*1024)	/* optimal for POSIX shmem */
 #define SM_RMA_FRAG_MAX		(64*1024)	/* optimal for knem and CMA */
@@ -260,6 +261,7 @@ typedef struct sm_dev		sm_dev_t;
 typedef struct sm_ep		sm_ep_t;
 typedef struct sm_conn		sm_conn_t;
 typedef struct sm_conn_buffer	sm_conn_buffer_t;
+typedef struct sm_conn_rma_buf	sm_conn_rma_buf_t;
 typedef struct sm_tx		sm_tx_t;
 typedef struct sm_rx		sm_rx_t;
 typedef struct sm_rma		sm_rma_t;
@@ -352,6 +354,13 @@ struct sm_conn_buffer {
 	ring_t			ring;		/* For headers */
 };
 
+struct sm_conn_rma_buf {
+	uint64_t		avail;		/* Bitmask for available pages */
+	ring_t			ring;		/* For headers */
+	char			pad[SM_RMA_MTU - sizeof(uint64_t) - sizeof(ring_t)];
+	char			buf[SM_RMA_MTU * 64]; /* Pages */
+};
+
 struct sm_conn {
 	cci__conn_t		*conn;		/* Owning conn */
 	sm_conn_state_t		state;		/* SM_CONN_* */
@@ -364,6 +373,11 @@ struct sm_conn {
 	sm_conn_buffer_t	*tx;		/* Pointer to mmap */
 	void			*peer_mmap;	/* Peer's mmap */
 	sm_conn_buffer_t	*rx;		/* Pointer to peer's mmap */
+
+	void			*rma_mmap;	/* Mmapped RMA buffer */
+	sm_conn_rma_buf_t	*rma;		/* Pointer to RMA mmap */
+	void			*peer_rma_mmap;	/* Peer's RMA mmap */
+	sm_conn_rma_buf_t	*peer_rma;	/* Pointer to peer's RMA mmap */
 
 	cci__evt_t		*rxs;		/* RECV events */
 

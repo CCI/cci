@@ -425,6 +425,16 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 						ret = CCI_EINVAL;
 						goto out;
 					}
+					if (id >= SM_EP_MAX_ID) {
+						debug(CCI_DB_WARN,
+							"%s: device %s base "
+							"endpoint id %u is "
+							"too large",
+							__func__, device->name,
+							id);
+						ret = CCI_EINVAL;
+						goto out;
+					}
 					sdev->id = id;
 				} else if (0 == strncmp("mss=", *arg, 4)) {
 					const char *mss_str = *arg + 4;
@@ -970,8 +980,6 @@ static int ctp_sm_destroy_endpoint(cci_endpoint_t * endpoint)
 		path = (void*)((uintptr_t)ep->uri + strlen("sm://"));
 
 	if (sep) {
-		char name[MAXPATHLEN];
-
 		if (sep->sock)
 			close(sep->sock);
 
@@ -1061,7 +1069,7 @@ sm_put_conn_id(sm_conn_t *sconn)
 static int
 sm_map_conn(sm_conn_t *sconn)
 {
-	int ret = 0, msgs_fd = 0, len = 0;
+	int ret = 0, msgs_fd = 0, rma_fd = 0, len = 0;
 	char name[MAXPATHLEN], *ptr = NULL;
 
 	memset(name, 0, sizeof(name));
@@ -1085,6 +1093,7 @@ sm_map_conn(sm_conn_t *sconn)
 	/* MMAP the buffer */
 	sconn->peer_mmap = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, msgs_fd, 0);
 	close(msgs_fd);
+	msgs_fd = 0;
 	if (sconn->peer_mmap == MAP_FAILED) {
 		debug(CCI_DB_WARN, "%s: mmap() failed with %s", __func__,
 				strerror(errno));
@@ -1092,7 +1101,37 @@ sm_map_conn(sm_conn_t *sconn)
 		goto out;
 	}
 	sconn->rx = sconn->peer_mmap;
+
+	snprintf(name, sizeof(name), "%s-rma", name);
+	ret = open(name, O_RDWR, 0666);
+	if (ret == -1) {
+		debug(CCI_DB_CONN, "%s: unable to open %s's RMA mmap buf", __func__,
+				sconn->conn->uri);
+		ret = EHOSTUNREACH;
+		goto out;
+	}
+	rma_fd = ret;
+	ret = 0;
+
+	len = sizeof(*sconn->peer_rma);
+
+	/* MMAP the buffer */
+	sconn->peer_rma_mmap = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, rma_fd, 0);
+	close(rma_fd);
+	rma_fd = 0;
+	if (sconn->peer_rma_mmap == MAP_FAILED) {
+		debug(CCI_DB_WARN, "%s: RMA mmap() failed with %s", __func__,
+				strerror(errno));
+		ret = CCI_ERROR;
+		goto out;
+	}
+	sconn->peer_rma = sconn->peer_rma_mmap;
+
     out:
+	if (msgs_fd)
+		close(msgs_fd);
+	if (rma_fd)
+		close(rma_fd);
 	return ret;
 }
 
@@ -1329,7 +1368,8 @@ sm_parse_uri(const char *uri, int *pidp, int *idp)
 static int
 sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 {
-	int ret = 0, peer_pid = 0, peer_id = 0, len = 0, msgs_fd = 0, i = 0;
+	int ret = 0, peer_pid = 0, peer_id = 0, len = 0, i = 0;
+	int msgs_fd = 0, rma_fd = 0;
 	cci__conn_t *conn = NULL;
 	cci__dev_t *dev = ep->dev;
 	sm_dev_t *sdev = dev->priv;
@@ -1404,7 +1444,7 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 	}
 	sconn->fifo = ret;
 
-	/* Open our shared memory object */
+	/* Open our shared memory object for MSGs */
 	memset(name, 0, sizeof(name));
 	snprintf(name, sizeof(name), "%s/%u/conns/%d", sdev->path, sep->id, sconn->id);
 	ret = open(name, O_RDWR | O_CREAT | O_TRUNC, 0666);
@@ -1428,6 +1468,7 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 	/* MMAP the buffer */
 	sconn->mmap = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, msgs_fd, 0);
 	close(msgs_fd);
+	msgs_fd = 0;
 	if (sconn->mmap == MAP_FAILED) {
 		debug(CCI_DB_WARN, "%s: mmap() failed with %s", __func__,
 				strerror(errno));
@@ -1441,6 +1482,46 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 	 */
 	sconn->tx->avail = ~(0ULL);
 	ring_init(&(sconn->tx->ring), 64); /* magic number */
+
+
+	/* Open our shared memory object for RMA */
+	memset(name, 0, sizeof(name));
+	snprintf(name, sizeof(name), "%s/%u/conns/%d-rma", sdev->path, sep->id, sconn->id);
+	ret = open(name, O_RDWR | O_CREAT | O_TRUNC, 0666);
+	if (ret == -1) {
+		debug(CCI_DB_CONN, "%s: unable to open %s's RMA mmap buf", __func__, uri);
+		ret = EHOSTUNREACH;
+		goto out;
+	}
+	rma_fd = ret;
+
+	len = sizeof(*sconn->rma);
+
+	ret = ftruncate(rma_fd, len);
+	if (ret) {
+		debug(CCI_DB_WARN, "%s: ftruncate(%s, %d) failed with %s", __func__,
+				name, len, strerror(errno));
+		ret = CCI_ERROR;
+		goto out;
+	}
+
+	/* MMAP the RMA buffer */
+	sconn->rma_mmap = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, rma_fd, 0);
+	close(rma_fd);
+	rma_fd = 0;
+	if (sconn->rma_mmap == MAP_FAILED) {
+		debug(CCI_DB_WARN, "%s: mmap() RMA failed with %s", __func__,
+				strerror(errno));
+		ret = CCI_ERROR;
+		goto out;
+	}
+
+	sconn->rma = sconn->rma_mmap;
+	/* We can just set this and rely on ring_init() to call
+	 * a memory barrier.
+	 */
+	sconn->rma->avail = ~(0ULL);
+	ring_init(&(sconn->rma->ring), 64); /* magic number */
 
 	/* Add new conn to the conns tree */
 	ret = pthread_rwlock_wrlock(&sep->conns_lock);
@@ -1475,9 +1556,15 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 
     out:
 	if (ret) {
+		if (msgs_fd)
+			close(msgs_fd);
+		if (rma_fd)
+			close(rma_fd);
 		if (sconn) {
 			if (sconn->mmap)
 				munmap(sconn->mmap, len);
+			if (sconn->rma_mmap)
+				munmap(sconn->rma_mmap, len);
 			if (sconn->fifo)
 				close(sconn->fifo);
 			free(sconn->name);
