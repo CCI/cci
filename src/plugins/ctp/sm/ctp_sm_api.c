@@ -1425,6 +1425,23 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 		evt->conn = conn;
 	}
 
+	sconn->txs_avail = ~(0ULL);
+
+	sconn->txs = calloc(64, sizeof(*sconn->txs));
+	if (!sconn->txs) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	for (i = 0; i < 64; i++) {
+		cci__evt_t *evt = &sconn->txs[i];
+
+		evt->event.type = CCI_EVENT_SEND;
+		evt->ep = ep;
+		evt->conn = conn;
+		evt->priv = (void*)(uintptr_t)i;
+	}
+
 	path = uri + 5; /* sm:// */
 	memset(name, 0, sizeof(name));
 	snprintf(name, sizeof(name), "%s/sock", path);
@@ -2166,6 +2183,49 @@ sm_progress_ep(cci__ep_t *ep)
 	return 0;
 }
 
+static cci__evt_t *
+sm_get_tx(sm_conn_t *sconn)
+{
+	int idx = 0;
+	uint64_t avail = 0, new = 0;
+	cci__evt_t *tx = NULL;
+
+    again:
+	avail = read_u64(&sconn->txs_avail, __ATOMIC_RELAXED);
+	if (!avail) {
+		debug(CCI_DB_MSG, "%s: no available txs for %s", __func__,
+			sconn->conn->uri);
+		goto out;
+	}
+	idx = ffsll(avail) - 1; /* convert to 0-based index */
+	new = ~(1ULL << idx) & avail;
+	if (compare_and_swap_u64(&sconn->txs_avail, avail, new, __ATOMIC_SEQ_CST)) {
+		tx = &sconn->txs[idx];
+	} else {
+		goto again;
+	}
+
+    out:
+	return tx;
+}
+
+static void
+sm_put_tx(cci__evt_t *tx)
+{
+	int idx = (int)(uintptr_t)tx->priv;
+	uint64_t avail = 0, new = 0;
+	sm_conn_t *sconn = tx->conn->priv;
+
+    again:
+	avail = read_u64(&sconn->txs_avail, __ATOMIC_RELAXED);
+	new = (1ULL << idx) | avail;
+	if (!compare_and_swap_u64(&sconn->txs_avail, avail, new, __ATOMIC_SEQ_CST)) {
+		goto again;
+	}
+
+	return;
+}
+
 static int ctp_sm_get_event(cci_endpoint_t * endpoint,
 			      cci_event_t ** event)
 {
@@ -2242,10 +2302,8 @@ sm_return_send(cci_event_t *event)
 {
 	cci__evt_t *evt = container_of(event, cci__evt_t, event);
 
-	if (evt->priv) {
-		/* TODO handle RMA */
-	}
-	free(evt);
+	sm_put_tx(evt);
+
 	return;
 }
 
@@ -2418,19 +2476,15 @@ static int ctp_sm_send(cci_connection_t * connection,
 	}
 
 	if (!(flags & CCI_FLAG_SILENT)) {
-		evt = calloc(1, sizeof(*evt));
+		evt = sm_get_tx(sconn);
 		if (!evt) {
-			ret = CCI_ENOMEM;
+			ret = CCI_ENOBUFS;
 			goto out;
 		}
 
-		evt->event.type = CCI_EVENT_SEND;
 		evt->event.send.status = CCI_SUCCESS; /* for now */
 		evt->event.send.connection = connection;
 		evt->event.send.context = (void *)context;
-		evt->ep = ep;
-		evt->conn = conn;
-		evt->priv = NULL;
 	}
 
 	if (msg_len) {
@@ -2465,7 +2519,7 @@ static int ctp_sm_send(cci_connection_t * connection,
 		msg_len, conn->uri, ret ? "failed" : "succeeded", ret);
 
 	if (ret)
-		free(evt);
+		sm_put_tx(evt);
 
 	CCI_EXIT;
 	return ret;
@@ -2492,19 +2546,15 @@ static int ctp_sm_sendv(cci_connection_t * connection,
 	}
 
 	if (!(flags & CCI_FLAG_SILENT)) {
-		evt = calloc(1, sizeof(*evt));
+		evt = sm_get_tx(sconn);
 		if (!evt) {
-			ret = CCI_ENOMEM;
+			ret = CCI_ENOBUFS;
 			goto out;
 		}
 
-		evt->event.type = CCI_EVENT_SEND;
 		evt->event.send.status = CCI_SUCCESS; /* for now */
 		evt->event.send.connection = connection;
 		evt->event.send.context = (void *)context;
-		evt->ep = ep;
-		evt->conn = conn;
-		evt->priv = NULL;
 	}
 
 	if (iovcnt) {
@@ -2545,7 +2595,7 @@ static int ctp_sm_sendv(cci_connection_t * connection,
 		len, conn->uri, ret ? "failed" : "succeeded", ret);
 
 	if (ret)
-		free(evt);
+		sm_put_tx(evt);
 
 	CCI_EXIT;
 	return ret;

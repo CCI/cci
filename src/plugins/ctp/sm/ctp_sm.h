@@ -25,9 +25,7 @@ BEGIN_C_DECLS
 #define SM_EP_RX_CNT		(1024)		/* number of rx messages */
 #define SM_EP_TX_CNT		(1024)		/* number of tx messages */
 
-/* Define minimal cache line sizes.
- * The cache line must be larger than the size of sm_tx_t.
- */
+/* Define minimal cache line sizes. */
 #define SM_SHIFT		(6)		/* 6 = 64B, 7 = 128B, 8 = 256B */
 #define SM_LINE			(1 << SM_SHIFT)	/* Cache line size */
 #define SM_MASK			(SM_LINE - 1)	/* Mask bits for line size */
@@ -262,7 +260,6 @@ typedef struct sm_ep		sm_ep_t;
 typedef struct sm_conn		sm_conn_t;
 typedef struct sm_conn_buffer	sm_conn_buffer_t;
 typedef struct sm_conn_rma_buf	sm_conn_rma_buf_t;
-typedef struct sm_tx		sm_tx_t;
 typedef struct sm_rx		sm_rx_t;
 typedef struct sm_rma		sm_rma_t;
 typedef struct sm_rma_op	sm_rma_op_t;
@@ -283,7 +280,6 @@ struct sm_rma_handle {
 struct sm_rma {
 	cci__evt_t evt;
 	sm_rma_hdr_t hdr;
-	sm_tx_t *tx;
 	uint32_t num_frags;
 	uint32_t next_frag;
 	uint32_t completed;
@@ -380,6 +376,8 @@ struct sm_conn {
 	sm_conn_rma_buf_t	*peer_rma;	/* Pointer to peer's RMA mmap */
 
 	cci__evt_t		*rxs;		/* RECV events */
+	cci__evt_t		*txs;		/* SEND events */
+	uint64_t		txs_avail;	/* Bitmap of available txs */
 
 	TAILQ_ENTRY(sm_conn)	entry;		/* Entry in sep->conns|active|passive */
 	char			*name;		/* sockaddr_un.sun_path */
