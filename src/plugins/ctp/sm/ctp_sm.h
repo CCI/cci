@@ -259,7 +259,7 @@ typedef struct sm_dev		sm_dev_t;
 typedef struct sm_ep		sm_ep_t;
 typedef struct sm_conn		sm_conn_t;
 typedef struct sm_conn_buffer	sm_conn_buffer_t;
-typedef struct sm_conn_rma_buf	sm_conn_rma_buf_t;
+typedef struct sm_rma_buffer	sm_rma_buffer_t;
 typedef struct sm_rx		sm_rx_t;
 typedef struct sm_rma		sm_rma_t;
 typedef struct sm_rma_op	sm_rma_op_t;
@@ -350,10 +350,11 @@ struct sm_conn_buffer {
 	ring_t			ring;		/* For headers */
 };
 
-struct sm_conn_rma_buf {
+struct sm_rma_buffer {
 	uint64_t		avail;		/* Bitmask for available pages */
-	ring_t			ring;		/* For headers */
+	ring_t			ring;		/* For MSG headers */
 	char			pad[SM_RMA_MTU - sizeof(uint64_t) - sizeof(ring_t)];
+	char			hdr[SM_LINE * 64]; /* Cache lines for RMA frag headers */
 	char			buf[SM_RMA_MTU * 64]; /* Pages */
 };
 
@@ -371,9 +372,9 @@ struct sm_conn {
 	sm_conn_buffer_t	*rx;		/* Pointer to peer's mmap */
 
 	void			*rma_mmap;	/* Mmapped RMA buffer */
-	sm_conn_rma_buf_t	*rma;		/* Pointer to RMA mmap */
+	sm_rma_buffer_t		*rma;		/* Pointer to RMA mmap */
 	void			*peer_rma_mmap;	/* Peer's RMA mmap */
-	sm_conn_rma_buf_t	*peer_rma;	/* Pointer to peer's RMA mmap */
+	sm_rma_buffer_t		*peer_rma;	/* Pointer to peer's RMA mmap */
 
 	cci__evt_t		*rxs;		/* RECV events */
 	cci__evt_t		*txs;		/* SEND events */

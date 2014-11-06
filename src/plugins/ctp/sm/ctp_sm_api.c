@@ -2369,6 +2369,68 @@ sm_release_conn_buffer(sm_conn_buffer_t *cb, uint32_t len, int offset)
 	return;
 }
 
+static int
+sm_reserve_rma_buffer(sm_rma_buffer_t *rb, uint32_t len, int *offset)
+{
+	int ret = 0, cnt = (len & SM_MASK ? 1 : 0) + (len >> SM_SHIFT), i = 0;
+	uint64_t avail = 0, bits = ((uint64_t)1 << cnt) - 1, new = 0;
+
+	debug(CCI_DB_MSG, "%s: requesting %d bytes (cnt %d bits 0x%"PRIx64")",
+		__func__, len, cnt, bits);
+
+	for (i = 0; i < (63 - cnt); i++) {
+    again:
+		avail = read_u64(&rb->avail, __ATOMIC_RELAXED);
+		if (!avail) {
+			debug(CCI_DB_MSG, "%s: avail 0x%"PRIx64, __func__, avail);
+			ret = ENOBUFS;
+			goto out;
+		}
+		if ((avail & bits) == bits) {
+			new = avail & ~bits;
+			if (compare_and_swap_u64(&rb->avail, avail, new,
+						__ATOMIC_SEQ_CST)) {
+				debug(CCI_DB_MSG, "%s: bits 0x%"PRIx64" avail 0x%"PRIx64" "
+					"new 0x%"PRIx64" offset %u", __func__, bits,
+					avail, new, i);
+				*offset = i;
+				goto out;
+			} else {
+				goto again;
+			}
+		}
+		bits <<= 1;
+	}
+
+	bits = ((uint64_t)1 << cnt) - 1;
+	debug(CCI_DB_MSG, "%s: bits 0x%"PRIx64" avail 0x%"PRIx64, __func__, bits, avail);
+
+	ret = CCI_ENOBUFS;
+
+    out:
+	return ret;
+}
+
+static void
+sm_release_rma_buffer(sm_rma_buffer_t *rb, uint32_t len, int offset)
+{
+	int cnt = (len & SM_MASK ? 1 : 0) + (len >> SM_SHIFT);
+	uint64_t avail = 0, bits = (((uint64_t)1 << cnt) - 1) << offset;
+
+    again:
+	avail = read_u64(&rb->avail, __ATOMIC_RELAXED);
+	debug(CCI_DB_MSG, "%s: bits 0x%"PRIx64" avail 0x%"PRIx64, __func__, bits, avail);
+	if (avail & bits)
+		debug(CCI_DB_WARN, "%s: bits 0x%"PRIx64" avail 0x%"PRIx64,
+			__func__, bits, avail);
+	assert((avail & bits) == 0);
+
+	if (!compare_and_swap_u64(&rb->avail, avail, avail | bits, __ATOMIC_SEQ_CST))
+		goto again;
+
+	return;
+}
+
 static void
 sm_return_recv(cci_event_t *event)
 {
