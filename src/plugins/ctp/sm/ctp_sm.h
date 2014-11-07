@@ -35,9 +35,11 @@ BEGIN_C_DECLS
 #define SM_MAX_MSS		(4096)		/* page size */
 
 #define SM_RMA_MTU		(4096)		/* Common page size */
-#define SM_RMA_DEPTH		(4)		/* how many in-flight msgs per RMA */
-#define SM_RMA_FRAG_SIZE	(8*1024)	/* optimal for POSIX shmem */
-#define SM_RMA_FRAG_MAX		(64*1024)	/* optimal for knem and CMA */
+#define SM_RMA_SHIFT		(12)
+#define SM_RMA_MASK		(SM_RMA_MTU - 1)
+#define SM_RMA_DEPTH		(32)		/* how many in-flight msgs per RMA */
+#define SM_RMA_FRAG_SIZE	(2*SM_RMA_MTU)	/* optimal for POSIX shmem */
+#define SM_RMA_FRAG_MAX		(16*SM_RMA_MTU)	/* optimal for knem and CMA */
 
 #define SM_EP_MAX_CONNS		(1024)		/* Number of cores? */
 #define SM_EP_MAX_ID		((1 << 14) - 1)	/* Largest supported endpoint ID -
@@ -272,17 +274,25 @@ typedef enum sm_ctx {
 } sm_ctx_t;
 
 struct sm_rma_handle {
-	void *addr;
-	uint64_t len;
-	int flags;
+	cci__ep_t		*ep;		/* Owning endpoint */
+	void			*addr;		/* Starting address */
+	uint64_t		len;		/* Length */
+	struct cci_rma_handle	handle;		/* CCI RMA handle */
+	int			flags;		/* Access flags */
 };
 
+/* Store RMA pointer in rma->evt.priv to distringuish this from a MSG */
 struct sm_rma {
-	cci__evt_t evt;
-	sm_rma_hdr_t hdr;
-	uint32_t num_frags;
-	uint32_t next_frag;
-	uint32_t completed;
+	cci__evt_t		evt;		/* CCI internal event */
+	sm_rma_hdr_t		hdr;		/* RMA parameters */
+	uint64_t		offset;		/* Bytes transferred */
+	void			*msg_ptr;	/* Completion MSG */
+	uint32_t		seq;		/* RMA frag seqno */
+	uint32_t		next_frag;	/* Next frag index to send */
+	uint32_t		pending;	/* In-flight fragments */
+	uint32_t		completed;	/* Number of completed frags */
+	uint32_t		msg_len;	/* Completion msg length */
+	int			flags;		/* CCI flags */
 };
 
 struct sm_ep {

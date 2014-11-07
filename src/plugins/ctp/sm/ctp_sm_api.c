@@ -2050,25 +2050,119 @@ sm_handle_send(cci__ep_t *ep, cci__conn_t *conn, sm_hdr_t *hdr)
 }
 
 static int
-sm_handle_rma_write(cci__ep_t *ep, sm_hdr_t hdr)
+sm_handle_rma_write(cci__ep_t *ep, cci__conn_t *conn, sm_hdr_t *hdr)
 {
 	int ret = 0;
+	sm_conn_t *sconn = conn->priv;
+	sm_rma_hdr_t *rma_hdr = (void*) &sconn->peer_rma->hdr[hdr->rma.offset * SM_LINE];
+	void *src = NULL, *dst = NULL;
+	sm_rma_handle_t *h = (void*) ((uintptr_t)rma_hdr->remote_handle);
+	sm_hdr_t ack;
+
+	if (rma_hdr->remote_offset + rma_hdr->len > h->len) {
+		/* exceeds RMA registration length, return error */
+		ret = CCI_ERR_RMA_HANDLE;
+		goto out;
+	}
+
+	src = (void*)&sconn->peer_rma->buf[hdr->rma.offset * SM_RMA_MTU];
+	dst = (void*)((uintptr_t)h->addr + (uintptr_t)rma_hdr->remote_offset);
+	memcpy(dst, src, rma_hdr->len);
+
+    out:
+	ack.rma_ack.type = SM_MSG_RMA_ACK;
+	ack.rma_ack.offset = hdr->rma.offset;
+	ack.rma_ack.status = ret;
+	mb();
+
+    again:
+	ret = ring_insert(&sconn->rma->ring, *((uint32_t*)&ack.u32));
+	if (ret)
+		goto again;
 
 	return ret;
 }
 
 static int
-sm_handle_rma_read(cci__ep_t *ep, sm_hdr_t hdr)
+sm_handle_rma_read(cci__ep_t *ep, cci__conn_t *conn, sm_hdr_t *hdr)
 {
 	int ret = 0;
+	sm_conn_t *sconn = conn->priv;
+	sm_rma_hdr_t *rma_hdr = (void*) &sconn->peer_rma->hdr[hdr->rma.offset * SM_LINE];
+	void *src = NULL, *dst = NULL;
+	sm_rma_handle_t *h = (void*) ((uintptr_t)rma_hdr->remote_handle);
+	sm_hdr_t ack;
+
+	if (rma_hdr->remote_offset + rma_hdr->len > h->len) {
+		/* exceeds RMA registration length, return error */
+		ret = CCI_ERR_RMA_HANDLE;
+		goto out;
+	}
+
+	src = (void*)((uintptr_t)h->addr + (uintptr_t)rma_hdr->remote_offset);
+	dst = (void*)&sconn->peer_rma->buf[hdr->rma.offset * SM_RMA_MTU];
+	memcpy(dst, src, rma_hdr->len);
+
+    out:
+	ack.rma_ack.type = SM_MSG_RMA_ACK;
+	ack.rma_ack.offset = hdr->rma.offset;
+	ack.rma_ack.status = ret;
+	mb();
+
+    again:
+	ret = ring_insert(&sconn->rma->ring, *((uint32_t*)&ack.u32));
+	if (ret)
+		goto again;
 
 	return ret;
 }
 
+static inline void
+sm_complete_rma(cci__ep_t *ep, sm_rma_t *rma)
+{
+	if (!(rma->flags & CCI_FLAG_SILENT)) {
+		debug(CCI_DB_MSG, "%s: queuing rma %p", __func__, rma);
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_INSERT_TAIL(&ep->evts, &rma->evt, entry);
+		pthread_mutex_unlock(&ep->lock);
+	} else {
+		debug(CCI_DB_MSG, "%s: freeing rma %p", __func__, rma);
+		free(rma);
+	}
+	return;
+}
+
+static void
+sm_release_rma_buffer(sm_rma_buffer_t *rb, uint32_t len, int index);
+
 static int
-sm_handle_rma_ack(cci__ep_t *ep, sm_hdr_t hdr)
+sm_progress_rma(sm_rma_t *rma);
+
+static int
+sm_handle_rma_ack(cci__ep_t *ep, cci__conn_t *conn, sm_hdr_t *hdr)
 {
 	int ret = 0;
+	sm_conn_t *sconn = conn->priv;
+	sm_rma_hdr_t *rma_hdr = (void*) &sconn->rma->hdr[hdr->rma_ack.offset * SM_LINE];
+	void *src = NULL, *dst = NULL;
+	sm_rma_handle_t *h = (void*) ((uintptr_t)rma_hdr->local_handle);
+	sm_rma_t *rma = (void*)((uintptr_t)rma_hdr->rma);
+
+	rma->pending--;
+	rma->completed++;
+
+	if (!rma->evt.event.send.status)
+		rma->evt.event.send.status = hdr->rma_ack.status;
+
+	if (!hdr->rma_ack.status && (rma->flags & CCI_FLAG_READ)) {
+		src = (void*)((uintptr_t)&sconn->rma->buf[hdr->rma_ack.offset * SM_RMA_MTU]);
+		dst = (void*)((uintptr_t)h->addr + (uintptr_t)rma_hdr->local_offset);
+		memcpy(dst, src, rma_hdr->len);
+	}
+
+	sm_release_rma_buffer(sconn->rma, rma_hdr->len, hdr->rma_ack.offset);
+
+	sm_progress_rma(rma);
 
 	return ret;
 }
@@ -2302,7 +2396,12 @@ sm_return_send(cci_event_t *event)
 {
 	cci__evt_t *evt = container_of(event, cci__evt_t, event);
 
-	sm_put_tx(evt);
+	if (!evt->priv) {
+		sm_put_tx(evt);
+	} else {
+		sm_rma_t *rma = container_of(evt, sm_rma_t, evt);
+		free(rma);
+	}
 
 	return;
 }
@@ -2370,9 +2469,9 @@ sm_release_conn_buffer(sm_conn_buffer_t *cb, uint32_t len, int offset)
 }
 
 static int
-sm_reserve_rma_buffer(sm_rma_buffer_t *rb, uint32_t len, int *offset)
+sm_reserve_rma_buffer(sm_rma_buffer_t *rb, uint32_t len, int *index)
 {
-	int ret = 0, cnt = (len & SM_MASK ? 1 : 0) + (len >> SM_SHIFT), i = 0;
+	int ret = 0, cnt = (len & SM_RMA_MASK ? 1 : 0) + (len >> SM_RMA_SHIFT), i = 0;
 	uint64_t avail = 0, bits = ((uint64_t)1 << cnt) - 1, new = 0;
 
 	debug(CCI_DB_MSG, "%s: requesting %d bytes (cnt %d bits 0x%"PRIx64")",
@@ -2391,9 +2490,9 @@ sm_reserve_rma_buffer(sm_rma_buffer_t *rb, uint32_t len, int *offset)
 			if (compare_and_swap_u64(&rb->avail, avail, new,
 						__ATOMIC_SEQ_CST)) {
 				debug(CCI_DB_MSG, "%s: bits 0x%"PRIx64" avail 0x%"PRIx64" "
-					"new 0x%"PRIx64" offset %u", __func__, bits,
+					"new 0x%"PRIx64" index %u", __func__, bits,
 					avail, new, i);
-				*offset = i;
+				*index = i;
 				goto out;
 			} else {
 				goto again;
@@ -2412,10 +2511,10 @@ sm_reserve_rma_buffer(sm_rma_buffer_t *rb, uint32_t len, int *offset)
 }
 
 static void
-sm_release_rma_buffer(sm_rma_buffer_t *rb, uint32_t len, int offset)
+sm_release_rma_buffer(sm_rma_buffer_t *rb, uint32_t len, int index)
 {
-	int cnt = (len & SM_MASK ? 1 : 0) + (len >> SM_SHIFT);
-	uint64_t avail = 0, bits = (((uint64_t)1 << cnt) - 1) << offset;
+	int cnt = (len & SM_RMA_MASK ? 1 : 0) + (len >> SM_RMA_SHIFT);
+	uint64_t avail = 0, bits = (((uint64_t)1 << cnt) - 1) << index;
 
     again:
 	avail = read_u64(&rb->avail, __ATOMIC_RELAXED);
@@ -2494,11 +2593,138 @@ sm_progress_conn_ring(cci__ep_t *ep, cci__conn_t *conn)
 	case SM_MSG_SEND:
 		ret = sm_handle_send(ep, conn, hdr);
 		break;
+	default:
+		debug(CCI_DB_MSG, "%s: unknown header type %d from %s", __func__,
+				hdr->generic.type, conn->uri);
+		ret = CCI_ERROR;
+	}
+
+    out:
+	return ret;
+}
+
+static int
+sm_progress_rma(sm_rma_t *rma)
+{
+	int ret = CCI_SUCCESS;
+	uint64_t start = rma->offset;
+	cci__ep_t *ep = rma->evt.ep;
+	cci__conn_t *conn = rma->evt.conn;
+	sm_conn_t *sconn = conn->priv;
+
+	if (rma->evt.event.send.status) {
+		/* Failed RMA, ... */
+		if (rma->pending == 0)
+			sm_complete_rma(ep, rma);
+		goto out;
+	}
+
+	if (rma->offset == rma->hdr.len) {
+		if (rma->pending == 0) {
+			/* RMA complete */
+			if (!rma->msg_ptr) {
+				sm_complete_rma(ep, rma);
+				goto out;
+			} else {
+				rma->flags = rma->flags &
+					~(CCI_FLAG_READ|CCI_FLAG_WRITE|CCI_FLAG_FENCE);
+				/* Send completion MSG */
+				ret = ctp_sm_send(&conn->connection, rma->msg_ptr,
+						rma->msg_len, rma->evt.event.send.context,
+						rma->flags);
+				if (!ret) {
+					free(rma);
+				} else {
+					rma->evt.event.send.status = ret;
+					pthread_mutex_lock(&ep->lock);
+					TAILQ_INSERT_TAIL(&ep->evts, &rma->evt, entry);
+					pthread_mutex_unlock(&ep->lock);
+				}
+			}
+		}
+		goto out;
+	}
+
+	if (rma->pending == SM_RMA_DEPTH)
+		goto out;
+
+	/* The RMA is not done, push more fragments */
+	do {
+		int index = 0;
+		uint32_t len = SM_RMA_FRAG_SIZE;
+		sm_rma_hdr_t *rma_hdr = NULL;
+		void *addr = NULL, *src = NULL;
+		sm_rma_handle_t *lh = (void *)rma->hdr.local_handle;
+		sm_hdr_t hdr;
+
+		if ((rma->hdr.len - rma->offset) < (uint64_t)SM_RMA_FRAG_SIZE)
+			len = (uint32_t)(rma->hdr.len - rma->offset);
+
+    reserve:
+		ret = sm_reserve_rma_buffer(sconn->rma, len, &index);
+		if (ret) {
+			if (len > SM_RMA_MTU) {
+				len >>= 1;
+				goto reserve;
+			}
+			break;
+		}
+
+		/* we have a header cache line and payload page(s) */
+		rma_hdr = (void*) &sconn->rma->hdr[index * SM_LINE];
+		memcpy(rma_hdr, &rma->hdr, sizeof(*rma_hdr));
+		rma_hdr->len = len;
+
+		if (rma->flags & CCI_FLAG_WRITE) {
+			addr = &sconn->rma->buf[index * SM_RMA_MTU];
+			src = (void *)((uintptr_t)lh->addr + (uintptr_t)rma->offset);
+			memcpy(addr, src, len);
+		}
+		rma->offset += len;
+		rma->pending++;
+
+		hdr.rma.type = rma->flags & CCI_FLAG_WRITE ?
+			SM_MSG_RMA_WRITE : SM_MSG_RMA_READ;
+		hdr.rma.offset = index;
+		hdr.rma.seq = rma->seq++;
+
+    insert:
+		ret = ring_insert(&sconn->rma->ring, *((uint32_t*)&hdr.u32));
+		if (ret)
+			goto insert;
+	} while ((rma->pending < SM_RMA_DEPTH) && (rma->offset < rma->hdr.len));
+
+	if (rma->offset > start)
+		ret = 0;
+
+    out:
+	return ret;
+}
+
+static int
+sm_progress_rma_ring(cci__ep_t *ep, cci__conn_t *conn)
+{
+	int ret = 0;
+	sm_conn_t *sconn = conn->priv;
+	uint32_t val = 0;
+	sm_hdr_t *hdr = (sm_hdr_t *)&val;
+
+	if (!sconn->peer_rma)
+		return CCI_EAGAIN;
+
+	ret = ring_remove(&sconn->peer_rma->ring, &val);
+	if (ret)
+		goto out;
+
+	switch (hdr->generic.type) {
 	case SM_MSG_RMA_WRITE:
+		ret = sm_handle_rma_write(ep, conn, hdr);
 		break;
 	case SM_MSG_RMA_READ:
+		ret = sm_handle_rma_read(ep, conn, hdr);
 		break;
 	case SM_MSG_RMA_ACK:
+		ret = sm_handle_rma_ack(ep, conn, hdr);
 		break;
 	default:
 		debug(CCI_DB_MSG, "%s: unknown header type %d from %s", __func__,
@@ -2514,6 +2740,7 @@ static void
 sm_progress_conn(cci__ep_t *ep, cci__conn_t *conn)
 {
 	sm_progress_conn_ring(ep, conn);
+	sm_progress_rma_ring(ep, conn);
 
 	return;
 }
@@ -2667,22 +2894,58 @@ static int ctp_sm_rma_register(cci_endpoint_t * endpoint,
 				 void *start, uint64_t length,
 				 int flags, cci_rma_handle_t ** rma_handle)
 {
+	int ret = CCI_SUCCESS;
+	cci__ep_t *ep = NULL;
+	sm_ep_t *sep = NULL;
+	sm_rma_handle_t *sh = NULL;
+
 	CCI_ENTER;
 
-	debug(CCI_DB_INFO, "%s", "In sm_rma_register\n");
+	if (!smglobals) {
+		ret = CCI_ENODEV;
+		goto out;
+	}
 
+	ep = container_of(endpoint, cci__ep_t, endpoint);
+	sep = ep->priv;
+
+	sh = calloc(1, sizeof(*sh));
+	if (!sh) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	sh->ep = ep;
+	sh->addr = start;
+	sh->len = length;
+	sh->handle.stuff[0] = (uintptr_t) sh;
+	sh->flags = flags;
+
+	*rma_handle = &sh->handle;
+
+    out:
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 static int ctp_sm_rma_deregister(cci_endpoint_t * endpoint, cci_rma_handle_t * rma_handle)
 {
+	int ret = CCI_SUCCESS;
+	struct cci_rma_handle *lh = (void*) rma_handle;
+	sm_rma_handle_t *sh = (void *)((uintptr_t)lh->stuff[0]);
+
 	CCI_ENTER;
 
-	debug(CCI_DB_INFO, "%s", "In sm_rma_deregister\n");
+	if (!smglobals) {
+		ret = CCI_ENODEV;
+		goto out;
+	}
 
+	free(sh);
+
+    out:
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
 
 static int ctp_sm_rma(cci_connection_t * connection,
@@ -2691,10 +2954,63 @@ static int ctp_sm_rma(cci_connection_t * connection,
 			cci_rma_handle_t * remote_handle, uint64_t remote_offset,
 			uint64_t data_len, const void *context, int flags)
 {
+	int ret = CCI_SUCCESS;
+	cci__ep_t *ep = NULL;
+	sm_ep_t *sep = NULL;
+	cci__conn_t *conn = container_of(connection, cci__conn_t, connection);
+	struct cci_rma_handle *h = (void *)local_handle;
+	sm_rma_handle_t *sh = (void*)((uintptr_t)h->stuff[0]);
+	sm_rma_t *rma = NULL;
+
 	CCI_ENTER;
 
-	debug(CCI_DB_INFO, "%s", "In sm_rma\n");
+	if (!smglobals) {
+		ret = CCI_ENODEV;
+		goto out;
+	}
 
+	if ((data_len + local_offset) > sh->len) {
+		debug(CCI_DB_MSG,
+			"%s: RMA length + offset exceeds registered length "
+			"(%"PRIu64" + %"PRIu64" > %"PRIu64")",
+			__func__, data_len, local_offset, sh->len);
+		ret = CCI_EINVAL;
+		goto out;
+	}
+
+	ep = container_of(connection->endpoint, cci__ep_t, endpoint);
+	sep = ep->priv;
+
+	rma = calloc(1, sizeof(*rma));
+	if (!rma) {
+		ret = CCI_ENOMEM;
+		goto out;
+	}
+
+	rma->evt.event.send.type = CCI_EVENT_SEND;
+	rma->evt.event.send.status = CCI_SUCCESS; /* for now */
+	rma->evt.event.send.connection = connection;
+	rma->evt.event.send.context = (void*) context;
+	rma->evt.ep = ep;
+	rma->evt.conn = conn;
+	rma->evt.priv = (void*) rma;
+
+	rma->msg_ptr = (void*) msg_ptr;
+
+	rma->hdr.local_handle = (uintptr_t)sh;
+	rma->hdr.local_offset = local_offset;
+	rma->hdr.remote_handle = remote_handle->stuff[0];
+	rma->hdr.remote_offset = remote_offset;
+	rma->hdr.len = data_len;
+	rma->hdr.rma = (uintptr_t)rma;
+
+	rma->msg_len = msg_len;
+	rma->flags = flags;
+
+	ret = sm_progress_rma(rma);
+	if (ret)
+		free(rma);
+    out:
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return ret;
 }
