@@ -2674,6 +2674,8 @@ sm_progress_rma(sm_rma_t *rma)
 		rma_hdr = (void*) &sconn->rma->hdr[index * SM_LINE];
 		memcpy(rma_hdr, &rma->hdr, sizeof(*rma_hdr));
 		rma_hdr->len = len;
+		rma_hdr->local_offset += rma->offset;
+		rma_hdr->remote_offset += rma->offset;
 
 		if (rma->flags & CCI_FLAG_WRITE) {
 			addr = &sconn->rma->buf[index * SM_RMA_MTU];
