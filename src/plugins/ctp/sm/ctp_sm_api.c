@@ -1070,7 +1070,7 @@ static int
 sm_map_conn(sm_conn_t *sconn)
 {
 	int ret = 0, msgs_fd = 0, rma_fd = 0, len = 0;
-	char name[MAXPATHLEN], *ptr = NULL;
+	char name[MAXPATHLEN], rma_name[MAXPATHLEN], *ptr = NULL;
 
 	memset(name, 0, sizeof(name));
 	snprintf(name, sizeof(name), "%s", sconn->name);
@@ -1102,11 +1102,11 @@ sm_map_conn(sm_conn_t *sconn)
 	}
 	sconn->rx = sconn->peer_mmap;
 
-	snprintf(name, sizeof(name), "%s-rma", name);
-	ret = open(name, O_RDWR, 0666);
+	snprintf(rma_name, sizeof(rma_name), "%s-rma", name);
+	ret = open(rma_name, O_RDWR, 0666);
 	if (ret == -1) {
-		debug(CCI_DB_CONN, "%s: unable to open %s's RMA mmap buf", __func__,
-				sconn->conn->uri);
+		debug(CCI_DB_CONN, "%s: unable to open %s's RMA mmap buf %s (%s)", __func__,
+				sconn->conn->uri, rma_name, strerror(errno));
 		ret = EHOSTUNREACH;
 		goto out;
 	}
