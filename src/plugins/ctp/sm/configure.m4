@@ -33,10 +33,6 @@ AC_DEFUN([PLUGINS_cci_ctp_sm_CONFIG],[
                              [],
                              [$1],
                              [$2])
-    AC_CHECK_TYPE([struct xpmem_addr],
-        [AC_DEFINE([HAVE_XPMEM], [1])],
-        [AC_DEFINE([HAVE_XPMEM], [0], [Define if struct xpmem_addr detected])],
-        [#include <xpmem.h>])
     AC_CHECK_HEADER(xpmem.h,
         [AC_DEFINE([HAVE_XPMEM_H], [1])],
         [AC_DEFINE([HAVE_XPMEM_H], [0], [Define if xpmem.h detected])])
