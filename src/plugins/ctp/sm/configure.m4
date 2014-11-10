@@ -33,6 +33,23 @@ AC_DEFUN([PLUGINS_cci_ctp_sm_CONFIG],[
                              [],
                              [$1],
                              [$2])
+    xpmem_dir=no
+    AC_ARG_WITH([sm-xpmem],
+        [AS_HELP_STRING([--with-sm-xpmem=DIR], [Build xpmem support in sm])],
+        [AS_IF([test "x$withval" != xyes],
+        [AC_DEFINE_UNQUOTED([XPMEM_DIR],[$withval],[XPMEM directory])
+         xpmem_dir=$withval])])
+    AS_IF([test "x$xpmem_dir" != xyes -a "x$xpmem_dir" != xno],
+        [echo xxpmem_dir is "x$xpmem_dir"
+         sm_ldadd="-L$xpmem_dir/lib"
+         sm_libadd="-lxpmem"
+         sm_incadd="-I$xpmem_dir/include"
+         CFLAGS="$CLFAGS $sm_incadd"
+         LDFLAGS="$LDFLAGS $sm_ldadd $sm_libadd"
+         unset sm_ldadd
+         unset sm_libadd
+         unset sm_incadd],
+        [echo xpmem not specified])
     AC_CHECK_HEADER(xpmem.h,
         [AC_DEFINE([HAVE_XPMEM_H], [1])],
         [AC_DEFINE([HAVE_XPMEM_H], [0], [Define if xpmem.h detected])])
