@@ -16,6 +16,9 @@
 #include "cci_lib_types.h"
 #include "cci-api.h"
 #include "ring.h"
+#if HAVE_XPMEM_H
+#include "xpmem.h"
+#endif
 
 BEGIN_C_DECLS
 #define SM_BLOCK_SIZE		(64)		/* uint64_t sized ep id blocks */
@@ -120,6 +123,10 @@ typedef union sm_conn_hdr {
 		uint32_t server_id	: 16;	/* Client-assigned ID for server */
 		uint32_t pad2		: 16;	/* Reserved */
 		/* 64b */
+#if HAVE_XPMEM_H
+		uint64_t segid;			/* xpmem segid */
+		/* 128b */
+#endif
 	} connect;
 
 	/* Connect reply */
@@ -131,6 +138,10 @@ typedef union sm_conn_hdr {
 		uint32_t server_id	: 16;	/* Client-assigned ID for server */
 		uint32_t client_id	: 16;	/* Server-assigned ID for client */
 		/* 64b */
+#if HAVE_XPMEM_H
+		uint64_t segid;			/* xpmem segid */
+		/* 128b */
+#endif
 	} reply;
 
 	/* Connect ack */
@@ -310,6 +321,10 @@ struct sm_ep {
 	uint32_t		last_id;	/* Last ID assigned */
 	int			pipe[2];	/* Pipe to notify app */
 
+#if HAVE_XPMEM_H
+	xpmem_segid_t		segid;		/* xpmem segid for this process */
+#endif
+
 	TAILQ_HEAD(act, sm_conn) active;	/* Active conns */
 	TAILQ_HEAD(psv, sm_conn) passive;	/* Passive conns */
 	TAILQ_HEAD(cls, sm_conn) closing;	/* Closing conns */
@@ -385,6 +400,12 @@ struct sm_conn {
 	sm_rma_buffer_t		*rma;		/* Pointer to RMA mmap */
 	void			*peer_rma_mmap;	/* Peer's RMA mmap */
 	sm_rma_buffer_t		*peer_rma;	/* Pointer to peer's RMA mmap */
+
+#if HAVE_XPMEM_H
+	xpmem_segid_t		segid;		/* xpmem segid */
+	xpmem_apid_t		apid;		/* xpmem apid */
+	void			*base;		/* xpmem address */
+#endif
 
 	cci__evt_t		*rxs;		/* RECV events */
 	cci__evt_t		*txs;		/* SEND events */

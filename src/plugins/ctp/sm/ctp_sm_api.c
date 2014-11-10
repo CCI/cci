@@ -915,6 +915,11 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	}
 	memset(sep->conn_ids, 0xFF, SM_EP_MAX_CONNS / sizeof(*sep->conn_ids));
 
+#if HAVE_XPMEM_H
+	sep->segid = xpmem_make(0, XPMEM_MAXADDR_SIZE, XPMEM_PERMIT_MODE,
+			(void*)((uintptr_t)0600));
+#endif
+
 	/* Create listening socket for connection setup */
 
 	/* If there is not enough space to append "/sock", bail */
@@ -1067,7 +1072,7 @@ sm_put_conn_id(sm_conn_t *sconn)
 }
 
 static int
-sm_map_conn(sm_conn_t *sconn)
+sm_map_conn(sm_ep_t *sep, sm_conn_t *sconn)
 {
 	int ret = 0, msgs_fd = 0, rma_fd = 0, len = 0;
 	char name[MAXPATHLEN], rma_name[MAXPATHLEN], *ptr = NULL;
@@ -1102,30 +1107,46 @@ sm_map_conn(sm_conn_t *sconn)
 	}
 	sconn->rx = sconn->peer_mmap;
 
-	snprintf(rma_name, sizeof(rma_name), "%s-rma", name);
-	ret = open(rma_name, O_RDWR, 0666);
-	if (ret == -1) {
-		debug(CCI_DB_CONN, "%s: unable to open %s's RMA mmap buf %s (%s)", __func__,
+#if HAVE_XPMEM_H
+	if (sep->segid != (xpmem_segid_t) -1 && sconn->segid != (xpmem_segid_t) -1) {
+		sconn->apid = xpmem_get(sconn->segid, XPMEM_RDWR, XPMEM_PERMIT_MODE,
+				(void*)0600);
+		if (sconn->apid == -1) {
+			debug(CCI_DB_CONN, "%s: xpmem_get() failed with %s",
+				__func__, strerror(errno));
+			ret = CCI_ERROR;
+			goto out;
+		}
+	} else
+#endif
+	{
+		snprintf(rma_name, sizeof(rma_name), "%s-rma", name);
+		ret = open(rma_name, O_RDWR, 0666);
+		if (ret == -1) {
+			debug(CCI_DB_CONN, "%s: unable to open %s's "
+				"RMA mmap buf %s (%s)", __func__,
 				sconn->conn->uri, rma_name, strerror(errno));
-		ret = EHOSTUNREACH;
-		goto out;
-	}
-	rma_fd = ret;
-	ret = 0;
+			ret = EHOSTUNREACH;
+			goto out;
+		}
+		rma_fd = ret;
+		ret = 0;
 
-	len = sizeof(*sconn->peer_rma);
+		len = sizeof(*sconn->peer_rma);
 
-	/* MMAP the buffer */
-	sconn->peer_rma_mmap = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, rma_fd, 0);
-	close(rma_fd);
-	rma_fd = 0;
-	if (sconn->peer_rma_mmap == MAP_FAILED) {
-		debug(CCI_DB_WARN, "%s: RMA mmap() failed with %s", __func__,
-				strerror(errno));
-		ret = CCI_ERROR;
-		goto out;
+		/* MMAP the buffer */
+		sconn->peer_rma_mmap = mmap(NULL, len, PROT_READ|PROT_WRITE,
+				MAP_SHARED, rma_fd, 0);
+		close(rma_fd);
+		rma_fd = 0;
+		if (sconn->peer_rma_mmap == MAP_FAILED) {
+			debug(CCI_DB_WARN, "%s: RMA mmap() failed with %s", __func__,
+					strerror(errno));
+			ret = CCI_ERROR;
+			goto out;
+		}
+		sconn->peer_rma = sconn->peer_rma_mmap;
 	}
-	sconn->peer_rma = sconn->peer_rma_mmap;
 
     out:
 	if (msgs_fd)
@@ -1157,7 +1178,7 @@ static int ctp_sm_accept(cci_event_t *event, const void *context)
 
 	conn->connection.context = (void *)context;
 
-	ret = sm_map_conn(sconn);
+	ret = sm_map_conn(sep, sconn);
 	if (ret)
 		goto out;
 
@@ -1173,13 +1194,16 @@ static int ctp_sm_accept(cci_event_t *event, const void *context)
 	evt->ep = ep;
 	evt->conn = conn;
 
-	len = sizeof(hdr);
+	len = sizeof(hdr.reply);
 
 	memset(&hdr, 0, len);
 	hdr.reply.type = SM_CMSG_CONN_REPLY;
 	hdr.reply.status = CCI_SUCCESS;
 	hdr.reply.server_id = sconn->peer_id;
 	hdr.reply.client_id = sconn->id;
+#if HAVE_XPMEM_H
+	hdr.reply.segid = sep->segid;
+#endif
 
 	memset(&sun, 0, slen);
 	sun.sun_family = AF_UNIX;
@@ -1283,13 +1307,16 @@ static int ctp_sm_reject(cci_event_t *event)
 	sep = ep->priv;
 	sconn = conn->priv;
 
-	len = sizeof(hdr);
+	len = sizeof(hdr.reply);
 
 	memset(&hdr, 0, len);
 	hdr.reply.type = SM_CMSG_CONN_REPLY;
 	hdr.reply.status = CCI_ECONNREFUSED;
 	hdr.reply.server_id = sconn->peer_id;
 	hdr.reply.client_id = 0;
+#if HAVE_XPMEM_H
+	hdr.reply.segid = -1;
+#endif
 
 	memset(&sun, 0, slen);
 	sun.sun_family = AF_UNIX;
@@ -1501,44 +1528,52 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 	ring_init(&(sconn->tx->ring), 64); /* magic number */
 
 
-	/* Open our shared memory object for RMA */
-	memset(name, 0, sizeof(name));
-	snprintf(name, sizeof(name), "%s/%u/conns/%d-rma", sdev->path, sep->id, sconn->id);
-	ret = open(name, O_RDWR | O_CREAT | O_TRUNC, 0666);
-	if (ret == -1) {
-		debug(CCI_DB_CONN, "%s: unable to open %s's RMA mmap buf", __func__, uri);
-		ret = EHOSTUNREACH;
-		goto out;
+#if HAVE_XPMEM_H
+	if (sep->segid != -1) {
+	} else
+#endif /* HAVE_XPMEM_H */
+	{
+		/* Open our shared memory object for RMA */
+		memset(name, 0, sizeof(name));
+		snprintf(name, sizeof(name), "%s/%u/conns/%d-rma",
+				sdev->path, sep->id, sconn->id);
+		ret = open(name, O_RDWR | O_CREAT | O_TRUNC, 0666);
+		if (ret == -1) {
+			debug(CCI_DB_CONN, "%s: unable to open %s's RMA mmap buf",
+				__func__, uri);
+			ret = EHOSTUNREACH;
+			goto out;
+		}
+		rma_fd = ret;
+
+		len = sizeof(*sconn->rma);
+
+		ret = ftruncate(rma_fd, len);
+		if (ret) {
+			debug(CCI_DB_WARN, "%s: ftruncate(%s, %d) failed with %s",
+				__func__, name, len, strerror(errno));
+			ret = CCI_ERROR;
+			goto out;
+		}
+
+		/* MMAP the RMA buffer */
+		sconn->rma_mmap = mmap(NULL, len, PROT_READ|PROT_WRITE, MAP_SHARED, rma_fd, 0);
+		close(rma_fd);
+		rma_fd = 0;
+		if (sconn->rma_mmap == MAP_FAILED) {
+			debug(CCI_DB_WARN, "%s: mmap() RMA failed with %s",
+				__func__, strerror(errno));
+			ret = CCI_ERROR;
+			goto out;
+		}
+
+		sconn->rma = sconn->rma_mmap;
+		/* We can just set this and rely on ring_init() to call
+		 * a memory barrier.
+		 */
+		sconn->rma->avail = ~(0ULL);
+		ring_init(&(sconn->rma->ring), 64); /* magic number */
 	}
-	rma_fd = ret;
-
-	len = sizeof(*sconn->rma);
-
-	ret = ftruncate(rma_fd, len);
-	if (ret) {
-		debug(CCI_DB_WARN, "%s: ftruncate(%s, %d) failed with %s", __func__,
-				name, len, strerror(errno));
-		ret = CCI_ERROR;
-		goto out;
-	}
-
-	/* MMAP the RMA buffer */
-	sconn->rma_mmap = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED, rma_fd, 0);
-	close(rma_fd);
-	rma_fd = 0;
-	if (sconn->rma_mmap == MAP_FAILED) {
-		debug(CCI_DB_WARN, "%s: mmap() RMA failed with %s", __func__,
-				strerror(errno));
-		ret = CCI_ERROR;
-		goto out;
-	}
-
-	sconn->rma = sconn->rma_mmap;
-	/* We can just set this and rely on ring_init() to call
-	 * a memory barrier.
-	 */
-	sconn->rma->avail = ~(0ULL);
-	ring_init(&(sconn->rma->ring), 64); /* magic number */
 
 	/* Add new conn to the conns tree */
 	ret = pthread_rwlock_wrlock(&sep->conns_lock);
@@ -1645,15 +1680,18 @@ static int ctp_sm_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	sun.sun_family = AF_UNIX;
 	memcpy(sun.sun_path, sconn->name, strlen(sconn->name));
 
-	memset(&hdr, 0, sizeof(hdr));
+	memset(&hdr, 0, sizeof(hdr.connect));
 	hdr.connect.type = SM_CMSG_CONNECT;
 	hdr.connect.version = 0;
 	hdr.connect.len = data_len;
 	hdr.connect.server_id = sconn->id;
+#if HAVE_XPMEM_H
+	hdr.connect.segid = sep->segid;
+#endif
 
 	memset(&iov, 0, sizeof(iov));
 	iov[0].iov_base = &hdr;
-	iov[0].iov_len = sizeof(hdr);
+	iov[0].iov_len = sizeof(hdr.connect);
 	iov[1].iov_base = params->data_ptr;
 	iov[1].iov_len = params->data_len;
 
@@ -1745,7 +1783,7 @@ sm_handle_connect(cci__ep_t *ep, const char *path, void *buffer, int len)
 	sm_conn_hdr_t *hdr = buffer;
 	cci__evt_t *rx = NULL;
 	char uri[MAXPATHLEN], *suffix = NULL;
-	void *p = (void*)((uintptr_t)buffer + sizeof(*hdr));
+	void *p = (void*)((uintptr_t)buffer + sizeof(hdr->connect));
 
 	memset(uri, 0, sizeof(uri));
 	snprintf(uri, sizeof(uri), "sm://%s", path);
@@ -1786,6 +1824,9 @@ sm_handle_connect(cci__ep_t *ep, const char *path, void *buffer, int len)
 	sconn = conn->priv;
 	sconn->state = SM_CONN_PASSIVE;
 	sconn->peer_id = hdr->connect.server_id;
+#if HAVE_XPMEM_H
+	sconn->segid = hdr->connect.segid;
+#endif
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&ep->evts, rx, entry);
@@ -1889,11 +1930,14 @@ sm_handle_connect_reply(cci__ep_t *ep, void *buffer)
 
 	if (hdr->reply.status == CCI_SUCCESS) {
 		sconn->peer_id = hdr->reply.client_id;
+#if HAVE_XPMEM_H
+		sconn->segid = hdr->reply.segid;
+#endif
 		evt->conn = conn;
 		evt->event.connect.status = CCI_SUCCESS;
 		evt->event.connect.connection = &conn->connection;
 		sconn->state = SM_CONN_READY;
-		ret = sm_map_conn(sconn);
+		ret = sm_map_conn(sep, sconn);
 		if (ret)
 			goto out;
 	} else {
@@ -1908,7 +1952,7 @@ sm_handle_connect_reply(cci__ep_t *ep, void *buffer)
 	hdr->ack.type = SM_CMSG_CONN_ACK;
 	hdr->ack.pad = 0;
 
-	len = sizeof(*hdr);
+	len = sizeof(hdr->ack);
 
 	ret = sendto(sep->sock, hdr, len, 0, (struct sockaddr*)&sun, slen);
 	if (ret == -1 ) {
@@ -1973,7 +2017,7 @@ sm_progress_sock(cci__ep_t *ep)
 
 	switch (hdr->generic.type) {
 	case SM_CMSG_CONNECT:
-		len -= sizeof(*hdr);
+		len -= sizeof(hdr->connect);
 		ret = sm_handle_connect(ep, sun.sun_path, buffer, len);
 		break;
 	case SM_CMSG_CONN_REPLY:
@@ -2121,12 +2165,12 @@ static inline void
 sm_complete_rma(cci__ep_t *ep, sm_rma_t *rma)
 {
 	if (!(rma->flags & CCI_FLAG_SILENT)) {
-		debug(CCI_DB_MSG, "%s: queuing rma %p", __func__, rma);
+		debug(CCI_DB_MSG, "%s: queuing rma %p", __func__, (void*)rma);
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_INSERT_TAIL(&ep->evts, &rma->evt, entry);
 		pthread_mutex_unlock(&ep->lock);
 	} else {
-		debug(CCI_DB_MSG, "%s: freeing rma %p", __func__, rma);
+		debug(CCI_DB_MSG, "%s: freeing rma %p", __func__, (void*)rma);
 		free(rma);
 	}
 	return;
@@ -2898,7 +2942,6 @@ static int ctp_sm_rma_register(cci_endpoint_t * endpoint,
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
-	sm_ep_t *sep = NULL;
 	sm_rma_handle_t *sh = NULL;
 
 	CCI_ENTER;
@@ -2909,7 +2952,6 @@ static int ctp_sm_rma_register(cci_endpoint_t * endpoint,
 	}
 
 	ep = container_of(endpoint, cci__ep_t, endpoint);
-	sep = ep->priv;
 
 	sh = calloc(1, sizeof(*sh));
 	if (!sh) {
@@ -2921,6 +2963,8 @@ static int ctp_sm_rma_register(cci_endpoint_t * endpoint,
 	sh->addr = start;
 	sh->len = length;
 	sh->handle.stuff[0] = (uintptr_t) sh;
+	sh->handle.stuff[1] = (uintptr_t) start;
+	sh->handle.stuff[2] = (uintptr_t) length;
 	sh->flags = flags;
 
 	*rma_handle = &sh->handle;
@@ -2958,9 +3002,10 @@ static int ctp_sm_rma(cci_connection_t * connection,
 {
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
-	sm_ep_t *sep = NULL;
 	cci__conn_t *conn = container_of(connection, cci__conn_t, connection);
+	sm_conn_t *sconn = conn->priv;
 	struct cci_rma_handle *h = (void *)local_handle;
+	struct cci_rma_handle *rh = (void*)remote_handle;
 	sm_rma_handle_t *sh = (void*)((uintptr_t)h->stuff[0]);
 	sm_rma_t *rma = NULL;
 
@@ -2980,8 +3025,16 @@ static int ctp_sm_rma(cci_connection_t * connection,
 		goto out;
 	}
 
+	if ((data_len + remote_offset) > remote_handle->stuff[2]) {
+		debug(CCI_DB_MSG,
+			"%s: RMA length + offset exceeds remote registered length "
+			"(%"PRIu64" + %"PRIu64" > %"PRIu64")",
+			__func__, data_len, local_offset, sh->len);
+		ret = CCI_EINVAL;
+		goto out;
+	}
+
 	ep = container_of(connection->endpoint, cci__ep_t, endpoint);
-	sep = ep->priv;
 
 	rma = calloc(1, sizeof(*rma));
 	if (!rma) {
@@ -2997,22 +3050,53 @@ static int ctp_sm_rma(cci_connection_t * connection,
 	rma->evt.conn = conn;
 	rma->evt.priv = (void*) rma;
 
-	rma->msg_ptr = (void*) msg_ptr;
+#if HAVE_XPMEM_H
+	if (remote_handle->stuff[3] == 0) {
+		size_t size = rh->stuff[1] + rh->stuff[2];
+		struct xpmem_addr xaddr;
 
-	rma->hdr.local_handle = (uintptr_t)sh;
-	rma->hdr.local_offset = local_offset;
-	rma->hdr.remote_handle = remote_handle->stuff[0];
-	rma->hdr.remote_offset = remote_offset;
-	rma->hdr.len = data_len;
-	rma->hdr.rma = (uintptr_t)rma;
+		xaddr.apid = sconn->apid;
+		xaddr.offset = 0;
+		rh->stuff[3] = (uint64_t) xpmem_attach(xaddr, size, NULL);
+	}
+	if (rh->stuff[3] != (uint64_t) -1) {
+		void *src = NULL, *dst = NULL;
 
-	rma->msg_len = msg_len;
-	rma->flags = flags;
+		if (flags & CCI_FLAG_WRITE) {
+			src = (void *)((uintptr_t)sh->addr + local_offset);
+			dst = (void*)((uintptr_t)sconn->base + rh->stuff[1] + remote_offset);
+		} else {
+			src = (void*)((uintptr_t)sconn->base + rh->stuff[1] + remote_offset);
+			dst = (void *)((uintptr_t)sh->addr + local_offset);
+		}
+		memcpy(dst, src, data_len);
+		if (msg_ptr) {
+			ret = ctp_sm_send(connection, msg_ptr, msg_len, context, flags);
+		} else {
+			pthread_mutex_lock(&ep->lock);
+			TAILQ_INSERT_TAIL(&ep->evts, &rma->evt, entry);
+			pthread_mutex_unlock(&ep->lock);
+		}
+	} else
+#endif
+	{
+		rma->msg_ptr = (void*) msg_ptr;
 
-	ret = sm_progress_rma(rma);
+		rma->hdr.local_handle = (uintptr_t)sh;
+		rma->hdr.local_offset = local_offset;
+		rma->hdr.remote_handle = remote_handle->stuff[0];
+		rma->hdr.remote_offset = remote_offset;
+		rma->hdr.len = data_len;
+		rma->hdr.rma = (uintptr_t)rma;
+
+		rma->msg_len = msg_len;
+		rma->flags = flags;
+
+		ret = sm_progress_rma(rma);
+	}
+    out:
 	if (ret)
 		free(rma);
-    out:
 	CCI_EXIT;
 	return ret;
 }
