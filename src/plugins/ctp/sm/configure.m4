@@ -41,7 +41,7 @@ AC_DEFUN([PLUGINS_cci_ctp_sm_CONFIG],[
          xpmem_dir=$withval])])
     AS_IF([test "x$xpmem_dir" != xyes -a "x$xpmem_dir" != xno],
         [echo xxpmem_dir is "x$xpmem_dir"
-         sm_ldadd="-L$xpmem_dir/lib"
+         sm_ldadd="-L$xpmem_dir/lib -L$xpmem_dir/lib64"
          sm_libadd="-lxpmem"
          sm_incadd="-I$xpmem_dir/include"
          CFLAGS="$CFLAGS $sm_incadd"
