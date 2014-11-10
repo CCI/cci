@@ -44,7 +44,7 @@ AC_DEFUN([PLUGINS_cci_ctp_sm_CONFIG],[
          sm_ldadd="-L$xpmem_dir/lib"
          sm_libadd="-lxpmem"
          sm_incadd="-I$xpmem_dir/include"
-         CFLAGS="$CLFAGS $sm_incadd"
+         CFLAGS="$CFLAGS $sm_incadd"
          LDFLAGS="$LDFLAGS $sm_ldadd $sm_libadd"
          unset sm_ldadd
          unset sm_libadd
