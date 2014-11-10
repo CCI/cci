@@ -5,7 +5,8 @@
 
 pkglib_LTLIBRARIES = cci_ctp_sm.la
 
-cci_ctp_sm_la_LDFLAGS = -module -avoid-version
+cci_ctp_sm_la_CFLAGS = $(ctp_sm_CFLAGS)
+cci_ctp_sm_la_LDFLAGS = -module -avoid-version $(ctp_sm_LDFLAGS) $(ctp_sm_LIBS)
 cci_ctp_sm_la_SOURCES = \
         ctp_sm.h \
         ctp_sm_module.c \

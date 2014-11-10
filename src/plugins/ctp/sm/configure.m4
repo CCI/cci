@@ -33,24 +33,38 @@ AC_DEFUN([PLUGINS_cci_ctp_sm_CONFIG],[
                              [],
                              [$1],
                              [$2])
+    cflags_save=$CFLAGS
+    ldflags_save=$LDFLAGS
+    libs_save=$LIBS
     xpmem_dir=no
     AC_ARG_WITH([sm-xpmem],
         [AS_HELP_STRING([--with-sm-xpmem=DIR], [Build xpmem support in sm])],
-        [AS_IF([test "x$withval" != xyes],
-        [AC_DEFINE_UNQUOTED([XPMEM_DIR],[$withval],[XPMEM directory])
-         xpmem_dir=$withval])])
+        [AS_IF([test "x$withval" != xyes], xpmem_dir=$withval)])
     AS_IF([test "x$xpmem_dir" != xyes -a "x$xpmem_dir" != xno],
         [echo xxpmem_dir is "x$xpmem_dir"
          sm_ldadd="-L$xpmem_dir/lib -L$xpmem_dir/lib64"
          sm_libadd="-lxpmem"
          sm_incadd="-I$xpmem_dir/include"
          CFLAGS="$CFLAGS $sm_incadd"
-         LDFLAGS="$LDFLAGS $sm_ldadd $sm_libadd"
-         unset sm_ldadd
-         unset sm_libadd
-         unset sm_incadd],
+         LDFLAGS="$LDFLAGS $sm_ldadd $sm_libadd"],
         [echo xpmem not specified])
     AC_CHECK_HEADER(xpmem.h,
-        [AC_DEFINE([HAVE_XPMEM_H], [1])],
-        [AC_DEFINE([HAVE_XPMEM_H], [0], [Define if xpmem.h detected])])
+        [AC_DEFINE([HAVE_XPMEM_H], [1])
+	    CFLAGS="$cflags_save"
+	    LDFLAGS="$ldflags_save"
+	    LIBS="$libs_save"
+	    ctp_sm_CFLAGS="$ctp_sm_CFLAGS $sm_incadd"
+	    ctp_sm_LDFLAGS="$ctp_sm_LDFLAGS $sm_ldadd"
+	    ctp_sm_LIBS="$ctp_sm_LIBS $sm_libadd"],
+        [AC_DEFINE([HAVE_XPMEM_H], [0], [Define if xpmem.h detected])
+	    CFLAGS="$cflags_save"
+	    LDFLAGS="$ldflags_save"
+	    LIBS="$libs_save"
+	])
+    unset cflags_save
+    unset ldflags_save
+    unset libs_save
+    unset sm_ldadd
+    unset sm_libadd
+    unset sm_incadd
 ])dnl
