@@ -3003,9 +3003,7 @@ static int ctp_sm_rma(cci_connection_t * connection,
 	int ret = CCI_SUCCESS;
 	cci__ep_t *ep = NULL;
 	cci__conn_t *conn = container_of(connection, cci__conn_t, connection);
-	sm_conn_t *sconn = conn->priv;
 	struct cci_rma_handle *h = (void *)local_handle;
-	struct cci_rma_handle *rh = (void*)remote_handle;
 	sm_rma_handle_t *sh = (void*)((uintptr_t)h->stuff[0]);
 	sm_rma_t *rma = NULL;
 
@@ -3052,6 +3050,8 @@ static int ctp_sm_rma(cci_connection_t * connection,
 
 #if HAVE_XPMEM_H
 	if (remote_handle->stuff[3] == 0) {
+		sm_conn_t *sconn = conn->priv;
+		struct cci_rma_handle *rh = (void*)remote_handle;
 		size_t size = rh->stuff[1] + rh->stuff[2];
 		struct xpmem_addr xaddr;
 
@@ -3059,7 +3059,9 @@ static int ctp_sm_rma(cci_connection_t * connection,
 		xaddr.offset = 0;
 		rh->stuff[3] = (uint64_t) xpmem_attach(xaddr, size, NULL);
 	}
-	if (rh->stuff[3] != (uint64_t) -1) {
+	if (remote_handle->stuff[3] != (uint64_t) -1) {
+		sm_conn_t *sconn = conn->priv;
+		struct cci_rma_handle *rh = (void*)remote_handle;
 		void *src = NULL, *dst = NULL;
 
 		if (flags & CCI_FLAG_WRITE) {
