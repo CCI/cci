@@ -981,6 +981,8 @@ static int ctp_sm_destroy_endpoint(cci_endpoint_t * endpoint)
 	dev = ep->dev;
 	sep = ep->priv;
 
+	pthread_join(sep->conn_tid, NULL);
+
 	if (ep->uri)
 		path = (void*)((uintptr_t)ep->uri + strlen("sm://"));
 
@@ -1279,6 +1281,8 @@ sm_free_conn(cci__conn_t *conn)
 			}
 			sm_put_conn_id(sconn);
 		}
+		free(sconn->rxs);
+		free(sconn->txs);
 		free(sconn);
 	}
 	free((void*)conn->uri);
@@ -1734,9 +1738,11 @@ static int ctp_sm_connect(cci_endpoint_t * endpoint, const char *server_uri,
 
 static int ctp_sm_disconnect(cci_connection_t * connection)
 {
+	cci__conn_t *conn = container_of(connection, cci__conn_t, connection);
+
 	CCI_ENTER;
 
-	debug(CCI_DB_INFO, "%s", "In sm_disconnect\n");
+	sm_free_conn(conn);
 
 	CCI_EXIT;
 	return CCI_ERR_NOT_IMPLEMENTED;
