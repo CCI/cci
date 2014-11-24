@@ -727,8 +727,10 @@ out:
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_REMOVE(&tep->conns, tconn, entry);
 			pthread_mutex_unlock(&ep->lock);
-			if (tconn->pfd.fd)
+			if (tconn->pfd.fd) {
 				close(tconn->pfd.fd);
+				tconn->pfd.fd = 0;
+			}
 		}
 		free((char*)conn->uri);
 		free(conn->priv);
@@ -761,12 +763,17 @@ tcp_conn_set_closed(cci__ep_t *ep, cci__conn_t *conn)
 	tcp_ep_t *tep = ep->priv;
 	tcp_conn_t *tconn = conn->priv;
 
+	debug(CCI_DB_INFO, "%s: conn %p", __func__, (void*)conn);
+
 	pthread_mutex_lock(&ep->lock);
 	pthread_mutex_lock(&tconn->lock);
 	if (tconn->status == TCP_CONN_READY) {
 		if (tep->poll_conn == tconn)
 			tep->poll_conn = NULL;
-		close(tconn->pfd.fd);
+		if (tconn->pfd.fd) {
+			close(tconn->pfd.fd);
+			tconn->pfd.fd = 0;
+		}
 		/* TODO complete queued and pending sends */
 	}
 	tconn->status = TCP_CONN_CLOSED;
@@ -785,7 +792,10 @@ tcp_conn_set_closing_locked(cci__ep_t *ep, cci__conn_t *conn)
 	tcp_conn_t *tconn = conn->priv;
 
 	if (tconn->status > TCP_CONN_INIT) {
-		close(tconn->pfd.fd);
+		if (tconn->pfd.fd) {
+			close(tconn->pfd.fd);
+			tconn->pfd.fd = 0;
+		}
 		tconn->status = TCP_CONN_CLOSING;
 		/* TODO complete queued and pending sends */
 
@@ -1040,7 +1050,10 @@ static int ctp_tcp_accept(cci_event_t *event, const void *context)
 		/* TODO send reject */
 		/* TODO tep->nfds-- */
 
-		close(tconn->pfd.fd);
+		if (tconn->pfd.fd) {
+			close(tconn->pfd.fd);
+			tconn->pfd.fd = 0;
+		}
 
 		pthread_mutex_lock(&ep->lock);
 		if (tep->poll_conn == tconn)
@@ -2444,7 +2457,7 @@ tcp_recv_msg(int fd, void *ptr, uint32_t len)
 	uint32_t offset = 0;
 	static int count = 0;
 
-	if (!len)
+	if (!len || !fd)
 		goto out;
 
 again:
