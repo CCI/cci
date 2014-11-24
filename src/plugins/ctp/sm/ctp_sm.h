@@ -37,6 +37,11 @@ BEGIN_C_DECLS
 #define SM_MIN_MSS		(SM_LINE)	/* Minimum cache line size */
 #define SM_MAX_MSS		(4096)		/* page size */
 
+#define SM_TX_BIT		((uintptr_t) 1)
+#define SM_SET_TX(x)		(((uintptr_t)(x) << 1) | SM_TX_BIT)
+#define SM_IS_TX(x)		((uintptr_t)(x) &  SM_TX_BIT)
+#define SM_TX(x)		((uintptr_t)(x) >> 1)
+
 #define SM_RMA_MTU		(4096)		/* Common page size */
 #define SM_RMA_SHIFT		(12)
 #define SM_RMA_MASK		(SM_RMA_MTU - 1)

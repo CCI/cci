@@ -1470,7 +1470,7 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 		evt->event.type = CCI_EVENT_SEND;
 		evt->ep = ep;
 		evt->conn = conn;
-		evt->priv = (void*)(uintptr_t)i;
+		evt->priv = (void*)SM_SET_TX(i);
 	}
 
 	path = uri + 5; /* sm:// */
@@ -2356,7 +2356,7 @@ sm_get_tx(sm_conn_t *sconn)
 static void
 sm_put_tx(cci__evt_t *tx)
 {
-	int idx = (int)(uintptr_t)tx->priv;
+	int idx = (int)SM_TX(tx->priv);
 	uint64_t avail = 0, new = 0;
 	sm_conn_t *sconn = tx->conn->priv;
 
@@ -2446,7 +2446,8 @@ sm_return_send(cci_event_t *event)
 {
 	cci__evt_t *evt = container_of(event, cci__evt_t, event);
 
-	if (!evt->priv) {
+	if (SM_IS_TX(evt->priv)) {
+		debug(CCI_DB_MSG, "%s: putting tx", __func__);
 		sm_put_tx(evt);
 	} else {
 		sm_rma_t *rma = container_of(evt, sm_rma_t, evt);
@@ -3080,6 +3081,8 @@ static int ctp_sm_rma(cci_connection_t * connection,
 		memcpy(dst, src, data_len);
 		if (msg_ptr) {
 			ret = ctp_sm_send(connection, msg_ptr, msg_len, context, flags);
+			free(rma);
+			rma = NULL;
 		} else {
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_INSERT_TAIL(&ep->evts, &rma->evt, entry);
