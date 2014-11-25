@@ -2571,15 +2571,9 @@ out:
 static int gni_progress_connections(cci__ep_t * ep)
 {
 	int ret = CCI_EAGAIN;
-	static int count = 0;
 	gni_ep_t *gep = ep->priv;
 
 	CCI_ENTER;
-
-	if (!gep->fd && likely(++count != 10000))
-		return CCI_EAGAIN;
-	else
-		count = 0;
 
 	ret = gni_check_for_conn_requests(ep);
 	if (ret && ret != CCI_EAGAIN)
