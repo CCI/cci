@@ -45,7 +45,7 @@ BEGIN_C_DECLS
 #define SM_RMA_MTU		(4096)		/* Common page size */
 #define SM_RMA_SHIFT		(12)
 #define SM_RMA_MASK		(SM_RMA_MTU - 1)
-#define SM_RMA_DEPTH		(32)		/* how many in-flight msgs per RMA */
+#define SM_RMA_DEPTH		(2)		/* how many in-flight msgs per RMA */
 #define SM_RMA_FRAG_SIZE	(2*SM_RMA_MTU)	/* optimal for POSIX shmem */
 #define SM_RMA_FRAG_MAX		(16*SM_RMA_MTU)	/* optimal for knem and CMA */
 
