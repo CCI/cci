@@ -231,7 +231,7 @@ extern int cci__debug;
 #define CCI_DB_ALL    (~0)	/* print everything */
 #define CCI_DB_DFLT   (CCI_DB_ERR|CCI_DB_WARN)
 
-#define CCI_DEBUG     1		/* Turn on for developing */
+#define CCI_DEBUG     0		/* Turn on for developing */
 
 #if CCI_DEBUG
 #define debug(lvl,fmt,...)                           \
