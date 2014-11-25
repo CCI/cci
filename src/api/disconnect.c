@@ -25,8 +25,6 @@ int cci_disconnect(cci_connection_t * connection)
 		return CCI_EINVAL;
 	}
 
-	*((void**)&connection->context) = NULL;
-
 	/* NOTE the transport does all connection cleanup */
 	return conn->plugin->disconnect(connection);
 }
