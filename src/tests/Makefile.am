@@ -21,7 +21,8 @@ check_PROGRAMS = \
 	opt \
 	connect_reject \
 	msg_verify \
-	rma_register
+	rma_register \
+	rpc
 
 rma_verify_SOURCES = rma_verify.c crc32.c
 rma_threaded_SOURCES = rma_threaded.c crc32.c
