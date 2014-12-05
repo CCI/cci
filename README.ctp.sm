@@ -1,0 +1,104 @@
+= Configuration ================================================================
+
+  The sm CTP is enabled by default.
+
+  To enable support for libxpmem, add this option to configure:
+
+  --with-sm-xpmem=DIR     Build xpmem support in sm
+
+  where DIR is the path the libxpmem install directory.
+
+= Endpoint naming ==============================================================
+
+  SM endpoint URIs are a path to the process' pid and endpoint ID:
+
+    sm:///tmp/cci/sm/pid/id
+
+= Config file options ==========================================================
+
+  SM devices _must_ have this in the config file:
+
+    transport = sm
+
+  SM devices may have the following items in the config file:
+
+    mss = 256
+
+  The sm transport will then set the endpoint->max_send_size to this size. Note,
+  large messages mean that a connection will have fewer messages per connection
+  and cci_send[v]() may return CCI_ENOBUFS more frequently. The value should be
+  a power of 2 and equal to or larger than the processor's cache line size.
+
+    path = /tmp/cci
+
+  The sm transport needs a valid path in the file system to create the Unix
+  Domain Socket (UDS) and one or more mmapped files. The default is /tmp/cci.
+  If /tmp is not available, you can use this option to specify another path such
+  as /var/cci.
+
+    pid = 123456789
+
+  The sm transport will use the process' pid as the default process ID. You can
+  override this by using the pid option. It can be any value between 0 and 2^32.
+  This is useful for servers while testing.
+
+    id = 32
+
+  By default, each sm will start issuing endpoint IDs with 0 and incrementing
+  for each endpoint. If you want to start naming with a higher value, use the id
+  option to set the base endpoint ID. The sm transport will then use that value
+  for the first endpoint and additional endpoints will increment from there.
+
+= Run-time notes ===============================================================
+
+  1. The sm transport is for node-local communication only. If you need to
+  communicate between nodes, you must use another transport.
+
+  2. The sm transport uses atomics to pass message headers and to allocate
+  buffer space. The atomics take advantage of the cache coherency protocol to
+  ensure that updates are visible in the correct order by invalidating the cache
+  after updates. Processes running on the same core will see very poor
+  performance because they may invalidate the cache and then be scheduled out
+  before being able to update the memory location. It is important to schedule
+  processes on separate cores.
+
+  3. By default, the sm transport uses mmapped memory for a "bounce buffer" when
+  handling a RMA. This means that the data is copied twice - once into the
+  bounce buffer and then out of the bounce buffer. On systems with libxpmem,
+  a RMA operation only requires a single copy between the two processes, which
+  greatly improves throughput.
+
+= Known limitations ============================================================
+
+Not implemented:
+
+  Create endpoint cannot return an OS handle (i.e. no blocking support)
+  RMA Fence
+
+= CCI Performance Tuning =======================================================
+
+SM_SHIFT
+    This value should be set to the base-2 log of the processor's cache line
+    size. Ideally, we would be able to determine this at runtime, but we do not.
+
+SM_DEFAULT_MSS
+    The default max_message_size for a connection. The default is four times the
+    SM_LINE value. Setting this larger allows larger MSGs, but fewer message
+    outstanding on a connection. This does the same thing as the mss= option in
+    the config file, but does it at compile time rather than runtime. The value
+    should be a multiple of SM_LINE.
+
+SM_RMA_MTU
+    When using mmapped bounce buffers, this is the minimum transfer unit for RMA
+    operations. This should almost always be the OS page size. A RMA of less
+    than this size will still consume the whole MTU of buffer space.
+
+SM_RMA_FRAG_SIZE
+    When using mmapped bounce buffers, allocate this many SM_RMA_MTU sized
+    buffers for each RMA fragment. Larger values may increase throughput, but
+    pipelined RMAs may return CCI_ENOBUFS.
+
+SM_RMA_DEPTH
+    When using mmapped bounce buffers, pipeline this many fragments per RMA
+    concurrently.  Higher values may increase throughput, but pipelined RMAs may
+    return CCI_ENOBUFS.

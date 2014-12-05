@@ -38,6 +38,7 @@ The following transports are supported (more coming soon):
   Cray GNI (Gemini and Aries)
   Linux Ethernet (raw Ethernet)
   TCP
+  Shared Memory
 
 
 = Current Limitations ==========================================================
