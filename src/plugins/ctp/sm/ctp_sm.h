@@ -57,10 +57,13 @@ BEGIN_C_DECLS
 
 /* Valid URI include:
  *
- * sm://path/pid/id	# Directory path, process id and endpoint id
+ * sm://path/hostname/pid/id
+ *			  Directory path, hostname, process id, and endpoint id
  *
  *                        The path may be relative from the process' working
- *                        directory or absolute. The process must have read,
+ *                        directory or absolute. The hostname is included in
+ *                        case the processes are using a shared file system
+ *                        for multiple nodes. The process must have read,
  *                        write, and execute permissions for the directory to
  *                        create an endpoint and read and execute to connect
  *                        to an endpoint.

@@ -241,12 +241,20 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 	cci_device_t **devices = NULL;
 	struct cci_device *device = NULL;
 	sm_dev_t *sdev = NULL;
+	char hname[MAXPATHLEN];
 	char dname[MAXPATHLEN];
 	pid_t pid;
 
 	CCI_ENTER;
 
 	pid = getpid();
+
+	memset(hname, 0, sizeof(hname));
+	ret = gethostname(hname, sizeof(hname));
+	if (ret) {
+		ret = CCI_ERROR;
+		goto out;
+	}
 
 	smglobals = calloc(1, sizeof(*smglobals));
 	if (!smglobals) {
@@ -287,7 +295,7 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 		device->name = strdup(name);
 
 		memset(dname, 0, sizeof(dname));
-		snprintf(dname, sizeof(dname), "%s/%u", SM_DEFAULT_PATH, pid);
+		snprintf(dname, sizeof(dname), "%s/%s/%u", SM_DEFAULT_PATH, hname, pid);
 		sdev->path = strdup(dname);
 		if (!sdev->path) {
 			ret = CCI_ENOMEM;
@@ -467,7 +475,7 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 				path = SM_DEFAULT_PATH;
 
 			memset(dname, 0, sizeof(dname));
-			snprintf(dname, sizeof(dname), "%s/%u", path, sdev->pid);
+			snprintf(dname, sizeof(dname), "%s/%s/%u", path, hname, sdev->pid);
 			sdev->path = strdup(dname);
 			if (!sdev->path) {
 				ret = CCI_ENOMEM;
