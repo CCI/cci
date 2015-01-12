@@ -2691,6 +2691,8 @@ sm_progress_rma(sm_rma_t *rma)
 				ret = ctp_sm_send(&conn->connection, rma->msg_ptr,
 						rma->msg_len, rma->evt.event.send.context,
 						rma->flags);
+				free(rma->msg_ptr);
+				rma->msg_ptr = NULL;
 				if (!ret) {
 					free(rma);
 				} else {
@@ -3099,7 +3101,15 @@ static int ctp_sm_rma(cci_connection_t * connection,
 	} else
 #endif
 	{
-		rma->msg_ptr = (void*) msg_ptr;
+		if (msg_ptr && msg_len) {
+			rma->msg_ptr = malloc(msg_len);
+			if (!rma->msg_ptr) {
+				debug(CCI_DB_MSG, "%s: no memory for msg_ptr", __func__);
+				ret = CCI_ENOMEM;
+				goto out;
+			}
+			memcpy(rma->msg_ptr, msg_ptr, msg_len);
+		}
 
 		rma->hdr.local_handle = (uintptr_t)sh;
 		rma->hdr.local_offset = local_offset;
