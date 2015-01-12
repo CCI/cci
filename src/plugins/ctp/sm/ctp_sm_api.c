@@ -203,7 +203,9 @@ sm_create_path(const char *path)
 		/* Does the path already exist? */
 		ret = sm_check_path(new);
 		if (ret) {
-			if (errno == ENOENT) {
+			if (errno == EEXIST) {
+				/* it exists */
+			} else if (errno == ENOENT) {
 				/* No, try to create it */
 				ret = mkdir(new, 0755);
 				if (ret) {
@@ -1401,6 +1403,8 @@ sm_parse_uri(const char *uri, int *pidp, int *idp)
 	*idp = id;
 
     out:
+	if (ret)
+		debug(CCI_DB_INFO, "%s: failed to parse \"%s\"", __func__, uri);
 	return ret;
 }
 
@@ -2459,6 +2463,7 @@ sm_return_send(cci_event_t *event)
 		sm_put_tx(evt);
 	} else {
 		sm_rma_t *rma = container_of(evt, sm_rma_t, evt);
+		debug(CCI_DB_MSG, "%s: freeing rma %p", __func__, (void*) rma);
 		free(rma);
 	}
 
