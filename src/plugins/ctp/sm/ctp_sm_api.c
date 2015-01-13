@@ -203,9 +203,9 @@ sm_create_path(const char *path)
 		/* Does the path already exist? */
 		ret = sm_check_path(new);
 		if (ret) {
-			if (errno == EEXIST) {
+			if (ret == EEXIST) {
 				/* it exists */
-			} else if (errno == ENOENT) {
+			} else if (ret == ENOENT) {
 				/* No, try to create it */
 				ret = mkdir(new, 0755);
 				if (ret) {
@@ -1757,7 +1757,7 @@ static int ctp_sm_disconnect(cci_connection_t * connection)
 	sm_free_conn(conn);
 
 	CCI_EXIT;
-	return CCI_ERR_NOT_IMPLEMENTED;
+	return CCI_SUCCESS;
 }
 
 static int ctp_sm_set_opt(cci_opt_handle_t * handle,
@@ -3082,15 +3082,14 @@ static int ctp_sm_rma(cci_connection_t * connection,
 		rh->stuff[3] = (uint64_t) xpmem_attach(xaddr, size, NULL);
 	}
 	if (remote_handle->stuff[3] != (uint64_t) -1) {
-		sm_conn_t *sconn = conn->priv;
 		struct cci_rma_handle *rh = (void*)remote_handle;
 		void *src = NULL, *dst = NULL;
 
 		if (flags & CCI_FLAG_WRITE) {
 			src = (void *)((uintptr_t)sh->addr + local_offset);
-			dst = (void*)((uintptr_t)sconn->base + rh->stuff[1] + remote_offset);
+			dst = (void*)(rh->stuff[1] + remote_offset);
 		} else {
-			src = (void*)((uintptr_t)sconn->base + rh->stuff[1] + remote_offset);
+			src = (void*)(rh->stuff[1] + remote_offset);
 			dst = (void *)((uintptr_t)sh->addr + local_offset);
 		}
 		memcpy(dst, src, data_len);
