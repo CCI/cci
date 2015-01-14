@@ -208,7 +208,7 @@ sm_create_path(const char *path)
 			} else if (ret == ENOENT) {
 				/* No, try to create it */
 				ret = mkdir(new, 0755);
-				if (ret) {
+				if (ret && errno != EEXIST) {
 					debug(CCI_DB_WARN, "%s: mkdir(%s) failed with %s",
 							__func__, new,
 							strerror(errno));
@@ -926,8 +926,11 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	memset(sep->conn_ids, 0xFF, SM_EP_MAX_CONNS / sizeof(*sep->conn_ids));
 
 #if HAVE_XPMEM_H
+	debug(CCI_DB_INFO, "%s: calling xpmem_make()", __func__);
 	sep->segid = xpmem_make(0, XPMEM_MAXADDR_SIZE, XPMEM_PERMIT_MODE,
 			(void*)((uintptr_t)0600));
+	debug(CCI_DB_INFO, "%s: xpmem_make() returned %"PRId64,
+		__func__, (int64_t)sep->segid);
 #endif
 
 	/* Create listening socket for connection setup */
@@ -1121,8 +1124,12 @@ sm_map_conn(sm_ep_t *sep, sm_conn_t *sconn)
 
 #if HAVE_XPMEM_H
 	if (sep->segid != (xpmem_segid_t) -1 && sconn->segid != (xpmem_segid_t) -1) {
+		debug(CCI_DB_INFO, "%s: calling xpmem_get()", __func__);
 		sconn->apid = xpmem_get(sconn->segid, XPMEM_RDWR, XPMEM_PERMIT_MODE,
-				(void*)0600);
+				/* (void*)0600); */
+				(void*)0);
+		debug(CCI_DB_INFO, "%s: xpmem_get() returned %"PRId64,
+			__func__, (int64_t)sconn->apid);
 		if (sconn->apid == -1) {
 			debug(CCI_DB_CONN, "%s: xpmem_get() failed with %s",
 				__func__, strerror(errno));
@@ -3079,7 +3086,13 @@ static int ctp_sm_rma(cci_connection_t * connection,
 
 		xaddr.apid = sconn->apid;
 		xaddr.offset = 0;
+		debug(CCI_DB_INFO, "%s: calling xpmem_attach()", __func__);
 		rh->stuff[3] = (uint64_t) xpmem_attach(xaddr, size, NULL);
+		debug(CCI_DB_INFO, "%s: xpmem_attach() %s for size %zu "
+			"vaddr %p len %"PRIu64, __func__,
+			rh->stuff[3] == UINT64_C(-1) ?
+			"failed" : "succeeded", size,
+			(void*)(uintptr_t)rh->stuff[1], rh->stuff[2]);
 	}
 	if (remote_handle->stuff[3] != (uint64_t) -1) {
 		struct cci_rma_handle *rh = (void*)remote_handle;
@@ -3087,11 +3100,15 @@ static int ctp_sm_rma(cci_connection_t * connection,
 
 		if (flags & CCI_FLAG_WRITE) {
 			src = (void *)((uintptr_t)sh->addr + local_offset);
-			dst = (void*)(rh->stuff[1] + remote_offset);
+			dst = (void*)(rh->stuff[3] + rh->stuff[1] + remote_offset);
 		} else {
-			src = (void*)(rh->stuff[1] + remote_offset);
+			src = (void*)(rh->stuff[3] + rh->stuff[1] + remote_offset);
 			dst = (void *)((uintptr_t)sh->addr + local_offset);
 		}
+
+		debug(CCI_DB_MSG, "%s: using xpmem to RMA %"PRIu64" bytes from "
+			"src %p to dst %p", __func__, data_len, src, dst);
+
 		memcpy(dst, src, data_len);
 		if (msg_ptr) {
 			ret = ctp_sm_send(connection, msg_ptr, msg_len, context, flags);
