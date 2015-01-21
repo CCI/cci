@@ -929,8 +929,8 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	debug(CCI_DB_INFO, "%s: calling xpmem_make()", __func__);
 	sep->segid = xpmem_make(0, XPMEM_MAXADDR_SIZE, XPMEM_PERMIT_MODE,
 			(void*)((uintptr_t)0600));
-	debug(CCI_DB_INFO, "%s: xpmem_make() returned %"PRId64,
-		__func__, (int64_t)sep->segid);
+	debug(CCI_DB_INFO, "%s: xpmem_make() returned %p",
+		__func__, (void*)sep->segid);
 #endif
 
 	/* Create listening socket for connection setup */
@@ -3081,11 +3081,11 @@ static int ctp_sm_rma(cci_connection_t * connection,
 	if (remote_handle->stuff[3] == 0) {
 		sm_conn_t *sconn = conn->priv;
 		struct cci_rma_handle *rh = (void*)remote_handle;
-		size_t size = rh->stuff[1] + rh->stuff[2];
+		size_t size = rh->stuff[2];
 		struct xpmem_addr xaddr;
 
 		xaddr.apid = sconn->apid;
-		xaddr.offset = 0;
+		xaddr.offset = rh->stuff[1];
 		debug(CCI_DB_INFO, "%s: calling xpmem_attach()", __func__);
 		rh->stuff[3] = (uint64_t) xpmem_attach(xaddr, size, NULL);
 		debug(CCI_DB_INFO, "%s: xpmem_attach() %s for size %zu "
@@ -3100,9 +3100,9 @@ static int ctp_sm_rma(cci_connection_t * connection,
 
 		if (flags & CCI_FLAG_WRITE) {
 			src = (void *)((uintptr_t)sh->addr + local_offset);
-			dst = (void*)(rh->stuff[3] + rh->stuff[1] + remote_offset);
+			dst = (void*)(rh->stuff[3] + remote_offset);
 		} else {
-			src = (void*)(rh->stuff[3] + rh->stuff[1] + remote_offset);
+			src = (void*)(rh->stuff[3] + remote_offset);
 			dst = (void *)((uintptr_t)sh->addr + local_offset);
 		}
 

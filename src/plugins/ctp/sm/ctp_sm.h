@@ -412,7 +412,6 @@ struct sm_conn {
 #if HAVE_XPMEM_H
 	xpmem_segid_t		segid;		/* xpmem segid */
 	xpmem_apid_t		apid;		/* xpmem apid */
-	void			*base;		/* xpmem address */
 #endif
 
 	cci__evt_t		*rxs;		/* RECV events */
