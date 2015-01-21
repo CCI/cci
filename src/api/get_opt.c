@@ -10,9 +10,10 @@
  *
  */
 
-#include "cci/private_config.h"
-
 #include <stdio.h>
+#include <string.h>
+
+#include "cci/private_config.h"
 
 #include "cci.h"
 #include "plugins/ctp/ctp.h"
