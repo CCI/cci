@@ -289,6 +289,12 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 		cci__init_dev(dev);
 		dev->plugin = plugin;
 		dev->priority = plugin->base.priority;
+#if HAVE_XPMEM_H
+		dev->align.rma_write_local_addr =
+			dev->align.rma_write_remote_addr =
+			dev->align.rma_read_local_addr =
+			dev->align.rma_read_remote_addr = getpagesize();
+#endif
 
 		device = &dev->device;
 		device->transport = strdup("sm");
