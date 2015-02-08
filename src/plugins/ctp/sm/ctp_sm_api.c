@@ -808,17 +808,6 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 		return CCI_ENODEV;
 	}
 
-	/* TODO support blocking mode
-	 * in the meantime, fail if the fd is requested */
-	if (fd) {
-		debug(CCI_DB_WARN, "%s: The SM transport does not yet "
-			"support blocking mode via the OS handle. "
-			"Either choose another transport or set the "
-			"OS handle to NULL\n", __func__);
-		CCI_EXIT;
-		return CCI_ERR_NOT_IMPLEMENTED;
-	}
-
 	dev = container_of(device, cci__dev_t, device);
 	if (0 != strcmp("sm", device->transport)) {
 		CCI_EXIT;
@@ -895,34 +884,36 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	if (ret)
 		goto out;
 
-	/* Create FIFO for receiving keepalives and wakeups */
+	if (fd) {
+		/* Create FIFO for receiving keepalives and wakeups */
 
-	/* If there is not enough space to append "/fifo", bail */
-	if (strlen(uri) >= (sizeof(name) - 6)) {
-		ret = CCI_EINVAL;
-		goto out;
+		/* If there is not enough space to append "/fifo", bail */
+		if (strlen(uri) >= (sizeof(name) - 6)) {
+			ret = CCI_EINVAL;
+			goto out;
+		}
+
+		memset(name, 0, sizeof(name));
+		snprintf(name, sizeof(name), "%s/fifo", uri);
+
+		unlink(name);
+		ret = mkfifo(name, 0622);
+		if (ret) {
+			debug(CCI_DB_WARN, "%s: mkfifo(%s) failed with %s", __func__,
+					name, strerror(errno));
+			ret = CCI_ERROR;
+			goto out;
+		}
+
+		ret = open(name, O_RDWR|O_NONBLOCK);
+		if (ret == -1) {
+			debug(CCI_DB_WARN, "%s: open(%s) failed with %s", __func__,
+					name, strerror(errno));
+			ret = CCI_ERROR;
+			goto out;
+		}
+		sep->fifo = ret;
 	}
-
-	memset(name, 0, sizeof(name));
-	snprintf(name, sizeof(name), "%s/fifo", uri);
-
-	unlink(name);
-	ret = mkfifo(name, 0622);
-	if (ret) {
-		debug(CCI_DB_WARN, "%s: mkfifo(%s) failed with %s", __func__,
-				name, strerror(errno));
-		ret = CCI_ERROR;
-		goto out;
-	}
-
-	ret = open(name, O_RDWR|O_NONBLOCK);
-	if (ret == -1) {
-		debug(CCI_DB_WARN, "%s: open(%s) failed with %s", __func__,
-				name, strerror(errno));
-		ret = CCI_ERROR;
-		goto out;
-	}
-	sep->fifo = ret;
 
 	sep->conn_ids = malloc(SM_EP_MAX_CONNS / sizeof(*sep->conn_ids));
 	if (!sep->conn_ids) {
@@ -972,6 +963,10 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	}
 
 	ret = pthread_create(&sep->conn_tid, NULL, sm_conn_thread, (void *)ep);
+
+	if (fd) {
+		*fd = sep->fifo;
+	}
 
 out:
 	if (ret)
@@ -1181,6 +1176,9 @@ sm_map_conn(sm_ep_t *sep, sm_conn_t *sconn)
 	return ret;
 }
 
+static inline void
+sm_ep_notify(cci__ep_t *ep);
+
 static int ctp_sm_accept(cci_event_t *event, const void *context)
 {
 	int ret = 0, len = 0;
@@ -1260,6 +1258,7 @@ static int ctp_sm_accept(cci_event_t *event, const void *context)
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+	sm_ep_notify(ep);
 	pthread_mutex_unlock(&ep->lock);
 
     out:
@@ -1513,9 +1512,9 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 	ret = open(name, O_WRONLY|O_NONBLOCK);
 	if (ret == -1) {
 		debug(CCI_DB_CONN, "%s: unable to open %s's FIFO", __func__, uri);
-		ret = EHOSTUNREACH;
+	} else {
+		sconn->fifo = ret;
 	}
-	sconn->fifo = ret;
 
 	/* Open our shared memory object for MSGs */
 	memset(name, 0, sizeof(name));
@@ -1657,7 +1656,39 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 			free(conn);
 		}
 	}
+	CCI_EXIT;
 	return ret;
+}
+
+static inline int
+sm_write(cci__ep_t *ep, cci__conn_t *conn);
+
+static inline void
+sm_conn_notify(cci__ep_t *ep, cci__conn_t *conn)
+{
+	sm_conn_t *sconn = conn->priv;
+
+	if (sconn->fifo)
+		sm_write(ep, conn);
+
+	return;
+}
+
+static inline void
+sm_ep_notify(cci__ep_t *ep)
+{
+	sm_ep_t *sep = ep->priv;
+
+	if (sep->fifo) {
+		int ret = 0;
+		char one = 1;
+
+		ret = write(sep->fifo, &one, sizeof(one));
+		debug(CCI_DB_EP, "%s: write(fifo) returned %s", __func__,
+			ret == 1 ? "success" : strerror(errno));
+	}
+
+	return;
 }
 
 static int ctp_sm_connect(cci_endpoint_t * endpoint, const char *server_uri,
@@ -1748,6 +1779,8 @@ static int ctp_sm_connect(cci_endpoint_t * endpoint, const char *server_uri,
 		ret = 0;
 	}
 
+	debug(CCI_DB_CONN, "%s: connecting to %s", __func__, server_uri);
+
     out:
 	if (ret) {
 		if (params) {
@@ -1816,6 +1849,8 @@ sm_handle_connect(cci__ep_t *ep, const char *path, void *buffer, int len)
 	char uri[MAXPATHLEN], *suffix = NULL;
 	void *p = (void*)((uintptr_t)buffer + sizeof(hdr->connect));
 
+	CCI_ENTER;
+
 	memset(uri, 0, sizeof(uri));
 	snprintf(uri, sizeof(uri), "sm://%s", path);
 	suffix = strstr(uri, "/sock");
@@ -1861,6 +1896,7 @@ sm_handle_connect(cci__ep_t *ep, const char *path, void *buffer, int len)
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&ep->evts, rx, entry);
+	sm_ep_notify(ep);
 	pthread_mutex_unlock(&ep->lock);
 
     out:
@@ -1876,6 +1912,7 @@ sm_handle_connect(cci__ep_t *ep, const char *path, void *buffer, int len)
 			free(rx);
 		}
 	}
+	CCI_EXIT;
 	return ret;
 }
 
@@ -1928,6 +1965,8 @@ sm_handle_connect_reply(cci__ep_t *ep, void *buffer)
 	struct sockaddr_un sun;
 	socklen_t slen = sizeof(sun);
 
+	CCI_ENTER;
+
 	evt = calloc(1, sizeof(*evt));
 	if (!evt) {
 		ret = CCI_ENOMEM;
@@ -1978,6 +2017,7 @@ sm_handle_connect_reply(cci__ep_t *ep, void *buffer)
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+	sm_ep_notify(ep);
 	pthread_mutex_unlock(&ep->lock);
 
 	hdr->ack.type = SM_CMSG_CONN_ACK;
@@ -2068,13 +2108,14 @@ sm_progress_sock(cci__ep_t *ep)
 	return ret;
 }
 
-static int
-sm_write(cci__ep_t *ep, cci__conn_t *conn, void *buf, int len)
+static inline int
+sm_write(cci__ep_t *ep, cci__conn_t *conn)
 {
 	int ret = 0;
+	char one = 1;
 	sm_conn_t *sconn = conn->priv;
 
-	ret = write(sconn->fifo, buf, len);
+	ret = write(sconn->fifo, &one, sizeof(one));
 	if (ret == -1) {
 		switch (errno) {
 		case EAGAIN:
@@ -2086,17 +2127,17 @@ sm_write(cci__ep_t *ep, cci__conn_t *conn, void *buf, int len)
 			ret = CCI_ERROR;
 			goto out;
 		}
-	} else if (ret != len) {
-		debug(CCI_DB_MSG, "%s: write(%s) returned only %d of expected %d bytes",
-			__func__, sconn->name, ret, len);
+	} else if (ret != sizeof(one)) {
+		debug(CCI_DB_MSG, "%s: write(%s) returned %d",
+			__func__, sconn->name, ret);
 		ret = CCI_ERROR;
 		goto out;
 	}
 
 	ret = 0;
     out:
-	debug(CCI_DB_MSG, "%s: writing %d bytes to %s's fifo %s (ret %d)",
-		__func__, len, conn->uri, ret ? "failed" : "succeeded", ret);
+	debug(CCI_DB_MSG, "%s: writing to %s's fifo %s (ret %d)",
+		__func__, conn->uri, ret ? "failed" : "succeeded", ret);
 
 	return ret;
 }
@@ -2107,6 +2148,8 @@ sm_handle_send(cci__ep_t *ep, cci__conn_t *conn, sm_hdr_t *hdr)
 	int ret = 0;
 	sm_conn_t *sconn = conn->priv;
 	cci__evt_t *evt = &sconn->rxs[hdr->send.offset];
+
+	CCI_ENTER;
 
 	/* evt->event.type = CCI_EVENT_RECV; */
 	evt->event.recv.ptr = &sconn->rx->buf[hdr->send.offset * SM_LINE];
@@ -2121,6 +2164,7 @@ sm_handle_send(cci__ep_t *ep, cci__conn_t *conn, sm_hdr_t *hdr)
 	debug(CCI_DB_MSG, "%s: received SEND from %s (offset %u) len %u",
 		__func__, conn->uri, hdr->send.offset, hdr->send.len);
 
+	CCI_EXIT;
 	return ret;
 }
 
@@ -2154,6 +2198,8 @@ sm_handle_rma_write(cci__ep_t *ep, cci__conn_t *conn, sm_hdr_t *hdr)
 	ret = ring_insert(&sconn->rma->ring, *((uint32_t*)&ack.u32));
 	if (ret)
 		goto again;
+
+	sm_conn_notify(ep, conn);
 
 	return ret;
 }
@@ -2189,12 +2235,16 @@ sm_handle_rma_read(cci__ep_t *ep, cci__conn_t *conn, sm_hdr_t *hdr)
 	if (ret)
 		goto again;
 
+	sm_conn_notify(ep, conn);
+
 	return ret;
 }
 
 static inline void
 sm_complete_rma(cci__ep_t *ep, sm_rma_t *rma)
 {
+	CCI_ENTER;
+
 	if (!(rma->flags & CCI_FLAG_SILENT)) {
 		debug(CCI_DB_MSG, "%s: queuing rma %p", __func__, (void*)rma);
 		pthread_mutex_lock(&ep->lock);
@@ -2204,6 +2254,7 @@ sm_complete_rma(cci__ep_t *ep, sm_rma_t *rma)
 		debug(CCI_DB_MSG, "%s: freeing rma %p", __func__, (void*)rma);
 		free(rma);
 	}
+	CCI_EXIT;
 	return;
 }
 
@@ -2244,45 +2295,6 @@ sm_handle_rma_ack(cci__ep_t *ep, cci__conn_t *conn, sm_hdr_t *hdr)
 
 static void
 sm_progress_conn(cci__ep_t *ep, cci__conn_t *conn);
-
-static int
-sm_progress_fifo(cci__ep_t *ep)
-{
-	int ret = 0, id = 0, len = sizeof(id);
-	sm_ep_t *sep = ep->priv;
-	cci__conn_t *conn = NULL;
-
-	return 0;
-
-	ret = read(sep->fifo, &id, len);
-	if (ret == -1) {
-		switch (errno) {
-		case EAGAIN:
-		case EINTR:
-		case ENOBUFS:
-		case ENOMEM:
-			break;
-		default:
-			debug(CCI_DB_WARN, "%s: read(fifo) failed with %s",
-					__func__, strerror(errno));
-			break;
-		}
-		ret = CCI_EAGAIN;
-		goto out;
-	} else if (ret != len) {
-		debug(CCI_DB_WARN, "%s: read(fifo) only returned %d of %d bytes requested",
-				__func__, ret, len);
-		ret = CCI_EAGAIN;
-		goto out;
-	}
-
-	ret = sm_find_conn(ep, id, &conn);
-	if (!ret)
-		sm_progress_conn(ep, conn);
-
-    out:
-	return ret;
-}
 
 static void
 sm_progress_conn_tree(const void *nodep, const VISIT which, const int depth)
@@ -2341,12 +2353,6 @@ sm_progress_conns(cci__ep_t *ep)
 static int
 sm_progress_ep(cci__ep_t *ep)
 {
-	static int cnt = 0;
-
-	if (0 && (cnt++ & 0x1000000) == 0x1000000) {
-		sm_progress_sock(ep);
-		sm_progress_fifo(ep);
-	}
 	sm_progress_conns(ep);
 
 	return 0;
@@ -2401,6 +2407,7 @@ static int ctp_sm_get_event(cci_endpoint_t * endpoint,
 	int ret = 0;
 	cci__ep_t *ep = NULL;
 	cci__evt_t *ev = NULL;
+	sm_ep_t *sep = NULL;
 
 	CCI_ENTER;
 
@@ -2410,18 +2417,32 @@ static int ctp_sm_get_event(cci_endpoint_t * endpoint,
 	pthread_mutex_lock(&ep->lock);
 	ev = TAILQ_FIRST(&ep->evts);
 
-	if (ev) {
-		char one = 0;
-		sm_ep_t *sep = ep->priv;
+	sep = ep->priv;
 
+	if (ev) {
 		TAILQ_REMOVE(&ep->evts, ev, entry);
-		if (sep->pipe[0] && TAILQ_EMPTY(&ep->evts)) {
-			debug(CCI_DB_EP, "%s: reading from pipe", __func__);
-			read(sep->pipe[0], &one, 1);
-			assert(one == 1);
+		if (sep->fifo) {
+			int rc = 0;
+			char one = 0;
+
+			rc = read(sep->fifo, &one, 1);
+			debug(CCI_DB_EP, "%s: read(fifo) returned %s", __func__,
+				rc == 1 ? "success" : strerror(errno));
 		}
+
+		debug(CCI_DB_EP, "%s: found %s", __func__,
+				cci_event_type_str(ev->event.type));
 	} else {
 		ret = CCI_EAGAIN;
+	}
+
+	if (0 && sep->fifo && TAILQ_EMPTY(&ep->evts)) {
+		int rc = 0;
+		char one = 0;
+
+		rc = read(sep->fifo, &one, 1);
+		debug(CCI_DB_EP, "%s: read(fifo) returned %s", __func__,
+			rc == 1 ? "success" : strerror(errno));
 	}
 
 	pthread_mutex_unlock(&ep->lock);
@@ -2689,6 +2710,8 @@ sm_progress_rma(sm_rma_t *rma)
 	cci__conn_t *conn = rma->evt.conn;
 	sm_conn_t *sconn = conn->priv;
 
+	CCI_ENTER;
+
 	if (rma->evt.event.send.status) {
 		/* Failed RMA, ... */
 		if (rma->pending == 0)
@@ -2773,12 +2796,15 @@ sm_progress_rma(sm_rma_t *rma)
 		ret = ring_insert(&sconn->rma->ring, *((uint32_t*)&hdr.u32));
 		if (ret)
 			goto insert;
+
+		sm_conn_notify(ep, conn);
 	} while ((rma->pending < SM_RMA_DEPTH) && (rma->offset < rma->hdr.len));
 
 	if (rma->offset > start)
 		ret = 0;
 
     out:
+	CCI_EXIT;
 	return ret;
 }
 
@@ -2878,6 +2904,8 @@ static int ctp_sm_send(cci_connection_t * connection,
 	if (ret)
 		goto again;
 
+	sm_conn_notify(ep, conn);
+
 	if (!(flags & CCI_FLAG_SILENT)) {
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
@@ -2953,6 +2981,8 @@ static int ctp_sm_sendv(cci_connection_t * connection,
 	ret = ring_insert(&sconn->tx->ring, *((uint32_t*)&hdr.u32));
 	if (ret)
 		goto again;
+
+	sm_conn_notify(ep, conn);
 
 	if (!(flags & CCI_FLAG_SILENT)) {
 		pthread_mutex_lock(&ep->lock);
@@ -3123,6 +3153,7 @@ static int ctp_sm_rma(cci_connection_t * connection,
 		} else {
 			pthread_mutex_lock(&ep->lock);
 			TAILQ_INSERT_TAIL(&ep->evts, &rma->evt, entry);
+			sm_ep_notify(ep);
 			pthread_mutex_unlock(&ep->lock);
 		}
 	} else
