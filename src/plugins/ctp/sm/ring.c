@@ -6,7 +6,6 @@
 #include <sched.h>
 
 #include "ring.h"
-#include "sm_atomics.h"
 
 uint32_t ring_size(uint32_t num)
 {
@@ -18,9 +17,14 @@ void ring_init(ring_t *r, uint32_t num)
 {
 	r->num_elem0 = r->num_elem1 = num;
 	memset(r->elems, 0, sizeof(r->elems));
-	r->tail = 0;
-	/* We need at least one barrier here. */
-	store_u32(&r->head, 0, __ATOMIC_SEQ_CST);
+	OPA_store_int(&r->tail, 0);
+	OPA_store_int(&r->head, 0);
+	OPA_write_barrier();
+}
+
+static inline void wait_for_change_int(OPA_int_t *ptr, int val)
+{
+	while (OPA_load_acquire_int(ptr) == val);
 }
 
 int ring_insert(ring_t *r, uint32_t elem)
@@ -28,10 +32,10 @@ int ring_insert(ring_t *r, uint32_t elem)
 	uint32_t t, h, num = r->num_elem0;
 
 	/* Bottom bit means someone is updating now. */
-	while ((h = read_u32(&r->head, __ATOMIC_RELAXED)) & 1) {
-		wait_for_change_u32(&r->head, h);
+	while ((h = OPA_load_acquire_int(&r->head)) & 1) {
+		wait_for_change_int(&r->head, h);
 	}
-	t = read_u32(&r->tail, __ATOMIC_RELAXED);
+	t = OPA_load_acquire_int(&r->tail);
 
 	if (h == t + (num * 2)) {
 		sched_yield();
@@ -39,14 +43,14 @@ int ring_insert(ring_t *r, uint32_t elem)
 	}
 
 	/* This tells everyone we're updating. */
-	if (!compare_and_swap_u32(&r->head, h, h+1, __ATOMIC_ACQUIRE)) {
+	if ((uint32_t)OPA_cas_int(&r->head, h, h+1) != h) {
 		sched_yield();
 		return EAGAIN;
 	}
 
-	store_u32(&r->elems[(h/2) % num], elem, __ATOMIC_RELAXED);
-	assert(read_u32(&r->head, __ATOMIC_RELAXED) == h + 1);
-	store_u32(&r->head, h+2, __ATOMIC_RELEASE);
+	OPA_store_release_int(&r->elems[(h/2) % num], elem);
+	assert((uint32_t)OPA_load_acquire_int(&r->head) == h + 1);
+	OPA_store_release_int(&r->head, h+2);
 
 	return 0;
 }
@@ -58,15 +62,15 @@ int ring_remove(ring_t *r, uint32_t *elemp)
 
 	do {
 		/* Read tail before head (reverse how they change) */
-		t = read_u32(&r->tail, __ATOMIC_SEQ_CST);
-		h = read_u32(&r->head, __ATOMIC_SEQ_CST);
+		t = OPA_load_acquire_int(&r->tail);
+		h = OPA_load_acquire_int(&r->head);
 		if ((h & ~1) == t) {
 			/* Empty... */
 			sched_yield();
 			return EAGAIN;
 		}
-		elem = read_u32(&r->elems[(t/2) % num], __ATOMIC_SEQ_CST);
-	} while (!compare_and_swap_u32(&r->tail, t, t+2, __ATOMIC_SEQ_CST));
+		elem = OPA_load_acquire_int(&r->elems[(t/2) % num]);
+	} while ((uint32_t)OPA_cas_int(&r->tail, t, t+2) != t);
 
 	*elemp = elem;
 	return 0;

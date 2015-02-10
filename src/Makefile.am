@@ -5,6 +5,7 @@
 
 SUBDIRS = \
         libltdl \
+	openpa \
         api \
         plugins/base \
         util \
@@ -16,6 +17,7 @@ SUBDIRS = \
 
 DIST_SUBDIRS = \
         libltdl \
+	openpa \
         api \
         plugins/base \
         util \
@@ -28,6 +30,7 @@ noinst_HEADERS = plugins/plugins.h
 lib_LTLIBRARIES = libcci.la
 libcci_la_SOURCES =
 libcci_la_LIBADD = \
+	openpa/src/libopa.la \
         api/libcci_api.la \
         plugins/base/libcci_plugins_base.la \
         util/libcci_util.la \

@@ -377,14 +377,14 @@ typedef struct sm_conn_params {
 } sm_conn_params_t;
 
 struct sm_conn_buffer {
-	uint64_t		avail;		/* Bitmask for available cache lines */
+	OPA_ptr_t		avail;		/* Bitmask for available cache lines */
 	char			pad[SM_LINE - sizeof(uint64_t)];
 	char			buf[SM_LINE * 64]; /* Cache lines */
 	ring_t			ring;		/* For headers */
 };
 
 struct sm_rma_buffer {
-	uint64_t		avail;		/* Bitmask for available pages */
+	OPA_ptr_t		avail;		/* Bitmask for available pages */
 	ring_t			ring;		/* For MSG headers */
 	char			pad[SM_RMA_MTU - sizeof(uint64_t) - sizeof(ring_t)];
 	char			hdr[SM_LINE * 64]; /* Cache lines for RMA frag headers */
@@ -416,7 +416,7 @@ struct sm_conn {
 
 	cci__evt_t		*rxs;		/* RECV events */
 	cci__evt_t		*txs;		/* SEND events */
-	uint64_t		txs_avail;	/* Bitmap of available txs */
+	OPA_ptr_t		txs_avail;	/* Bitmap of available txs */
 
 	TAILQ_ENTRY(sm_conn)	entry;		/* Entry in sep->conns|active|passive */
 	char			*name;		/* sockaddr_un.sun_path */

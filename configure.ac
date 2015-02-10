@@ -145,6 +145,10 @@ m4_ifdef([AM_PROG_AR], [AM_PROG_AR])
 # Define cci's configure arguments
 CCI_DEFINE_ARGS
 
+# Configure openpa
+cci_show_title "Configuring openpa"
+AC_CONFIG_SUBDIRS([src/openpa])
+
 # Setup the cci ctp
 CCI_SETUP_CTP([], [], [AC_MSG_ERROR([Cannot continue])], [1])
 

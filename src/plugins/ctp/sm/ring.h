@@ -27,17 +27,19 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "opa_primitives.h"
+
 #define RING_CACHE_LINE	(64)
 #define RING_NUM_ELEMS	(64)
 
 typedef struct ring {
 	uint32_t num_elem0;
-	uint32_t head;
+	OPA_int_t head;
 	char pad0[RING_CACHE_LINE - (sizeof(uint32_t) * 2)];
 	uint32_t num_elem1;
-	uint32_t tail;
+	OPA_int_t tail;
 	char pad1[RING_CACHE_LINE - (sizeof(uint32_t) * 2)];
-	uint32_t elems[RING_NUM_ELEMS];
+	OPA_int_t elems[RING_NUM_ELEMS];
 } ring_t;
 
 /**

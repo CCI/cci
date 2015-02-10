@@ -23,7 +23,7 @@
 #include "cci.h"
 #include "plugins/ctp/ctp.h"
 #include "ctp_sm.h"
-#include "sm_atomics.h"
+#include "opa_primitives.h"
 
 sm_globals_t *smglobals = NULL;
 
@@ -716,6 +716,7 @@ sm_put_ep_id(cci__dev_t *dev, uint32_t id)
 	return ret;
 }
 
+#if 0
 static inline int
 check_block(uint64_t block, int cnt, int shift, int *offset)
 {
@@ -749,6 +750,7 @@ check_block(uint64_t block, int cnt, int shift, int *offset)
     out:
 	return ret;
 }
+#endif
 
 static int
 sm_compare_conns(const void *pa, const void *pb)
@@ -1480,7 +1482,7 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 		evt->conn = conn;
 	}
 
-	sconn->txs_avail = ~(0ULL);
+	OPA_store_ptr(&sconn->txs_avail, (void*) ~((uintptr_t)0));
 
 	sconn->txs = calloc(64, sizeof(*sconn->txs));
 	if (!sconn->txs) {
@@ -1552,7 +1554,7 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 	/* We can just set this and rely on ring_init() to call
 	 * a memory barrier.
 	 */
-	sconn->tx->avail = ~(0ULL);
+	OPA_store_ptr(&sconn->tx->avail, (void*) ~((uintptr_t)0));
 	ring_init(&(sconn->tx->ring), 64); /* magic number */
 
 
@@ -1599,7 +1601,7 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 		/* We can just set this and rely on ring_init() to call
 		 * a memory barrier.
 		 */
-		sconn->rma->avail = ~(0ULL);
+		OPA_store_ptr(&sconn->rma->avail, (void*) ~((uintptr_t)0));
 		ring_init(&(sconn->rma->ring), 64); /* magic number */
 	}
 
@@ -2192,7 +2194,7 @@ sm_handle_rma_write(cci__ep_t *ep, cci__conn_t *conn, sm_hdr_t *hdr)
 	ack.rma_ack.type = SM_MSG_RMA_ACK;
 	ack.rma_ack.offset = hdr->rma.offset;
 	ack.rma_ack.status = ret;
-	mb();
+	OPA_write_barrier();
 
     again:
 	ret = ring_insert(&sconn->rma->ring, *((uint32_t*)&ack.u32));
@@ -2228,7 +2230,7 @@ sm_handle_rma_read(cci__ep_t *ep, cci__conn_t *conn, sm_hdr_t *hdr)
 	ack.rma_ack.type = SM_MSG_RMA_ACK;
 	ack.rma_ack.offset = hdr->rma.offset;
 	ack.rma_ack.status = ret;
-	mb();
+	OPA_write_barrier();
 
     again:
 	ret = ring_insert(&sconn->rma->ring, *((uint32_t*)&ack.u32));
@@ -2366,7 +2368,7 @@ sm_get_tx(sm_conn_t *sconn)
 	cci__evt_t *tx = NULL;
 
     again:
-	avail = read_u64(&sconn->txs_avail, __ATOMIC_RELAXED);
+	avail = (uintptr_t) OPA_load_ptr(&sconn->txs_avail);
 	if (!avail) {
 		debug(CCI_DB_MSG, "%s: no available txs for %s", __func__,
 			sconn->conn->uri);
@@ -2374,7 +2376,7 @@ sm_get_tx(sm_conn_t *sconn)
 	}
 	idx = ffsll(avail) - 1; /* convert to 0-based index */
 	new = ~(1ULL << idx) & avail;
-	if (compare_and_swap_u64(&sconn->txs_avail, avail, new, __ATOMIC_SEQ_CST)) {
+	if (OPA_cas_ptr(&sconn->txs_avail, (void*)avail, (void*)new) == (void*)avail) {
 		tx = &sconn->txs[idx];
 	} else {
 		goto again;
@@ -2392,9 +2394,9 @@ sm_put_tx(cci__evt_t *tx)
 	sm_conn_t *sconn = tx->conn->priv;
 
     again:
-	avail = read_u64(&sconn->txs_avail, __ATOMIC_RELAXED);
+	avail = (uintptr_t) OPA_load_ptr(&sconn->txs_avail);
 	new = (1ULL << idx) | avail;
-	if (!compare_and_swap_u64(&sconn->txs_avail, avail, new, __ATOMIC_SEQ_CST)) {
+	if (OPA_cas_ptr(&sconn->txs_avail, (void*)avail, (void*)new) != (void*)avail) {
 		goto again;
 	}
 
@@ -2515,7 +2517,7 @@ sm_reserve_conn_buffer(sm_conn_buffer_t *cb, uint32_t len, int *offset)
 
 	for (i = 0; i < (63 - cnt); i++) {
     again:
-		avail = read_u64(&cb->avail, __ATOMIC_RELAXED);
+		avail = (uintptr_t) OPA_load_ptr(&cb->avail);
 		if (!avail) {
 			debug(CCI_DB_MSG, "%s: avail 0x%"PRIx64, __func__, avail);
 			ret = ENOBUFS;
@@ -2523,8 +2525,8 @@ sm_reserve_conn_buffer(sm_conn_buffer_t *cb, uint32_t len, int *offset)
 		}
 		if ((avail & bits) == bits) {
 			new = avail & ~bits;
-			if (compare_and_swap_u64(&cb->avail, avail, new,
-						__ATOMIC_SEQ_CST)) {
+			if (OPA_cas_ptr(&cb->avail, (void*)avail, (void*)new)
+					== (void*)avail) {
 				debug(CCI_DB_MSG, "%s: bits 0x%"PRIx64" avail 0x%"PRIx64" "
 					"new 0x%"PRIx64" offset %u", __func__, bits,
 					avail, new, i);
@@ -2553,14 +2555,15 @@ sm_release_conn_buffer(sm_conn_buffer_t *cb, uint32_t len, int offset)
 	uint64_t avail = 0, bits = (((uint64_t)1 << cnt) - 1) << offset;
 
     again:
-	avail = read_u64(&cb->avail, __ATOMIC_RELAXED);
+	avail = (uintptr_t) OPA_load_ptr(&cb->avail);
 	debug(CCI_DB_MSG, "%s: bits 0x%"PRIx64" avail 0x%"PRIx64, __func__, bits, avail);
 	if (avail & bits)
 		debug(CCI_DB_WARN, "%s: bits 0x%"PRIx64" avail 0x%"PRIx64,
 			__func__, bits, avail);
 	assert((avail & bits) == 0);
 
-	if (!compare_and_swap_u64(&cb->avail, avail, avail | bits, __ATOMIC_SEQ_CST))
+	if (OPA_cas_ptr(&cb->avail, (void*)avail, (void*)(avail | bits))
+			!= (void*)avail)
 		goto again;
 
 	return;
@@ -2577,7 +2580,7 @@ sm_reserve_rma_buffer(sm_rma_buffer_t *rb, uint32_t len, int *index)
 
 	for (i = 0; i < (63 - cnt); i++) {
     again:
-		avail = read_u64(&rb->avail, __ATOMIC_RELAXED);
+		avail = (uintptr_t) OPA_load_ptr(&rb->avail);
 		if (!avail) {
 			debug(CCI_DB_MSG, "%s: avail 0x%"PRIx64, __func__, avail);
 			ret = ENOBUFS;
@@ -2585,8 +2588,8 @@ sm_reserve_rma_buffer(sm_rma_buffer_t *rb, uint32_t len, int *index)
 		}
 		if ((avail & bits) == bits) {
 			new = avail & ~bits;
-			if (compare_and_swap_u64(&rb->avail, avail, new,
-						__ATOMIC_SEQ_CST)) {
+			if (OPA_cas_ptr(&rb->avail, (void*)avail, (void*)new)
+					== (void*)avail) {
 				debug(CCI_DB_MSG, "%s: bits 0x%"PRIx64" avail 0x%"PRIx64" "
 					"new 0x%"PRIx64" index %u", __func__, bits,
 					avail, new, i);
@@ -2615,14 +2618,15 @@ sm_release_rma_buffer(sm_rma_buffer_t *rb, uint32_t len, int index)
 	uint64_t avail = 0, bits = (((uint64_t)1 << cnt) - 1) << index;
 
     again:
-	avail = read_u64(&rb->avail, __ATOMIC_RELAXED);
+	avail = (uintptr_t) OPA_load_ptr(&rb->avail);
 	debug(CCI_DB_MSG, "%s: bits 0x%"PRIx64" avail 0x%"PRIx64, __func__, bits, avail);
 	if (avail & bits)
 		debug(CCI_DB_WARN, "%s: bits 0x%"PRIx64" avail 0x%"PRIx64,
 			__func__, bits, avail);
 	assert((avail & bits) == 0);
 
-	if (!compare_and_swap_u64(&rb->avail, avail, avail | bits, __ATOMIC_SEQ_CST))
+	if (OPA_cas_ptr(&rb->avail, (void*)avail, (void*)(avail | bits))
+			!= (void*)avail)
 		goto again;
 
 	return;
@@ -2892,7 +2896,7 @@ static int ctp_sm_send(cci_connection_t * connection,
 
 		addr = &sconn->tx->buf[offset * SM_LINE];
 		memcpy(addr, msg_ptr, msg_len);
-		mb();
+		OPA_write_barrier();
 	}
 
 	hdr.send.type = SM_MSG_SEND;
@@ -2970,7 +2974,7 @@ static int ctp_sm_sendv(cci_connection_t * connection,
 			memcpy(addr, data[i].iov_base, data[i].iov_len);
 			addr = (void*)((uintptr_t)addr + data[i].iov_len);
 		}
-		mb();
+		OPA_write_barrier();
 	}
 
 	hdr.send.type = SM_MSG_SEND;
