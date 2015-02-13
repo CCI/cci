@@ -67,4 +67,11 @@ AC_DEFUN([PLUGINS_cci_ctp_sm_CONFIG],[
     unset sm_ldadd
     unset sm_libadd
     unset sm_incadd
+
+    use_cma=no
+    AC_ARG_WITH([sm-cma],
+        [AS_HELP_STRING([--with-sm-cma], [Build cma support in sm])])
+    AC_CHECK_FUNC(process_vm_writev,
+        [AC_DEFINE([HAVE_CMA_H], [1])],
+        [AC_DEFINE([HAVE_CMA_H], [0], [Define if cma.h detected])])
 ])dnl

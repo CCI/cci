@@ -3034,6 +3034,9 @@ static int ctp_sm_rma_register(cci_endpoint_t * endpoint,
 	sh->handle.stuff[0] = (uintptr_t) sh;
 	sh->handle.stuff[1] = (uintptr_t) start;
 	sh->handle.stuff[2] = (uintptr_t) length;
+#if HAVE_CMA_H
+	sh->handle.stuff[3] = (uintptr_t) getpid();
+#endif
 	sh->flags = flags;
 
 	*rma_handle = &sh->handle;
@@ -3161,6 +3164,47 @@ static int ctp_sm_rma(cci_connection_t * connection,
 			pthread_mutex_unlock(&ep->lock);
 		}
 	} else
+#elif HAVE_CMA_H
+	{
+		struct iovec local, remote;
+		ssize_t rc = 0;
+
+		local.iov_base = (void*)((uintptr_t)local_handle->stuff[1] + local_offset);
+		remote.iov_base = (void*)((uintptr_t)remote_handle->stuff[1] + remote_offset);
+		local.iov_len = remote.iov_len = data_len;
+
+		debug(CCI_DB_MSG, "%s: using CMA to RMA %"PRIu64" bytes from "
+			"pid %d to pid %d", __func__, data_len,
+			(pid_t)local_handle->stuff[3],
+			(pid_t)remote_handle->stuff[3]);
+
+		if (flags & CCI_FLAG_WRITE) {
+			rc = process_vm_writev((pid_t)remote_handle->stuff[3],
+				&local, 1, &remote, 1, 0);
+		} else {
+			rc = process_vm_readv((pid_t)remote_handle->stuff[3],
+				&local, 1, &remote, 1, 0);
+		}
+		if (rc != (ssize_t)data_len) {
+			ret = errno;
+			debug(CCI_DB_MSG, "%s: process_vm_%s() failed with %s",
+				__func__, flags & CCI_FLAG_WRITE ? "write" : "read",
+				strerror(ret));
+			goto out;
+		}
+
+		if (msg_ptr) {
+			ret = ctp_sm_send(connection, msg_ptr, msg_len, context, flags);
+			free(rma);
+			rma = NULL;
+		} else {
+			pthread_mutex_lock(&ep->lock);
+			TAILQ_INSERT_TAIL(&ep->evts, &rma->evt, entry);
+			sm_ep_notify(ep);
+			pthread_mutex_unlock(&ep->lock);
+		}
+		goto out;
+	}
 #endif
 	{
 		if (msg_ptr && msg_len) {
