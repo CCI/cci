@@ -2117,6 +2117,8 @@ sm_write(cci__ep_t *ep, cci__conn_t *conn)
 	char one = 1;
 	sm_conn_t *sconn = conn->priv;
 
+	CCI_ENTER;
+
 	ret = write(sconn->fifo, &one, sizeof(one));
 	if (ret == -1) {
 		switch (errno) {
@@ -2141,6 +2143,7 @@ sm_write(cci__ep_t *ep, cci__conn_t *conn)
 	debug(CCI_DB_MSG, "%s: writing to %s's fifo %s (ret %d)",
 		__func__, conn->uri, ret ? "failed" : "succeeded", ret);
 
+	CCI_EXIT;
 	return ret;
 }
 
@@ -2161,6 +2164,7 @@ sm_handle_send(cci__ep_t *ep, cci__conn_t *conn, sm_hdr_t *hdr)
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+	sm_ep_notify(ep);
 	pthread_mutex_unlock(&ep->lock);
 
 	debug(CCI_DB_MSG, "%s: received SEND from %s (offset %u) len %u",
@@ -2251,6 +2255,7 @@ sm_complete_rma(cci__ep_t *ep, sm_rma_t *rma)
 		debug(CCI_DB_MSG, "%s: queuing rma %p", __func__, (void*)rma);
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_INSERT_TAIL(&ep->evts, &rma->evt, entry);
+		sm_ep_notify(ep);
 		pthread_mutex_unlock(&ep->lock);
 	} else {
 		debug(CCI_DB_MSG, "%s: freeing rma %p", __func__, (void*)rma);
@@ -2744,6 +2749,7 @@ sm_progress_rma(sm_rma_t *rma)
 					rma->evt.event.send.status = ret;
 					pthread_mutex_lock(&ep->lock);
 					TAILQ_INSERT_TAIL(&ep->evts, &rma->evt, entry);
+					sm_ep_notify(ep);
 					pthread_mutex_unlock(&ep->lock);
 				}
 			}
@@ -2913,6 +2919,7 @@ static int ctp_sm_send(cci_connection_t * connection,
 	if (!(flags & CCI_FLAG_SILENT)) {
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+		sm_ep_notify(ep);
 		pthread_mutex_unlock(&ep->lock);
 	}
 
@@ -2991,6 +2998,7 @@ static int ctp_sm_sendv(cci_connection_t * connection,
 	if (!(flags & CCI_FLAG_SILENT)) {
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+		sm_ep_notify(ep);
 		pthread_mutex_unlock(&ep->lock);
 	}
 
