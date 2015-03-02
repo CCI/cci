@@ -1280,6 +1280,9 @@ sm_free_conn(cci__conn_t *conn)
 	sm_ep_t *sep = ep->priv;
 	sm_conn_t *sconn = conn->priv;
 
+	if (!conn)
+		return;
+
 	if (sconn) {
 		free(sconn->name);
 		if (sconn->id != -1) {
