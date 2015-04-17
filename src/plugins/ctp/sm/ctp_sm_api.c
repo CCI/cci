@@ -1561,10 +1561,6 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 	ring_init(&(sconn->tx->ring), 64); /* magic number */
 
 
-#if HAVE_XPMEM_H
-	if (sep->segid != -1) {
-	} else
-#endif /* HAVE_XPMEM_H */
 	{
 		/* Open our shared memory object for RMA */
 		memset(name, 0, sizeof(name));
@@ -3096,6 +3092,12 @@ static int ctp_sm_rma(cci_connection_t * connection,
 		ret = CCI_ENODEV;
 		goto out;
 	}
+
+	debug(CCI_DB_MSG, "%s: msg_ptr %p msg_len %u local %p local_offset %"PRIu64
+			" remote %p remote_offset %"PRIu64" data_len %"PRIu64
+			" context %p flags %d", __func__, msg_ptr, msg_len,
+			(void*)local_handle, local_offset, (void*) remote_handle,
+			remote_offset, data_len, context, flags);
 
 	if ((data_len + local_offset) > sh->len) {
 		debug(CCI_DB_MSG,
