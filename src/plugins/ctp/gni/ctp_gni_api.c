@@ -2571,15 +2571,9 @@ out:
 static int gni_progress_connections(cci__ep_t * ep)
 {
 	int ret = CCI_EAGAIN;
-	static int count = 0;
 	gni_ep_t *gep = ep->priv;
 
 	CCI_ENTER;
-
-	if (!gep->fd && likely(++count != 10000))
-		return CCI_EAGAIN;
-	else
-		count = 0;
 
 	ret = gni_check_for_conn_requests(ep);
 	if (ret && ret != CCI_EAGAIN)
@@ -2915,9 +2909,7 @@ gni_rma_send_completion(cci__ep_t *ep, gni_cq_entry_t gevt)
 	if (rma_op->buf) {
 		if (rma_op->status == CCI_SUCCESS) {
 			void *src = NULL, *dest = NULL;
-			gni_rma_handle_t *local =
-				container_of(rma_op->local_handle,
-						gni_rma_handle_t, rma_handle);
+			gni_rma_handle_t *local = (void*)rma_op->local_handle->stuff[3];
 
 			dest = (void *) (local->addr + rma_op->local_offset);
 			/* FIXME double check this */
@@ -3457,6 +3449,7 @@ ctp_gni_rma_register(cci_endpoint_t * endpoint,
 	*((uint64_t*)&handle->rma_handle.stuff[0]) = (uintptr_t) start;
 	*((uint64_t*)&handle->rma_handle.stuff[1]) = handle->mh.qword1;
 	*((uint64_t*)&handle->rma_handle.stuff[2]) = handle->mh.qword2;
+	*((uint64_t*)&handle->rma_handle.stuff[3]) = (uintptr_t)handle;
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&gep->handles, handle, entry);
@@ -3473,8 +3466,7 @@ static int ctp_gni_rma_deregister(cci_endpoint_t * endpoint,
 			      cci_rma_handle_t * rma_handle)
 {
 	int ret = CCI_SUCCESS;
-	gni_rma_handle_t *handle =
-		container_of(rma_handle, gni_rma_handle_t, rma_handle);
+	gni_rma_handle_t *handle = (void*)rma_handle->stuff[3];
 	cci__ep_t *ep = handle->ep;
 	gni_ep_t *gep = ep->priv;
 	gni_return_t grc = GNI_RC_SUCCESS;
@@ -3595,8 +3587,7 @@ ctp_gni_rma(cci_connection_t * connection,
 	cci__conn_t *conn = NULL;
 	gni_ep_t *gep = NULL;
 	gni_conn_t *gconn = NULL;
-	gni_rma_handle_t *local =
-		container_of(local_handle, gni_rma_handle_t, rma_handle);
+	gni_rma_handle_t *local = (void*) local_handle->stuff[3];
 	gni_rma_op_t *rma_op = NULL;
 
 	CCI_ENTER;

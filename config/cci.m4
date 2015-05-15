@@ -75,9 +75,11 @@ AC_DEFUN([CCI_SETUP_CTP],[
     CPPFLAGS="$CPPFLAGS -I$CCI_top_srcdir/include"
     if test "$CCI_top_builddir" != "$CCI_top_srcdir"; then
         CPPFLAGS="$CPPFLAGS -I$CCI_top_builddir/include"
+        CPPFLAGS="$CPPFLAGS -I$CCI_top_builddir/src/openpa/src"
     fi
     CPPFLAGS="$CPPFLAGS -I$CCI_top_srcdir/src -I$CCI_top_srcdir/src/libltdl"
     CPPFLAGS="$CPPFLAGS -I$CCI_top_srcdir/src/api"
+    CPPFLAGS="$CPPFLAGS -I$CCI_top_srcdir/src/openpa/src"
 
     # Look for some header files
     AC_CHECK_HEADERS(errno.h stdint.h sys/types.h sys/time.h sys/uio.h)
