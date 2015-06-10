@@ -2946,6 +2946,7 @@ gni_rma_send_completion(cci__ep_t *ep, gni_cq_entry_t gevt)
 		}
 		/* we will pass the tx completion to the app,
 		 * free the rma_op now */
+		free(rma_op->msg_ptr);
 		free(rma_op);
 	}
 
@@ -3622,7 +3623,14 @@ ctp_gni_rma(cci_connection_t * connection,
 	rma_op->context = (void *) context;
 	rma_op->flags = flags;
 	rma_op->msg_len = msg_len;
-	rma_op->msg_ptr = (void *) msg_ptr;
+	/* rma_op->msg_ptr = (void *) msg_ptr; */
+	if (msg_len) {
+		rma_op->msg_ptr = calloc(1, msg_len);
+		if (!rma_op->msg_ptr) {
+			/* FIXME */
+		}
+		memcpy(rma_op->msg_ptr, msg_ptr, msg_len);
+	}
 
 	rma_op->evt.event.type = CCI_EVENT_SEND;
 	rma_op->evt.event.send.connection = connection;
