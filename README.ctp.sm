@@ -64,15 +64,14 @@
 
   3. By default, the sm transport uses mmapped memory for a "bounce buffer" when
   handling a RMA. This means that the data is copied twice - once into the
-  bounce buffer and then out of the bounce buffer. On systems with libxpmem,
-  a RMA operation only requires a single copy between the two processes, which
-  greatly improves throughput.
+  bounce buffer and then out of the bounce buffer. On systems with libxpmem or
+  Cross Memory Attach, a RMA operation only requires a single copy between the
+  two processes, which greatly improves throughput.
 
 = Known limitations ============================================================
 
 Not implemented:
 
-  Create endpoint cannot return an OS handle (i.e. no blocking support)
   RMA Fence
 
 = CCI Performance Tuning =======================================================
