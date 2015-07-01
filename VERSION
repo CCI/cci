@@ -6,7 +6,7 @@
 # <major>.<minor>.<release>.  If release is zero, then it is omitted.
 
 major=0
-minor=1
+minor=2
 release=0
 
 # greek is used for alpha or beta release tags.  If it is non-empty,
@@ -16,7 +16,7 @@ release=0
 # requirement is that it must be entirely printable ASCII characters
 # and have no white space.
 
-greek=b8
+greek=
 
 # If want_repo_rev=1, then the repository version number will be
 # included in the overall CCI version number in some form.  
@@ -45,7 +45,7 @@ repo_rev=-1
 
 # The date when this release was created
 
-date="Unreleased developer copy"
+date="June 10, 2015"
 
 # The shared library version of CCI's public library.  This version is
 # maintained in accordance with the "Library Interface Versions"
