@@ -18,6 +18,9 @@ AC_CONFIG_AUX_DIR([./config])
 # -I in ACLOCAL_AMFLAGS in the top-level Makefile.am.
 AC_CONFIG_MACRO_DIR([./config])
 
+AC_CHECK_HEADERS([include/ltdl.h])
+AC_SEARCH_LIBS([lt_dlopen],[ltdl])
+
 # Define $target
 AC_CANONICAL_TARGET
 
@@ -29,12 +32,17 @@ cci_show_title "Configuring CCI distribution tarball"
 AM_INIT_AUTOMAKE([1.11 dist-bzip2 subdir-objects foreign tar-ustar -Wall -Werror])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
-# Libtool2 is needed
-m4_ifdef([LT_PREREQ], [],
-	 [m4_fatal([libtool version 2.2.6 or higher is required], [63])])
-LT_PREREQ([2.2.6])
+#AC_LIBTOOL_DLOPEN
+#AM_PROG_LIBTOOL
+#AC_LIBLTDL_CONVENIENCE
+#AC_SUBST(LIBLTDL)
 
-m4_ifdef([AM_PROG_AR], [AM_PROG_AR]) 
+# Libtool2 is needed
+#m4_ifdef([LT_PREREQ], [],
+#	 [m4_fatal([libtool version 2.2.6 or higher is required], [63])])
+#LT_PREREQ([2.2.6])
+
+#m4_ifdef([AM_PROG_AR], [AM_PROG_AR]) 
 
 # Make configure depend on the VERSION file, since it's used in AC_INIT
 AC_SUBST([CONFIGURE_DEPENDENCIES], ['$(top_srcdir)/VERSION'])
@@ -158,9 +166,92 @@ AM_DISABLE_STATIC
 
 # Setup libtool / libltdl.  No need for Fortran, etc.
 cci_show_title "Configuring libtool / libltdl"
-LT_CONFIG_LTDL_DIR([src/libltdl])
-LT_INIT([dlopen win32-dll])
-LTDL_INIT([subproject convenience])
+# LT_CONFIG_LTDL_DIR([src/libltdl])
+#LT_INIT([dlopen win32-dll])
+#LTDL_INIT([subproject convenience])
+
+dnl Allow the user to specify where ltdl headers are installed
+AC_MSG_CHECKING([for ltld.h])
+AC_ARG_WITH([ltdl_include],
+    [AS_HELP_STRING([--with-ltdl-include=DIR],
+                    [use the ltdl headers installed in DIR])])
+if test -n "$with_ltdl_include"; then
+    if test -f "$with_ltdl_include/ltdl.h"; then
+        AC_MSG_RESULT([$with_ltdl_include])
+        LTDLINCL="-I$with_ltdl_include"
+        CFLAGS="$CFLAGS $LTDLINCL"
+    else
+        AC_MSG_RESULT([no])
+        AC_MSG_ERROR([Could not find ltdl.h in $with_ltdl_include])
+    fi
+else
+    with_ltdl_include=no
+fi
+
+dnl Allow the user to specify where libltdl is installed
+AC_MSG_CHECKING([for libltld])
+AC_ARG_WITH([ltdl_lib],
+    [AS_HELP_STRING([--with-ltdl-lib=DIR],
+                    [use the ltdl library installed in DIR])])
+if test -n "$with_ltdl_lib"; then
+    if test -f "$with_ltdl_lib/libltdl.la"; then
+        AC_MSG_RESULT([$with_ltdl_lib])
+        LIBLTDL="-L$with_ltdl_lib -lltdl"
+        LDFLAGS="$LDFLAGS $LIBLTDL"
+    else
+        AC_MSG_RESULT([no])
+        AC_MSG_ERROR([Could not find libltdl in $with_ltdl_lib])
+    fi
+else
+    with_ltdl_lib=no
+    AC_MSG_RESULT([no])
+fi
+
+dnl Allow the user to specify where ltdl is installed (cannot be used in
+dnl conjunction with --with-ltdl-include and/or --with-ltdl-lib
+AC_MSG_CHECKING([for installed ltdl])
+AC_ARG_WITH([installed_ltdl],
+    [AS_HELP_STRING([--with-installed-ltdl=DIR],
+                    [use ltdl installed in DIR])])
+if test -n "$with_installed_ltdl"; then
+    if test "$with_ltdl_lib"="no" -a "$with_ltdl_include"="no"; then
+        if test -f "$with_installed_ltdl/include/ltdl.h"; then
+            AC_MSG_RESULT([$with_ltd])
+            LTDLINCL="-I$with_installed_ltdl/include"
+            CFLAGS="$CFLAGS $LTDLINCL"
+        else
+            AC_MSG_RESULT([no])
+            AC_MSG_ERROR([Could not find ltdl.h in $with_ltdl/include])
+        fi
+        if test -f "$with_installed_ltdl/lib/libltdl.la"; then
+            LIBLTDL="-L$with_installed_ltdl/lib -lltdl"
+            LDFLAGS="$LDFLAGS $LIBLTDL"
+            AC_MSG_RESULT([yep])
+        else
+            AC_MSG_RESULT([no])
+            AC_MSG_ERROR([Could not find libltdl in $with_installed_ltdl/lib])
+        fi
+    else
+        AC_MSG_RESULT([no])
+        AC_MSG_ERROR([--with-installed-ltdl cannot be used with --with-ltdl-lib or --with-ltdl-include])
+    fi
+else
+    with_ltdl=no
+    AC_MSG_RESULT([no])
+fi
+
+dnl Enable building of the convenience library
+dnl and set LIBLTDL accordingly
+#AC_LIBLTDL_CONVENIENCE
+dnl Substitute INCLTDL and LIBLTDL in the Makefiles
+AC_SUBST(INCLTDL)
+AC_SUBST(LIBLTDL)
+dnl Check for dlopen support
+#AC_LIBTOOL_DLOPEN
+
+dnl Configure libtool
+AC_PROG_LIBTOOL
+
 LT_LANG([C])
 
 # Party on

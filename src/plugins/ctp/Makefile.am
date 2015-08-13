@@ -16,3 +16,4 @@ sources =
 include base/Makefile.include
 
 libcci_plugins_framework_ctp_la_SOURCES = $(headers) $(sources)
+libcci_plugins_framework_ctp_la_LDFLAGS = $(LIBLTDL)
