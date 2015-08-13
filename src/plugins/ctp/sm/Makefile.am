@@ -11,6 +11,6 @@ cci_ctp_sm_la_SOURCES = \
         ctp_sm.h \
         ctp_sm_module.c \
         ctp_sm_api.c \
-	ring.h \
-	ring.c \
-	sm_atomics.h
+        ring.h \
+        ring.c 
+#        sm_atomics.h
