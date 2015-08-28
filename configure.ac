@@ -32,18 +32,6 @@ cci_show_title "Configuring CCI distribution tarball"
 AM_INIT_AUTOMAKE([1.11 dist-bzip2 subdir-objects foreign -Wall -Werror])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
-#AC_LIBTOOL_DLOPEN
-#AM_PROG_LIBTOOL
-#AC_LIBLTDL_CONVENIENCE
-#AC_SUBST(LIBLTDL)
-
-# Libtool2 is needed
-#m4_ifdef([LT_PREREQ], [],
-#	 [m4_fatal([libtool version 2.2.6 or higher is required], [63])])
-#LT_PREREQ([2.2.6])
-
-#m4_ifdef([AM_PROG_AR], [AM_PROG_AR]) 
-
 # Make configure depend on the VERSION file, since it's used in AC_INIT
 AC_SUBST([CONFIGURE_DEPENDENCIES], ['$(top_srcdir)/VERSION'])
 
