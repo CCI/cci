@@ -29,7 +29,7 @@ CCI_CONFIGURE_SETUP
 cci_show_title "Configuring CCI distribution tarball"
 
 # Init automake
-AM_INIT_AUTOMAKE([1.11 dist-bzip2 subdir-objects foreign tar-ustar -Wall -Werror])
+AM_INIT_AUTOMAKE([1.11 dist-bzip2 subdir-objects foreign -Wall -Werror])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
 #AC_LIBTOOL_DLOPEN
@@ -171,11 +171,11 @@ cci_show_title "Configuring libtool / libltdl"
 #LTDL_INIT([subproject convenience])
 
 dnl Allow the user to specify where ltdl headers are installed
-AC_MSG_CHECKING([for ltld.h])
 AC_ARG_WITH([ltdl_include],
     [AS_HELP_STRING([--with-ltdl-include=DIR],
                     [use the ltdl headers installed in DIR])])
 if test -n "$with_ltdl_include"; then
+    AC_MSG_CHECKING([for ltld.h])
     if test -f "$with_ltdl_include/ltdl.h"; then
         AC_MSG_RESULT([$with_ltdl_include])
         LTDLINCL="-I$with_ltdl_include"
@@ -183,17 +183,18 @@ if test -n "$with_ltdl_include"; then
     else
         AC_MSG_RESULT([no])
         AC_MSG_ERROR([Could not find ltdl.h in $with_ltdl_include])
+        with_ltdl_include=no
     fi
 else
     with_ltdl_include=no
 fi
 
 dnl Allow the user to specify where libltdl is installed
-AC_MSG_CHECKING([for libltld])
 AC_ARG_WITH([ltdl_lib],
     [AS_HELP_STRING([--with-ltdl-lib=DIR],
                     [use the ltdl library installed in DIR])])
 if test -n "$with_ltdl_lib"; then
+    AC_MSG_CHECKING([for libltld])
     if test -f "$with_ltdl_lib/libltdl.la"; then
         AC_MSG_RESULT([$with_ltdl_lib])
         LIBLTDL="-L$with_ltdl_lib -lltdl"
@@ -201,53 +202,76 @@ if test -n "$with_ltdl_lib"; then
     else
         AC_MSG_RESULT([no])
         AC_MSG_ERROR([Could not find libltdl in $with_ltdl_lib])
+        with_ltdl_lib=no
     fi
 else
     with_ltdl_lib=no
-    AC_MSG_RESULT([no])
 fi
 
 dnl Allow the user to specify where ltdl is installed (cannot be used in
 dnl conjunction with --with-ltdl-include and/or --with-ltdl-lib
-AC_MSG_CHECKING([for installed ltdl])
 AC_ARG_WITH([installed_ltdl],
-    [AS_HELP_STRING([--with-installed-ltdl=DIR],
+    [AS_HELP_STRING([--with-included-ltdl=DIR],
                     [use ltdl installed in DIR])])
-if test -n "$with_installed_ltdl"; then
-    if test "$with_ltdl_lib"="no" -a "$with_ltdl_include"="no"; then
-        if test -f "$with_installed_ltdl/include/ltdl.h"; then
-            AC_MSG_RESULT([$with_ltd])
-            LTDLINCL="-I$with_installed_ltdl/include"
+if test -n "$with_included_ltdl"; then
+    AC_MSG_CHECKING([for installed ltdl])
+    if test x"$with_ltdl_lib" = x"no" -a x"$with_ltdl_include" = x"no"; then
+        if test -f "$with_included_ltdl/include/ltdl.h"; then
+            AC_MSG_RESULT([$with_included_ltdl])
+            LTDLINCL="-I$with_included_ltdl/include"
             CFLAGS="$CFLAGS $LTDLINCL"
+            if test -f "$with_included_ltdl/lib/libltdl.la"; then
+                LIBLTDL="-L$with_included_ltdl/lib -lltdl"
+                LDFLAGS="$LDFLAGS $LIBLTDL"
+                AC_MSG_RESULT([yep])
+            else
+                with_included_ltdl=no
+                AC_MSG_RESULT([no])
+                AC_MSG_ERROR([Could not find libltdl in $with_included_ltdl/lib])
+            fi
         else
             AC_MSG_RESULT([no])
+            with_included_ltdl=no
             AC_MSG_ERROR([Could not find ltdl.h in $with_ltdl/include])
-        fi
-        if test -f "$with_installed_ltdl/lib/libltdl.la"; then
-            LIBLTDL="-L$with_installed_ltdl/lib -lltdl"
-            LDFLAGS="$LDFLAGS $LIBLTDL"
-            AC_MSG_RESULT([yep])
-        else
-            AC_MSG_RESULT([no])
-            AC_MSG_ERROR([Could not find libltdl in $with_installed_ltdl/lib])
         fi
     else
         AC_MSG_RESULT([no])
-        AC_MSG_ERROR([--with-installed-ltdl cannot be used with --with-ltdl-lib or --with-ltdl-include])
+        AC_MSG_ERROR([--with-included-ltdl cannot be used with --with-ltdl-lib or --with-ltdl-include])
+        exit 1
     fi
 else
-    with_ltdl=no
-    AC_MSG_RESULT([no])
+    with_included_ltdl=no
 fi
 
-dnl Enable building of the convenience library
-dnl and set LIBLTDL accordingly
-#AC_LIBLTDL_CONVENIENCE
+dnl If the user did not explicitly specify where ltdl headers are, we check
+dnl if the headers are available on the system by default.
+echo "toto $with_ltdl_include $with_included_ltdl"
+if test x"$with_ltdl_include" = x"no" -a x"$with_included_ltdl" = x"no"; then
+    AC_MSG_CHECKING([for ltld.h])
+    AC_CHECK_HEADER([ltdl.h],
+                    [AC_MSG_RESULT([yes])],
+                    [AC_MSG_ERROR([ltdl headers not available]),
+                     exit 1])
+fi
+echo "titi"
+
+dnl If the user did not explicitly specify where the ltdl library is, we check
+dnl if the library is available on the system by default. Note that by checking
+dnl for lt_dladvise_init, we check whether libtool 2.2 or newer is installed
+if test x"$with_ltdl_lib" = x"no" -a x"$with_included_ltdl" = x"no"; then
+    AC_MSG_CHECKING([for libltld])
+    AC_CHECK_LIB([ltdl],
+                 [lt_dladvise_init],
+                 [(LIBLTDL=-lltdl
+                   AC_MSG_RESULT([yes]))],
+                 [AC_MSG_ERROR([libltdl not available])
+                  exit 1])
+fi
+                
+
 dnl Substitute INCLTDL and LIBLTDL in the Makefiles
 AC_SUBST(INCLTDL)
 AC_SUBST(LIBLTDL)
-dnl Check for dlopen support
-#AC_LIBTOOL_DLOPEN
 
 dnl Configure libtool
 AC_PROG_LIBTOOL

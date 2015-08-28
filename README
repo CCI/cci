@@ -50,3 +50,21 @@ The current CCI prototype has the following limitations:
   See README.<transport> for additional notes and limitations for that
   transport.
 
+  The current CCI build system supports the standard 'make dist' command but
+  users may face problems when using a MacOS/BSD environment, resulting in
+  empty distribution archives. In this context, the following error message
+  will appear in the output of the 'make dist' command:
+    Numeric user ID too largeNumeric group ID too large
+  This error is due to a user ID and group ID that BSD tar is trying to include
+  into the archive but that cannot be encoded, usually because the user account
+  is a "Network User" account. To address this problem, please follow these
+  instructions:
+    - compile GNU tar from source (http://www.gnu.org/software/tar/),
+    - extend your PATH environment variable to include the directory where the
+      GNU tar binary has been compiled,
+    - set the TAR_OPTIONS environment variable to "--owner=0 --group=0
+      --numeric-owner",
+    - run the autogen.pl and configure commands again.
+  You should then be able to successfully create the CCI distribution archive
+  by running the 'make dist' command.
+  
