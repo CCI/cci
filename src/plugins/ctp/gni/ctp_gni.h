@@ -332,10 +332,16 @@ typedef struct gni_new_conn {
 	gni_conn_request_t cr;		/* conn request */
 } gni_new_conn_t;
 
+#define GNI_ID_MASK	((1 << 24) - 1)	/* 24 bit mask for gconn->id */
+
 typedef struct gni_conn {
 	cci__conn_t *conn;		/* owning conn */
 	gni_ep_handle_t peer;		/* peer ep handle */
 	uint32_t id;			/* peer sets remote_event to this */
+					/* On Gemini, the id is 32 bits.
+					 * On Aries, it is 24 bits.
+					 * Ensure ids fit in 24 bits.
+					 */
 	gni_conn_state_t state;		/* current state */
 	struct sockaddr_in sin;		/* peer address and port */
 	uint32_t mss;			/* max send size */
