@@ -2163,7 +2163,6 @@ sm_handle_send(cci__ep_t *ep, cci__conn_t *conn, sm_hdr_t *hdr)
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
-	sm_ep_notify(ep);
 	pthread_mutex_unlock(&ep->lock);
 
 	debug(CCI_DB_MSG, "%s: received SEND from %s (offset %u) len %u",
