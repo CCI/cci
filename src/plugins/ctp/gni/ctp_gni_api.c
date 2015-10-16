@@ -805,8 +805,6 @@ gni_create_cdm_cqs(cci__dev_t *dev, cci__ep_t *ep, uint32_t port)
 	gni_ep_t *gep = ep->priv;
 	gni_return_t grc = GNI_RC_SUCCESS;
 
-	gdev->ptag = GNI_FIND_ALLOC_PTAG;
-
 	debug(CCI_DB_CTP, "%s: creating CDM port=%u ptag=%u cookie=0x%x",
 		__func__, port, gdev->ptag, gdev->cookie);
 
