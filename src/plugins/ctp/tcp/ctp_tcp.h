@@ -868,34 +868,55 @@ struct tcp_globals {
 };
 
 /* Macro to initialize the structure of a device */
-#define INIT_CCI_DEVICE_STRUCT(device) { \
-        device->max_send_size = TCP_DEFAULT_MSS; \
-        device->rate = 10000000000ULL; \
-        device->pci.domain = -1;    /* per CCI spec */ \
-        device->pci.bus = -1;       /* per CCI spec */ \
-        device->pci.dev = -1;       /* per CCI spec */ \
-        device->pci.func = -1;      /* per CCI spec */ \
-        device->up = 0; \
+#define INIT_CCI_DEVICE_STRUCT(device) {                \
+        device->max_send_size = TCP_DEFAULT_MSS;        \
+        device->rate = 10000000000ULL;                  \
+        device->pci.domain = -1;    /* per CCI spec */  \
+        device->pci.bus = -1;       /* per CCI spec */  \
+        device->pci.dev = -1;       /* per CCI spec */  \
+        device->pci.func = -1;      /* per CCI spec */  \
+        device->up = 0;                                 \
     } while (0)
 
-#define INIT_CCI__DEV_STRUCT(dev,ret) do { \
-        struct cci_device *device; \
-        tcp_dev_t *sdev; \
-        ret = CCI_SUCCESS; \
-        dev = calloc(1, sizeof(*dev)); \
-        if (!dev) \
-            ret = CCI_ENOMEM; \
-        dev->priv = calloc(1, sizeof(*sdev)); \
-        if (!dev->priv) { \
-            free(dev); \
-            ret = CCI_ENOMEM; \
-        } \
-        cci__init_dev(dev); \
-        device = &dev->device; \
-        INIT_CCI_DEVICE_STRUCT(device); \
-        sdev = dev->priv; \
-        device->transport = strdup("tcp"); \
+#define INIT_CCI__DEV_STRUCT(dev,ret) do {      \
+        struct cci_device *device;              \
+        tcp_dev_t *sdev;                        \
+        ret = CCI_SUCCESS;                      \
+        dev = calloc(1, sizeof(*dev));          \
+        if (!dev)                               \
+            ret = CCI_ENOMEM;                   \
+        dev->priv = calloc(1, sizeof(*sdev));   \
+        if (!dev->priv) {                       \
+            free(dev);                          \
+            ret = CCI_ENOMEM;                   \
+        }                                       \
+        cci__init_dev(dev);                     \
+        device = &dev->device;                  \
+        INIT_CCI_DEVICE_STRUCT(device);         \
+        sdev = dev->priv;                       \
+        device->transport = strdup("tcp");      \
     } while(0)
+
+#define TCP_QUEUE_EVT(queue,evt,tep) do {       \
+        TAILQ_INSERT_TAIL(queue, evt, entry);   \
+        if (TCP_CONN_IS_BLOCKING(tep)) {        \
+            tcp_wakeup_app_thread(tep);         \
+        }                                       \
+    } while (0)
+
+static inline int
+tcp_event_queue_is_empty (cci__ep_t *ep)
+{
+        int ret;
+        pthread_mutex_lock(&ep->lock);
+        if (TAILQ_EMPTY (&ep->evts))
+                ret = 1;
+        else
+                ret = 0;
+        pthread_mutex_unlock(&ep->lock);
+
+        return ret;
+}
 
 typedef enum device_state {
 	IFACE_IS_DOWN = 0,
