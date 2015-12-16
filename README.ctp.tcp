@@ -53,16 +53,12 @@
 = Run-time notes ===============================================================
 
   1. Most devices that support transports other than tcp will also provide an
-  Ethernet interface. Generally, you will want to use the native transport and
-  not tcp for these devices.
+  Ethernet or IP interface. Generally, you will want to use the native transport
+  and not tcp for these devices.
 
 = Known limitations ============================================================
 
-Not implemented:
-
-  Create endpoint cannot return an OS handle (i.e. no blocking support)
-  RMA Fence
-
+  None.
 
 = CCI Performance Tuning =======================================================
 

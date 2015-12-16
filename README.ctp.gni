@@ -107,6 +107,15 @@
      create a progress thread. The progress thread will call into GNI and allow
      multiple threads to call into CCI successfully.
 
+  4. Small MSG Latency
+
+     The GNI transport uses sockets to exchange mailbox information. Currently,
+     the transport tries to progress the listening socket every time the
+     application calls cci_get_event(). This increases the GNI latency from
+     about 1 us to about 13 us. Previously, the transport only progressed the
+     listening socket every Nth call to cci_get_event(), but that resulted in
+     very long connection times.
+
 = Performance Tuning ===========================================================
 
   There are no-runtime tuning parameters currently. A few items may be tweaked
