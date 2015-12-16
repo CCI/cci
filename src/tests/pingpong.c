@@ -29,7 +29,7 @@
 int connect_done = 0, done = 0;
 int ready = 0;
 int is_server = 0;
-int accept = 1;
+int accept_conn = 1;
 int count = 0;
 int iters = ITERS;
 int warmup = WARMUP;
@@ -408,7 +408,7 @@ static void do_server(void)
 		if (ret == CCI_SUCCESS) {
 			switch (event->type) {
 			case CCI_EVENT_CONNECT_REQUEST:
-				if (accept) {
+				if (accept_conn) {
 					opts =
 					    *((options_t *) event->request.
 					      data_ptr);
@@ -503,7 +503,7 @@ int main(int argc, char *argv[])
 			is_server = 1;
 			break;
 		case 'R':
-			accept = 0;
+			accept_conn = 0;
 			break;
 		case 'i':
 			iters = strtoul(optarg, NULL, 0);

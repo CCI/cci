@@ -349,6 +349,7 @@ static int ctp_gni_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver,
 	cci_device_t **devices = NULL;
 	struct ifaddrs *ifaddrs = NULL;
 	uint32_t cpu_id = 0;
+	gni_nic_device_t nic_type = 0;
 
 	CCI_ENTER;
 
@@ -373,6 +374,12 @@ static int ctp_gni_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver,
 		goto out;
 	}
 	gglobals->count = count;
+
+	grc = GNI_GetDeviceType(&nic_type);
+	if (grc != GNI_RC_SUCCESS) {
+		ret = gni_to_cci_status(grc);
+		goto out;
+	}
 
 	grc = GNI_CdmGetNicAddress(0, &gglobals->phys_addr, &cpu_id);
 	if (grc != GNI_RC_SUCCESS) {
@@ -435,7 +442,11 @@ static int ctp_gni_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver,
 
 		gdev = dev->priv;
 		gdev->device_id = 0;
-		gdev->ptag = GNI_DEFAULT_PTAG;
+		if (nic_type == GNI_DEVICE_GEMINI) {
+			gdev->ptag = GNI_DEFAULT_PTAG;
+		} else {
+			gdev->ptag = GNI_FIND_ALLOC_PTAG;
+		}
 		gdev->cookie = GNI_DEFAULT_COOKIE;
 		gdev->ifa = &gglobals->ifaddrs[0];
 
@@ -479,7 +490,11 @@ static int ctp_gni_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver,
 
 			gdev = dev->priv;
 			gdev->device_id = -1;
-			gdev->ptag = GNI_DEFAULT_PTAG;
+			if (nic_type == GNI_DEVICE_GEMINI) {
+				gdev->ptag = GNI_DEFAULT_PTAG;
+			} else {
+				gdev->ptag = GNI_FIND_ALLOC_PTAG;
+			}
 			gdev->cookie = GNI_DEFAULT_COOKIE;
 
 			/* parse conf_argv */
@@ -1548,7 +1563,7 @@ gni_insert_conn(cci__conn_t *conn)
 	if (ret)
 		debug(CCI_DB_WARN, "%s: wrlock() failed with %s", __func__, strerror(errno));
 	do {
-		id = random();
+		id = random() & GNI_ID_MASK;
 		ret = gni_find_conn_locked(ep, id, &c);
 	} while (ret == CCI_SUCCESS);
 	gconn->id = id;
@@ -2722,6 +2737,8 @@ static int gni_get_recv_event(cci__ep_t * ep, gni_cq_entry_t cqe)
 		ret = gni_find_conn(ep, id, &conn);
 		if (ret != CCI_SUCCESS) {
 			/* TODO */
+			debug(CCI_DB_MSG, "%s: unable to find conn for id %u",
+					__func__, id);
 			goto out;
 		}
 		gconn = conn->priv;
@@ -2863,6 +2880,9 @@ gni_rma_send_completion(cci__ep_t *ep, gni_cq_entry_t gevt)
 	rma_op = container_of(pd, gni_rma_op_t, pd);
 	conn = rma_op->evt.conn;
 	gconn = conn->priv;
+	if (gconn->id != id)
+		debug(CCI_DB_MSG, "%s: expected gconn->id %u but got %u",
+				__func__, gconn->id, id);
 	assert(gconn->id == id);
 
 	pthread_mutex_lock(&ep->lock);

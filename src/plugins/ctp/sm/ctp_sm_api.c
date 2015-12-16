@@ -2163,7 +2163,6 @@ sm_handle_send(cci__ep_t *ep, cci__conn_t *conn, sm_hdr_t *hdr)
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
-	sm_ep_notify(ep);
 	pthread_mutex_unlock(&ep->lock);
 
 	debug(CCI_DB_MSG, "%s: received SEND from %s (offset %u) len %u",
@@ -2407,6 +2406,22 @@ sm_put_tx(cci__evt_t *tx)
 	return;
 }
 
+static void
+sm_read_fifo(cci__ep_t *ep, const char *func)
+{
+	sm_ep_t *sep = ep->priv;
+
+	if (sep->fifo) {
+		int rc = 0;
+		char one = 0;
+
+		rc = read(sep->fifo, &one, 1);
+		if (rc != 1)
+			debug(CCI_DB_EP, "%s: read(fifo) returned %d", func, rc);
+	}
+	return;
+}
+
 static int ctp_sm_get_event(cci_endpoint_t * endpoint,
 			      cci_event_t ** event)
 {
@@ -2427,14 +2442,7 @@ static int ctp_sm_get_event(cci_endpoint_t * endpoint,
 
 	if (ev) {
 		TAILQ_REMOVE(&ep->evts, ev, entry);
-		if (sep->fifo) {
-			int rc = 0;
-			char one = 0;
-
-			rc = read(sep->fifo, &one, 1);
-			debug(CCI_DB_EP, "%s: read(fifo) returned %s", __func__,
-				rc == 1 ? "success" : strerror(errno));
-		}
+		sm_read_fifo(ep, __func__);
 
 		debug(CCI_DB_EP, "%s: found %s", __func__,
 				cci_event_type_str(ev->event.type));
@@ -2847,6 +2855,8 @@ sm_progress_rma_ring(cci__ep_t *ep, cci__conn_t *conn)
 				hdr->generic.type, conn->uri);
 		ret = CCI_ERROR;
 	}
+
+	sm_read_fifo(ep, __func__);
 
     out:
 	return ret;
