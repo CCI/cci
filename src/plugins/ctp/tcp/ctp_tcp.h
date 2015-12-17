@@ -897,6 +897,8 @@ struct tcp_globals {
         device->transport = strdup("tcp");      \
     } while(0)
 
+#define TCP_CONN_IS_BLOCKING(tep) (tep->pipe[0] != -1)
+
 #define TCP_QUEUE_EVT(queue,evt,tep) do {       \
         TAILQ_INSERT_TAIL(queue, evt, entry);   \
         if (TCP_CONN_IS_BLOCKING(tep)) {        \
