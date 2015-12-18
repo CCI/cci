@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2010 Cisco Systems, Inc.  All rights reserved.
- * Copyright © 2010-2014 UT-Battelle, LLC. All rights reserved.
- * Copyright © 2010-2014 Oak Ridge National Labs.  All rights reserved.
+ * Copyright © 2010-2015 UT-Battelle, LLC. All rights reserved.
+ * Copyright © 2010-2015 Oak Ridge National Labs.  All rights reserved.
  * Copyright © 2012 inria.  All rights reserved.
  *
  * See COPYING in top-level directory
@@ -42,8 +42,6 @@
 #include <stdbool.h>
 bool conn_established = false;
 #endif
-
-#define TCP_CONN_IS_BLOCKING(tep) (tep->pipe[0] != -1)
 
 tcp_globals_t *tglobals = NULL;
 
@@ -715,11 +713,11 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 			goto out;
 		}
 		*fd = tep->pipe[0];
-	}
 
-	ret = tcp_create_thread(ep);
-	if (ret)
-		goto out;
+		ret = tcp_create_thread(ep);
+		if (ret)
+			goto out;
+	}
 
 	conn_decref(ep, conn); /* drop our ref to the listening conn */
 
@@ -1639,7 +1637,7 @@ static int ctp_tcp_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eve
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 	tep = ep->priv;
 
-	if (!tep->pipe[0])
+	if (!TCP_CONN_IS_BLOCKING(tep))
 		tcp_progress_ep(ep);
 
 	pthread_mutex_lock(&ep->lock);
@@ -2541,12 +2539,6 @@ tcp_handle_conn_request(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx, uint32_t
 	pthread_mutex_lock(&ep->lock);
 	TCP_QUEUE_EVT (&ep->evts, &rx->evt, tep);
 	pthread_mutex_unlock(&ep->lock);
-
-#if 0
-	if (TCP_CONN_IS_BLOCKING(tep)) {
-		tcp_wakeup_app_thread(tep);
-	}
-#endif
 
 	return;
 out:
