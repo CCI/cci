@@ -659,7 +659,7 @@ sm_get_ep_id(cci__dev_t *dev, uint32_t *id)
 			shift = (uint32_t) ffsl(*b);
 			assert(shift);	/* it must find a bit */
 			shift--;
-			assert((*b & ((uint64_t)1 << shift)) == 1);
+			assert(*b & ((uint64_t)1 << shift));
 			*b = *b & ~(((uint64_t)1) << shift);
 			found = 1;
 			break;
