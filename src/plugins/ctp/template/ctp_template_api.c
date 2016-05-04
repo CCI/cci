@@ -25,6 +25,11 @@ static int ctp_template_create_endpoint(cci_device_t * device,
 				    int flags,
 				    cci_endpoint_t ** endpoint,
 				    cci_os_handle_t * fd);
+static int ctp_template_create_endpoint_at(cci_device_t * device,
+					   const char * service,
+					   int flags,
+					   cci_endpoint_t ** endpoint,
+					   cci_os_handle_t * fd);
 static int ctp_template_destroy_endpoint(cci_endpoint_t * endpoint);
 static int ctp_template_accept(cci_event_t *event, const void *context);
 static int ctp_template_reject(cci_event_t *event);
@@ -89,6 +94,7 @@ cci_plugin_ctp_t cci_ctp_template_plugin = {
 	ctp_template_finalize,
 	ctp_template_strerror,
 	ctp_template_create_endpoint,
+	ctp_template_create_endpoint_at,
 	ctp_template_destroy_endpoint,
 	ctp_template_accept,
 	ctp_template_reject,
@@ -130,6 +136,16 @@ static int ctp_template_create_endpoint(cci_device_t * device,
 				    cci_os_handle_t * fd)
 {
 	printf("In template_create_endpoint\n");
+	return CCI_ERR_NOT_IMPLEMENTED;
+}
+
+static int ctp_template_create_endpoint_at(cci_device_t * device,
+					   const char * service,
+					   int flags,
+					   cci_endpoint_t ** endpoint,
+					   cci_os_handle_t * fd)
+{
+	printf("In %s\n", __func__);
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 

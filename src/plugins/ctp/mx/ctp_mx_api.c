@@ -20,6 +20,9 @@ static const char *mx_strerror(cci_endpoint_t * endpoint, enum cci_status status
 static int mx_create_endpoint(cci_device_t * device,
 			      int flags,
 			      cci_endpoint_t ** endpoint, cci_os_handle_t * fd);
+static int mx_create_endpoint_at(cci_device_t * device,
+			         const char * service, int flags,
+			         cci_endpoint_t ** endpoint, cci_os_handle_t * fd);
 static int mx_destroy_endpoint(cci_endpoint_t * endpoint);
 static int mx_bind(cci_device_t * device, int backlog, uint32_t * port,
 		   cci_service_t ** service, cci_os_handle_t * fd);
@@ -91,6 +94,7 @@ cci_plugin_ctp_t cci_ctp_mx_plugin = {
 	mx_finalize,
 	mx_strerror,
 	mx_create_endpoint,
+	mx_create_endpoint_at,
 	mx_destroy_endpoint,
 	mx_bind,
 	mx_unbind,
@@ -134,6 +138,14 @@ static int mx_create_endpoint(cci_device_t * device,
 			      cci_endpoint_t ** endpoint, cci_os_handle_t * fd)
 {
 	printf("In mx_create_endpoint\n");
+	return CCI_ERR_NOT_IMPLEMENTED;
+}
+
+static int mx_create_endpoint_at(cci_device_t * device,
+			      const char * service, int flags,
+			      cci_endpoint_t ** endpoint, cci_os_handle_t * fd)
+{
+	printf("In mx_create_endpoint_at\n");
 	return CCI_ERR_NOT_IMPLEMENTED;
 }
 

@@ -120,6 +120,11 @@ static int ctp_portals_create_endpoint(cci_device_t * device,
 				   int flags,
 				   cci_endpoint_t ** endpoint,
 				   cci_os_handle_t * fd);
+static int ctp_portals_create_endpoint_at(cci_device_t * device,
+					  const char * service,
+					  int flags,
+					  cci_endpoint_t ** endpoint,
+					  cci_os_handle_t * fd);
 static int ctp_portals_destroy_endpoint(cci_endpoint_t * endpoint);
 static int ctp_portals_accept(cci_event_t *event,
 			  const void *context);
@@ -193,6 +198,7 @@ cci_plugin_ctp_t cci_ctp_portals_plugin = {
 	ctp_portals_finalize,
 	ctp_portals_strerror,
 	ctp_portals_create_endpoint,
+	ctp_portals_create_endpoint_at,
 	ctp_portals_destroy_endpoint,
 	ctp_portals_accept,
 	ctp_portals_reject,
@@ -1020,6 +1026,15 @@ static int ctp_portals_create_endpoint(cci_device_t * device,
 
 	CCI_EXIT;
 	return iRC;
+}
+
+static int ctp_portals_create_endpoint_at(cci_device_t * device,
+					  const char * service,
+					  int flags,
+					  cci_endpoint_t ** endpointp,
+					  cci_os_handle_t * fd)
+{
+	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 static int ctp_portals_destroy_endpoint(cci_endpoint_t * endpoint)

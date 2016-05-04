@@ -57,6 +57,11 @@ static int ctp_gni_create_endpoint(cci_device_t * device,
 				 int flags,
 				 cci_endpoint_t ** endpoint,
 				 cci_os_handle_t * fd);
+static int ctp_gni_create_endpoint_at(cci_device_t * device,
+				    const char * service,
+				    int flags,
+				    cci_endpoint_t ** endpoint,
+				    cci_os_handle_t * fd);
 static int ctp_gni_destroy_endpoint(cci_endpoint_t * endpoint);
 static int ctp_gni_accept(cci_event_t *event, const void *context);
 static int ctp_gni_reject(cci_event_t *event);
@@ -122,6 +127,7 @@ cci_plugin_ctp_t cci_ctp_gni_plugin = {
 	ctp_gni_finalize,
 	ctp_gni_strerror,
 	ctp_gni_create_endpoint,
+	ctp_gni_create_endpoint_at,
 	ctp_gni_destroy_endpoint,
 	ctp_gni_accept,
 	ctp_gni_reject,
@@ -1108,6 +1114,15 @@ ctp_gni_create_endpoint(cci_device_t * device,
 		ep->priv = NULL;
 	}
 	return ret;
+}
+
+static int
+ctp_gni_create_endpoint_at(cci_device_t * device,
+			   const char * service,
+			   int flags,
+			   cci_endpoint_t ** endpointp, cci_os_handle_t * fd)
+{
+	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 static int gni_destroy_rx_pool(cci__ep_t * ep, gni_rx_pool_t * rx_pool)

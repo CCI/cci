@@ -56,6 +56,11 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 				int flags,
 				cci_endpoint_t ** endpoint,
 				cci_os_handle_t * fd);
+static int ctp_tcp_create_endpoint_at(cci_device_t * device,
+				      const char * service,
+				      int flags,
+				      cci_endpoint_t ** endpoint,
+				      cci_os_handle_t * fd);
 static int ctp_tcp_destroy_endpoint(cci_endpoint_t * endpoint);
 static int ctp_tcp_accept(cci_event_t *event, const void *context);
 static int ctp_tcp_reject(cci_event_t *conn_req);
@@ -127,6 +132,7 @@ cci_plugin_ctp_t cci_ctp_tcp_plugin = {
 	ctp_tcp_finalize,
 	ctp_tcp_strerror,
 	ctp_tcp_create_endpoint,
+	ctp_tcp_create_endpoint_at,
 	ctp_tcp_destroy_endpoint,
 	ctp_tcp_accept,
 	ctp_tcp_reject,
@@ -758,6 +764,14 @@ out:
 	*endpointp = NULL;
 	CCI_EXIT;
 	return ret;
+}
+
+static int ctp_tcp_create_endpoint_at(cci_device_t * device,
+				      int flags,
+				      cci_endpoint_t ** endpointp,
+				      cci_os_handle_t * fd)
+{
+	return CCI_ERR_NOT_IMPLEMENTED;
 }
 
 static inline void

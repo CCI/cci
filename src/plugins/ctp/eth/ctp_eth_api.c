@@ -37,6 +37,11 @@ static int ctp_eth_create_endpoint(cci_device_t * device,
 				   int flags,
 				   cci_endpoint_t ** endpoint,
 				   cci_os_handle_t * fd);
+static int ctp_eth_create_endpoint_at(cci_device_t * device,
+				      const char * service,
+				      int flags,
+				      cci_endpoint_t ** endpoint,
+				      cci_os_handle_t * fd);
 static int ctp_eth_destroy_endpoint(cci_endpoint_t * endpoint);
 static int ctp_eth_accept(cci_event_t *event, const void *context);
 static int ctp_eth_reject(cci_event_t *event);
@@ -99,6 +104,7 @@ cci_plugin_ctp_t cci_ctp_eth_plugin = {
 	ctp_eth_finalize,
 	ctp_eth_strerror,
 	ctp_eth_create_endpoint,
+	ctp_eth_create_endpoint_at,
 	ctp_eth_destroy_endpoint,
 	ctp_eth_accept,
 	ctp_eth_reject,
@@ -514,6 +520,20 @@ out_with_uri:
 out_with_eep:
 	free(eep);
 out:
+	CCI_EXIT;
+	return ret;
+}
+
+static int ctp_eth_create_endpoint_at(cci_device_t * device,
+				      const char * service,
+				      int flags,
+				      cci_endpoint_t ** endpointp,
+				      cci_os_handle_t * fdp)
+{
+	int ret = CCI_ERR_NOT_IMPLEMENTED;
+
+	CCI_ENTER;
+
 	CCI_EXIT;
 	return ret;
 }
