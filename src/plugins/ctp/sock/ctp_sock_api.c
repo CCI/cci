@@ -972,6 +972,7 @@ out:
 }
 
 static int ctp_sock_create_endpoint_at(cci_device_t * device,
+				const char * service,
 				int flags,
 				cci_endpoint_t ** endpointp,
 				cci_os_handle_t * fd)
