@@ -20,6 +20,7 @@ int cci_plugins_ctp_verify(cci_plugin_t * plugin)
 	    NULL == p->finalize ||
 	    NULL == p->strerror ||
 	    NULL == p->create_endpoint ||
+	    NULL == p->create_endpoint_at ||
 	    NULL == p->destroy_endpoint ||
 	    NULL == p->accept ||
 	    NULL == p->reject ||
@@ -40,8 +41,7 @@ int cci_plugins_ctp_verify(cci_plugin_t * plugin)
 		return CCI_ERROR;
 	}
 
-	/* Check to ensure it's a supported API version.  For simplicity,
-	   we only support 1 version right now. */
+	/* Check to ensure it's a supported API version. */
 	if (p->base.plugin_type_version_major != CCI_CTP_API_VERSION_MAJOR ||
 	    p->base.plugin_type_version_minor != CCI_CTP_API_VERSION_MINOR ||
 	    p->base.plugin_type_version_release !=

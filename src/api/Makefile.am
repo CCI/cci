@@ -10,6 +10,7 @@ libcci_api_la_SOURCES = \
         arm_os_handle.c \
         connect.c \
         create_endpoint.c \
+        create_endpoint_at.c \
         destroy_endpoint.c \
         disconnect.c \
         finalize.c \

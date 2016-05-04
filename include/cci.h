@@ -548,6 +548,68 @@ CCI_DECLSPEC int cci_create_endpoint(cci_device_t * device,
 				     cci_endpoint_t ** endpoint,
 				     cci_os_handle_t * fd);
 
+/*!
+  Create an endpoint bound to a specified service.
+
+  \param[in] device: A pointer to a device that was returned via
+                     cci_get_devices() or NULL.
+
+  \param[in] service: Device-specific service hint.
+
+  \param[in] flags: Flags specifying behavior of this endpoint.
+
+  \param[out] endpoint: A handle to the endpoint that was created.
+
+  \param[out] fd: Operating system handle that can be used to block for
+                  progress on this endpoint.
+
+  \return CCI_SUCCESS   The endpoint is ready for use.
+  \return CCI_EINVAL    Device, endpoint, or fd is NULL.
+  \return CCI_ENODEV    Device is not "up".
+  \return CCI_ENOMEM    Unable to allocate enough memory.
+  \return Each transport may have additional error codes.
+
+  This function creates a CCI endpoint bound to a specified service.
+  A CCI endpoint represents a collection of local resources (such as
+  buffers and a completion queue).  An endpoint is associated with a
+  device that performs the actual communication (see the description
+  of cci_get_devices(), above).
+
+  The device argument must be a pointer that was returned by
+  cci_get_devices() to indicate that a specific device should be used
+  for this endpoint.
+
+  The service argument is a string that provides a device-specific hint
+  about how to bind the endpoint. Most transports use AF_INET sockets,
+  which use a port for the service. For these transports, pass the
+  requested port as a string. The shared memory (SM) transport, however,
+  uses AF_UNIX, which uses a path. See README.ctp.sm for instructions
+  on how to create a service string.
+
+  If successful, cci_create_endpoint_at() creates an endpoint and
+  returns a pointer to it in the endpoint parameter.
+
+  cci_create_endpoint_at() is a local operation (i.e., it occurs on
+  local hardware).  There is no need to talk to name services, etc.
+  To be clear, the intent is that this function can be invoked many
+  times locally without affecting any remote resources.
+
+  If it is desirable to bind the CCI endpoint to a specific set of
+  resources (e.g., a NUMA node), the application should bind the calling
+  thread before calling cci_create_endpoint_at().
+
+  Advice to users: to set the send/receive buffer count on the endpoint,
+  call cci_set|get_opt() after creating the endpoint with the applicable
+  options.
+
+  \ingroup endpoints
+*/
+CCI_DECLSPEC int cci_create_endpoint_at(cci_device_t * device,
+				        const char *service,
+				        int flags,
+				        cci_endpoint_t ** endpoint,
+				        cci_os_handle_t * fd);
+
 /*! Destroy an endpoint.
 
    \param[in] endpoint: Handle previously returned from a successful call to

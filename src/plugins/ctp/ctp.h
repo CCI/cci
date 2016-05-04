@@ -44,6 +44,11 @@ typedef int (*cci_create_endpoint_fn_t) (cci_device_t * device,
 					 int flags,
 					 cci_endpoint_t ** endpoint,
 					 cci_os_handle_t * fd);
+typedef int (*cci_create_endpoint_at_fn_t) (cci_device_t * device,
+					    const char * service,
+					    int flags,
+					    cci_endpoint_t ** endpoint,
+					    cci_os_handle_t * fd);
 typedef int (*cci_destroy_endpoint_fn_t) (cci_endpoint_t * endpoint);
 typedef int (*cci_accept_fn_t) (cci_event_t * conn_req, const void *context);
 typedef int (*cci_reject_fn_t) (cci_event_t * conn_req);
@@ -88,6 +93,7 @@ typedef struct cci_plugin_ctp {
 	cci_finalize_fn_t finalize;
 	cci_strerror_fn_t strerror;
 	cci_create_endpoint_fn_t create_endpoint;
+	cci_create_endpoint_at_fn_t create_endpoint_at;
 	cci_destroy_endpoint_fn_t destroy_endpoint;
 	cci_accept_fn_t accept;
 	cci_reject_fn_t reject;
