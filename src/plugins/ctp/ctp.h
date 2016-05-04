@@ -110,7 +110,7 @@ typedef struct cci_plugin_ctp {
 extern struct cci_plugin_handle *cci_all_plugins;
 
 /* Define for the version of this plugin type header file */
-#define CCI_CTP_API_VERSION_MAJOR 1
+#define CCI_CTP_API_VERSION_MAJOR 2
 #define CCI_CTP_API_VERSION_MINOR 0
 #define CCI_CTP_API_VERSION_RELEASE 0
 #define CCI_CTP_API_VERSION \
