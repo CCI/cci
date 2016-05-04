@@ -70,7 +70,7 @@ BEGIN_C_DECLS
 
   \ingroup env
  */
-#define CCI_ABI_VERSION 1
+#define CCI_ABI_VERSION 2
 
 /*!
   This is the first CCI function that must called; no other CCI
