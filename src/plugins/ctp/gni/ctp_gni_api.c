@@ -885,8 +885,8 @@ out:
 }
 
 static int
-ctp_gni_create_endpoint(cci_device_t * device,
-		      int flags,
+ctp_gni_create_endpoint_at(cci_device_t * device,
+		      const char * service, int flags,
 		      cci_endpoint_t ** endpointp, cci_os_handle_t * fd)
 {
 	int i = 0;
@@ -955,6 +955,9 @@ ctp_gni_create_endpoint(cci_device_t * device,
 	gep->sock = ret;
 
 	memcpy(&gep->sin, gdev->ifa->ifa_addr, sizeof(gep->sin));
+
+	if (service)
+		gep->sin.sin_port = strtol(service, NULL, 0);
 
 	ret = bind(gep->sock, (struct sockaddr*)&gep->sin, sizeof(gep->sin));
 	if (ret == -1) {
@@ -1117,12 +1120,19 @@ ctp_gni_create_endpoint(cci_device_t * device,
 }
 
 static int
-ctp_gni_create_endpoint_at(cci_device_t * device,
-			   const char * service,
+ctp_gni_create_endpoint(cci_device_t * device,
 			   int flags,
 			   cci_endpoint_t ** endpointp, cci_os_handle_t * fd)
 {
-	return CCI_ERR_NOT_IMPLEMENTED;
+	int ret = 0;
+
+	CCI_ENTER;
+
+	ret = ctp_gni_create_endpoint_at(device, NULL, flags, endpointp, fd);
+
+	CCI_EXIT;
+
+	return ret;
 }
 
 static int gni_destroy_rx_pool(cci__ep_t * ep, gni_rx_pool_t * rx_pool)
