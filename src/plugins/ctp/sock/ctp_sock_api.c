@@ -678,7 +678,8 @@ static inline void sock_close_socket(cci_os_handle_t sock)
 	return;
 }
 
-static int ctp_sock_create_endpoint(cci_device_t * device,
+static int ctp_sock_create_endpoint_at(cci_device_t * device,
+				const char * service,
 				int flags,
 				cci_endpoint_t ** endpointp,
 				cci_os_handle_t * fd)
@@ -792,8 +793,11 @@ static int ctp_sock_create_endpoint(cci_device_t * device,
 	memset(&sin, 0, sizeof(sin));
 	sin.sin_family = AF_INET;
 	sin.sin_addr.s_addr = sdev->ip;
-	if (sdev->port != 0)
+	if (service) {
+		sin.sin_port = strtol(service, NULL, 0);
+	} else if (sdev->port) {
 		sin.sin_port = sdev->port;
+	}
 
 	ret = bind(sep->sock, (const struct sockaddr *)&sin, sizeof(sin));
 	if (ret) {
@@ -971,13 +975,20 @@ out:
 	return ret;
 }
 
-static int ctp_sock_create_endpoint_at(cci_device_t * device,
-				const char * service,
+static int ctp_sock_create_endpoint(cci_device_t * device,
 				int flags,
 				cci_endpoint_t ** endpointp,
 				cci_os_handle_t * fd)
 {
-	return CCI_ERR_NOT_IMPLEMENTED;
+	int ret = 0;
+
+	CCI_ENTER;
+
+	ret = ctp_sock_create_endpoint_at(device, NULL, flags, endpointp, fd);
+
+	CCI_EXIT;
+
+	return ret;
 }
 
 static int ctp_sock_destroy_endpoint(cci_endpoint_t * endpoint)
