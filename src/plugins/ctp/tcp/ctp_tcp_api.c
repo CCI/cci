@@ -547,10 +547,11 @@ queue_conn(cci__ep_t *ep, cci__conn_t *conn);
 static void
 conn_decref(cci__ep_t *ep, cci__conn_t *conn);
 
-static int ctp_tcp_create_endpoint(cci_device_t * device,
-				int flags,
-				cci_endpoint_t ** endpointp,
-				cci_os_handle_t * fd)
+static int ctp_tcp_create_endpoint_at(cci_device_t * device,
+				      const char * service,
+				      int flags,
+				      cci_endpoint_t ** endpointp,
+				      cci_os_handle_t * fd)
 {
 	int i, ret, one = 1;
 	cci_os_handle_t sock = -1;
@@ -619,8 +620,11 @@ static int ctp_tcp_create_endpoint(cci_device_t * device,
 	memset(&sin, 0, sizeof(sin));
 	sin.sin_family = AF_INET;
 	sin.sin_addr.s_addr = tdev->ip;
-	if (tdev->port != 0)
-        sin.sin_port = tdev->port;
+	if (service) {
+		sin.sin_port = strtol(service, NULL, 0);
+	} else if (tdev->port != 0) {
+		sin.sin_port = tdev->port;
+	}
 
 	ret = bind(sock, (const struct sockaddr *)&sin, sizeof(sin));
 	if (ret) {
@@ -766,13 +770,20 @@ out:
 	return ret;
 }
 
-static int ctp_tcp_create_endpoint_at(cci_device_t * device,
-				      const char * service,
-				      int flags,
-				      cci_endpoint_t ** endpointp,
-				      cci_os_handle_t * fd)
+static int ctp_tcp_create_endpoint(cci_device_t * device,
+				   int flags,
+				   cci_endpoint_t ** endpointp,
+				   cci_os_handle_t * fd)
 {
-	return CCI_ERR_NOT_IMPLEMENTED;
+	int ret = 0;
+
+	CCI_ENTER;
+
+	ret = ctp_tcp_create_endpoint_at(device, NULL, flags, endpointp, fd);
+
+	CCI_EXIT;
+
+	return ret;
 }
 
 static inline void
@@ -2431,6 +2442,7 @@ tcp_handle_listen_socket(cci__ep_t *ep, cci__conn_t *listen_conn)
 
 	CCI_ENTER;
 
+	memset(&sin, 0, sizeof(sin));
 	ret = tcp_new_conn(ep, sin, -1, &conn);
 	if (ret)
 		return;
