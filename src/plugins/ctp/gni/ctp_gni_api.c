@@ -957,7 +957,7 @@ ctp_gni_create_endpoint_at(cci_device_t * device,
 	memcpy(&gep->sin, gdev->ifa->ifa_addr, sizeof(gep->sin));
 
 	if (service)
-		gep->sin.sin_port = strtol(service, NULL, 0);
+		gep->sin.sin_port = htons((uint16_t)strtol(service, NULL, 0));
 
 	ret = bind(gep->sock, (struct sockaddr*)&gep->sin, sizeof(gep->sin));
 	if (ret == -1) {

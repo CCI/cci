@@ -794,7 +794,7 @@ static int ctp_sock_create_endpoint_at(cci_device_t * device,
 	sin.sin_family = AF_INET;
 	sin.sin_addr.s_addr = sdev->ip;
 	if (service) {
-		sin.sin_port = strtol(service, NULL, 0);
+		sin.sin_port = htons((uint16_t)strtol(service, NULL, 0));
 	} else if (sdev->port) {
 		sin.sin_port = sdev->port;
 	}
