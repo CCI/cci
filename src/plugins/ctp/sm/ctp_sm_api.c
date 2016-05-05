@@ -309,7 +309,7 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 		device->name = strdup(name);
 
 		memset(dname, 0, sizeof(dname));
-		snprintf(dname, sizeof(dname), "%s/%s/%u", SM_DEFAULT_PATH, hname, pid);
+		snprintf(dname, sizeof(dname), "%s/%s", SM_DEFAULT_PATH, hname);
 		sdev->path = strdup(dname);
 		if (!sdev->path) {
 			ret = CCI_ENOMEM;
@@ -489,7 +489,7 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 				path = SM_DEFAULT_PATH;
 
 			memset(dname, 0, sizeof(dname));
-			snprintf(dname, sizeof(dname), "%s/%s/%u", path, hname, sdev->pid);
+			snprintf(dname, sizeof(dname), "%s/%s", path, hname);
 			sdev->path = strdup(dname);
 			if (!sdev->path) {
 				ret = CCI_ENOMEM;
@@ -562,6 +562,9 @@ remove_path(char *path)
 	char *argv[2];
 	FTS *fts = NULL;
 	FTSENT *ent = NULL;
+
+	if (!path)
+		return;
 
 	argv[0] = path;
 	argv[1] = NULL;
@@ -793,10 +796,11 @@ sm_conn_thread(void *arg)
 	pthread_exit(NULL);
 }
 
-static int ctp_sm_create_endpoint(cci_device_t * device,
-				    int flags,
-				    cci_endpoint_t ** endpointp,
-				    cci_os_handle_t * fd)
+static int ctp_sm_create_endpoint_at(cci_device_t * device,
+				     const char * service,
+				      int flags,
+				      cci_endpoint_t ** endpointp,
+				      cci_os_handle_t * fd)
 {
 	int ret = CCI_SUCCESS;
 	uint32_t id = 0;
@@ -846,20 +850,31 @@ static int ctp_sm_create_endpoint(cci_device_t * device,
 	TAILQ_INIT(&sep->passive);
 	TAILQ_INIT(&sep->closing);
 
-	ret = sm_get_ep_id(dev, &id);
-	if (ret) goto out;
-
-	sep->id = id;
-
-	/* If the path length plus enough room for a uint32_t and NULL
+	/* If the path length plus enough room for two uint32_t and NULL
 	 * exceeds the sizeof name (sun.sun_path) length, bail */
-	if ((strlen(sdev->path) + 12) > sizeof(name)) {
+	if ((strlen(sdev->path) + 22) > sizeof(name)) {
 		ret = CCI_EINVAL;
 		goto out;
 	}
 
 	memset(name, 0, sizeof(name));
-	snprintf(name, sizeof(name), "%s/%u", sdev->path, sep->id);
+
+	if (service) {
+		ret = sscanf(service, "%u/%u", &sep->pid, &sep->id);
+		if (ret != 2) {
+			ret = CCI_EINVAL;
+			goto out;
+		}
+	} else {
+		ret = sm_get_ep_id(dev, &id);
+		if (ret) goto out;
+
+		sep->pid = sdev->pid;
+		sep->id = id;
+		sep->put_id = 1;
+	}
+
+	snprintf(name, sizeof(name), "%s/%u/%u", sdev->path, sep->pid, sep->id);
 
 	memset(uri, 0, sizeof(uri));
 	snprintf(uri, sizeof(uri), "sm://%s", name);
@@ -984,13 +999,20 @@ out:
 	return ret;
 }
 
-static int ctp_sm_create_endpoint_at(cci_device_t * device,
-				     const char * service,
-				     int flags,
-				     cci_endpoint_t ** endpointp,
-				     cci_os_handle_t * fd)
+static int ctp_sm_create_endpoint(cci_device_t * device,
+				  int flags,
+				  cci_endpoint_t ** endpointp,
+				  cci_os_handle_t * fd)
 {
-	return CCI_ERR_NOT_IMPLEMENTED;
+	int ret = 0;
+
+	CCI_ENTER;
+
+	ret = ctp_sm_create_endpoint_at(device, NULL, flags, endpointp, fd);
+
+	CCI_EXIT;
+
+	return ret;
 }
 
 static int ctp_sm_destroy_endpoint(cci_endpoint_t * endpoint)
@@ -1018,6 +1040,8 @@ static int ctp_sm_destroy_endpoint(cci_endpoint_t * endpoint)
 		path = (void*)((uintptr_t)ep->uri + strlen("sm://"));
 
 	if (sep) {
+		char *slash = NULL;
+
 		if (sep->sock)
 			close(sep->sock);
 
@@ -1029,9 +1053,18 @@ static int ctp_sm_destroy_endpoint(cci_endpoint_t * endpoint)
 		if (sep->fifo)
 			close(sep->fifo);
 
+		if (path)
+			slash = strrchr(path, '/');
+
 		remove_path(path);
 
-		sm_put_ep_id(dev, sep->id);
+		if (slash) {
+			*slash = '\0';
+			remove_path(path);
+		}
+
+		if (sep->put_id)
+			sm_put_ep_id(dev, sep->id);
 		free(sep);
 		ep->priv = NULL;
 	}
@@ -1538,7 +1571,8 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 
 	/* Open our shared memory object for MSGs */
 	memset(name, 0, sizeof(name));
-	snprintf(name, sizeof(name), "%s/%u/conns/%d", sdev->path, sep->id, sconn->id);
+	snprintf(name, sizeof(name), "%s/%u/%u/conns/%d", sdev->path,
+			sep->pid, sep->id, sconn->id);
 	ret = open(name, O_RDWR | O_CREAT | O_TRUNC, 0666);
 	if (ret == -1) {
 		debug(CCI_DB_CONN, "%s: unable to open %s's mmap buf", __func__, uri);
@@ -1579,8 +1613,8 @@ sm_create_conn(cci__ep_t *ep, const char *uri, cci__conn_t **connp)
 	{
 		/* Open our shared memory object for RMA */
 		memset(name, 0, sizeof(name));
-		snprintf(name, sizeof(name), "%s/%u/conns/%d-rma",
-				sdev->path, sep->id, sconn->id);
+		snprintf(name, sizeof(name), "%s/%u/%u/conns/%d-rma",
+				sdev->path, sep->pid, sep->id, sconn->id);
 		ret = open(name, O_RDWR | O_CREAT | O_TRUNC, 0666);
 		if (ret == -1) {
 			debug(CCI_DB_CONN, "%s: unable to open %s's RMA mmap buf",

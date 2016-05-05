@@ -10,9 +10,10 @@
 
 = Endpoint naming ==============================================================
 
-  SM endpoint URIs are a path to the process' pid and endpoint ID:
+  SM endpoint URIs are a path to the hostname followed by the process' pid and
+  endpoint ID:
 
-    sm:///tmp/cci/sm/pid/id
+    sm:///tmp/cci/sm/hostname/pid/id
 
 = Config file options ==========================================================
 
@@ -67,6 +68,10 @@
   bounce buffer and then out of the bounce buffer. On systems with libxpmem or
   Cross Memory Attach, a RMA operation only requires a single copy between the
   two processes, which greatly improves throughput.
+
+  4.  When using cci_create_endpoint_at(), the service must be a string with
+  two numbers separated by a slash. Examples include "1/2", "5000/6000", etc.
+  The values must fit within a 32-bit unsigned integer.
 
 = Known limitations ============================================================
 

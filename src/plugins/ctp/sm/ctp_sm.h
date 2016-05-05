@@ -316,10 +316,8 @@ struct sm_rma {
 
 struct sm_ep {
 	cci_os_handle_t		sock;		/* For listen socket */
-	uint32_t		sock_busy :  1;	/* Serialize access to sock */
-	uint32_t		fifo_busy :  1;	/* Serialize access to fifo */
-	uint32_t		id        : 14;	/* Large enough to handle SM_EP_MAX_ID */
-	uint32_t		pad       : 16;	/* Reserved */
+	uint32_t		pid;		/* Process ID */
+	uint32_t		id;		/* Endpoint ID */
 
 	cci_os_handle_t		fifo;		/* FIFO fd for receiving headers */
 
@@ -338,6 +336,7 @@ struct sm_ep {
 	TAILQ_HEAD(cls, sm_conn) closing;	/* Closing conns */
 
 	pthread_t		conn_tid;	/* Connection thread */
+	int			put_id;		/* Put ID when done - no service */
 };
 
 typedef enum sm_conn_state {
