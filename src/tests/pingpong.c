@@ -52,6 +52,7 @@ int blocking = 0;
 int nfds = 0;
 fd_set rfds;
 int attempts = 0;
+char *service = NULL;
 
 typedef struct options {
 	struct cci_rma_handle rma_handle;
@@ -70,7 +71,8 @@ static void print_usage(void)
 {
 	fprintf(stderr, "usage: %s -h <server_uri> [-s] [-i <iters>] "
 		"[-W <warmup>] [-c <type>] [-n] [-b|-o]"
-		"[[-w | -r] [-m <max_rma_size> [-C]]]\n", name);
+		"[[-w | -r] [-m <max_rma_size> [-C]]] "
+		"[-S <service>]\n", name);
 	fprintf(stderr, "where:\n");
 	fprintf(stderr, "\t-h\tServer's URI\n");
 	fprintf(stderr, "\t-s\tSet to run as the server\n");
@@ -85,7 +87,8 @@ static void print_usage(void)
 	fprintf(stderr, "\t-m\tTest RMA messages up to max_rma_size\n");
 	fprintf(stderr, "\t-C\tSend RMA remote completion message\n");
 	fprintf(stderr, "\t-b\tBlock using the OS handle instead of polling\n");
-	fprintf(stderr, "\t-o\tGet OS handle but don't use it\n\n");
+	fprintf(stderr, "\t-o\tGet OS handle but don't use it\n");
+	fprintf(stderr, "\t-S\tSpecify a service hint for cci_create_endpoint_at()\n\n");
 	fprintf(stderr, "Example:\n");
 	fprintf(stderr, "server$ %s -h ip://foo -p 2211 -s\n", name);
 	fprintf(stderr, "client$ %s -h ip://foo -p 2211\n", name);
@@ -494,7 +497,7 @@ int main(int argc, char *argv[])
 
 	name = argv[0];
 
-	while ((c = getopt(argc, argv, "h:sRc:nwrm:Ci:W:bo")) != -1) {
+	while ((c = getopt(argc, argv, "h:sRc:nwrm:Ci:W:boS:")) != -1) {
 		switch (c) {
 		case 'h':
 			server_uri = strdup(optarg);
@@ -547,6 +550,11 @@ int main(int argc, char *argv[])
 			ignore_os_handle = 1;
 			os_handle = &fd;
 			break;
+		case 'S':
+			service = strdup(optarg);
+			if (!service)
+				fprintf(stderr, "strdup(service) failed.\n");
+			break;
 		default:
 			print_usage();
 		}
@@ -594,7 +602,18 @@ int main(int argc, char *argv[])
 	}
 
 	/* create an endpoint */
-	ret = cci_create_endpoint(NULL, 0, &endpoint, os_handle);
+	if (service) {
+		cci_device_t * const * devices = NULL;
+		ret = cci_get_devices(&devices);
+		if (ret != CCI_SUCCESS) {
+			fprintf(stderr, "%s: cci_get_devices() failed with %s\n,",
+				__func__, cci_strerror(NULL, ret));
+		}
+
+		ret = cci_create_endpoint_at(devices[0], service, 0, &endpoint, os_handle);
+	} else {
+		ret = cci_create_endpoint(NULL, 0, &endpoint, os_handle);
+	}
 	if (ret) {
 		fprintf(stderr, "cci_create_endpoint() failed with %s (%d)\n",
 			cci_strerror(NULL, ret), ret);
