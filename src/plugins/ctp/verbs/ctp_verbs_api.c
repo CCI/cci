@@ -1109,8 +1109,8 @@ out:
 }
 
 static int
-ctp_verbs_create_endpoint(cci_device_t * device,
-		      int flags,
+ctp_verbs_create_endpoint_at(cci_device_t * device,
+		      const char * service, int flags,
 		      cci_endpoint_t ** endpointp, cci_os_handle_t * fd)
 {
 	int ret = CCI_SUCCESS;
@@ -1178,6 +1178,9 @@ ctp_verbs_create_endpoint(cci_device_t * device,
 	}
 
 	vep->sin = *((struct sockaddr_in *)vdev->ifa->ifa_addr);
+
+	if (service)
+		vep->sin.sin_port = htons((uint16_t)strtol(service, NULL, 0));
 
 	ret = rdma_bind_addr(vep->id_rc, (struct sockaddr *)&vep->sin);
 	if (ret == -1) {
@@ -1390,11 +1393,19 @@ out:
 }
 
 static int
-ctp_verbs_create_endpoint_at(cci_device_t * device,
-			     const char * service, int flags,
+ctp_verbs_create_endpoint(cci_device_t * device,
+			     int flags,
 			     cci_endpoint_t ** endpointp, cci_os_handle_t * fd)
 {
-	return CCI_ERR_NOT_IMPLEMENTED;
+	int ret = 0;
+
+	CCI_ENTER;
+
+	ret = ctp_verbs_create_endpoint(device, NULL, flags, endpointp, fd);
+
+	CCI_EXIT;
+
+	return ret;
 }
 
 static int verbs_destroy_rx_pool(cci__ep_t * ep, verbs_rx_pool_t * rx_pool)
