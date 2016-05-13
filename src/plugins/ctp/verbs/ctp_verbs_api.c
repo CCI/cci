@@ -1401,7 +1401,7 @@ ctp_verbs_create_endpoint(cci_device_t * device,
 
 	CCI_ENTER;
 
-	ret = ctp_verbs_create_endpoint(device, NULL, flags, endpointp, fd);
+	ret = ctp_verbs_create_endpoint_at(device, NULL, flags, endpointp, fd);
 
 	CCI_EXIT;
 
