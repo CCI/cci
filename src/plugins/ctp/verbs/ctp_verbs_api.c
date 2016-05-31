@@ -4230,9 +4230,9 @@ ctp_verbs_rma_register(cci_endpoint_t * endpoint,
 
 	handle->ep = ep;
 
-	if (flags & CCI_FLAG_RMA_READ)
+	if (flags & CCI_FLAG_READ)
 		ibv_flags = IBV_ACCESS_REMOTE_READ;
-	if (flags & CCI_FLAG_RMA_WRITE) {
+	if (flags & CCI_FLAG_WRITE) {
 		ibv_flags |= IBV_ACCESS_REMOTE_WRITE;
 		ibv_flags |= IBV_ACCESS_LOCAL_WRITE;
 	}
