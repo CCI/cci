@@ -4184,8 +4184,7 @@ ctp_verbs_rma_register(cci_endpoint_t * endpoint,
 		   void *start, uint64_t length,
 		   int flags, cci_rma_handle_t ** rma_handle)
 {
-	/* FIXME use read/write flags? */
-	int ret = CCI_SUCCESS;
+	int ret = CCI_SUCCESS, ibv_flags = 0;
 	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
 	verbs_ep_t *vep = ep->priv;
 	verbs_rma_handle_t *handle = NULL;
@@ -4206,10 +4205,14 @@ ctp_verbs_rma_register(cci_endpoint_t * endpoint,
 
 	handle->ep = ep;
 
-	handle->mr = ibv_reg_mr(vep->pd, start, (size_t) length,
-				IBV_ACCESS_LOCAL_WRITE |
-				IBV_ACCESS_REMOTE_WRITE |
-				IBV_ACCESS_REMOTE_READ);
+	if (flags & CCI_FLAG_RMA_READ)
+		ibv_flags = IBV_ACCESS_REMOTE_READ;
+	if (flags & CCI_FLAG_RMA_WRITE) {
+		ibv_flags |= IBV_ACCESS_REMOTE_WRITE;
+		ibv_flags |= IBV_ACCESS_LOCAL_WRITE;
+	}
+
+	handle->mr = ibv_reg_mr(vep->pd, start, (size_t) length, ibv_flags);
 	if (!handle->mr) {
 		free(handle);
 		CCI_EXIT;
