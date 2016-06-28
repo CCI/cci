@@ -1847,8 +1847,6 @@ static int ctp_verbs_accept(cci_event_t * event, const void *context)
 	if (vconn->num_slots)
 		header |= (1 << 12);	/* magic number */
 
-	vconn->state = VERBS_CONN_ESTABLISHED;
-
 	pthread_mutex_lock(&ep->lock);
 	vconn->tx_pending++;
 	pthread_mutex_unlock(&ep->lock);
@@ -3309,6 +3307,9 @@ static int verbs_handle_msg(cci__ep_t * ep, struct ibv_wc wc)
 	else
 		rx->evt.event.request.data_ptr = NULL;
 
+	if (vconn->state == VERBS_CONN_PASSIVE)
+		queue = 1;
+
 	pthread_mutex_lock(&ep->lock);
 	if (!queue) {
 		verbs_queue_evt_locked(ep, &rx->evt);
@@ -3544,7 +3545,16 @@ static int verbs_handle_send_completion(cci__ep_t * ep, struct ibv_wc wc)
 			ctp_verbs_disconnect(&conn->connection);
 		} else {
 			queue_tx = 0;
-			verbs_queue_evt(ep, &tx->evt);
+			pthread_mutex_lock(&ep->lock);
+			vconn->state = VERBS_CONN_ESTABLISHED;
+			verbs_queue_evt_locked(ep, &tx->evt);
+			while (!TAILQ_EMPTY(&vconn->early)) {
+				cci__evt_t *evt = TAILQ_FIRST(&vconn->early);
+
+				TAILQ_REMOVE(&vconn->early, evt, entry);
+				TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
+			}
+			pthread_mutex_unlock(&ep->lock);
 		}
 		break;
 	case VERBS_MSG_SEND:
