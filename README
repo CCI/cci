@@ -31,7 +31,7 @@ Thank you for using CCI.
 
 = Supported Transports =========================================================
 
-The following transports are supported (more coming soon):
+The following transports are supported:
 
   Sockets (UDP)
   OFA Verbs (InfiniBand and RoCE)
