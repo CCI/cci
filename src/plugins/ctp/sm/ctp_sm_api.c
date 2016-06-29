@@ -320,6 +320,7 @@ static int ctp_sm_init(cci_plugin_ctp_t *plugin, uint32_t abi_ver, uint32_t flag
 		if (ret)
 			goto out;
 
+		sdev->pid = pid;
 		sdev->id = 0;
 
 		device->up = 1;
