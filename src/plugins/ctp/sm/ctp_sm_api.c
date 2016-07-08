@@ -1333,6 +1333,23 @@ sm_free_conn(cci__conn_t *conn)
 		return;
 
 	if (sconn) {
+		int len = sizeof(*sconn->tx);
+
+		if (sconn->fifo != 0)
+			close(sconn->fifo);
+
+		if (sconn->mmap)
+			munmap(sconn->mmap, len);
+		if (sconn->peer_mmap)
+			munmap(sconn->peer_mmap, len);
+
+		len = sizeof(*sconn->rma);
+
+		if (sconn->rma_mmap)
+			munmap(sconn->rma_mmap, len);
+		if (sconn->peer_rma_mmap)
+			munmap(sconn->peer_rma_mmap, len);
+
 		free(sconn->name);
 		if (sconn->id != -1) {
 			ret = pthread_rwlock_wrlock(&sep->conns_lock);
@@ -1357,6 +1374,9 @@ sm_free_conn(cci__conn_t *conn)
 			}
 			sm_put_conn_id(sconn);
 		}
+		if (sconn->params)
+			free(sconn->params->data_ptr);
+		free(sconn->params);
 		free(sconn->rxs);
 		free(sconn->txs);
 		free(sconn);
@@ -1833,13 +1853,8 @@ static int ctp_sm_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	debug(CCI_DB_CONN, "%s: connecting to %s", __func__, server_uri);
 
     out:
-	if (ret) {
-		if (params) {
-			free(params->data_ptr);
-			free(params);
-		}
+	if (ret)
 		sm_free_conn(conn);
-	}
 
 	CCI_EXIT;
 	return ret;
@@ -2037,6 +2052,7 @@ sm_handle_connect_reply(cci__ep_t *ep, void *buffer)
 
 	free(params->data_ptr);
 	free(params);
+	sconn->params = NULL;
 
 	evt->event.type = CCI_EVENT_CONNECT;
 	evt->event.connect.context = conn->connection.context;
