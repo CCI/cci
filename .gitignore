@@ -30,3 +30,7 @@ src/libltdl
 /config/missing
 /include/cci/configure_output.h
 /include/cci/configure_output.h.in
+build*
+*.dSYM
+*patch
+*txt
