@@ -1708,12 +1708,15 @@ static int ctp_tcp_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eve
 	pthread_mutex_unlock(&ep->lock);
 
 	/* drain fd so that they can block again */
-	if (TCP_CONN_IS_BLOCKING(tep)) {
+	if (ev && TCP_CONN_IS_BLOCKING(tep)) {
 		char a[1];
+#if 0
 		do {
 			/* Nothing explicit to do here */
 		} while (tcp_event_queue_is_empty (ep) &&
 		         read (tep->pipe[0], a, sizeof(a)) != sizeof (a));
+#endif
+		read (tep->pipe[0], a, sizeof(a));
 	}
 
 	*event = &ev->event;
@@ -2608,6 +2611,8 @@ tcp_handle_conn_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		ret = tcp_recv_msg(tconn->pfd.fd, hdr->data, total);
 		if (ret) {
 			/* TODO handle error */
+			debug(CCI_DB_CONN, "%s: recv_msg() failed with %d",
+					__func__, ret);
 			tcp_conn_set_closing(ep, conn);
 			rx->evt.event.connect.status = CCI_ERROR;
 			rx->evt.event.connect.connection = NULL;
