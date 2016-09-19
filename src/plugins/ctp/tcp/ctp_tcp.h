@@ -695,8 +695,17 @@ struct tcp_ep {
 	/*! Last conn polled */
 	tcp_conn_t *poll_conn;
 
+	/*! Number of bitmap 64-bit blocks */
+	int blocks;
+
+	/*! Poll FD bitmap */
+	uint64_t *fd_bits;
+
 	/*! Number of pollfds */
 	nfds_t nfds;
+
+	/*! Arrary of poll fds - multiples of 64 */
+	struct pollfd *fds;
 
 	/*! TX common buffer */
 	void *tx_buf;
@@ -802,7 +811,7 @@ struct tcp_conn {
 	int refcnt;
 
 	/*! poll fd */
-	struct pollfd pfd;
+	struct pollfd *pfd;
 
 	/*! partial receive */
 	tcp_rx_t *rx;
@@ -812,6 +821,9 @@ struct tcp_conn {
 
 	/*! Is this the endpoint's listening socket? */
 	int is_listener;
+
+	/*! Poll fd index */
+	int idx;
 
 	/*! Entry to hang on tcp_ep->conns */
 	 TAILQ_ENTRY(tcp_conn) entry;
@@ -845,16 +857,6 @@ struct tcp_dev {
 	/*! Set socket buffers sizes */
 	uint32_t bufsize;
 };
-
-typedef enum tcp_fd_type {
-	TCP_FD_UNUSED = 0,
-	TCP_FD_EP
-} tcp_fd_type_t;
-
-typedef struct tcp_fd_idx {
-	tcp_fd_type_t type;
-	cci__ep_t *ep;
-} tcp_fd_idx_t;
 
 struct tcp_globals {
 	/*! Mutex */
