@@ -1327,6 +1327,9 @@ assign_pollfd(cci__ep_t *ep, tcp_conn_t *tconn)
 		goto again;
 	}
 
+	if (tep->nfds < (nfds_t) idx + 1)
+		tep->nfds = (nfds_t) idx + 1;
+
 	pthread_mutex_unlock(&ep->lock);
 
 	tconn->idx = idx;
@@ -3747,11 +3750,21 @@ out:
 static void *tcp_progress_thread(void *arg)
 {
 	cci__ep_t *ep = (cci__ep_t *) arg;
+	tcp_ep_t *tep = NULL;
 
 	assert (ep);
 
-	while (!ep->closing)
+	tep = ep->priv;
+
+	while (!ep->closing) {
+		int ret = 0;
+
+		ret = poll(tep->fds, tep->nfds, 1000);
+		if (ret < 1)
+			continue;
+
 		tcp_progress_ep(ep);
+	}
 
 	pthread_exit(NULL);
 	return (NULL);		/* make pgcc happy */
