@@ -10,6 +10,7 @@
  *
  */
 
+#define _GNU_SOURCE
 #include "cci/private_config.h"
 
 #include <stdio.h>
