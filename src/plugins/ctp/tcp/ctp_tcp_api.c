@@ -777,6 +777,8 @@ out:
 		free(tep->rxs);
 		free(tep->rx_buf);
 
+		free(tep->fds);
+
 		if (sock)
 			tcp_close_socket(sock);
 		free(tep);
@@ -932,6 +934,8 @@ static int ctp_tcp_destroy_endpoint(cci_endpoint_t * endpoint)
 			TAILQ_REMOVE(&tep->handles, handle, entry);
 			free(handle);
 		}
+
+		free(tep->fds);
 
 		if (tep->pipe[0] != -1)
 			close(tep->pipe[0]);
