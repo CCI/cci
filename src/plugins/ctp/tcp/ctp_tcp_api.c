@@ -1326,9 +1326,6 @@ assign_pollfd(cci__ep_t *ep, tcp_conn_t *tconn)
 		if (!fds)
 			goto again; /* will retry */
 
-		if (fds != tep->fds)
-			free(tep->fds); /* the original memory */
-
 		tep->fds = fds;
 		fds = (void*)((uintptr_t)tep->fds +
 				(uintptr_t)((tep->blocks - 1) * sizeof(*tep->fds)));
