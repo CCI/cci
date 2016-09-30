@@ -778,6 +778,7 @@ out:
 		free(tep->rx_buf);
 
 		free(tep->fds);
+		free(tep->fd_bits);
 
 		if (sock)
 			tcp_close_socket(sock);
@@ -936,6 +937,7 @@ static int ctp_tcp_destroy_endpoint(cci_endpoint_t * endpoint)
 		}
 
 		free(tep->fds);
+		free(tep->fd_bits);
 
 		if (tep->pipe[0] != -1)
 			close(tep->pipe[0]);
@@ -1323,6 +1325,9 @@ assign_pollfd(cci__ep_t *ep, tcp_conn_t *tconn)
 		fds = realloc(tep->fds, tep->blocks * sizeof(*tep->fds) * 64);
 		if (!fds)
 			goto again; /* will retry */
+
+		if (fds != tep->fds)
+			free(tep->fds); /* the original memory */
 
 		tep->fds = fds;
 		fds = (void*)((uintptr_t)tep->fds +
