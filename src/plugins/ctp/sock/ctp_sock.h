@@ -30,7 +30,7 @@ BEGIN_C_DECLS
 #define SOCK_MAX_HDRS           (SOCK_MAX_HDR_SIZE + 20 + 8)	/* IP + UDP */
 #define SOCK_DEFAULT_MSS        (SOCK_UDP_MAX - SOCK_MAX_HDR_SIZE)	/* assume jumbo frames */
 #define SOCK_DEFAULT_RMA_MSS    (SOCK_DEFAULT_MSS - 20)
-#define SOCK_MIN_MSS            (1500 - SOCK_MAX_HDR_SIZE)
+#define SOCK_MIN_MSS            (1000 - SOCK_MAX_HDR_SIZE)
 #define SOCK_MAX_SACK           (4)	/* pairs of start/end acks */
 #define SOCK_ACK_DELAY          (1)	/* send an ack after every Nth send */
 #define SOCK_EP_TX_TIMEOUT_SEC  (64)	/* seconds for now */
