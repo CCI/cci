@@ -1369,10 +1369,24 @@ sm_free_conn(cci__conn_t *conn)
 						tdelete(sconn, &sep->conns,
 								sm_compare_conns);
 					}
+					else {
+						debug(CCI_DB_WARN, "%s: tmp %p != sconn %p",
+								__func__,
+								(void*)tmp,
+								(void*)sconn);
+					}
+				}
+				else {
+					debug(CCI_DB_WARN, "%s: sconn %p not found",
+							__func__, (void*)sconn);
 				}
 				pthread_rwlock_unlock(&sep->conns_lock);
 			}
 			sm_put_conn_id(sconn);
+		}
+		else {
+			debug(CCI_DB_WARN, "%s: sconn %p id == -1",
+					__func__, (void*)sconn);
 		}
 		if (sconn->params)
 			free(sconn->params->data_ptr);
@@ -2991,11 +3005,13 @@ static int ctp_sm_send(cci_connection_t * connection,
 
 	sm_conn_notify(ep, conn);
 
-	if (!(flags & CCI_FLAG_SILENT)) {
+	if (!(flags & CCI_FLAG_SILENT) && !(flags & CCI_FLAG_BLOCKING)) {
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
 		sm_ep_notify(ep);
 		pthread_mutex_unlock(&ep->lock);
+	} else {
+		sm_put_tx(evt);
 	}
 
     out:
@@ -3275,10 +3291,21 @@ static int ctp_sm_rma(cci_connection_t * connection,
 				&local, 1, &remote, 1, 0);
 		}
 		if (rc != (ssize_t)data_len) {
-			ret = errno;
+			static int once = 0;
+
+			if (rc != -1) {
+				/* partial transfer - bad iovec segment */
+				ret = EFAULT;
+			} else {
+				ret = errno;
+			}
 			debug(CCI_DB_MSG, "%s: process_vm_%s() failed with %s",
 				__func__, flags & CCI_FLAG_WRITE ? "write" : "read",
 				strerror(ret));
+			if (once == 0 && ret == EPERM) {
+				debug(CCI_DB_WARN, "%s: process_vm_%s() failed because it cannot trace another process. See https://www.kernel.org/doc/Documentation/security/Yama.txt for more details.", __func__, flags & CCI_FLAG_WRITE ? "write" : "read");
+				once++;
+			}
 			goto out;
 		}
 
