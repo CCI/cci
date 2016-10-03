@@ -2034,6 +2034,7 @@ verbs_insert_conn(cci__conn_t *conn)
 	pthread_rwlock_unlock(&vep->conn_tree_lock);
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&vep->conns, vconn, entry);
+	vconn->cci_disconn = 1;
 	pthread_mutex_unlock(&ep->lock);
 	debug(CCI_DB_CONN, "%s [%s]: added conn %p qp_num %u", __func__,
 		ep->uri, (void*)conn, vconn->qp_num);
@@ -2345,20 +2346,23 @@ out:
 
 static const char *verbs_conn_state_str(verbs_conn_state_t state);
 
-static int ctp_verbs_disconnect(cci_connection_t * connection)
+static void verbs_destroy_conn(cci__ep_t *ep, cci__conn_t *conn)
 {
-	int ret = CCI_SUCCESS;
-	cci__conn_t *conn = container_of(connection, cci__conn_t, connection);
-	verbs_conn_t *vconn = conn->priv;
-	cci_endpoint_t *endpoint = connection->endpoint;
-	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
+	int ret = 0;
 	verbs_ep_t *vep = ep->priv;
+	verbs_conn_t *vconn = conn->priv;
 
-	CCI_ENTER;
+	debug(CCI_DB_CONN, "%s: conn %p vconn %p qp_num %u (%s)",
+		__func__, (void*) conn, (void*)vconn, vconn->qp_num, conn->uri);
 
-	debug(CCI_DB_CONN, "%s [%s]: conn %p state %s qp_num %u", __func__,
-		ep->uri, (void*)conn, verbs_conn_state_str(vconn->state),
-		vconn->qp_num);
+	if (vconn->rdma_disconn) {
+		ret = rdma_disconnect(vconn->id);
+		if (ret == -1) {
+			ret = errno;
+			debug(CCI_DB_WARN, "%s: rdma_disconnect() returned %s",
+			      __func__, strerror(ret));
+		}
+	}
 
 	pthread_rwlock_wrlock(&vep->conn_tree_lock);
 	tdelete(&vconn->qp_num, &vep->conn_tree, verbs_compare_u32);
@@ -2377,13 +2381,6 @@ static int ctp_verbs_disconnect(cci_connection_t * connection)
 			free(vconn->conn_req->ptr);
 	}
 
-	ret = rdma_disconnect(vconn->id);
-	if (ret == -1) {
-		ret = errno;
-		debug(CCI_DB_WARN, "%s: rdma_disconnect() returned %s",
-		      __func__, strerror(ret));
-	}
-
 	if (vconn->rbuf) {
 		if (vconn->rmr) {
 			ret = ibv_dereg_mr(vconn->rmr);
@@ -2399,11 +2396,48 @@ static int ctp_verbs_disconnect(cci_connection_t * connection)
 		free(vconn->rbuf);
 	}
 
-	rdma_destroy_ep(vconn->id);
-
 	free((void *)conn->uri);
 	free(vconn);
 	free(conn);
+
+	return;
+}
+
+static int ctp_verbs_disconnect(cci_connection_t * connection)
+{
+	int ret = CCI_SUCCESS;
+	cci__conn_t *conn = container_of(connection, cci__conn_t, connection);
+	verbs_conn_t *vconn = conn->priv;
+	cci_endpoint_t *endpoint = connection->endpoint;
+	cci__ep_t *ep = container_of(endpoint, cci__ep_t, endpoint);
+	verbs_ep_t *vep = ep->priv;
+	int rdma_disconn = 0;
+
+	CCI_ENTER;
+
+	debug(CCI_DB_CONN, "%s [%s]: conn %p state %s qp_num %u", __func__,
+		ep->uri, (void*)conn, verbs_conn_state_str(vconn->state),
+		vconn->qp_num);
+
+	vconn->cci_disconn = 0;
+
+	if (vconn->rdma_disconn) {
+		/* The conn is established and we are the one trying to
+		 * tear it down.
+		 */
+		ret = rdma_disconnect(vconn->id);
+		if (ret == -1) {
+			ret = errno;
+			debug(CCI_DB_WARN, "%s: rdma_disconnect() returned %s",
+			      __func__, strerror(ret));
+		}
+		vconn->rdma_disconn = 0;
+	} else {
+		/* We have already received the RDMA_CM_EVENT_DISCONNECTED
+		 * event. Go ahead and cleanup.
+		 */
+		verbs_destroy_conn(ep, conn);
+	}
 
 	CCI_EXIT;
 	return ret;
@@ -2891,6 +2925,13 @@ verbs_handle_conn_established(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 	vconn = conn->priv;
 	assert(vconn);
 
+	/* The RDMA connection is established. We will need to call
+	 * rdma_disconnect() in the future.
+	 */
+	pthread_mutex_lock(&ep->lock);
+	vconn->rdma_disconn = 1;
+	pthread_mutex_unlock(&ep->lock);
+
 	switch (vconn->state) {
 	case VERBS_CONN_ACTIVE:
 		ret = verbs_conn_est_active(ep, cm_evt);
@@ -2924,20 +2965,59 @@ verbs_handle_disconnected(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 	vconn = conn->priv;
 	assert(vconn);
 
-	switch (vconn->state) {
-	case VERBS_CONN_ESTABLISHED:
-		vconn->state = VERBS_CONN_CLOSED;
-		debug(CCI_DB_CONN, "%s: marking vconn %p closed (%s)",
-			__func__, (void*)vconn, conn->uri);
-		break;
-	default:
-		debug(CCI_DB_INFO, "%s: incorrect conn state %s", __func__,
-		      verbs_conn_state_str(vconn->state));
-		break;
+	if (vconn->rdma_disconn) {
+		/* We did not initiate the disconnect. We will not get
+		 * another RDMA_CM_EVENT_DISCONNECTED, so go ahead and
+		 * call it now.
+		 */
+		ret = rdma_disconnect(vconn->id);
+		if (ret == -1) {
+			ret = errno;
+			debug(CCI_DB_WARN, "%s: rdma_disconnect() returned %s",
+			      __func__, strerror(ret));
+		}
+		vconn->rdma_disconn = 0;
+	}
+
+	/* Either way, we got the DISCONNECTED event, it is safe to cleanup
+	 * the QP and CM id.
+	 */
+	ret = rdma_destroy_ep(vconn->id);
+	if (ret == -1) {
+		ret = errno;
+		debug(CCI_DB_WARN, "%s: rdma_destroy_ep() returned %s",
+		      __func__, strerror(ret));
+	}
+
+	if (!vconn->cci_disconn) {
+		verbs_destroy_conn(ep, conn);
 	}
 
 	CCI_EXIT;
 	return ret;
+}
+
+static void
+verbs_handle_timewait_exit(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
+{
+	/* The CM can reuse the QP now. We should have already torn down the
+	 * QP, destroyed the RDMA id, and freed the CCI conn. Simply
+	 * print the QP number and the possibly freed CCI conn address
+	 * for informational purposes.
+	 */
+	debug(CCI_DB_CONN, "%s: qp_num %u context (conn) %p", __func__,
+		cm_evt->id->qp->qp_num, cm_evt->id->context);
+
+	return;
+}
+
+static void
+verbs_handle_connect_error(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
+{
+	debug(CCI_DB_WARN, "%s: qp_num %u context (conn) %p", __func__,
+		cm_evt->id->qp->qp_num, cm_evt->id->context);
+
+	return;
 }
 
 static int verbs_get_cm_event(cci__ep_t * ep)
@@ -2985,6 +3065,12 @@ static int verbs_get_cm_event(cci__ep_t * ep)
 		if (ret)
 			debug(CCI_DB_CONN, "%s: verbs_handle_conn_rejected()"
 			      "returned %s", __func__, strerror(ret));
+		break;
+	case RDMA_CM_EVENT_TIMEWAIT_EXIT:
+		verbs_handle_timewait_exit(ep, cm_evt);
+		break;
+	case RDMA_CM_EVENT_CONNECT_ERROR:
+		verbs_handle_connect_error(ep, cm_evt);
 		break;
 	default:
 		debug(CCI_DB_CONN, "ignoring %s event",

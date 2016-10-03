@@ -392,7 +392,9 @@ typedef struct verbs_conn {
 	uint32_t last;		/* last slot used */
 	uint32_t **slots;	/* pointers to buffer headers
 				   to poll */
-	int is_polling;		/* polling RDMA MSGs */
+	uint32_t is_polling :1;	/* polling RDMA MSGs */
+	uint32_t rdma_disconn :1; /* still needs rdma_disconnect */
+	uint32_t cci_disconn :1; /* still needs cci_disconnect */
 
 	/* for RO connections when using both SendRecv and RDMA */
 	uint16_t seqno;		/* last seqno sent */
