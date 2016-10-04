@@ -211,6 +211,7 @@ sm_create_path(const char *path)
 		if (ret) {
 			if (ret == EEXIST) {
 				/* it exists */
+				ret = 0;
 			} else if (ret == ENOENT) {
 				/* No, try to create it */
 				ret = mkdir(new, 0755);
@@ -220,6 +221,8 @@ sm_create_path(const char *path)
 							strerror(errno));
 					ret = CCI_ERROR;
 					goto out;
+				} else {
+					ret = 0;
 				}
 			} else {
 				/* No, but we got another error.
@@ -623,12 +626,7 @@ static int ctp_sm_finalize(cci_plugin_ctp_t * plugin)
 		if (!strcmp(dev->device.transport, "sm")) {
 			if (dev->priv) {
 				sm_dev_t *sdev = dev->priv;
-				int ret = 0;
 
-				ret = rmdir(sdev->path);
-				if (ret)
-					debug(CCI_DB_INFO, "%s: rmdir(%s) failed with %s",
-						__func__, sdev->path, strerror(errno));
 				free(sdev->path);
 				free(sdev->ids);
 			}
