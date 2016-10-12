@@ -3137,7 +3137,7 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 						1,
 						rma_op->context,
 						rma_op->flags,
-						NULL);
+						rma_op);
 			if (ret) {
 				tx->evt.event.send.status = ret;
 				pthread_mutex_lock(&ep->lock);
