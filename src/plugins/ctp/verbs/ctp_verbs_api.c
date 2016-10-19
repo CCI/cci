@@ -1724,8 +1724,8 @@ verbs_post_send(cci__conn_t * conn, uint64_t id, void *buffer, uint32_t len,
 	}
 
 	ret = ibv_post_send(vconn->id->qp, &wr, &bad_wr);
-	if (ret == -1) {
-		ret = errno;
+	if (ret) {
+		ret = verbs_wc_to_cci_status(ret);
 		debug(CCI_DB_MSG,
 		      "unable to send id 0x%" PRIx64
 		      " buffer %p len %u header 0x%x", id, (void*)buffer, len, header);
@@ -4423,7 +4423,7 @@ static int verbs_post_rma(verbs_rma_op_t * rma_op)
 
 	ret = ibv_post_send(vconn->id->qp, &wr, &bad_wr);
 	if (ret) {
-		ret = verbs_wc_to_cci_status(errno);
+		ret = verbs_wc_to_cci_status(ret);
 		debug(CCI_DB_MSG, "%s: ibv_post_send() failed with %s (cci %s)",
 				__func__, ibv_wc_status_str(errno),
 				cci_strerror(&(rma_op->evt.ep)->endpoint, ret));
