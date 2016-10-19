@@ -1322,13 +1322,18 @@ static void
 sm_free_conn(cci__conn_t *conn)
 {
 	int ret = 0;
-	cci_connection_t *connection = &conn->connection;
-	cci__ep_t *ep = container_of(connection->endpoint, cci__ep_t, endpoint);
-	sm_ep_t *sep = ep->priv;
-	sm_conn_t *sconn = conn->priv;
+	cci_connection_t *connection = NULL;
+	cci__ep_t *ep = NULL;
+	sm_ep_t *sep = NULL;
+	sm_conn_t *sconn = NULL;
 
 	if (!conn)
 		return;
+
+	connection = &conn->connection;
+	ep = container_of(connection->endpoint, cci__ep_t, endpoint);
+	sep = ep->priv;
+	sconn = conn->priv;
 
 	if (sconn) {
 		int len = sizeof(*sconn->tx);
@@ -1982,9 +1987,7 @@ sm_handle_connect(cci__ep_t *ep, const char *path, void *buffer, int len)
 		debug(CCI_DB_CONN, "%s: unable to service connect request from "
 			"%s (%s) - dropping message", __func__, uri,
 			cci_strerror(&ep->endpoint, ret));
-		if (conn) {
-			sm_free_conn(conn);
-		}
+		sm_free_conn(conn);
 		if (rx) {
 			free((void*)rx->event.request.data_ptr);
 			free(rx);
