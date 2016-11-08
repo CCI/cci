@@ -1108,6 +1108,8 @@ static int ctp_tcp_accept(cci_event_t *event, const void *context)
 	if (!tx) {
 		/* TODO send reject */
 		/* TODO tep->nfds-- */
+		debug(CCI_DB_CONN, "%s: unable to get tx for conn %p (%s)",
+				__func__, (void*) conn, conn->uri);
 
 		if (tconn->pfd->fd) {
 			close(tconn->pfd->fd);
@@ -1156,12 +1158,12 @@ static int ctp_tcp_accept(cci_event_t *event, const void *context)
 
 	tx->len = sizeof(*hdr) + sizeof(*hs);
 
+	pthread_mutex_lock(&tconn->lock);
 	tx->state = TCP_TX_PENDING;
 	tcp_sendto(tconn->pfd->fd, tx->buffer, tx->len, NULL, 0, &offset);
 
 	assert((uint32_t)offset == tx->len);
 
-	pthread_mutex_lock(&tconn->lock);
 	TAILQ_INSERT_HEAD(&tconn->pending, &tx->evt, entry);
 	pthread_mutex_unlock(&tconn->lock);
 
@@ -2635,6 +2637,8 @@ tcp_handle_conn_request(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx, uint32_t
 	ret = tcp_recv_msg(tconn->pfd->fd, hdr->data, total);
 	if (ret) {
 		/* TODO handle error */
+		debug(CCI_DB_CONN, "%s: unable to recv conn %p handshake - %s",
+				__func__, (void*)conn, cci_strerror(&ep->endpoint, ret));
 		goto out;
 	}
 
