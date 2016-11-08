@@ -3205,7 +3205,8 @@ static int ctp_sm_rma(cci_connection_t * connection,
 		debug(CCI_DB_MSG,
 			"%s: RMA length + offset exceeds remote registered length "
 			"(%"PRIu64" + %"PRIu64" > %"PRIu64")",
-			__func__, data_len, local_offset, sh->len);
+			__func__, data_len, local_offset,
+			remote_handle->stuff[2]);
 		ret = CCI_EINVAL;
 		goto out;
 	}
