@@ -760,9 +760,8 @@ out:
 			TAILQ_REMOVE(&tep->conns, tconn, entry);
 			pthread_mutex_unlock(&ep->lock);
 			if (tconn->pfd->fd) {
-				release_pollfd(ep, tconn);
 				close(tconn->pfd->fd);
-				tconn->pfd->fd = 0;
+				release_pollfd(ep, tconn);
 			}
 		}
 		free((char*)conn->uri);
@@ -823,9 +822,8 @@ tcp_conn_set_closed(cci__ep_t *ep, cci__conn_t *conn)
 		if (tep->poll_conn == tconn)
 			tep->poll_conn = NULL;
 		if (tconn->pfd->fd) {
-			release_pollfd(ep, tconn);
 			close(tconn->pfd->fd);
-			tconn->pfd->fd = 0;
+			release_pollfd(ep, tconn);
 		}
 		/* TODO complete queued and pending sends */
 	}
@@ -846,9 +844,8 @@ tcp_conn_set_closing_locked(cci__ep_t *ep, cci__conn_t *conn)
 
 	if (tconn->status > TCP_CONN_INIT) {
 		if (tconn->pfd->fd) {
-			release_pollfd(ep, tconn);
 			close(tconn->pfd->fd);
-			tconn->pfd->fd = 0;
+			release_pollfd(ep, tconn);
 		}
 		tconn->status = TCP_CONN_CLOSING;
 		/* TODO complete queued and pending sends */
@@ -1113,9 +1110,8 @@ static int ctp_tcp_accept(cci_event_t *event, const void *context)
 		/* TODO tep->nfds-- */
 
 		if (tconn->pfd->fd) {
-			release_pollfd(ep, tconn);
 			close(tconn->pfd->fd);
-			tconn->pfd->fd = 0;
+			release_pollfd(ep, tconn);
 		}
 
 		pthread_mutex_lock(&ep->lock);
@@ -1592,15 +1588,6 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	tx->len += data_len;
 	assert(tx->len <= ep->buffer_len);
 
-	/* start connect now */
-	ret = socket(PF_INET, SOCK_STREAM, 0);
-	if (ret == -1) {
-		ret = errno;
-		debug(CCI_DB_CONN, "%s: socket returned %s", __func__, strerror(ret));
-		goto out;
-	}
-	tconn->pfd->fd = ret;
-
 	/* we will have to check for POLLOUT to determine when
 	 * the connect completed
 	 */
@@ -1653,10 +1640,6 @@ out:
 		pthread_mutex_unlock(&ep->lock);
 
 		free((char *)conn->uri);
-#if CCI_DEBUG
-		memset(tconn, 0xFF, sizeof(*tconn));
-		memset(conn, 0xFF, sizeof(*conn));
-#endif
 		free(conn->priv);
 		free(conn);
 	}
@@ -3488,10 +3471,6 @@ delete_conn_locked(cci__conn_t *conn)
 
 	free((char *)conn->uri);
 
-#if CCI_DEBUG
-	memset(tconn, 0xFF, sizeof(*tconn));
-	memset(conn, 0xFF, sizeof(*conn));
-#endif
 	free(tconn);
 	free(conn);
 	return;
