@@ -46,7 +46,7 @@
 
 int cci__debug = CCI_DB_DFLT;
 cci__globals_t *globals = NULL;
-int initialized = 0;
+int cci_initialized = 0;
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 pthread_mutex_t init_lock;
 
@@ -572,7 +572,7 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 	pthread_once(&once, cci_lock_init);
 	pthread_mutex_lock(&init_lock);
 
-	if (0 == initialized) {
+	if (0 == cci_initialized) {
 		cci__dev_t *dev;
 		char *str;
 
@@ -666,13 +666,13 @@ int cci_init(uint32_t abi_ver, uint32_t flags, uint32_t * caps)
 		pthread_mutex_unlock(&globals->lock);
 
 		/* success */
-		initialized++;
+		cci_initialized++;
 
 	} else {
-		/* already initialized */
+		/* already cci_initialized */
 		if (flags == globals->flags) {
 			/* same parameters, no-op */
-			initialized++;
+			cci_initialized++;
 		} else {
 			/* TODO */
 			/* if different, can we accomodate new params?

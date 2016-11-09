@@ -28,14 +28,14 @@ int cci_finalize(void)
 
 	pthread_mutex_lock(&init_lock);
 
-	if (!initialized) {
-		/* not initialized */
+	if (!cci_initialized) {
+		/* not cci_initialized */
 		ret = CCI_ERROR;
 		goto out;
 	}
 
-	initialized--;
-	if (initialized > 0) {
+	cci_initialized--;
+	if (cci_initialized > 0) {
 		/* no-op, return SUCCESS */
 		goto out;
 	}

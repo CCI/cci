@@ -186,8 +186,8 @@ typedef struct cci__globals {
 	uint32_t flags;
 } cci__globals_t;
 
-extern pthread_mutex_t init_lock; /*! Protects initialized and globals during cci_init() and cci_finalize() */
-extern int initialized; /*! How many times cci_init() was called minus how many times cci_finalize() was called */
+extern pthread_mutex_t init_lock; /*! Protects cci_initialized and globals during cci_init() and cci_finalize() */
+extern int cci_initialized; /*! How many times cci_init() was called minus how many times cci_finalize() was called */
 extern cci__globals_t *globals;
 
 /*! Obtain the private struct from the public struct
