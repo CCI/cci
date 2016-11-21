@@ -1167,6 +1167,8 @@ static int ctp_tcp_accept(cci_event_t *event, const void *context)
 	TAILQ_INSERT_HEAD(&tconn->pending, &tx->evt, entry);
 	pthread_mutex_unlock(&tconn->lock);
 
+	tcp_put_rx(rx);
+
 	CCI_EXIT;
 
 	return CCI_SUCCESS;
