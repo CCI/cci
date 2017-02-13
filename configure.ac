@@ -233,7 +233,6 @@ fi
 
 dnl If the user did not explicitly specify where ltdl headers are, we check
 dnl if the headers are available on the system by default.
-echo "toto $with_ltdl_include $with_included_ltdl"
 if test x"$with_ltdl_include" = x"no" -a x"$with_included_ltdl" = x"no"; then
     AC_MSG_CHECKING([for ltld.h])
     AC_CHECK_HEADER([ltdl.h],
