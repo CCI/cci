@@ -198,7 +198,7 @@ fi
 
 dnl Allow the user to specify where ltdl is installed (cannot be used in
 dnl conjunction with --with-ltdl-include and/or --with-ltdl-lib
-AC_ARG_WITH([installed_ltdl],
+AC_ARG_WITH([included_ltdl],
     [AS_HELP_STRING([--with-included-ltdl=DIR],
                     [use ltdl installed in DIR])])
 if test -n "$with_included_ltdl"; then
@@ -211,7 +211,6 @@ if test -n "$with_included_ltdl"; then
             if test -f "$with_included_ltdl/lib/libltdl.la"; then
                 LIBLTDL="-L$with_included_ltdl/lib -lltdl"
                 LDFLAGS="$LDFLAGS $LIBLTDL"
-                AC_MSG_RESULT([yep])
             else
                 with_included_ltdl=no
                 AC_MSG_RESULT([no])
@@ -240,7 +239,6 @@ if test x"$with_ltdl_include" = x"no" -a x"$with_included_ltdl" = x"no"; then
                     [AC_MSG_ERROR([ltdl headers not available]),
                      exit 1])
 fi
-echo "titi"
 
 dnl If the user did not explicitly specify where the ltdl library is, we check
 dnl if the library is available on the system by default. Note that by checking
