@@ -1990,6 +1990,9 @@ tcp_progress_conn_sends(cci__conn_t *conn)
 			}
 		}
 	}
+	/* If nothing queued, unset POLLOUT */
+	if (TAILQ_EMPTY(&tconn->queued))
+		tconn->pfd->events &= ~POLLOUT;
 	pthread_mutex_unlock(&tconn->lock);
 
 	if (put_tx) {
@@ -3644,6 +3647,9 @@ tcp_poll_events(cci__ep_t *ep)
 				!TAILQ_EMPTY(&tconn->queued)) {
 				evt = TAILQ_FIRST(&tconn->queued);
 				TAILQ_REMOVE(&tconn->queued, evt, entry);
+				/* If nothing queued, unset POLLOUT */
+				if (TAILQ_EMPTY(&tconn->queued))
+					tconn->pfd->events &= ~POLLOUT;
 			} else {
 				evt = TAILQ_FIRST(&tconn->pending);
 				TAILQ_REMOVE(&tconn->pending, evt, entry);
