@@ -815,7 +815,7 @@ gni_create_cdm_cqs(cci__dev_t *dev, cci__ep_t *ep, uint32_t port)
 		__func__, port, gdev->ptag, gdev->cookie);
 
 	grc = GNI_CdmCreate(port, gdev->ptag, gdev->cookie,
-			0, &gep->cdm);
+			GNI_CDM_MODE_BTE_SINGLE_CHANNEL, &gep->cdm);
 	if (grc) {
 		ret = gni_to_cci_status(grc);
 		debug(CCI_DB_EP, "%s: GNI_CdmCreate() failed with %u (%u)",
@@ -1390,7 +1390,7 @@ static int ctp_gni_accept(cci_event_t *event, const void *context)
 
 	grc = GNI_MemRegister(gep->nic, (uintptr_t) gconn->msg_buffer,
 			gconn->buff_size, gep->rx_cq,
-			GNI_MEM_RELAXED_PI_ORDERING | GNI_MEM_READWRITE,
+			GNI_MEM_READWRITE,
 			-1, &gconn->mem_hndl);
 	if (grc) {
 		ret = gni_to_cci_status(grc);
@@ -1711,7 +1711,7 @@ ctp_gni_connect(cci_endpoint_t * endpoint, const char *server_uri,
 
 	grc = GNI_MemRegister(gep->nic, (uintptr_t) gconn->msg_buffer,
 			gconn->buff_size, gep->rx_cq,
-			GNI_MEM_RELAXED_PI_ORDERING | GNI_MEM_READWRITE,
+			GNI_MEM_READWRITE,
 			-1, &gconn->mem_hndl);
 	if (grc) {
 		ret = gni_to_cci_status(grc);
@@ -3458,7 +3458,7 @@ ctp_gni_rma_register(cci_endpoint_t * endpoint,
 	gni_ep_t *gep = ep->priv;
 	gni_rma_handle_t *handle = NULL;
 	gni_return_t grc = GNI_RC_SUCCESS;
-	uint32_t gflags = GNI_MEM_RELAXED_PI_ORDERING;
+	uint32_t gflags = 0;
 
 	CCI_ENTER;
 
@@ -3547,6 +3547,8 @@ static int gni_post_rma(gni_rma_op_t * rma_op)
 
 	CCI_ENTER;
 
+	debug(CCI_DB_MSG, "%s: posting rma_op %p", __func__, rma_op);
+
 	rma_op->pd.remote_addr = rma_op->remote_handle->stuff[0] + rma_op->remote_offset;
 	rma_op->pd.remote_mem_hndl.qword1 = rma_op->remote_handle->stuff[1];
 	rma_op->pd.remote_mem_hndl.qword2 = rma_op->remote_handle->stuff[2];
@@ -3583,7 +3585,7 @@ static int gni_post_rma(gni_rma_op_t * rma_op)
 		}
 		rma_op->pd.length = new_len;
 		grc = GNI_MemRegister(gep->nic, (uintptr_t) rma_op->buf,
-			new_len, NULL, GNI_MEM_RELAXED_PI_ORDERING| GNI_MEM_READWRITE,
+			new_len, NULL, GNI_MEM_READWRITE,
 			-1, &rma_op->pd.local_mem_hndl);
 		if (grc) {
 			ret = gni_to_cci_status(grc);
@@ -3604,7 +3606,7 @@ static int gni_post_rma(gni_rma_op_t * rma_op)
 	if (grc) {
 		ret = gni_to_cci_status(grc);
 		debug(CCI_DB_MSG, "%s: PostRdma() failed with %s (%d) len %"PRIu64,
-			__func__, cci_strerror(&ep->endpoint, grc), grc, rma_op->pd.length);
+			__func__, cci_strerror(&ep->endpoint, ret), grc, rma_op->pd.length);
 	}
 
 out:
@@ -3687,6 +3689,7 @@ ctp_gni_rma(cci_connection_t * connection,
 
 	rma_op->pd.type = flags & CCI_FLAG_WRITE ? GNI_POST_RDMA_PUT :
 				GNI_POST_RDMA_GET;
+	//rma_op->pd.post_id = (uintptr_t) rma_op;
 	rma_op->pd.cq_mode = GNI_CQMODE_GLOBAL_EVENT;
 	/* NOTE: always use GNI_DLVMODE_PERFORMANCE. This round-robins over
 	 *       the three available DMA channels. GNI_DLVMODE_IN_ORDER
@@ -3697,6 +3700,7 @@ ctp_gni_rma(cci_connection_t * connection,
 	rma_op->pd.local_addr = (uintptr_t) local->addr + local_offset;
 	rma_op->pd.local_mem_hndl = local->mh;
 	rma_op->pd.length = data_len;
+	rma_op->pd.src_cq_hndl = gep->tx_cq; /* added for debug */
 
 	fence = flags & CCI_FLAG_FENCE;
 
