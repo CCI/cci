@@ -520,13 +520,13 @@ static int ctp_gni_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver,
 							       0);
 				} else if (0 == strncmp("interface=", *arg, 10)) {
 					interface = (void *) ((uintptr_t)*arg + 10);
-				} else if (0 == strncmp("ptag=", *arg, 10)) {
+				} else if (0 == strncmp("ptag=", *arg, 5)) {
 					ptag = (void *) ((uintptr_t) *arg + 5);
 					gdev->ptag = strtoul(ptag, NULL, 0);
-				} else if (0 == strncmp("cookie=", *arg, 10)) {
+				} else if (0 == strncmp("cookie=", *arg, 7)) {
 					cookie = (void *) ((uintptr_t) *arg + 7);
 					gdev->cookie = strtoul(cookie, NULL, 0);
-				} else if (0 == strncmp("transport=", *arg, 7)) {
+				} else if (0 == strncmp("transport=", *arg, 10)) {
 					/* do nothing */
 				} else {
 					debug(CCI_DB_INFO, "unknown keyword %s",
