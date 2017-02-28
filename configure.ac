@@ -18,7 +18,7 @@ AC_CONFIG_AUX_DIR([./config])
 # -I in ACLOCAL_AMFLAGS in the top-level Makefile.am.
 AC_CONFIG_MACRO_DIR([./config])
 
-AC_CHECK_HEADERS([include/ltdl.h])
+AC_CHECK_HEADERS([ltdl.h])
 AC_SEARCH_LIBS([lt_dlopen],[ltdl])
 
 # Define $target
@@ -163,7 +163,7 @@ AC_ARG_WITH([ltdl_include],
     [AS_HELP_STRING([--with-ltdl-include=DIR],
                     [use the ltdl headers installed in DIR])])
 if test -n "$with_ltdl_include"; then
-    AC_MSG_CHECKING([for ltld.h])
+    AC_MSG_CHECKING([for ltdl.h])
     if test -f "$with_ltdl_include/ltdl.h"; then
         AC_MSG_RESULT([$with_ltdl_include])
         LTDLINCL="-I$with_ltdl_include"
@@ -182,7 +182,7 @@ AC_ARG_WITH([ltdl_lib],
     [AS_HELP_STRING([--with-ltdl-lib=DIR],
                     [use the ltdl library installed in DIR])])
 if test -n "$with_ltdl_lib"; then
-    AC_MSG_CHECKING([for libltld])
+    AC_MSG_CHECKING([for libltdl])
     if test -f "$with_ltdl_lib/libltdl.la"; then
         AC_MSG_RESULT([$with_ltdl_lib])
         LIBLTDL="-L$with_ltdl_lib -lltdl"
@@ -235,7 +235,7 @@ dnl If the user did not explicitly specify where ltdl headers are, we check
 dnl if the headers are available on the system by default.
 echo "toto $with_ltdl_include $with_included_ltdl"
 if test x"$with_ltdl_include" = x"no" -a x"$with_included_ltdl" = x"no"; then
-    AC_MSG_CHECKING([for ltld.h])
+    AC_MSG_CHECKING([for ltdl.h])
     AC_CHECK_HEADER([ltdl.h],
                     [AC_MSG_RESULT([yes])],
                     [AC_MSG_ERROR([ltdl headers not available]),
@@ -247,7 +247,7 @@ dnl If the user did not explicitly specify where the ltdl library is, we check
 dnl if the library is available on the system by default. Note that by checking
 dnl for lt_dladvise_init, we check whether libtool 2.2 or newer is installed
 if test x"$with_ltdl_lib" = x"no" -a x"$with_included_ltdl" = x"no"; then
-    AC_MSG_CHECKING([for libltld])
+    AC_MSG_CHECKING([for libltdl])
     AC_CHECK_LIB([ltdl],
                  [lt_dladvise_init],
                  [(LIBLTDL=-lltdl
