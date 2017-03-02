@@ -2419,14 +2419,16 @@ sm_progress_conns(cci__ep_t *ep)
 	int ret = 0;
 	sm_ep_t *sep = ep->priv;
 
-	if (!sep->conns)
-		return;
-
 	ret = pthread_rwlock_rdlock(&sep->conns_lock);
 	if (ret) {
 		debug(CCI_DB_WARN, "%s: pthread_rwlock_rdlock() failed with %s",
 				__func__, strerror(ret));
 		goto out;
+	}
+
+	if (!sep->conns) {
+		pthread_rwlock_unlock(&sep->conns_lock);
+		return;
 	}
 
 	twalk(sep->conns, sm_progress_conn_tree);
