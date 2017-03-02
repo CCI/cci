@@ -99,7 +99,7 @@ static int tcp_progress_ep(cci__ep_t *ep);
 static int tcp_poll_events(cci__ep_t *ep);
 static int tcp_sendto(cci_os_handle_t sock, void *buf, int len,
 			void *rma_ptr, uint32_t rma_len, uintptr_t *offset);
-static inline void tcp_progress_conn_sends(cci__conn_t *conn);
+static inline void tcp_progress_conn_sends(cci__ep_t *ep, cci__conn_t *conn);
 
 
 /*
@@ -817,7 +817,6 @@ tcp_conn_set_closed(cci__ep_t *ep, cci__conn_t *conn)
 	debug(CCI_DB_INFO, "%s: conn %p", __func__, (void*)conn);
 
 	pthread_mutex_lock(&ep->lock);
-	pthread_mutex_lock(&tconn->lock);
 	if (tconn->status == TCP_CONN_READY) {
 		if (tep->poll_conn == tconn)
 			tep->poll_conn = NULL;
@@ -828,13 +827,12 @@ tcp_conn_set_closed(cci__ep_t *ep, cci__conn_t *conn)
 		/* TODO complete queued and pending sends */
 	}
 	tconn->status = TCP_CONN_CLOSED;
-	pthread_mutex_unlock(&tconn->lock);
 	pthread_mutex_unlock(&ep->lock);
 
 	return;
 }
 
-/* NOTE: the caller holds ep->lock and tconn->lock
+/* NOTE: the caller holds ep->lock
  */
 static void
 tcp_conn_set_closing_locked(cci__ep_t *ep, cci__conn_t *conn)
@@ -849,6 +847,17 @@ tcp_conn_set_closing_locked(cci__ep_t *ep, cci__conn_t *conn)
 		}
 		tconn->status = TCP_CONN_CLOSING;
 		/* TODO complete queued and pending sends */
+		if (!TAILQ_EMPTY(&tconn->queued))
+			debug(CCI_DB_CONN,
+				"%s: tconn->queued is not empty", __func__);
+
+		if (!TAILQ_EMPTY(&tconn->rmas))
+			debug(CCI_DB_CONN,
+				"%s: tconn->rmas is not empty", __func__);
+
+		if (!TAILQ_EMPTY(&tconn->pending))
+			debug(CCI_DB_CONN,
+				"%s: tconn->pending is not empty", __func__);
 
 		if (tep->poll_conn == tconn)
 			tep->poll_conn = NULL;
@@ -863,12 +872,8 @@ tcp_conn_set_closing_locked(cci__ep_t *ep, cci__conn_t *conn)
 static void
 tcp_conn_set_closing(cci__ep_t *ep, cci__conn_t *conn)
 {
-	tcp_conn_t *tconn = conn->priv;
-
 	pthread_mutex_lock(&ep->lock);
-	pthread_mutex_lock(&tconn->lock);
 	tcp_conn_set_closing_locked(ep, conn);
-	pthread_mutex_unlock(&tconn->lock);
 	pthread_mutex_unlock(&ep->lock);
 	return;
 }
@@ -1158,14 +1163,15 @@ static int ctp_tcp_accept(cci_event_t *event, const void *context)
 
 	tx->len = sizeof(*hdr) + sizeof(*hs);
 
-	pthread_mutex_lock(&tconn->lock);
+	pthread_mutex_lock(&ep->lock);
 	tx->state = TCP_TX_PENDING;
 	tcp_sendto(tconn->pfd->fd, tx->buffer, tx->len, NULL, 0, &offset);
 
 	assert((uint32_t)offset == tx->len);
 
 	TAILQ_INSERT_HEAD(&tconn->pending, &tx->evt, entry);
-	pthread_mutex_unlock(&tconn->lock);
+	tconn->pfd->events = POLLIN | POLLOUT;
+	pthread_mutex_unlock(&ep->lock);
 
 	CCI_EXIT;
 
@@ -1320,9 +1326,12 @@ assign_pollfd(cci__ep_t *ep, tcp_conn_t *tconn)
 		tmp = &tep->fd_bits[tep->blocks - 1];
 		memset(tmp, -1, sizeof(*tmp));
 
+    again_fds:
 		fds = realloc(tep->fds, tep->blocks * sizeof(*tep->fds) * 64);
-		if (!fds)
-			goto again; /* will retry */
+		if (!fds) {
+			usleep(1000);
+			goto again_fds; /* will retry */
+		}
 
 		tep->fds = fds;
 		fds = (void*)((uintptr_t)tep->fds +
@@ -1369,9 +1378,6 @@ tcp_new_conn(cci__ep_t *ep, struct sockaddr_in sin, int fd, cci__conn_t **connp)
 	int ret = CCI_SUCCESS;
 	cci__conn_t *conn = NULL;
 	tcp_conn_t *tconn = NULL;
-	pthread_mutexattr_t attr;
-
-	pthread_mutexattr_init(&attr);
 
 	/* allocate a new connection */
 	conn = calloc(1, sizeof(*conn));
@@ -1406,17 +1412,10 @@ tcp_new_conn(cci__ep_t *ep, struct sockaddr_in sin, int fd, cci__conn_t **connp)
 
 	memcpy(&tconn->sin, &sin, sizeof(sin));
 
-	ret = pthread_mutex_init(&tconn->lock, &attr);
-	if (ret)
-		goto out_with_pollfd;
-
 	*connp = conn;
 
 	return ret;
 
-out_with_pollfd:
-	release_pollfd(ep, tconn);
-	free(tconn);
 out_with_conn:
 	free(conn);
 	return ret;
@@ -1600,9 +1599,10 @@ static int ctp_tcp_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	tx->state = TCP_TX_QUEUED;
 
 	/* insert at tail of conn's queued list */
-	pthread_mutex_lock(&tconn->lock);
+	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
-	pthread_mutex_unlock(&tconn->lock);
+	tconn->pfd->events = POLLIN | POLLOUT;
+	pthread_mutex_unlock(&ep->lock);
 
 	queue_conn(ep, conn);
 
@@ -1907,7 +1907,7 @@ out:
 }
 
 static inline void
-tcp_progress_conn_sends(cci__conn_t *conn)
+tcp_progress_conn_sends(cci__ep_t *ep, cci__conn_t *conn)
 {
 	int ret;
 	tcp_conn_t *tconn = conn->priv;
@@ -1918,7 +1918,7 @@ tcp_progress_conn_sends(cci__conn_t *conn)
 
 	tconn = conn->priv;
 
-	pthread_mutex_lock(&tconn->lock);
+	pthread_mutex_lock(&ep->lock);
 	while (!TAILQ_EMPTY(&tconn->queued)) {
 		cci__evt_t *evt = TAILQ_FIRST(&tconn->queued);
 		tcp_tx_t *tx = container_of(evt, tcp_tx_t, evt);
@@ -1991,9 +1991,10 @@ tcp_progress_conn_sends(cci__conn_t *conn)
 		}
 	}
 	/* If nothing queued, unset POLLOUT */
-	if (TAILQ_EMPTY(&tconn->queued))
-		tconn->pfd->events &= ~POLLOUT;
-	pthread_mutex_unlock(&tconn->lock);
+	if (TAILQ_EMPTY(&tconn->queued) && TAILQ_EMPTY(&tconn->pending)
+			&& TAILQ_EMPTY(&tconn->rmas))
+		tconn->pfd->events = POLLIN;
+	pthread_mutex_unlock(&ep->lock);
 
 	if (put_tx) {
 		tcp_put_tx(put_tx);
@@ -2013,12 +2014,12 @@ tcp_progress_ep(cci__ep_t *ep)
 }
 
 static inline void
-tcp_queue_tx(tcp_ep_t *tep, tcp_conn_t *tconn, cci__evt_t *evt)
+tcp_queue_tx(cci__ep_t *ep, tcp_conn_t *tconn, cci__evt_t *evt)
 {
-	pthread_mutex_lock(&tconn->lock);
+	pthread_mutex_lock(&ep->lock);
 	TAILQ_INSERT_TAIL(&tconn->queued, evt, entry);
 	tconn->pfd->events = POLLIN | POLLOUT;
-	pthread_mutex_unlock(&tconn->lock);
+	pthread_mutex_unlock(&ep->lock);
 }
 
 static int tcp_send_common(cci_connection_t * connection,
@@ -2162,11 +2163,11 @@ static int tcp_send_common(cci_connection_t * connection,
 	debug(CCI_DB_MSG, "%s: queuing MSG %p to conn %p", __func__, (void*)tx, (void*)conn);
 
 	tx->state = TCP_TX_QUEUED;
-	tcp_queue_tx(tep, tconn, evt);
+	tcp_queue_tx(ep, tconn, evt);
 
 	/* try to progress txs */
 
-	tcp_progress_conn_sends(conn);
+	tcp_progress_conn_sends(ep, conn);
 
 	/* if unreliable, we are done since it is buffered internally */
 	if (!is_reliable) {
@@ -2507,12 +2508,10 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 		}
 	}
 	pthread_mutex_lock(&ep->lock);
-	pthread_mutex_lock(&tconn->lock);
 	for (i = 0; i < cnt; i++)
 		TAILQ_INSERT_TAIL(&tconn->queued, &(txs[i])->evt, entry);
 	TAILQ_INSERT_TAIL(&tconn->rmas, rma_op, rmas);
 	tconn->pfd->events = POLLIN | POLLOUT;
-	pthread_mutex_unlock(&tconn->lock);
 
 	TAILQ_INSERT_TAIL(&tep->rma_ops, rma_op, entry);
 	pthread_mutex_unlock(&ep->lock);
@@ -2522,7 +2521,7 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 
 	ret = CCI_SUCCESS;
 
-	tcp_progress_conn_sends(conn);
+	tcp_progress_conn_sends(ep, conn);
 
 out:
 	if (ret) {
@@ -2757,15 +2756,16 @@ tcp_handle_conn_reply(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 
 	tx->state = TCP_TX_QUEUED;
 
-	pthread_mutex_lock(&tconn->lock);
+	pthread_mutex_lock(&ep->lock);
 	TAILQ_REMOVE(&tconn->pending, &tx->evt, entry);
 	TAILQ_INSERT_TAIL(&tconn->queued, &tx->evt, entry);
+	tconn->pfd->events = POLLIN | POLLOUT;
 	tconn->status = TCP_CONN_READY;
 	tconn->refcnt++; /* for the calling application */
-	pthread_mutex_unlock(&tconn->lock);
+	pthread_mutex_unlock(&ep->lock);
 
 	/* try to progress txs */
-	tcp_progress_conn_sends(conn);
+	tcp_progress_conn_sends(ep, conn);
 
 out:
 	pthread_mutex_lock(&ep->lock);
@@ -2773,9 +2773,9 @@ out:
 	pthread_mutex_unlock(&ep->lock);
 
 	if (ret) {
-		pthread_mutex_lock(&tconn->lock);
+		pthread_mutex_lock(&ep->lock);
 		TAILQ_REMOVE(&tconn->pending, &tx->evt, entry);
-		pthread_mutex_unlock(&tconn->lock);
+		pthread_mutex_unlock(&ep->lock);
 		tcp_put_tx(tx);
 		/* This will close our connection, the peer will get
 		 * a POLLHUP and clean up accordingly */
@@ -2796,9 +2796,9 @@ tcp_handle_conn_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx, uint32_t tx_
 	debug(CCI_DB_CONN, "%s: recv'd conn_ack from conn %p",
 		__func__, (void*)conn);
 
-	pthread_mutex_lock(&tconn->lock);
+	pthread_mutex_lock(&ep->lock);
 	TAILQ_REMOVE(&tconn->pending, &tx->evt, entry);
-	pthread_mutex_unlock(&tconn->lock);
+	pthread_mutex_unlock(&ep->lock);
 
 	pthread_mutex_lock(&ep->lock);
 	tconn->status = TCP_CONN_READY;
@@ -2862,7 +2862,7 @@ out:
 
 		debug(CCI_DB_MSG, "%s: queuing ack for received tx %u", __func__, tx_id);
 
-		tcp_queue_tx(tep, tconn, &tx->evt);
+		tcp_queue_tx(ep, tconn, &tx->evt);
 	}
 
 	/* TODO close conn */
@@ -2956,7 +2956,7 @@ out:
 	ack = tx->buffer;
 	tcp_pack_ack(ack, tx_id, ret);
 
-	tcp_queue_tx(tep, tconn, &tx->evt);
+	tcp_queue_tx(ep, tconn, &tx->evt);
 
 	tcp_put_rx(rx);
 
@@ -3044,7 +3044,7 @@ tcp_handle_rma_read_request(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 			remote_handle,
 			remote_offset);
 
-	tcp_queue_tx(tep, tconn, &tx->evt);
+	tcp_queue_tx(ep, tconn, &tx->evt);
 
 out:
 	if (ret) {
@@ -3058,7 +3058,7 @@ out:
 		ack = tx->buffer;
 		tcp_pack_ack(ack, tx_id, ret);
 
-		tcp_queue_tx(tep, tconn, &tx->evt);
+		tcp_queue_tx(ep, tconn, &tx->evt);
 	}
 	tcp_put_rx(rx);
 
@@ -3080,11 +3080,11 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 	if (status && (rma_op->status == CCI_SUCCESS))
 		rma_op->status = status;
 
-	pthread_mutex_lock(&tconn->lock);
+	pthread_mutex_lock(&ep->lock);
 	TAILQ_REMOVE(&tconn->pending, &tx->evt, entry);
 	if (rma_op->status && rma_op->pending == 0)
 		done = 1;
-	pthread_mutex_unlock(&tconn->lock);
+	pthread_mutex_unlock(&ep->lock);
 
 	if ((tx->rma_id == (rma_op->num_msgs - 1)) || done) {
 		int ret;
@@ -3092,10 +3092,8 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 		/* last segment - complete rma */
 		tx->evt.event.send.status = rma_op->status;
 		if (rma_op->status || !rma_op->msg_ptr) {
-			pthread_mutex_lock(&tconn->lock);
-			TAILQ_REMOVE(&tconn->rmas, rma_op, rmas);
-			pthread_mutex_unlock(&tconn->lock);
 			pthread_mutex_lock(&ep->lock);
+			TAILQ_REMOVE(&tconn->rmas, rma_op, rmas);
 			TAILQ_REMOVE(&tep->rma_ops, rma_op, entry);
 			TCP_QUEUE_EVT(&ep->evts, &tx->evt, tep);
 			pthread_mutex_unlock(&ep->lock);
@@ -3114,10 +3112,8 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 			iov.iov_base = rma_op->msg_ptr;
 			iov.iov_len = rma_op->msg_len;
 
-			pthread_mutex_lock(&tconn->lock);
-			TAILQ_REMOVE(&tconn->rmas, rma_op, rmas);
-			pthread_mutex_unlock(&tconn->lock);
 			pthread_mutex_lock(&ep->lock);
+			TAILQ_REMOVE(&tconn->rmas, rma_op, rmas);
 			TAILQ_REMOVE(&tep->rma_ops, rma_op, entry);
 			pthread_mutex_unlock(&ep->lock);
 			debug(CCI_DB_MSG, "%s: sending RMA completion MSG ***",
@@ -3189,7 +3185,7 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 			tx->rma_len = 0;
 		}
 
-		tcp_queue_tx(tep, tconn, &tx->evt);
+		tcp_queue_tx(ep, tconn, &tx->evt);
 	}
 
 	tcp_put_rx(rx);
@@ -3290,9 +3286,9 @@ tcp_handle_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 				"with error %s", __func__,
 				cci_strerror(&ep->endpoint, status));
 
-		pthread_mutex_lock(&tconn->lock);
+		pthread_mutex_lock(&ep->lock);
 		TAILQ_REMOVE(&tconn->pending, &tx->evt, entry);
-		pthread_mutex_unlock(&tconn->lock);
+		pthread_mutex_unlock(&ep->lock);
 
 		pthread_mutex_lock(&ep->lock);
 		if (!(tx->msg_type == TCP_MSG_CONN_REPLY &&
@@ -3307,9 +3303,9 @@ tcp_handle_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 			/* We rejected this conn, clean it up */
 			/* FIXME */
 			/* FIXME do we need to put the tx? */
-			pthread_mutex_lock(&tconn->lock);
+			pthread_mutex_lock(&ep->lock);
 			tcp_conn_set_closing_locked(ep, conn);
-			pthread_mutex_unlock(&tconn->lock);
+			pthread_mutex_unlock(&ep->lock);
 		}
 		tcp_put_rx_locked(tep, rx);
 		pthread_mutex_unlock(&ep->lock);
@@ -3445,18 +3441,15 @@ get_conn_locked(cci__ep_t *ep, cci__conn_t **connp)
 		if (!last)
 			last = TAILQ_FIRST(&tep->conns);
 
-		pthread_mutex_lock(&last->lock);
 		if (last->status > TCP_CONN_INIT) {
 			if ((last->status == TCP_CONN_READY && last->refcnt == 2) ||
 				(last->status < TCP_CONN_READY && last->refcnt == 1)) {
 				conn = last->conn;
 				last->refcnt++;
-				pthread_mutex_unlock(&last->lock);
 				ret = CCI_SUCCESS;
 				break;
 			}
 		}
-		pthread_mutex_unlock(&last->lock);
 	} while (last != end);
 
 	tep->poll_conn = last;
@@ -3490,17 +3483,14 @@ conn_decref_locked(cci__ep_t *ep, cci__conn_t *conn)
 	tcp_ep_t *tep = ep->priv;
 	tcp_conn_t *tconn = conn->priv;
 
-	pthread_mutex_lock(&tconn->lock);
 	tconn->refcnt--;
 
 	if (tconn->refcnt == 0) {
 		assert(tconn->status < TCP_CONN_INIT);
 		TAILQ_REMOVE(&tep->conns, tconn, entry);
-		pthread_mutex_unlock(&tconn->lock);
 		delete_conn_locked(conn);
 		goto out;
 	}
-	pthread_mutex_unlock(&tconn->lock);
     out:
 	return;
 }
@@ -3642,19 +3632,19 @@ tcp_poll_events(cci__ep_t *ep)
 			break;
 		case TCP_CONN_ACTIVE1:
 		case TCP_CONN_ACTIVE2:
-			pthread_mutex_lock(&tconn->lock);
+			pthread_mutex_lock(&ep->lock);
 			if (old_status == TCP_CONN_ACTIVE1 ||
 				!TAILQ_EMPTY(&tconn->queued)) {
 				evt = TAILQ_FIRST(&tconn->queued);
 				TAILQ_REMOVE(&tconn->queued, evt, entry);
 				/* If nothing queued, unset POLLOUT */
-				if (TAILQ_EMPTY(&tconn->queued))
-					tconn->pfd->events &= ~POLLOUT;
+				if (0 && TAILQ_EMPTY(&tconn->queued))
+					tconn->pfd->events = POLLIN;
 			} else {
 				evt = TAILQ_FIRST(&tconn->pending);
 				TAILQ_REMOVE(&tconn->pending, evt, entry);
 			}
-			pthread_mutex_unlock(&tconn->lock);
+			pthread_mutex_unlock(&ep->lock);
 
 			evt->event.connect.status = CCI_ETIMEDOUT;
 			tx = container_of(evt, tcp_tx_t, evt);
@@ -3683,6 +3673,7 @@ tcp_poll_events(cci__ep_t *ep)
 	if (revents & POLLERR || revents & POLLNVAL) {
 		/* handle error */
 		/* TODO close connection */
+		tcp_conn_set_closing(ep, conn);
 		goto out;
 	}
 	if (revents & POLLIN) {
@@ -3730,7 +3721,7 @@ tcp_poll_events(cci__ep_t *ep)
 				goto out;
 			}
 		}
-		tcp_progress_conn_sends(conn);
+		tcp_progress_conn_sends(ep, conn);
 		revents &= ~POLLOUT;
 	}
 	if (revents) {
@@ -3754,8 +3745,23 @@ static void *tcp_progress_thread(void *arg)
 
 	while (!ep->closing) {
 		int ret = 0;
+		struct pollfd *fds = NULL;
+		nfds_t nfds = 0;
+		size_t len = 0;
 
-		ret = poll(tep->fds, tep->nfds, 1000);
+		pthread_mutex_lock(&ep->lock);
+		nfds = tep->nfds;
+		len = nfds * sizeof(*fds);
+		fds = malloc(len);
+		if (fds)
+			memcpy(fds, tep->fds, len);
+		pthread_mutex_unlock(&ep->lock);
+
+		if (!fds)
+			continue;
+
+		ret = poll(fds, nfds, 1000);
+		free(fds);
 		if (ret < 1)
 			continue;
 

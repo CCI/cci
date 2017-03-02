@@ -816,9 +816,6 @@ struct tcp_conn {
 	/*! partial receive */
 	tcp_rx_t *rx;
 
-	/*! Lock */
-	pthread_mutex_t lock;
-
 	/*! Is this the endpoint's listening socket? */
 	int is_listener;
 
