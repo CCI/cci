@@ -51,11 +51,11 @@ int cci_create_endpoint_at(cci_device_t * device,
 	pthread_mutex_init(&ep->lock, NULL);
 	ep->dev = dev;
 	ep->endpoint.device = &dev->device;
+	ep->plugin = dev->plugin; /* plugin needs to be set before we call create_endpoint_at() */
 	*endpoint = &ep->endpoint;
 
 	ret = dev->plugin->create_endpoint_at(device, service, flags, endpoint, fd);
 	if (ret == CCI_SUCCESS) {
-		ep->plugin = dev->plugin;
 		pthread_mutex_unlock(&globals->lock);
 
 		pthread_mutex_lock(&dev->lock);
