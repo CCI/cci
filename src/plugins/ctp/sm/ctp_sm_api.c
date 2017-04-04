@@ -3013,7 +3013,7 @@ static int ctp_sm_send(cci_connection_t * connection,
 		TAILQ_INSERT_TAIL(&ep->evts, evt, entry);
 		sm_ep_notify(ep);
 		pthread_mutex_unlock(&ep->lock);
-	} else {
+	} else if (flags & CCI_FLAG_BLOCKING) {
 		sm_put_tx(evt);
 	}
 
