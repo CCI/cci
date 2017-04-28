@@ -204,6 +204,7 @@ typedef struct gni_dev {
 	int device_id;			/* GNI device id */
 	uint32_t ptag;
 	uint32_t cookie;
+	gni_nic_device_t nic_type;	/* GEMINI, ARIES */
 	struct ifaddrs *ifa;		/* device's interface addr */
 	int is_progressing;		/* being progressed? */
 } gni_dev_t;
