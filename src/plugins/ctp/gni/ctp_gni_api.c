@@ -448,6 +448,7 @@ static int ctp_gni_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver,
 
 		gdev = dev->priv;
 		gdev->device_id = 0;
+		gdev->nic_type = nic_type;
 		if (nic_type == GNI_DEVICE_GEMINI) {
 			gdev->ptag = GNI_DEFAULT_PTAG;
 		} else {
@@ -496,6 +497,7 @@ static int ctp_gni_init(cci_plugin_ctp_t * plugin, uint32_t abi_ver,
 
 			gdev = dev->priv;
 			gdev->device_id = -1;
+			gdev->nic_type = nic_type;
 			if (nic_type == GNI_DEVICE_GEMINI) {
 				gdev->ptag = GNI_DEFAULT_PTAG;
 			} else {
@@ -806,7 +808,7 @@ static int
 gni_create_cdm_cqs(cci__dev_t *dev, cci__ep_t *ep, uint32_t port)
 {
 	int ret = CCI_SUCCESS;
-	uint32_t unused = 0, cq_mode = GNI_CQ_NOBLOCK;
+	uint32_t unused = 0, cq_mode = GNI_CQ_NOBLOCK, modes = 0;
 	gni_dev_t *gdev = dev->priv;
 	gni_ep_t *gep = ep->priv;
 	gni_return_t grc = GNI_RC_SUCCESS;
@@ -814,8 +816,11 @@ gni_create_cdm_cqs(cci__dev_t *dev, cci__ep_t *ep, uint32_t port)
 	debug(CCI_DB_CTP, "%s: creating CDM port=%u ptag=%u cookie=0x%x",
 		__func__, port, gdev->ptag, gdev->cookie);
 
+	if (gdev->nic_type != GNI_DEVICE_GEMINI)
+		modes = GNI_CDM_MODE_BTE_SINGLE_CHANNEL;
+
 	grc = GNI_CdmCreate(port, gdev->ptag, gdev->cookie,
-			GNI_CDM_MODE_BTE_SINGLE_CHANNEL, &gep->cdm);
+			modes, &gep->cdm);
 	if (grc) {
 		ret = gni_to_cci_status(grc);
 		debug(CCI_DB_EP, "%s: GNI_CdmCreate() failed with %u (%u)",
@@ -1326,6 +1331,9 @@ static int ctp_gni_accept(cci_event_t *event, const void *context)
 	gni_smsg_attr_t local, remote;
 	gni_return_t grc = GNI_RC_SUCCESS;
 	gni_conn_request_t reply;
+	cci__dev_t *dev = NULL;
+	gni_dev_t *gdev = NULL;
+	uint32_t flags = GNI_MEM_READWRITE;
 
 	CCI_ENTER;
 
@@ -1336,6 +1344,9 @@ static int ctp_gni_accept(cci_event_t *event, const void *context)
 	conn = evt->conn;
 	gconn = conn->priv;
 	new = gconn->new;
+
+	dev = ep->dev;
+	gdev = dev->priv;
 
 	memcpy(&remote, &new->cr.attr, sizeof(new->cr.attr));
 
@@ -1388,10 +1399,12 @@ static int ctp_gni_accept(cci_event_t *event, const void *context)
 	}
 	local.msg_buffer = gconn->msg_buffer;
 
+	if (gdev->nic_type == GNI_DEVICE_GEMINI)
+		flags |= GNI_MEM_RELAXED_PI_ORDERING;
+
 	grc = GNI_MemRegister(gep->nic, (uintptr_t) gconn->msg_buffer,
 			gconn->buff_size, gep->rx_cq,
-			GNI_MEM_READWRITE,
-			-1, &gconn->mem_hndl);
+			flags, -1, &gconn->mem_hndl);
 	if (grc) {
 		ret = gni_to_cci_status(grc);
 		goto out;
@@ -1624,11 +1637,17 @@ ctp_gni_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	uint16_t len = sizeof(gni_conn_request_t);
 	void *ptr = NULL;
 	gni_return_t grc = GNI_RC_SUCCESS;
+	cci__dev_t *dev = NULL;
+	gni_dev_t *gdev = NULL;
+	uint32_t gflags = GNI_MEM_READWRITE;
 
 	CCI_ENTER;
 
 	ep = container_of(endpoint, cci__ep_t, endpoint);
 	gep = ep->priv;
+
+	dev = ep->dev;
+	gdev = dev->priv;
 
 	conn = calloc(1, sizeof(*conn));
 	if (!conn) {
@@ -1709,10 +1728,12 @@ ctp_gni_connect(cci_endpoint_t * endpoint, const char *server_uri,
 	}
 	new->cr.attr.msg_buffer = gconn->msg_buffer;
 
+	if (gdev->nic_type == GNI_DEVICE_GEMINI)
+		gflags |= GNI_MEM_RELAXED_PI_ORDERING;
+
 	grc = GNI_MemRegister(gep->nic, (uintptr_t) gconn->msg_buffer,
 			gconn->buff_size, gep->rx_cq,
-			GNI_MEM_READWRITE,
-			-1, &gconn->mem_hndl);
+			gflags, -1, &gconn->mem_hndl);
 	if (grc) {
 		ret = gni_to_cci_status(grc);
 		debug(CCI_DB_CONN, "%s: GNI_MemRegister() returned %s (%d)",
@@ -2611,7 +2632,6 @@ out:
 static int gni_progress_connections(cci__ep_t * ep)
 {
 	int ret = CCI_EAGAIN;
-	gni_ep_t *gep = ep->priv;
 
 	CCI_ENTER;
 
@@ -3458,6 +3478,8 @@ ctp_gni_rma_register(cci_endpoint_t * endpoint,
 	gni_ep_t *gep = ep->priv;
 	gni_rma_handle_t *handle = NULL;
 	gni_return_t grc = GNI_RC_SUCCESS;
+	cci__dev_t *dev = NULL;
+	gni_dev_t *gdev = NULL;
 	uint32_t gflags = 0;
 
 	CCI_ENTER;
@@ -3481,6 +3503,12 @@ ctp_gni_rma_register(cci_endpoint_t * endpoint,
 		gflags |= GNI_MEM_READ_ONLY;
 	else
 		gflags |= GNI_MEM_READWRITE;
+
+	dev = ep->dev;
+	gdev = dev->priv;
+
+	if (gdev->nic_type == GNI_DEVICE_GEMINI)
+		gflags |= GNI_MEM_RELAXED_PI_ORDERING;
 
 	grc = GNI_MemRegister(gep->nic, (uint64_t)(uintptr_t)start,
 		length, NULL, gflags, -1, &handle->mh);
@@ -3567,6 +3595,12 @@ static int gni_post_rma(gni_rma_op_t * rma_op)
 		int remote_addr_pad = rma_op->pd.remote_addr & 0x3;
 		int length_pad = rma_op->pd.length & 0x3;
 		uint32_t new_len = rma_op->pd.length;
+		uint32_t flags = GNI_MEM_READWRITE;
+		cci__dev_t *dev = ep->dev;
+		gni_dev_t *gdev = dev->priv;
+
+		if (gdev->nic_type == GNI_DEVICE_GEMINI)
+			flags |= GNI_MEM_RELAXED_PI_ORDERING;
 
 		if (remote_addr_pad)
 			new_len += remote_addr_pad;
@@ -3585,7 +3619,7 @@ static int gni_post_rma(gni_rma_op_t * rma_op)
 		}
 		rma_op->pd.length = new_len;
 		grc = GNI_MemRegister(gep->nic, (uintptr_t) rma_op->buf,
-			new_len, NULL, GNI_MEM_READWRITE,
+			new_len, NULL, flags,
 			-1, &rma_op->pd.local_mem_hndl);
 		if (grc) {
 			ret = gni_to_cci_status(grc);
