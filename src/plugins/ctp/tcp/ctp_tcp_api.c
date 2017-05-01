@@ -2124,11 +2124,7 @@ static int tcp_send_common(cci_connection_t * connection,
 	 use sendmsg() with an iovec. */
 
 	for (i = 0; i < (int) iovcnt; i++) {
-		if (!(rma_op && rma_op->tx)) {
-			/* don't copy - the data is already in place
-			 * from the rma() call */
-			memcpy(ptr, data[i].iov_base, data[i].iov_len);
-		}
+		memcpy(ptr, data[i].iov_base, data[i].iov_len);
 		ptr = (void*)((uintptr_t)ptr + data[i].iov_len);
 		tx->len += data[i].iov_len;
 	}
