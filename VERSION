@@ -6,7 +6,7 @@
 # <major>.<minor>.<release>.  If release is zero, then it is omitted.
 
 major=2
-minor=0
+minor=1
 release=0
 
 # greek is used for alpha or beta release tags.  If it is non-empty,
@@ -45,7 +45,7 @@ repo_rev=-1
 
 # The date when this release was created
 
-date="June 28, 2016"
+date="May 2, 2017"
 
 # The shared library version of CCI's public library.  This version is
 # maintained in accordance with the "Library Interface Versions"
@@ -58,4 +58,4 @@ date="June 28, 2016"
 # 2. Version numbers are described in the Libtool current:revision:age
 # format.
 
-libcci_so_version=2:0:0
+libcci_so_version=2:1:0
