@@ -2143,7 +2143,7 @@ tcp_queue_tx(cci__ep_t *ep, tcp_conn_t *tconn, cci__evt_t *evt)
 }
 
 static int tcp_send_common(cci_connection_t * connection,
-		      const struct iovec *data, uint32_t iovcnt,
+		      struct iovec *data, uint32_t iovcnt,
 		      const void *context, int flags,
 		      tcp_rma_op_t *rma_op)
 {
@@ -2156,7 +2156,7 @@ static int tcp_send_common(cci_connection_t * connection,
 	tcp_conn_t *tconn;
 	tcp_tx_t *tx = NULL;
 	tcp_header_t *hdr;
-	void *ptr;
+	void *ptr = NULL, *rma_msg_ptr = NULL;
 	cci__evt_t *evt;
 	union cci_event *event;	/* generic CCI event */
 
@@ -2187,6 +2187,15 @@ static int tcp_send_common(cci_connection_t * connection,
 	/* get a tx */
 	if (rma_op && rma_op->tx) {
 		tx = rma_op->tx;
+
+		/* cache the RMA completion message */
+    alloc_again:
+		rma_msg_ptr = malloc(rma_op->msg_len);
+		if (!rma_msg_ptr)
+			goto alloc_again;
+
+		memcpy(rma_msg_ptr, rma_op->msg_ptr, rma_op->msg_len);
+		data[0].iov_base = rma_msg_ptr;
 	} else {
 		tx = tcp_get_tx(ep, conn, 0);
 		if (!tx) {
@@ -2248,6 +2257,9 @@ static int tcp_send_common(cci_connection_t * connection,
 		ptr = (void*)((uintptr_t)ptr + data[i].iov_len);
 		tx->len += data[i].iov_len;
 	}
+
+	/* free cached RMA completion message */
+	free(rma_msg_ptr);
 
 	/* if unreliable, try to send */
 	if (!is_reliable) {
@@ -2348,7 +2360,7 @@ static int ctp_tcp_sendv(cci_connection_t * connection,
 
 	CCI_ENTER;
 
-	ret = tcp_send_common(connection, data, iovcnt, context, flags, NULL);
+	ret = tcp_send_common(connection, (struct iovec*)data, iovcnt, context, flags, NULL);
 
 	CCI_EXIT;
 	return ret;
