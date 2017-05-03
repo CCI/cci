@@ -672,17 +672,17 @@ typedef struct tcp_rma_op {
 	/*! Application context */
 	void *context;
 
-	/*! Flags */
-	int flags;
-
 	/*! Pointer to tx for remote completion if needed */
 	tcp_tx_t *tx;
+
+	/*! Application completion msg ptr if provided */
+	char *msg_ptr;
 
 	/*! Application completion msg len */
 	uint16_t msg_len;
 
-	/*! Application completion msg ptr if provided */
-	char *msg_ptr;
+	/*! Flags */
+	int flags;
 } tcp_rma_op_t;
 
 struct tcp_ep {
