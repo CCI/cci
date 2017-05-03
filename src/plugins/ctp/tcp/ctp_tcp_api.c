@@ -2156,7 +2156,7 @@ static int tcp_send_common(cci_connection_t * connection,
 	tcp_conn_t *tconn;
 	tcp_tx_t *tx = NULL;
 	tcp_header_t *hdr;
-	void *ptr = NULL, *rma_msg_ptr = NULL;
+	void *ptr = NULL;
 	cci__evt_t *evt;
 	union cci_event *event;	/* generic CCI event */
 
@@ -2187,15 +2187,6 @@ static int tcp_send_common(cci_connection_t * connection,
 	/* get a tx */
 	if (rma_op && rma_op->tx) {
 		tx = rma_op->tx;
-
-		/* cache the RMA completion message */
-    alloc_again:
-		rma_msg_ptr = malloc(rma_op->msg_len);
-		if (!rma_msg_ptr)
-			goto alloc_again;
-
-		memcpy(rma_msg_ptr, rma_op->msg_ptr, rma_op->msg_len);
-		data[0].iov_base = rma_msg_ptr;
 	} else {
 		tx = tcp_get_tx(ep, conn, 0);
 		if (!tx) {
@@ -2257,9 +2248,6 @@ static int tcp_send_common(cci_connection_t * connection,
 		ptr = (void*)((uintptr_t)ptr + data[i].iov_len);
 		tx->len += data[i].iov_len;
 	}
-
-	/* free cached RMA completion message */
-	free(rma_msg_ptr);
 
 	/* if unreliable, try to send */
 	if (!is_reliable) {
@@ -2533,14 +2521,19 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	rma_op->tx = NULL;
 
 	if (msg_len) {
+		rma_op->msg_ptr = malloc(msg_len);
+		if (!rma_op->msg_ptr) {
+			ret = CCI_ENOMEM;
+			goto out;
+		}
+		rma_op->msg_len = msg_len;
+		memcpy(rma_op->msg_ptr, msg_ptr, msg_len);
+
 		rma_op->tx = tcp_get_tx(ep, conn, 0);
 		if (!rma_op->tx) {
 			ret = CCI_ENOBUFS;
 			goto out;
 		}
-		rma_op->msg_ptr = rma_op->tx->buffer;
-		rma_op->msg_len = msg_len;
-		memcpy(rma_op->msg_ptr, msg_ptr, msg_len);
 	} else {
 		rma_op->msg_ptr = NULL;
 	}
@@ -2656,6 +2649,8 @@ out:
 		pthread_mutex_lock(&ep->lock);
 		local->refcnt--;
 		pthread_mutex_unlock(&ep->lock);
+		if (rma_op)
+			free(rma_op->msg_ptr);
 		free(rma_op);
 	}
 	CCI_EXIT;
