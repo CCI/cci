@@ -950,6 +950,7 @@ tcp_conn_set_closing_locked(cci__ep_t *ep, cci__conn_t *conn)
 			TAILQ_REMOVE(&tconn->rmas, rma_op, rmas);
 			TAILQ_REMOVE(&tep->rma_ops, rma_op, entry);
 			assert(rma_op->pending == 0);
+			free(rma_op->msg_ptr);
 			free(rma_op);
 		}
 
@@ -1033,6 +1034,7 @@ static int ctp_tcp_destroy_endpoint(cci_endpoint_t * endpoint)
 		while (!TAILQ_EMPTY(&tep->rma_ops)) {
 			tcp_rma_op_t *rma_op = TAILQ_FIRST(&tep->rma_ops);
 			TAILQ_REMOVE(&tep->rma_ops, rma_op, entry);
+			free(rma_op->msg_ptr);
 			free(rma_op);
 		}
 		while (!TAILQ_EMPTY(&tep->handles)) {
@@ -2549,6 +2551,7 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 		pthread_mutex_lock(&ep->lock);
 		local->refcnt--;
 		pthread_mutex_unlock(&ep->lock);
+		free(rma_op->msg_ptr);
 		free(rma_op);
 		CCI_EXIT;
 		return CCI_ENOMEM;
@@ -2571,6 +2574,7 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 
 	if (err) {
 		free(txs);
+		free(rma_op->msg_ptr);
 		free(rma_op);
 		CCI_EXIT;
 		return CCI_ENOBUFS;
