@@ -831,11 +831,11 @@ struct tcp_conn {
 	/*! Pending (in-flight) sends */
 	TAILQ_HEAD(s_pending, cci__evt) pending;
 
-	/*! List of RMA ops in process in case of fence */
-	TAILQ_HEAD(s_rmas, tcp_rma_op) rmas;
-
 	/*! Peer's sockaddr_in (IP, port) */
 	struct sockaddr_in sin;
+
+	/*! Number of RMAs in-progress (i.e. queued on tep->rma_ops) */
+	int rma_ops_cnt;
 
 	/*! Max sends in flight to this peer (i.e. rwnd) */
 	uint32_t max_tx_cnt;

@@ -944,6 +944,8 @@ tcp_conn_set_closing_locked(cci__ep_t *ep, cci__conn_t *conn)
 			}
 		}
 
+		/* FIXME: walk tep->rma_ops and remove conn's RMAs */
+#if 0
 		while (!TAILQ_EMPTY(&tconn->rmas)) {
 			tcp_rma_op_t *rma_op = TAILQ_FIRST(&tconn->rmas);
 
@@ -953,6 +955,7 @@ tcp_conn_set_closing_locked(cci__ep_t *ep, cci__conn_t *conn)
 			free(rma_op->msg_ptr);
 			free(rma_op);
 		}
+#endif
 
 		if (tep->poll_conn == tconn)
 			tep->poll_conn = NULL;
@@ -1017,8 +1020,8 @@ static int ctp_tcp_destroy_endpoint(cci_endpoint_t * endpoint)
 			if (!TAILQ_EMPTY(&tconn->pending))
 				debug(CCI_DB_ALL, "%s: conn %p pending sends",
 					__func__, (void*)conn);
-			if (!TAILQ_EMPTY(&tconn->rmas))
-				debug(CCI_DB_ALL, "%s: conn %p queued rmas",
+			if (tconn->rma_ops_cnt != 0)
+				debug(CCI_DB_ALL, "%s: conn %p in-progress RMAs",
 					__func__, (void*)conn);
 			TAILQ_REMOVE(&tep->conns, tconn, entry);
 			free((char*)conn->uri);
@@ -1522,7 +1525,6 @@ tcp_new_conn(cci__ep_t *ep, struct sockaddr_in sin, int fd, cci__conn_t **connp)
 		tconn->status = TCP_CONN_ACTIVE1;
 	else
 		tconn->status = TCP_CONN_PASSIVE1;
-	TAILQ_INIT(&tconn->rmas);
 	TAILQ_INIT(&tconn->queued);
 	TAILQ_INIT(&tconn->pending);
 
@@ -2114,7 +2116,7 @@ tcp_progress_conn_sends(cci__ep_t *ep, cci__conn_t *conn)
 	if (tconn->status == TCP_CONN_READY &&
 			TAILQ_EMPTY(&tconn->queued) &&
 			TAILQ_EMPTY(&tconn->pending) &&
-			TAILQ_EMPTY(&tconn->rmas))
+			tconn->rma_ops_cnt > 0)
 		tconn->pfd->events = POLLIN;
 	pthread_mutex_unlock(&ep->lock);
 
@@ -2635,7 +2637,8 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	pthread_mutex_lock(&ep->lock);
 	for (i = 0; i < cnt; i++)
 		TAILQ_INSERT_TAIL(&tconn->queued, &(txs[i])->evt, entry);
-	TAILQ_INSERT_TAIL(&tconn->rmas, rma_op, rmas);
+
+	tconn->rma_ops_cnt++;
 	tconn->pfd->events = POLLIN | POLLOUT;
 
 	TAILQ_INSERT_TAIL(&tep->rma_ops, rma_op, entry);
@@ -3217,7 +3220,7 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 		tx->evt.event.send.status = rma_op->status;
 		if (rma_op->status || !rma_op->msg_ptr) {
 			pthread_mutex_lock(&ep->lock);
-			TAILQ_REMOVE(&tconn->rmas, rma_op, rmas);
+			tconn->rma_ops_cnt--;
 			TAILQ_REMOVE(&tep->rma_ops, rma_op, entry);
 			TCP_QUEUE_EVT(&ep->evts, &tx->evt, tep);
 			pthread_mutex_unlock(&ep->lock);
@@ -3237,7 +3240,7 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 			iov.iov_len = rma_op->msg_len;
 
 			pthread_mutex_lock(&ep->lock);
-			TAILQ_REMOVE(&tconn->rmas, rma_op, rmas);
+			tconn->rma_ops_cnt--;
 			TAILQ_REMOVE(&tep->rma_ops, rma_op, entry);
 			pthread_mutex_unlock(&ep->lock);
 			debug(CCI_DB_MSG, "%s: sending RMA completion MSG ***",
@@ -3587,7 +3590,7 @@ delete_conn_locked(cci__conn_t *conn)
 	assert(tconn->rx == NULL);
 	assert(TAILQ_EMPTY(&tconn->queued));
 	assert(TAILQ_EMPTY(&tconn->pending));
-	assert(TAILQ_EMPTY(&tconn->rmas));
+	assert(tconn->rma_ops_cnt == 0);
 
 	free((char *)conn->uri);
 
