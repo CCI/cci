@@ -540,8 +540,9 @@ typedef enum tcp_tx_state_t {
 } tcp_tx_state_t;
 
 typedef enum tcp_ctx {
-	TCP_CTX_TX,
-	TCP_CTX_RX
+	TCP_CTX_TX = 1000,
+	TCP_CTX_RX,
+	TCP_CTX_RMA
 } tcp_ctx_t;
 
 /*! Send message context.
@@ -638,6 +639,12 @@ typedef struct tcp_rma_handle {
 } tcp_rma_handle_t;
 
 typedef struct tcp_rma_op {
+	/*! Must be TCP_CTX_RMA */
+	tcp_ctx_t ctx;
+
+	/*! Associated event (includes public cci_event_t) */
+	cci__evt_t evt;
+
 	/*! Entry to hang on sep->rma_ops */
 	TAILQ_ENTRY(tcp_rma_op) entry;
 
@@ -662,12 +669,6 @@ typedef struct tcp_rma_op {
 
 	/*! Number of fragments pending */
 	uint32_t pending;
-
-	/*! Status of the RMA op */
-	cci_status_t status;
-
-	/*! Application context */
-	void *context;
 
 	/*! Pointer to tx for remote completion if needed */
 	tcp_tx_t *tx;

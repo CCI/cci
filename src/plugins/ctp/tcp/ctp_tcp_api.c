@@ -883,7 +883,7 @@ tcp_conn_set_closing_locked(cci__ep_t *ep, cci__conn_t *conn)
 				break;
 			case TCP_MSG_RMA_WRITE:
 			case TCP_MSG_RMA_READ_REQUEST:
-				tx->rma_op->status = CCI_ERR_DISCONNECTED;
+				tx->rma_op->evt.event.send.status = CCI_ERR_DISCONNECTED;
 				tx->rma_op->pending--;
 
 				if (tx->rma_op->pending == 0) {
@@ -917,7 +917,7 @@ tcp_conn_set_closing_locked(cci__ep_t *ep, cci__conn_t *conn)
 				break;
 			case TCP_MSG_RMA_WRITE:
 			case TCP_MSG_RMA_READ_REQUEST:
-				tx->rma_op->status = CCI_ERR_DISCONNECTED;
+				tx->rma_op->evt.event.send.status = CCI_ERR_DISCONNECTED;
 				tx->rma_op->pending--;
 
 				if (tx->rma_op->pending == 0) {
@@ -944,18 +944,30 @@ tcp_conn_set_closing_locked(cci__ep_t *ep, cci__conn_t *conn)
 			}
 		}
 
-		/* FIXME: walk tep->rma_ops and remove conn's RMAs */
-#if 0
-		while (!TAILQ_EMPTY(&tconn->rmas)) {
-			tcp_rma_op_t *rma_op = TAILQ_FIRST(&tconn->rmas);
+		/* Walk tep->rma_ops and remove conn's RMAs */
+		if (tconn->rma_ops_cnt) {
+			tcp_rma_op_t *op = NULL;
+			tcp_rma_op_t *tmp = NULL;
 
-			TAILQ_REMOVE(&tconn->rmas, rma_op, rmas);
-			TAILQ_REMOVE(&tep->rma_ops, rma_op, entry);
-			assert(rma_op->pending == 0);
-			free(rma_op->msg_ptr);
-			free(rma_op);
-		}
-#endif
+			TAILQ_FOREACH_SAFE(op, &tep->rma_ops, entry, tmp) {
+				cci__conn_t *c = NULL;
+
+				c = container_of(op->evt.event.send.connection,
+						cci__conn_t, connection);
+				if (c->priv != tconn)
+					continue;
+
+				debug(CCI_DB_ALL, "%s: losing RMA %p",
+						__func__, (void*) op);
+				TAILQ_REMOVE(&tep->rma_ops, op, entry);
+				assert(op->pending == 0);
+				free(op->msg_ptr);
+				free(op);
+				tconn->rma_ops_cnt--;
+				if (tconn->rma_ops_cnt == 0)
+					break;
+			}
+		};
 
 		if (tep->poll_conn == tconn)
 			tep->poll_conn = NULL;
@@ -2508,6 +2520,11 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 		return CCI_ENOMEM;
 	}
 
+	rma_op->ctx = TCP_CTX_RMA;
+	rma_op->evt.event.type = CCI_EVENT_SEND;
+	rma_op->evt.event.send.status = CCI_SUCCESS; /* for now */
+	rma_op->evt.event.send.context = (void *)context;
+	rma_op->evt.event.send.connection = connection;
 	rma_op->data_len = data_len;
 	rma_op->local_handle = local_handle;
 	rma_op->local_offset = local_offset;
@@ -2518,8 +2535,6 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	if ((rma_op->num_msgs * TCP_RMA_FRAG_SIZE) < data_len)
 		rma_op->num_msgs++;
 	rma_op->acked = -1;
-	rma_op->status = CCI_SUCCESS;	/* for now */
-	rma_op->context = (void *)context;
 	rma_op->flags = flags;
 	rma_op->msg_len = (uint16_t) msg_len;
 	rma_op->tx = NULL;
@@ -3204,12 +3219,12 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 
 	rma_op->acked = tx->rma_id;
 
-	if (status && (rma_op->status == CCI_SUCCESS))
-		rma_op->status = status;
+	if (status && (rma_op->evt.event.send.status == CCI_SUCCESS))
+		rma_op->evt.event.send.status = status;
 
 	pthread_mutex_lock(&ep->lock);
 	TAILQ_REMOVE(&tconn->pending, &tx->evt, entry);
-	if (rma_op->status && rma_op->pending == 0)
+	if (rma_op->evt.event.send.status && rma_op->pending == 0)
 		done = 1;
 	pthread_mutex_unlock(&ep->lock);
 
@@ -3217,8 +3232,8 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 		int ret;
 
 		/* last segment - complete rma */
-		tx->evt.event.send.status = rma_op->status;
-		if (rma_op->status || !rma_op->msg_ptr) {
+		tx->evt.event.send.status = rma_op->evt.event.send.status;
+		if (rma_op->evt.event.send.status || !rma_op->msg_ptr) {
 			pthread_mutex_lock(&ep->lock);
 			tconn->rma_ops_cnt--;
 			TAILQ_REMOVE(&tep->rma_ops, rma_op, entry);
@@ -3248,7 +3263,7 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 			ret = tcp_send_common(&conn->connection,
 						&iov,
 						1,
-						rma_op->context,
+						rma_op->evt.event.send.context,
 						rma_op->flags,
 						rma_op);
 			if (ret) {
