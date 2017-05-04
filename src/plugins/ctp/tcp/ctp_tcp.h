@@ -642,6 +642,9 @@ typedef struct tcp_rma_op {
 	/*! Must be TCP_CTX_RMA */
 	tcp_ctx_t ctx;
 
+	/*! Number of fragments for data transfer (excluding remote completion msg) */
+	uint32_t num_msgs;
+
 	/*! Associated event (includes public cci_event_t) */
 	cci__evt_t evt;
 
@@ -651,12 +654,6 @@ typedef struct tcp_rma_op {
 	uint64_t remote_offset;
 
 	uint64_t data_len;
-
-	/*! RMA id for ordering in case of fence */
-	uint32_t id;
-
-	/*! Number of fragments for data transfer (excluding remote completion msg) */
-	uint32_t num_msgs;
 
 	/*! Next segment to send */
 	uint32_t next;
