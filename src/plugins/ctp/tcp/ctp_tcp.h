@@ -641,9 +641,6 @@ typedef struct tcp_rma_op {
 	/*! Entry to hang on sep->rma_ops */
 	TAILQ_ENTRY(tcp_rma_op) entry;
 
-	/*! Entry to hang on sconn->rmas */
-	TAILQ_ENTRY(tcp_rma_op) rmas;
-
 	cci_rma_handle_t * local_handle;
 	uint64_t local_offset;
 	cci_rma_handle_t * remote_handle;
