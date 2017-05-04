@@ -645,9 +645,6 @@ typedef struct tcp_rma_op {
 	/*! Associated event (includes public cci_event_t) */
 	cci__evt_t evt;
 
-	/*! Entry to hang on sep->rma_ops */
-	TAILQ_ENTRY(tcp_rma_op) entry;
-
 	cci_rma_handle_t * local_handle;
 	uint64_t local_offset;
 	cci_rma_handle_t * remote_handle;
@@ -738,7 +735,7 @@ struct tcp_ep {
 	TAILQ_HEAD(s_handles, tcp_rma_handle) handles;
 
 	/*! List of RMA ops */
-	TAILQ_HEAD(s_ops, tcp_rma_op) rma_ops;
+	TAILQ_HEAD(s_ops, cci__evt) rma_ops;
 
 	/*! ID of the recv thread for the endpoint */
 	pthread_t tid;
