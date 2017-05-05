@@ -108,17 +108,31 @@ static void check_return(cci_endpoint_t * endpoint, char *func, int ret, int nee
 	return;
 }
 
+static int
+wait_for_event(void)
+{
+	int ret = 0;
+
+	FD_ZERO(&rfds);
+	FD_SET(fd, &rfds);
+
+	ret = select(nfds, &rfds, NULL, NULL, NULL);
+	if (ret > 0)
+		ret = 0; /* success */
+	else
+		ret = -1; /* failure */
+
+	return ret;
+}
+
 static void client_poll_events(void)
 {
 	int ret;
 	cci_event_t *event;
 
 	if (blocking) {
-		FD_ZERO(&rfds);
-		FD_SET(fd, &rfds);
-
-		ret = select(nfds, &rfds, NULL, NULL, NULL);
-		if (!ret)
+		ret = wait_for_event();
+		if (ret)
 			return;
 	}
 
@@ -375,11 +389,8 @@ static void server_poll_events(void)
 	cci_event_t *event;
 
 	if (blocking) {
-		FD_ZERO(&rfds);
-		FD_SET(fd, &rfds);
-
-		ret = select(nfds, &rfds, NULL, NULL, NULL);
-		if (!ret)
+		ret = wait_for_event();
+		if (ret)
 			return;
 	}
 
@@ -437,11 +448,8 @@ static void do_server(void)
 		cci_event_t *event;
 
 		if (blocking) {
-			FD_ZERO(&rfds);
-			FD_SET(fd, &rfds);
-
-			ret = select(nfds, &rfds, NULL, NULL, NULL);
-			if (!ret)
+			ret = wait_for_event();
+			if (ret)
 				return;
 		}
 
