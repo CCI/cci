@@ -228,8 +228,8 @@ static void client_poll_events(void)
 			}
 			break;
 		default:
-			fprintf(stderr, "ignoring event type %d\n",
-				event->type);
+			fprintf(stderr, "%s: ignoring unexpected event %s\n",
+				__func__, cci_event_type_str(event->type));
 		}
 		cci_return_event(event);
 	}
@@ -432,85 +432,90 @@ static void server_poll_events(void)
 				break;
 			}
 		default:
-			fprintf(stderr, "ignoring event type %d\n",
-				event->type);
+			fprintf(stderr, "%s: ignoring unexpected event %s\n",
+				__func__, cci_event_type_str(event->type));
 		}
 		cci_return_event(event);
 	}
 	return;
 }
 
-static void do_server(void)
+static void
+server_handle_connect_request(cci_event_t *event)
 {
-	int ret;
+	int ret = 0;
+
+	if (accept_conn) {
+		opts = *((options_t *) event->request.data_ptr);
+		ret = cci_accept(event, NULL);
+		check_return(endpoint, "cci_accept", ret, 1);
+	} else {
+		ret = cci_reject(event);
+		check_return(endpoint, "cci_reject", ret, 1);
+	}
+	return;
+}
+
+static void
+server_handle_accept(cci_event_t *event)
+{
+	int ret = 0;
+	int len = 0;
+
+	ready = 1;
+	connection = event->accept.connection;
+
+	if (opts.method == MSGS)
+		len = connection->max_send_size;
+	else
+		len = opts.max_rma_size;
+
+	ret = posix_memalign((void **)&buffer, 4096, len);
+	check_return(endpoint, "memalign buffer", ret, 1);
+
+	memset(buffer, 'a', len);
+
+	if (opts.method != MSGS) {
+		ret = cci_rma_register(endpoint, buffer, opts.max_rma_size,
+				opts.method == RMA_WRITE ? CCI_FLAG_WRITE : CCI_FLAG_READ,
+				&server_rma_handle);
+		check_return(endpoint, "cci_rma_register", ret, 1);
+		memcpy(&opts.rma_handle, server_rma_handle, sizeof(*server_rma_handle));
+	}
+	ret = cci_send(connection, &opts, sizeof(opts), NULL, 0);
+	check_return(endpoint, "cci_send", ret, 1);
+
+	return;
+}
+
+static int
+server_connection_setup(void)
+{
+	int ret = 0;
+	int ready = 0;
 
 	while (!ready) {
-		cci_event_t *event;
+		cci_event_t *event = NULL;
 
 		if (blocking) {
 			ret = wait_for_event();
 			if (ret)
-				return;
+				return ret;
 		}
 
 		ret = cci_get_event(endpoint, &event);
 		if (ret == CCI_SUCCESS) {
 			switch (event->type) {
 			case CCI_EVENT_CONNECT_REQUEST:
-				if (accept_conn) {
-					opts =
-					    *((options_t *) event->request.
-					      data_ptr);
-					ret = cci_accept(event, NULL);
-					check_return(endpoint, "cci_accept", ret, 1);
-				} else {
-					ret = cci_reject(event);
-					check_return(endpoint, "cci_reject", ret, 1);
-				}
+				server_handle_connect_request(event);
 				break;
 			case CCI_EVENT_ACCEPT:
-				{
-					int len;
-
-					ready = 1;
-					connection = event->accept.connection;
-
-					if (opts.method == MSGS)
-						len = connection->max_send_size;
-					else
-						len = opts.max_rma_size;
-
-					ret =
-					    posix_memalign((void **)&buffer,
-							   4096, len);
-					check_return(endpoint, "memalign buffer", ret, 1);
-
-					memset(buffer, 'a', len);
-
-					if (opts.method != MSGS) {
-						ret =
-						    cci_rma_register(endpoint,
-								     buffer,
-								     opts.
-								     max_rma_size,
-								     opts.method == RMA_WRITE ? CCI_FLAG_WRITE : CCI_FLAG_READ,
-								     &server_rma_handle);
-						check_return(endpoint, "cci_rma_register",
-							     ret, 1);
-						memcpy(&opts.rma_handle,
-								server_rma_handle,
-								sizeof(*server_rma_handle));
-					}
-					ret =
-					    cci_send(connection, &opts,
-						     sizeof(opts), NULL, 0);
-					check_return(endpoint, "cci_send", ret, 1);
-					break;
-				}
+				server_handle_accept(event);
+				ready = 1;
+				break;
 			default:
-				fprintf(stderr,
-					"%s: ignoring unexpected event %d\n",
-					__func__, event->type);
+				fprintf(stderr, "%s: ignoring unexpected event %s\n",
+					__func__, cci_event_type_str(event->type));
 				break;
 			}
 			ret = cci_return_event(event);
@@ -519,6 +524,14 @@ static void do_server(void)
 						cci_strerror(endpoint, ret));
 		}
 	}
+	return ret;
+}
+
+static void do_server(void)
+{
+	int ret;
+
+	server_connection_setup();
 
 	while (!done)
 		server_poll_events();
