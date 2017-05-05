@@ -383,63 +383,6 @@ static void do_client(void)
 	return;
 }
 
-static void server_poll_events(void)
-{
-	int ret;
-	cci_event_t *event;
-
-	if (blocking) {
-		ret = wait_for_event();
-		if (ret)
-			return;
-	}
-
-	ret = cci_get_event(endpoint, &event);
-	if (ret == CCI_SUCCESS) {
-		assert(event);
-		switch (event->type) {
-		case CCI_EVENT_SEND:
-			assert(event->send.status == CCI_SUCCESS);
-			break;
-		case CCI_EVENT_RECV:
-			{
-				if (!ready) {
-					ready = 1;
-				} else if (event->recv.len == 3) {
-					done = 1;
-					break;
-				} else if (opts.method == MSGS) {
-					count++;
-					if (event->recv.len > current_size) {
-						current_size = event->recv.len;
-						count = 1;
-					}
-    again:
-					ret = cci_send(connection, buffer,
-						     current_size, NULL,
-						     opts.flags);
-					if (ret)
-						fprintf(stderr,
-							"%s: server: send returned %s\n",
-							__func__,
-							cci_strerror
-							(endpoint, ret));
-					if (ret == CCI_ENOBUFS)
-						goto again;
-					check_return(endpoint, "cci_send", ret,
-						     1);
-				}
-				break;
-			}
-		default:
-			fprintf(stderr, "%s: ignoring unexpected event %s\n",
-				__func__, cci_event_type_str(event->type));
-		}
-		cci_return_event(event);
-	}
-	return;
-}
-
 static void
 server_handle_connect_request(cci_event_t *event)
 {
@@ -525,6 +468,63 @@ server_connection_setup(void)
 		}
 	}
 	return ret;
+}
+
+static void
+server_handle_recv(cci_event_t *event)
+{
+	if (event->recv.len == 3) {
+		done = 1;
+		return;
+	}
+	if (opts.method == MSGS) {
+		int ret = 0;
+
+		count++;
+		if (event->recv.len > current_size) {
+			current_size = event->recv.len;
+			count = 1;
+		}
+    again:
+		ret = cci_send(connection, buffer, current_size, NULL, opts.flags);
+		if (ret)
+			fprintf(stderr, "%s: server: send returned %s\n",
+				__func__, cci_strerror(endpoint, ret));
+		if (ret == CCI_ENOBUFS)
+			goto again;
+		check_return(endpoint, "cci_send", ret, 1);
+	}
+	return;
+}
+
+static void server_poll_events(void)
+{
+	int ret;
+	cci_event_t *event;
+
+	if (blocking) {
+		ret = wait_for_event();
+		if (ret)
+			return;
+	}
+
+	ret = cci_get_event(endpoint, &event);
+	if (ret == CCI_SUCCESS) {
+		assert(event);
+		switch (event->type) {
+		case CCI_EVENT_SEND:
+			assert(event->send.status == CCI_SUCCESS);
+			break;
+		case CCI_EVENT_RECV:
+			server_handle_recv(event);
+			break;
+		default:
+			fprintf(stderr, "%s: ignoring unexpected event %s\n",
+				__func__, cci_event_type_str(event->type));
+		}
+		cci_return_event(event);
+	}
+	return;
 }
 
 static void do_server(void)
