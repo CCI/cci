@@ -108,7 +108,7 @@ static void check_return(cci_endpoint_t * endpoint, char *func, int ret, int nee
 	return;
 }
 
-static void poll_events(void)
+static void client_poll_events(void)
 {
 	int ret;
 	cci_event_t *event;
@@ -129,8 +129,7 @@ static void poll_events(void)
 		case CCI_EVENT_SEND:
 			assert(event->send.status == CCI_SUCCESS);
 			if (opts.method != MSGS) {
-				if (!is_server
-				    && event->send.context == (void *)1) {
+				if (event->send.context == (void *)1) {
 					count++;
 					if (count < warmup + iters) {
 						ret =
@@ -146,14 +145,12 @@ static void poll_events(void)
 					}
 				}
 			}
-			if (!is_server
-			    && event->send.context == (void *)0xdeadbeef)
+			if (event->send.context == (void *)0xdeadbeef)
 				done = 1;
 			break;
 		case CCI_EVENT_RECV:
 			{
-				if (!is_server && opts.method != MSGS
-				    && event->recv.ptr == (void *)1) {
+				if (opts.method != MSGS && event->recv.ptr == (void *)1) {
 					count++;
 					if (count < warmup + iters) {
 						ret =
@@ -170,30 +167,16 @@ static void poll_events(void)
 				}
 				if (!ready) {
 					ready = 1;
-					if (opts.method != MSGS && !is_server) {
+					if (opts.method != MSGS) {
 						/* get server_rma_handle */
 						opts =
 						    *((options_t *) event->recv.
 						      ptr);
 					}
-				} else if (is_server && event->recv.len == 3) {
-					done = 1;
-					break;
 				} else if (opts.method == MSGS) {
-					if (is_server) {
+					if (event->recv.len == current_size)
 						count++;
-						if (event->recv.len >
-						    current_size) {
-							current_size =
-							    event->recv.len;
-							count = 1;
-						}
-					} else {
-						if (event->recv.len ==
-						    current_size)
-							count++;
-					}
-					if (is_server || count < warmup + iters) {
+					if (count < warmup + iters) {
     again:
 						ret =
 						    cci_send(connection, buffer,
@@ -201,11 +184,8 @@ static void poll_events(void)
 							     opts.flags);
 						if (ret)
 							fprintf(stderr,
-								"%s: %s: send returned %s\n",
+								"%s: client: send returned %s\n",
 								__func__,
-								is_server ?
-								"server" :
-								"client",
 								cci_strerror
 								(endpoint, ret));
 						if (ret == CCI_ENOBUFS)
@@ -217,22 +197,20 @@ static void poll_events(void)
 				break;
 			}
 		case CCI_EVENT_CONNECT:
-			if (!is_server) {
-				if (event->connect.status == CCI_SUCCESS) {
-					connect_done = 1;
-					connection = event->connect.connection;
-				} else {
-					fprintf(stderr, "client: connect failed with %s\n",
-							cci_strerror(endpoint,
-								event->connect.status));
-					attempts = attempts == 0 ? 1 : attempts * 2;
-					sleep(attempts);
+			if (event->connect.status == CCI_SUCCESS) {
+				connect_done = 1;
+				connection = event->connect.connection;
+			} else {
+				fprintf(stderr, "client: connect failed with %s\n",
+						cci_strerror(endpoint,
+							event->connect.status));
+				attempts = attempts == 0 ? 1 : attempts * 2;
+				sleep(attempts);
 
-					ret = cci_connect(endpoint, server_uri,
-							&opts, sizeof(opts), attr,
-							NULL, 0, NULL);
-					check_return(endpoint, "cci_connect", ret, 1);
-				}
+				ret = cci_connect(endpoint, server_uri,
+						&opts, sizeof(opts), attr,
+						NULL, 0, NULL);
+				check_return(endpoint, "cci_connect", ret, 1);
 			}
 			break;
 		default:
@@ -266,7 +244,7 @@ static void do_client(void)
 
 	/* poll for connect completion */
 	while (!connect_done)
-		poll_events();
+		client_poll_events();
 
 	if (!connection) {
 		fprintf(stderr, "no connection\n");
@@ -274,7 +252,7 @@ static void do_client(void)
 	}
 
 	while (!ready)
-		poll_events();
+		client_poll_events();
 
 	if (opts.method == MSGS) {
 		func = "cci_send";
@@ -341,12 +319,12 @@ static void do_client(void)
 		check_return(endpoint, func, ret, 1);
 
 		while (count < warmup)
-			poll_events();
+			client_poll_events();
 
 		gettimeofday(&start, NULL);
 
 		while (count < warmup + iters)
-			poll_events();
+			client_poll_events();
 
 		gettimeofday(&end, NULL);
 
@@ -378,7 +356,7 @@ static void do_client(void)
 	check_return(endpoint, "cci_send", ret, 0);
 
 	while (!done)
-		poll_events();
+		client_poll_events();
 
 	if (opts.method != MSGS) {
 		ret = cci_rma_deregister(endpoint, local_rma_handle);
@@ -388,6 +366,66 @@ static void do_client(void)
 	printf("client done\n");
 	sleep(1);
 
+	return;
+}
+
+static void server_poll_events(void)
+{
+	int ret;
+	cci_event_t *event;
+
+	if (blocking) {
+		FD_ZERO(&rfds);
+		FD_SET(fd, &rfds);
+
+		ret = select(nfds, &rfds, NULL, NULL, NULL);
+		if (!ret)
+			return;
+	}
+
+	ret = cci_get_event(endpoint, &event);
+	if (ret == CCI_SUCCESS) {
+		assert(event);
+		switch (event->type) {
+		case CCI_EVENT_SEND:
+			assert(event->send.status == CCI_SUCCESS);
+			break;
+		case CCI_EVENT_RECV:
+			{
+				if (!ready) {
+					ready = 1;
+				} else if (event->recv.len == 3) {
+					done = 1;
+					break;
+				} else if (opts.method == MSGS) {
+					count++;
+					if (event->recv.len > current_size) {
+						current_size = event->recv.len;
+						count = 1;
+					}
+    again:
+					ret = cci_send(connection, buffer,
+						     current_size, NULL,
+						     opts.flags);
+					if (ret)
+						fprintf(stderr,
+							"%s: server: send returned %s\n",
+							__func__,
+							cci_strerror
+							(endpoint, ret));
+					if (ret == CCI_ENOBUFS)
+						goto again;
+					check_return(endpoint, "cci_send", ret,
+						     1);
+				}
+				break;
+			}
+		default:
+			fprintf(stderr, "ignoring event type %d\n",
+				event->type);
+		}
+		cci_return_event(event);
+	}
 	return;
 }
 
@@ -475,7 +513,7 @@ static void do_server(void)
 	}
 
 	while (!done)
-		poll_events();
+		server_poll_events();
 
 	if (opts.method != MSGS) {
 		ret = cci_rma_deregister(endpoint, server_rma_handle);
