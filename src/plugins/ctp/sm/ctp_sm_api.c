@@ -2368,7 +2368,8 @@ sm_handle_rma_ack(cci__ep_t *ep, cci__conn_t *conn, sm_hdr_t *hdr)
 
 	if (!hdr->rma_ack.status && (rma->flags & CCI_FLAG_READ)) {
 		src = (void*)((uintptr_t)&sconn->rma->buf[hdr->rma_ack.offset * SM_RMA_MTU]);
-		dst = (void*)((uintptr_t)h->addr + (uintptr_t)rma_hdr->local_offset);
+		dst = (void*)((uintptr_t)h->handle.stuff[1]
+				+ (uintptr_t)rma_hdr->local_offset);
 		memcpy(dst, src, rma_hdr->len);
 	}
 
