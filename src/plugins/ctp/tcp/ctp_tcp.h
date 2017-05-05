@@ -638,12 +638,20 @@ typedef struct tcp_rma_handle {
 	uint32_t refcnt;
 } tcp_rma_handle_t;
 
+typedef enum tcp_rma_state {
+	TCP_RMA_STARTED = 2000,
+	TCP_RMA_WAITING_MSG,
+	TCP_RMA_MSG_DONE,
+	TCP_RMA_ALMOST_DONE,
+	TCP_RMA_DONE
+} tcp_rma_state_t;
+
 typedef struct tcp_rma_op {
 	/*! Must be TCP_CTX_RMA */
 	tcp_ctx_t ctx;
 
-	/*! Number of fragments for data transfer (excluding remote completion msg) */
-	uint32_t num_msgs;
+	/*! RMA operation state */
+	tcp_rma_state_t state;
 
 	/*! Associated event (includes public cci_event_t) */
 	cci__evt_t evt;
@@ -654,6 +662,9 @@ typedef struct tcp_rma_op {
 	uint64_t remote_offset;
 
 	uint64_t data_len;
+
+	/*! Number of fragments for data transfer (excluding remote completion msg) */
+	uint32_t num_msgs;
 
 	/*! Next segment to send */
 	uint32_t next;

@@ -1909,16 +1909,23 @@ static int ctp_tcp_get_event(cci_endpoint_t * endpoint, cci_event_t ** const eve
 	/* give the user the first event */
 	TAILQ_FOREACH(e, &ep->evts, entry) {
 		if (e->event.type == CCI_EVENT_SEND) {
-			/* NOTE: if it is blocking, skip it since tcp_sendv()
-			 * is waiting on it
+			/* NOTE: if it is blocking, skip it because someone
+			 *       is waiting on it
 			 */
 			tcp_tx_t *tx = container_of(e, tcp_tx_t, evt);
-			if (tx->flags & CCI_FLAG_BLOCKING) {
-				continue;
-			} else {
-				ev = e;
-				break;
+			tcp_rma_op_t *rma_op = NULL;
+
+			if (tx->ctx == TCP_CTX_TX) {
+				if (tx->flags & CCI_FLAG_BLOCKING)
+					continue;
+			} else if (tx->ctx == TCP_CTX_RMA) {
+				rma_op = container_of(e, tcp_rma_op_t, evt);
+				if (rma_op->flags & CCI_FLAG_BLOCKING)
+					continue;
 			}
+
+			ev = e;
+			break;
 		} else {
 			ev = e;
 			break;
@@ -1968,6 +1975,7 @@ static int ctp_tcp_return_event(cci_event_t * event)
 	cci__evt_t *evt;
 	tcp_tx_t *tx;
 	tcp_rx_t *rx;
+	tcp_rma_op_t *rma_op = NULL;
 
 	CCI_ENTER;
 
@@ -1984,7 +1992,12 @@ static int ctp_tcp_return_event(cci_event_t * event)
 	case CCI_EVENT_SEND:
 	case CCI_EVENT_ACCEPT:
 		tx = container_of(evt, tcp_tx_t, evt);
-		tcp_put_tx(tx);
+		if (tx->ctx == TCP_CTX_TX) {
+			tcp_put_tx(tx);
+		} else if (tx->ctx == TCP_CTX_RMA) {
+			rma_op = container_of(evt, tcp_rma_op_t, evt);
+			free(rma_op);
+		}
 		break;
 	case CCI_EVENT_RECV:
 	case CCI_EVENT_CONNECT_REQUEST:
@@ -2266,6 +2279,12 @@ static int tcp_send_common(cci_connection_t * connection,
 		tx->len += data[i].iov_len;
 	}
 
+	if (tx->rma_op) {
+		free(tx->rma_op->msg_ptr);
+		tx->rma_op->msg_ptr = NULL;
+		tx->rma_op->msg_len = 0;
+	}
+
 	/* if unreliable, try to send */
 	if (!is_reliable) {
     again:
@@ -2522,6 +2541,9 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	}
 
 	rma_op->ctx = TCP_CTX_RMA;
+	rma_op->state = TCP_RMA_STARTED;
+	rma_op->evt.ep = ep;
+	rma_op->evt.conn = conn;
 	rma_op->evt.event.type = CCI_EVENT_SEND;
 	rma_op->evt.event.send.status = CCI_SUCCESS; /* for now */
 	rma_op->evt.event.send.context = (void *)context;
@@ -2548,12 +2570,6 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 		}
 		rma_op->msg_len = msg_len;
 		memcpy(rma_op->msg_ptr, msg_ptr, msg_len);
-
-		rma_op->tx = tcp_get_tx(ep, conn, 0);
-		if (!rma_op->tx) {
-			ret = CCI_ENOBUFS;
-			goto out;
-		}
 	} else {
 		rma_op->msg_ptr = NULL;
 	}
@@ -2666,6 +2682,24 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	ret = CCI_SUCCESS;
 
 	tcp_progress_conn_sends(ep, conn);
+
+	if (flags & CCI_FLAG_BLOCKING) {
+		while (rma_op->state != TCP_RMA_DONE && tconn->status == TCP_CONN_READY)
+			tcp_progress_ep(ep);
+
+		ret = rma_op->evt.event.send.status;
+		if (ret == CCI_SUCCESS && tconn->status != TCP_CONN_READY)
+			ret = CCI_ERR_DISCONNECTED;
+
+		/* NOTE race with get_event()
+		 *      get_event() must ignore sends with
+		 *      flags & CCI_FLAG_BLOCKING
+		 */
+		pthread_mutex_lock(&ep->lock);
+		TAILQ_REMOVE(&ep->evts, &rma_op->evt, entry);
+		free(rma_op);
+		pthread_mutex_unlock(&ep->lock);
+	}
 
 out:
 	if (ret) {
@@ -3212,36 +3246,41 @@ static void
 tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 			tcp_rx_t *rx, uint32_t status, tcp_tx_t *tx)
 {
-	int done = 0;
 	tcp_ep_t *tep = ep->priv;
 	tcp_conn_t *tconn = conn->priv;
 	tcp_rma_op_t *rma_op = tx->rma_op;
 	tcp_msg_type_t msg_type = tx->msg_type;
 
+	pthread_mutex_lock(&ep->lock);
 	rma_op->acked = tx->rma_id;
 
 	if (status && (rma_op->evt.event.send.status == CCI_SUCCESS))
 		rma_op->evt.event.send.status = status;
 
-	pthread_mutex_lock(&ep->lock);
 	TAILQ_REMOVE(&tconn->pending, &tx->evt, entry);
-	if (rma_op->evt.event.send.status && rma_op->pending == 0)
-		done = 1;
+	if ((rma_op->evt.event.send.status && rma_op->pending == 0) ||
+		(tx->rma_id == (rma_op->num_msgs - 1)) ||
+		(rma_op->state == TCP_RMA_MSG_DONE))
+		rma_op->state = TCP_RMA_ALMOST_DONE;
 	pthread_mutex_unlock(&ep->lock);
 
-	if ((tx->rma_id == (rma_op->num_msgs - 1)) || done) {
+	if (rma_op->state == TCP_RMA_ALMOST_DONE) {
 		int ret;
 
 		/* last segment - complete rma */
-		tx->evt.event.send.status = rma_op->evt.event.send.status;
-		if (rma_op->evt.event.send.status || !rma_op->msg_ptr) {
+
+		/* if error or no completion message, queue now */
+		if (!rma_op->msg_ptr) {
 			pthread_mutex_lock(&ep->lock);
 			tconn->rma_ops_cnt--;
 			TAILQ_REMOVE(&tep->rma_ops, &rma_op->evt, entry);
-			TCP_QUEUE_EVT(&ep->evts, &tx->evt, tep);
+			if (!(rma_op->flags & CCI_FLAG_BLOCKING))
+				TCP_QUEUE_EVT(&ep->evts, &rma_op->evt, tep);
+			rma_op->state = TCP_RMA_DONE;
 			pthread_mutex_unlock(&ep->lock);
 			debug(CCI_DB_MSG, "%s: completed %s ***",
 				__func__, tcp_msg_type(msg_type));
+			tcp_put_tx(tx);
 		} else {
 			/* FIXME: This sends the completion MSG after the last
 			 * RMA fragment is acked which adds a MSG latency
@@ -3257,7 +3296,10 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 
 			pthread_mutex_lock(&ep->lock);
 			tconn->rma_ops_cnt--;
-			TAILQ_REMOVE(&tep->rma_ops, &rma_op->evt, entry);
+			rma_op->state = TCP_RMA_WAITING_MSG;
+			rma_op->tx = tx;
+			tx->offset = 0;
+			//TAILQ_REMOVE(&tep->rma_ops, &rma_op->evt, entry);
 			pthread_mutex_unlock(&ep->lock);
 			debug(CCI_DB_MSG, "%s: sending RMA completion MSG ***",
 				__func__);
@@ -3268,15 +3310,16 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 						rma_op->flags,
 						rma_op);
 			if (ret) {
-				tx->evt.event.send.status = ret;
 				pthread_mutex_lock(&ep->lock);
-				TCP_QUEUE_EVT(&ep->evts, &tx->evt, tep);
+				rma_op->evt.event.send.status = ret;
+				TAILQ_REMOVE(&tep->rma_ops, &rma_op->evt, entry);
+				if (!(rma_op->flags & CCI_FLAG_BLOCKING))
+					TCP_QUEUE_EVT(&ep->evts, &rma_op->evt, tep);
+				rma_op->state = TCP_RMA_DONE;
 				pthread_mutex_unlock(&ep->lock);
-			} else {
 				tcp_put_tx(tx);
 			}
 		}
-		free(rma_op);
 	} else if (rma_op->next == rma_op->num_msgs) {
 		/* no more fragments, we don't need this tx anymore */
 		debug(CCI_DB_MSG, "%s: releasing tx %p", __func__, (void*)tx);
@@ -3432,7 +3475,9 @@ tcp_handle_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		pthread_mutex_lock(&ep->lock);
 		TAILQ_REMOVE(&tconn->pending, &tx->evt, entry);
 
-		if (!(tx->msg_type == TCP_MSG_CONN_REPLY &&
+		if (tx->rma_op) {
+			tx->rma_op->state = TCP_RMA_MSG_DONE;
+		} else if (!(tx->msg_type == TCP_MSG_CONN_REPLY &&
 			tconn->status == TCP_CONN_CLOSING)) {
 			if (tx->flags & CCI_FLAG_SILENT) {
 				tcp_put_tx_locked(tep, tx);
@@ -3448,6 +3493,8 @@ tcp_handle_ack(cci__ep_t *ep, cci__conn_t *conn, tcp_rx_t *rx,
 		}
 		tcp_put_rx_locked(tep, rx);
 		pthread_mutex_unlock(&ep->lock);
+		if (tx->rma_op)
+			tcp_progress_rma(ep, conn, rx, status, tx);
 		break;
 	case TCP_MSG_RMA_WRITE:
 	case TCP_MSG_RMA_READ_REQUEST:
