@@ -497,7 +497,7 @@ server_handle_recv(cci_event_t *event)
 	return;
 }
 
-static void server_poll_events(void)
+static void server_event_loop(void)
 {
 	int ret;
 	cci_event_t *event;
@@ -534,7 +534,7 @@ static void do_server(void)
 	server_connection_setup();
 
 	while (!done)
-		server_poll_events();
+		server_event_loop();
 
 	if (opts.method != MSGS) {
 		ret = cci_rma_deregister(endpoint, server_rma_handle);
