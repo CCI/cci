@@ -949,6 +949,9 @@ tcp_conn_set_closing_locked(cci__ep_t *ep, cci__conn_t *conn)
 			cci__evt_t *evt = NULL;
 			cci__evt_t *tmp = NULL;
 
+			debug(CCI_DB_CONN, "%s: freeing %d rma ops",
+					__func__, tconn->rma_ops_cnt);
+
 			TAILQ_FOREACH_SAFE(evt, &tep->rma_ops, entry, tmp) {
 				tcp_rma_op_t *op = container_of(evt, tcp_rma_op_t, evt);
 				cci__conn_t *c = evt->conn;
@@ -958,11 +961,11 @@ tcp_conn_set_closing_locked(cci__ep_t *ep, cci__conn_t *conn)
 
 				debug(CCI_DB_ALL, "%s: losing RMA %p",
 						__func__, (void*) op);
+				tconn->rma_ops_cnt--;
 				TAILQ_REMOVE(&tep->rma_ops, &op->evt, entry);
 				assert(op->pending == 0);
 				free(op->msg_ptr);
 				free(op);
-				tconn->rma_ops_cnt--;
 				if (tconn->rma_ops_cnt == 0)
 					break;
 			}
@@ -1032,8 +1035,8 @@ static int ctp_tcp_destroy_endpoint(cci_endpoint_t * endpoint)
 				debug(CCI_DB_ALL, "%s: conn %p pending sends",
 					__func__, (void*)conn);
 			if (tconn->rma_ops_cnt != 0)
-				debug(CCI_DB_ALL, "%s: conn %p in-progress RMAs",
-					__func__, (void*)conn);
+				debug(CCI_DB_ALL, "%s: conn %p in-progress %d RMAs",
+					__func__, (void*)conn, tconn->rma_ops_cnt);
 			TAILQ_REMOVE(&tep->conns, tconn, entry);
 			free((char*)conn->uri);
 			free(tconn);
@@ -3295,11 +3298,9 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 			iov.iov_len = rma_op->msg_len;
 
 			pthread_mutex_lock(&ep->lock);
-			tconn->rma_ops_cnt--;
 			rma_op->state = TCP_RMA_WAITING_MSG;
 			rma_op->tx = tx;
 			tx->offset = 0;
-			//TAILQ_REMOVE(&tep->rma_ops, &rma_op->evt, entry);
 			pthread_mutex_unlock(&ep->lock);
 			debug(CCI_DB_MSG, "%s: sending RMA completion MSG ***",
 				__func__);
@@ -3312,6 +3313,7 @@ tcp_progress_rma(cci__ep_t *ep, cci__conn_t *conn,
 			if (ret) {
 				pthread_mutex_lock(&ep->lock);
 				rma_op->evt.event.send.status = ret;
+				tconn->rma_ops_cnt--;
 				TAILQ_REMOVE(&tep->rma_ops, &rma_op->evt, entry);
 				if (!(rma_op->flags & CCI_FLAG_BLOCKING))
 					TCP_QUEUE_EVT(&ep->evts, &rma_op->evt, tep);
