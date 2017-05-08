@@ -2335,8 +2335,10 @@ static int tcp_send_common(cci_connection_t * connection,
 	/* if blocking, wait for completion */
 
 	if (tx->flags & CCI_FLAG_BLOCKING) {
-		while (tx->state != TCP_TX_COMPLETED && tconn->status == TCP_CONN_READY)
-			tcp_progress_ep(ep);
+		while (tx->state != TCP_TX_COMPLETED && tconn->status == TCP_CONN_READY) {
+			if (!TCP_CONN_IS_BLOCKING(tep))
+				tcp_progress_ep(ep);
+		}
 
 		/* get status and cleanup */
 		ret = event->send.status;
@@ -2687,8 +2689,10 @@ static int ctp_tcp_rma(cci_connection_t * connection,
 	tcp_progress_conn_sends(ep, conn);
 
 	if (flags & CCI_FLAG_BLOCKING) {
-		while (rma_op->state != TCP_RMA_DONE && tconn->status == TCP_CONN_READY)
-			tcp_progress_ep(ep);
+		while (rma_op->state != TCP_RMA_DONE && tconn->status == TCP_CONN_READY) {
+			if (!TCP_CONN_IS_BLOCKING(tep))
+				tcp_progress_ep(ep);
+		}
 
 		ret = rma_op->evt.event.send.status;
 		if (ret == CCI_SUCCESS && tconn->status != TCP_CONN_READY)
