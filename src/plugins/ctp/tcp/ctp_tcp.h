@@ -681,6 +681,9 @@ typedef struct tcp_rma_op {
 	/*! Application completion msg ptr if provided */
 	char *msg_ptr;
 
+	/*! Reference count */
+	int16_t refcnt;
+
 	/*! Application completion msg len */
 	uint16_t msg_len;
 
@@ -820,7 +823,9 @@ struct tcp_conn {
 	tcp_rx_t *rx;
 
 	/*! Is this the endpoint's listening socket? */
-	int is_listener;
+	unsigned int is_listener	: 1;
+	unsigned int is_busy		: 1;
+	unsigned int pad		:30;
 
 	/*! Poll fd index */
 	int idx;
