@@ -2982,12 +2982,7 @@ verbs_handle_disconnected(cci__ep_t * ep, struct rdma_cm_event *cm_evt)
 	/* Either way, we got the DISCONNECTED event, it is safe to cleanup
 	 * the QP and CM id.
 	 */
-	ret = rdma_destroy_ep(vconn->id);
-	if (ret == -1) {
-		ret = errno;
-		debug(CCI_DB_WARN, "%s: rdma_destroy_ep() returned %s",
-		      __func__, strerror(ret));
-	}
+	rdma_destroy_ep(vconn->id);
 
 	if (!vconn->cci_disconn) {
 		verbs_destroy_conn(ep, conn);
